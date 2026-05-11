@@ -167,6 +167,147 @@ describe('createTerminal — text commands', () => {
     assert.deepEqual(lines, ['/src/bar.js:// TODO: doc this', '/src/foo.js:// TODO: fix'])
   })
 
+  it('grep -A N prints N lines after each match', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -A 1 TODO src/foo.js')
+    assert.equal(r.exitCode, 0)
+    // src/foo.js is "const x = 1\n// TODO: fix\nconst y = 2\n"
+    // -A 1 → match line + the next line. (No -n/-H here, so the
+    // match/`:` vs context/`-` separator distinction only shows
+    // when prefixes are on — see the `-n -A 1 -B 1` test below.)
+    assert.equal(r.stdout, '// TODO: fix\nconst y = 2\n')
+  })
+
+  it('grep -B N prints N lines before each match', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -B 1 TODO src/foo.js')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'const x = 1\n// TODO: fix\n')
+  })
+
+  it('grep -C N is shorthand for -A N -B N', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -C 1 TODO src/foo.js')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'const x = 1\n// TODO: fix\nconst y = 2\n')
+  })
+
+  it('grep -A/-B inserts `--` between non-adjacent context groups in one file', () => {
+    const t = createTerminal({
+      'log.txt': 'pre1\npre2\nMATCH a\nbetween1\nbetween2\nbetween3\nbetween4\nMATCH b\npost1\npost2\n',
+    })
+    const r = t.run('grep -A 1 -B 1 MATCH log.txt')
+    // Two groups separated by `--`. Each group: 1 before + match + 1 after.
+    assert.equal(r.stdout, 'pre2\nMATCH a\nbetween1\n--\nbetween4\nMATCH b\npost1\n')
+  })
+
+  it('grep -A/-B with explicit -n prefixes line numbers; context uses `-`', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -n -A 1 -B 1 TODO src/foo.js')
+    assert.equal(r.stdout, '1-const x = 1\n2:// TODO: fix\n3-const y = 2\n')
+  })
+
+  it('grep -l lists filenames with matches (no content); -L inverts', () => {
+    const t = createTerminal(SOURCES)
+    const withMatch = t.run('grep -rl TODO').stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(withMatch, ['src/bar.js', 'src/foo.js'])
+    const without = new Set(t.run('grep -rL TODO').stdout.split('\n').filter(Boolean))
+    // src/util/log.js, README.md, .hidden are dotfile / non-TODO files.
+    assert.ok(without.has('src/util/log.js'))
+    assert.ok(without.has('README.md'))
+    assert.ok(!without.has('src/foo.js'))
+  })
+
+  it('grep -c counts matching lines per file', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -rc TODO')
+    const counts = Object.fromEntries(
+      r.stdout.split('\n').filter(Boolean).map((l) => {
+        const [name, n] = l.split(':')
+        return [name, Number(n)]
+      })
+    )
+    assert.equal(counts['src/foo.js'], 1)
+    assert.equal(counts['src/bar.js'], 1)
+    assert.equal(counts['src/util/log.js'], 0)
+  })
+
+  it('grep -o prints only the matching substrings, one per line', () => {
+    const t = createTerminal({
+      'urls.txt': 'see http://a.example/x and http://b.example/y for more\nand http://c.example/z\n',
+    })
+    const r = t.run('grep -o "http://[^ ]+" urls.txt')
+    const matches = r.stdout.split('\n').filter(Boolean)
+    assert.deepEqual(matches, ['http://a.example/x', 'http://b.example/y', 'http://c.example/z'])
+  })
+
+  it('grep -w matches whole words only', () => {
+    const t = createTerminal({
+      'src/x.js': 'session\nsession_id\nmy_session\nsession.start\n',
+    })
+    const r = t.run('grep -w session src/x.js')
+    // `session` matches plainly; `session_id` and `my_session` are
+    // partial-token matches a non-`-w` grep would also catch but
+    // `-w` rejects (word-boundary fails inside the identifier).
+    // `session.start` matches because `.` isn't a word char.
+    assert.equal(r.stdout, 'session\nsession.start\n')
+  })
+
+  it('grep -h suppresses the filename prefix even under -r; -H forces it', () => {
+    const t = createTerminal(SOURCES)
+    const suppressed = t.run('grep -rh TODO src')
+    assert.ok(suppressed.stdout.length > 0)
+    // No leading "src/foo.js:" prefix on any line:
+    for (const line of suppressed.stdout.split('\n').filter(Boolean)) {
+      assert.ok(!line.startsWith('src/'), `unexpected name prefix: ${line}`)
+    }
+    // -H forces the prefix even with one file:
+    const forced = t.run('grep -H TODO src/foo.js')
+    assert.match(forced.stdout, /^src\/foo\.js:/u)
+  })
+
+  it('grep -H labels stdin input as `(standard input)` (matches GNU)', () => {
+    // Without this, `echo … | grep -H foo` would emit unprefixed
+    // lines and a piped grep result would be indistinguishable
+    // from raw data downstream.
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('echo hello | grep -H hello').stdout, '(standard input):hello\n')
+    assert.equal(t.run('echo hello | grep -Hn hello').stdout, '(standard input):1:hello\n')
+    assert.equal(t.run('echo hello | grep -Hc hello').stdout, '(standard input):1\n')
+  })
+
+  it('grep -l / -L on stdin labels the stream as `(standard input)`', () => {
+    // Previously the stdin case dropped silently because the
+    // name was null; consistent with the -H label above.
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('echo hello | grep -l hello').stdout, '(standard input)\n')
+    assert.equal(t.run('echo hello | grep -L nope').stdout, '(standard input)\n')
+  })
+
+  it('grep rejects mutually exclusive flag combinations', () => {
+    const t = createTerminal(SOURCES)
+    // parseArgs stores flags in a Set, so a user-typed ordering
+    // can't pick a winner the way "last one wins" would. We
+    // surface the conflict instead of silently preferring one.
+    const cases = [
+      ['grep -hH foo src/foo.js', /-h and -H/u],
+      ['grep -lL foo src/foo.js', /-l \/ -L/u],
+      ['grep -lc foo src/foo.js', /-l \/ -c/u],
+      ['grep -Lc foo src/foo.js', /-L \/ -c/u],
+    ]
+    for (const [cmd, re] of cases) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
+      assert.match(r.stderr, re, `${cmd}: stderr didn't mention the conflict`)
+    }
+  })
+
+  it('cat -n numbers lines with a 6-wide right-aligned column and a tab separator', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('cat -n src/foo.js')
+    assert.equal(r.stdout, '     1\tconst x = 1\n     2\t// TODO: fix\n     3\tconst y = 2\n')
+  })
+
   it('head -n and tail -n', () => {
     const t = createTerminal(SOURCES)
     assert.equal(t.run('head -n 1 src/foo.js').stdout, 'const x = 1\n')

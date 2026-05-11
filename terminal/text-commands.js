@@ -5,89 +5,30 @@
 // `dispatch()` in `index.js`, which formats them as
 // `${name}: ${message}` and returns an exit-1 stderr result.
 
-import { resolve } from './fs.js'
 import { parseArgs } from './parse.js'
-import { err, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
+import { err, ok, parseNonNegativeInt, readFilesFor, splitLines } from './util.js'
+import { grep } from './grep.js'
 
 function cat(stdin, tokens, ctx) {
-  const { positional } = parseArgs(tokens)
-  if (positional.length === 0) return ok(stdin)
-  const r = readFilesFor('cat', positional, ctx)
-  if (r.error) return r.error
-  return ok(r.inputs.map((f) => f.content).join(''))
-}
-
-function grep(stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['i', 'v', 'n', 'r'] })
-  if (positional.length === 0) return usage('grep', 'grep [-i] [-v] [-n] [-r] PATTERN [PATH...]')
-  const [pattern, ...rest] = positional
-  let re
-  try { re = new RegExp(pattern, flags.has('i') ? 'i' : '') } catch (e) {
-    return err(`grep: invalid pattern: ${e.message}`)
+  const { flags, positional } = parseArgs(tokens, { short: ['n'] })
+  let content = stdin
+  if (positional.length > 0) {
+    const r = readFilesFor('cat', positional, ctx)
+    if (r.error) return r.error
+    content = r.inputs.map((f) => f.content).join('')
   }
-  const recursive = flags.has('r')
-  const r = grepInputs(recursive, stdin, rest, ctx)
-  if (r.error) return r.error
-  // Always prefix matches with the file name under -r (matches are
-  // from discovered descendants, not the typed path); without -r,
-  // only when more than one file was named explicitly.
-  const showName = recursive || rest.length > 1
-  return grepRun(r.inputs, re, showName, flags.has('v'), flags.has('n'))
+  return ok(flags.has('n') ? numberLines(content) : content)
 }
 
-function grepInputs(recursive, stdin, rest, ctx) {
-  if (recursive) return readFilesRecursive('grep', rest.length > 0 ? rest : ['.'], ctx)
-  if (rest.length > 0) return readFilesFor('grep', rest, ctx)
-  return { inputs: [{ name: null, content: stdin }] }
-}
-
-// Expand each path into the list of files to scan: a file path
-// contributes itself; a directory contributes every file under it
-// (via fs.walkFiles, sorted files-first then descending). Missing
-// paths surface as the same "no such file or directory" error the
-// non-recursive path uses, so the user sees a consistent message.
-// Displayed file names preserve the user-typed prefix (e.g.
-// `grep -r foo src` produces `src/bar.js:…`, not `/src/bar.js:…`),
-// matching GNU grep's output convention.
-function readFilesRecursive(cmd, paths, ctx) {
-  const inputs = []
-  for (const p of paths) {
-    const abs = resolve(ctx.cwd, p)
-    if (ctx.fs.isFile(abs)) { inputs.push({ name: p, content: ctx.fs.readFile(abs) }); continue }
-    if (!ctx.fs.isDir(abs)) return { error: err(`${cmd}: ${p}: no such file or directory`) }
-    for (const filePath of ctx.fs.walkFiles(abs)) {
-      inputs.push({ name: displayName(p, abs, filePath), content: ctx.fs.readFile(filePath) })
-    }
-  }
-  return { inputs }
-}
-
-function displayName(userPath, absRoot, absFile) {
-  const rel = absRoot === '/' ? absFile.slice(1) : absFile.slice(absRoot.length + 1)
-  if (userPath === '.') return rel
-  return userPath.endsWith('/') ? userPath + rel : userPath + '/' + rel
-}
-
-function grepRun(inputs, re, showName, invert, showLine) {
-  const out = []
-  let matched = false
-  for (const { name, content } of inputs) {
-    const lines = splitLines(content)
-    for (let i = 0; i < lines.length; i++) {
-      if (re.test(lines[i]) === invert) continue
-      matched = true
-      out.push(formatGrepLine(lines[i], name, i + 1, showName, showLine))
-    }
-  }
-  // Match GNU grep's exit code: 0 = matched, 1 = no match.
-  return matched ? ok(out.join('\n') + '\n') : { stdout: '', stderr: '', exitCode: 1 }
-}
-
-function formatGrepLine(line, name, lineNum, showName, showLine) {
-  const parts = []
-  if (showName) parts.push(name)
-  if (showLine) parts.push(String(lineNum))
-  return parts.length > 0 ? parts.join(':') + ':' + line : line
+// GNU `cat -n` numbers lines starting from 1, right-aligned in a
+// 6-wide field with a tab separator. Trailing newlines are
+// preserved so `cat -n` of a file ending in '\n' produces output
+// that also ends in '\n' (no extra blank line at the end).
+function numberLines(content) {
+  if (content === '') return ''
+  const trailing = content.endsWith('\n') ? '\n' : ''
+  const lines = trailing ? content.slice(0, -1).split('\n') : content.split('\n')
+  return lines.map((l, i) => `${String(i + 1).padStart(6)}\t${l}`).join('\n') + trailing
 }
 
 function head(stdin, tokens, ctx) {
