@@ -4,6 +4,7 @@
 // fail fast instead of being silently dropped.
 
 import { basename as baseName, dirname as dirName, resolve } from './fs.js'
+import { find } from './find.js'
 import { parseArgs } from './parse.js'
 import { err, ok, usage } from './util.js'
 
@@ -69,72 +70,6 @@ function formatLsRow(name, size, isDir, long) {
   const display = name + (isDir ? '/' : '')
   if (!long) return display
   return `${isDir ? 'd' : '-'} ${String(size).padStart(8)}  ${display}`
-}
-
-function find(_stdin, tokens, ctx) {
-  // POSIX find uses single-dash primaries (`-name`, `-type`) where
-  // GNU long-form would be `--name` / `--type`. Normalise to the
-  // long form before handing off so the strict-schema parser
-  // doesn't unbundle `-name` into `-n -a -m -e`. Stops at `--` so
-  // a literal path named e.g. `-name` (passed as `find -- -name`)
-  // stays a positional rather than being rewritten into a primary.
-  const normalized = []
-  let afterTerminator = false
-  for (const t of tokens) {
-    if (!afterTerminator && (t === '-name' || t === '-type')) normalized.push('--' + t.slice(1))
-    else normalized.push(t)
-    if (t === '--') afterTerminator = true
-  }
-  const { values, positional } = parseArgs(normalized, { valueLong: ['name', 'type'] })
-  const start = positional[0] ?? '.'
-  const startAbs = resolve(ctx.cwd, start)
-  if (!ctx.fs.isDir(startAbs) && !ctx.fs.isFile(startAbs)) {
-    return err(`find: ${start}: no such file or directory`)
-  }
-  const typeFilter = values.get('type')
-  if (typeFilter !== undefined && typeFilter !== 'f' && typeFilter !== 'd') {
-    return err(`find: -type/--type expects 'f' or 'd', got: ${typeFilter}`)
-  }
-  const namePattern = values.get('name')
-  const out = []
-  for (const entry of walkAll(ctx.fs, startAbs)) {
-    if (typeFilter === 'f' && entry.kind !== 'file') continue
-    if (typeFilter === 'd' && entry.kind !== 'dir') continue
-    if (namePattern && !globMatch(baseName(entry.path), namePattern)) continue
-    out.push(entry.path)
-  }
-  return ok(out.length === 0 ? '' : out.join('\n') + '\n')
-}
-
-function* walkAll(fs, root) {
-  if (fs.isFile(root)) { yield { path: root, kind: 'file' }; return }
-  yield { path: root, kind: 'dir' }
-  // Index pointer instead of Array.shift() — shift() is O(n) per
-  // call because it reindexes the rest of the array, making BFS
-  // O(n²) on large trees.
-  const queue = [root]
-  for (let qi = 0; qi < queue.length; qi++) {
-    const cur = queue[qi]
-    const { dirs, files } = fs.listDir(cur)
-    for (const d of dirs) {
-      const path = cur === '/' ? '/' + d : cur + '/' + d
-      yield { path, kind: 'dir' }
-      queue.push(path)
-    }
-    for (const f of files) {
-      yield { path: cur === '/' ? '/' + f : cur + '/' + f, kind: 'file' }
-    }
-  }
-}
-
-// Tiny basename glob matcher: `*` (any chars), `?` (any single char).
-// No braces / character classes — kept small. Used by `find --name`.
-function globMatch(name, pattern) {
-  const re = new RegExp('^' + pattern
-    .replace(/[.+^${}()|[\]\\]/gu, '\\$&')
-    .replace(/\*/gu, '.*')
-    .replace(/\?/gu, '.') + '$', 'u')
-  return re.test(name)
 }
 
 function tree(_stdin, tokens, ctx) {

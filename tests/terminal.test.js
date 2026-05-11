@@ -374,6 +374,78 @@ describe('createTerminal — find / tree / path', () => {
     }
   })
 
+  it('find -maxdepth N caps walk depth (0 = start only, 1 = +direct children, …)', () => {
+    const t = createTerminal(SOURCES)
+    // SOURCES has /src/foo.js, /src/bar.js, /src/util/log.js,
+    // /README.md, /.hidden. Depth 0 = `/`, depth 1 = /src + /README.md
+    // + /.hidden, depth 2 = /src/foo.js + /src/bar.js + /src/util,
+    // depth 3 = /src/util/log.js.
+    const d0 = new Set(t.run('find / -maxdepth 0').stdout.split('\n').filter(Boolean))
+    assert.deepEqual([...d0], ['/'])
+    const d1 = new Set(t.run('find / -maxdepth 1').stdout.split('\n').filter(Boolean))
+    assert.ok(d1.has('/'))
+    assert.ok(d1.has('/src'))
+    assert.ok(d1.has('/README.md'))
+    assert.ok(!d1.has('/src/foo.js'))
+    const d2 = new Set(t.run('find / -maxdepth 2').stdout.split('\n').filter(Boolean))
+    assert.ok(d2.has('/src/foo.js'))
+    assert.ok(d2.has('/src/util'))
+    assert.ok(!d2.has('/src/util/log.js'))
+    const d3 = new Set(t.run('find / -maxdepth 3').stdout.split('\n').filter(Boolean))
+    assert.ok(d3.has('/src/util/log.js'))
+  })
+
+  it('find -path PATTERN matches against the full path, `*` spans `/`', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run("find / -path '*/util/*'").stdout.split('\n').filter(Boolean)
+    assert.deepEqual(r, ['/src/util/log.js'])
+    // `--path` long form also works:
+    const r2 = new Set(t.run("find / --path '*src*'").stdout.split('\n').filter(Boolean))
+    assert.ok(r2.has('/src'))
+    assert.ok(r2.has('/src/foo.js'))
+  })
+
+  it('find -not -path PATTERN (and `! -path`) excludes the matching subtree', () => {
+    const t = createTerminal({
+      'src/index.js': 'export {}',
+      'src/util.js': 'export {}',
+      'node_modules/foo/index.js': 'module.exports = {}',
+      'node_modules/foo/sub/x.js': '',
+      'node_modules/bar/y.js': '',
+    })
+    // The exact invocation from the request. Paths are POSIX-relative
+    // (preserve `./`) so `*/node_modules/*` matches descendants.
+    const r = t.run("find . -maxdepth 3 -type f -not -path '*/node_modules/*'")
+      .stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(r, ['./src/index.js', './src/util.js'])
+    // `!` is the same as -not:
+    const r2 = t.run("find . -type f ! -path '*node_modules*'")
+      .stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(r2, ['./src/index.js', './src/util.js'])
+  })
+
+  it('find -not also negates -name and -type', () => {
+    const t = createTerminal(SOURCES)
+    // -not -name "*.js" → everything but the .js files
+    const r = new Set(t.run('find / -not -name "*.js"').stdout.split('\n').filter(Boolean))
+    assert.ok(!r.has('/src/foo.js'))
+    assert.ok(r.has('/README.md'))
+    assert.ok(r.has('/src'))
+    // -not -type d → only files
+    const r2 = new Set(t.run('find / -not -type d').stdout.split('\n').filter(Boolean))
+    assert.ok(r2.has('/src/foo.js'))
+    assert.ok(!r2.has('/src'))
+  })
+
+  it('find rejects malformed -not usage', () => {
+    const t = createTerminal(SOURCES)
+    for (const cmd of ['find -not /src', 'find /src -not -not -name "*.js"', 'find /src -not']) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
+      assert.match(r.stderr, /-not/u)
+    }
+  })
+
   it('find: `--` ends primary normalization; a literal `-name` after it stays a path', () => {
     // Without the terminator guard, `-name` after `--` would be
     // rewritten to `--name`, swallowing the next token as a glob.
