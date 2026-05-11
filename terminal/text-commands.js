@@ -5,6 +5,7 @@
 // `dispatch()` in `index.js`, which formats them as
 // `${name}: ${message}` and returns an exit-1 stderr result.
 
+import { resolve } from './fs.js'
 import { parseArgs } from './parse.js'
 import { err, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
 
@@ -17,16 +18,54 @@ function cat(stdin, tokens, ctx) {
 }
 
 function grep(stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['i', 'v', 'n'] })
-  if (positional.length === 0) return usage('grep', 'grep [-i] [-v] [-n] PATTERN [FILE...]')
-  const [pattern, ...files] = positional
+  const { flags, positional } = parseArgs(tokens, { short: ['i', 'v', 'n', 'r'] })
+  if (positional.length === 0) return usage('grep', 'grep [-i] [-v] [-n] [-r] PATTERN [PATH...]')
+  const [pattern, ...rest] = positional
   let re
   try { re = new RegExp(pattern, flags.has('i') ? 'i' : '') } catch (e) {
     return err(`grep: invalid pattern: ${e.message}`)
   }
-  const r = files.length > 0 ? readFilesFor('grep', files, ctx) : { inputs: [{ name: null, content: stdin }] }
+  const recursive = flags.has('r')
+  const r = grepInputs(recursive, stdin, rest, ctx)
   if (r.error) return r.error
-  return grepRun(r.inputs, re, files.length > 1, flags.has('v'), flags.has('n'))
+  // Always prefix matches with the file name under -r (matches are
+  // from discovered descendants, not the typed path); without -r,
+  // only when more than one file was named explicitly.
+  const showName = recursive || rest.length > 1
+  return grepRun(r.inputs, re, showName, flags.has('v'), flags.has('n'))
+}
+
+function grepInputs(recursive, stdin, rest, ctx) {
+  if (recursive) return readFilesRecursive('grep', rest.length > 0 ? rest : ['.'], ctx)
+  if (rest.length > 0) return readFilesFor('grep', rest, ctx)
+  return { inputs: [{ name: null, content: stdin }] }
+}
+
+// Expand each path into the list of files to scan: a file path
+// contributes itself; a directory contributes every file under it
+// (via fs.walkFiles, sorted files-first then descending). Missing
+// paths surface as the same "no such file or directory" error the
+// non-recursive path uses, so the user sees a consistent message.
+// Displayed file names preserve the user-typed prefix (e.g.
+// `grep -r foo src` produces `src/bar.js:…`, not `/src/bar.js:…`),
+// matching GNU grep's output convention.
+function readFilesRecursive(cmd, paths, ctx) {
+  const inputs = []
+  for (const p of paths) {
+    const abs = resolve(ctx.cwd, p)
+    if (ctx.fs.isFile(abs)) { inputs.push({ name: p, content: ctx.fs.readFile(abs) }); continue }
+    if (!ctx.fs.isDir(abs)) return { error: err(`${cmd}: ${p}: no such file or directory`) }
+    for (const filePath of ctx.fs.walkFiles(abs)) {
+      inputs.push({ name: displayName(p, abs, filePath), content: ctx.fs.readFile(filePath) })
+    }
+  }
+  return { inputs }
+}
+
+function displayName(userPath, absRoot, absFile) {
+  const rel = absRoot === '/' ? absFile.slice(1) : absFile.slice(absRoot.length + 1)
+  if (userPath === '.') return rel
+  return userPath.endsWith('/') ? userPath + rel : userPath + '/' + rel
 }
 
 function grepRun(inputs, re, showName, invert, showLine) {

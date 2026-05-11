@@ -68,7 +68,7 @@ export function createFs(sources) {
     entry.dirs.sort()
     entry.files.sort()
   }
-  return {
+  const fs = {
     isFile: (p) => files.has(p),
     isDir: (p) => childMap.has(p),
     readFile: (p) => files.get(p),
@@ -77,6 +77,32 @@ export function createFs(sources) {
       if (!entry) throw new Error(`not a directory: ${p}`)
       return entry
     },
+    walkFiles: (root) => walkFiles(fs, root),
+  }
+  return fs
+}
+
+// Generator over every absolute file path under `root`. Yields
+// `root` itself when it's a file. Walks each directory's files in
+// lexicographic order before descending into subdirectories — gives
+// a stable "files first, then deeper" listing that's friendly for
+// grep -r / xargs / similar consumers. Uses an index pointer
+// instead of Array.shift for O(n) traversal even on wide trees.
+//
+// Note: this virtual FS has no empty directories — `childMap` only
+// holds dirs registered as ancestors of a file, so a leaf dir with
+// no files can't exist by construction (see `ensureDir`). The walk
+// still copes if one ever appears: a dir with empty `dirs` and
+// `files` simply yields nothing on its iteration.
+function* walkFiles(fs, root) {
+  if (fs.isFile(root)) { yield root; return }
+  if (!fs.isDir(root)) return
+  const queue = [root]
+  for (let i = 0; i < queue.length; i++) {
+    const cur = queue[i]
+    const { dirs, files } = fs.listDir(cur)
+    for (const f of files) yield cur === '/' ? '/' + f : cur + '/' + f
+    for (const d of dirs) queue.push(cur === '/' ? '/' + d : cur + '/' + d)
   }
 }
 

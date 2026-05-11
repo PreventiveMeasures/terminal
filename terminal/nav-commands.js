@@ -72,7 +72,20 @@ function formatLsRow(name, size, isDir, long) {
 }
 
 function find(_stdin, tokens, ctx) {
-  const { values, positional } = parseArgs(tokens, { valueLong: ['name', 'type'] })
+  // POSIX find uses single-dash primaries (`-name`, `-type`) where
+  // GNU long-form would be `--name` / `--type`. Normalise to the
+  // long form before handing off so the strict-schema parser
+  // doesn't unbundle `-name` into `-n -a -m -e`. Stops at `--` so
+  // a literal path named e.g. `-name` (passed as `find -- -name`)
+  // stays a positional rather than being rewritten into a primary.
+  const normalized = []
+  let afterTerminator = false
+  for (const t of tokens) {
+    if (!afterTerminator && (t === '-name' || t === '-type')) normalized.push('--' + t.slice(1))
+    else normalized.push(t)
+    if (t === '--') afterTerminator = true
+  }
+  const { values, positional } = parseArgs(normalized, { valueLong: ['name', 'type'] })
   const start = positional[0] ?? '.'
   const startAbs = resolve(ctx.cwd, start)
   if (!ctx.fs.isDir(startAbs) && !ctx.fs.isFile(startAbs)) {
@@ -80,7 +93,7 @@ function find(_stdin, tokens, ctx) {
   }
   const typeFilter = values.get('type')
   if (typeFilter !== undefined && typeFilter !== 'f' && typeFilter !== 'd') {
-    return err(`find: --type expects 'f' or 'd', got: ${typeFilter}`)
+    return err(`find: -type/--type expects 'f' or 'd', got: ${typeFilter}`)
   }
   const namePattern = values.get('name')
   const out = []

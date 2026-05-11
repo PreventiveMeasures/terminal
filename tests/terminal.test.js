@@ -100,6 +100,73 @@ describe('createTerminal — text commands', () => {
     assert.equal(t.run('grep ZZZ src/foo.js').exitCode, 1)
   })
 
+  it('grep -r walks a directory tree and prefixes every match with the file', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -r TODO src')
+    assert.equal(r.exitCode, 0)
+    const lines = r.stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(lines, ['src/bar.js:// TODO: doc this', 'src/foo.js:// TODO: fix'])
+  })
+
+  it('grep -r defaults to . and shows filenames relative to cwd', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -r TODO')
+    assert.equal(r.exitCode, 0)
+    // Defaults to '.'; both matching files appear with no leading '/'.
+    assert.match(r.stdout, /^src\/bar\.js:/mu)
+    assert.match(r.stdout, /^src\/foo\.js:/mu)
+    assert.doesNotMatch(r.stdout, /^\/src/mu)
+  })
+
+  it('grep -r forces the filename prefix even on a single named file', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -r fix src/foo.js')
+    assert.match(r.stdout, /^src\/foo\.js:/u)
+  })
+
+  it('grep -r exits 1 with no output when nothing matches', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -r ZZZZZ src')
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stdout, '')
+  })
+
+  it('grep -r errors on a missing starting path', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -r TODO nope')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /no such file or directory/u)
+  })
+
+  it('grep -r combines with -i and -n', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -irn todo src')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stdout, /^src\/foo\.js:2:\/\/ TODO: fix$/mu)
+    assert.match(r.stdout, /^src\/bar\.js:2:\/\/ TODO: doc this$/mu)
+  })
+
+  it('grep usage line uses [PATH...] (covers directories under -r)', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /PATTERN \[PATH\.\.\.\]/u)
+    // Hard-rejects the old `[FILE...]` wording so a regression
+    // (re-narrowing the docs) shows up here.
+    assert.doesNotMatch(r.stderr, /\[FILE\.\.\.\]/u)
+  })
+
+  it('grep -r preserves an absolute starting path in the displayed name', () => {
+    // Covers the displayName branch where userPath is absolute
+    // (so the result keeps the leading `/`), distinct from the
+    // relative-path / `.` cases pinned above.
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -r TODO /src')
+    assert.equal(r.exitCode, 0)
+    const lines = r.stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(lines, ['/src/bar.js:// TODO: doc this', '/src/foo.js:// TODO: fix'])
+  })
+
   it('head -n and tail -n', () => {
     const t = createTerminal(SOURCES)
     assert.equal(t.run('head -n 1 src/foo.js').stdout, 'const x = 1\n')
@@ -139,6 +206,54 @@ describe('createTerminal — find / tree / path', () => {
     assert.ok(!filesOnly.has('/src'))
     const named = t.run('find / --name "*.js"').stdout.split('\n').filter(Boolean)
     assert.deepEqual(named.sort(), ['/src/bar.js', '/src/foo.js', '/src/util/log.js'])
+  })
+
+  it('find accepts POSIX-style single-dash primaries (-name, -type)', () => {
+    const t = createTerminal(SOURCES)
+    const dirs = new Set(t.run('find / -type d').stdout.split('\n').filter(Boolean))
+    assert.ok(dirs.has('/src'))
+    assert.ok(dirs.has('/src/util'))
+    assert.ok(!dirs.has('/src/foo.js'))
+    const named = t.run('find / -name "*.js"').stdout.split('\n').filter(Boolean)
+    assert.deepEqual(named.sort(), ['/src/bar.js', '/src/foo.js', '/src/util/log.js'])
+    // Combining works the same as the long form.
+    const combined = t.run('find / -type f -name "*.md"').stdout.split('\n').filter(Boolean)
+    assert.deepEqual(combined, ['/README.md'])
+  })
+
+  it('find -type / --type with a bad value errors and mentions both forms', () => {
+    const t = createTerminal(SOURCES)
+    // Whichever form the user typed, the error mentions both so it
+    // doesn't mislead callers who used the long form.
+    for (const cmd of ['find / -type x', 'find / --type x']) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0)
+      assert.match(r.stderr, /-type/u, `${cmd}: short form missing from error`)
+      assert.match(r.stderr, /--type/u, `${cmd}: long form missing from error`)
+    }
+  })
+
+  it('find: `--` ends primary normalization; a literal `-name` after it stays a path', () => {
+    // Without the terminator guard, `-name` after `--` would be
+    // rewritten to `--name`, swallowing the next token as a glob.
+    // With the guard, `-name` stays a positional — find then tries
+    // to start from a path called `-name`, which doesn't exist.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find -- -name')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /-name: no such file or directory/u)
+  })
+
+  it('find -name accepts a dash-prefixed value as the literal glob', () => {
+    // parseArgs's takeNext takes whatever follows a value-flag, even
+    // if it looks like another flag — useful here so a user can pass
+    // a glob that starts with `-`. SOURCES has no file matching the
+    // literal `-foo` glob; find succeeds with no output (exit 0
+    // since find doesn't signal "no match" the way grep does).
+    const t = createTerminal(SOURCES)
+    const r = t.run('find / -name -foo')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '')
   })
 
   it('basename / dirname operate on path strings', () => {
