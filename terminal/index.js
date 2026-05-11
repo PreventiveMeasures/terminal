@@ -21,10 +21,21 @@
 import { createFs, resolve } from './fs.js'
 import { NAV_COMMANDS } from './nav-commands.js'
 import { parseLine } from './parse.js'
+import { sed } from './sed.js'
 import { TEXT_COMMANDS } from './text-commands.js'
 import { err } from './util.js'
 
-const COMMANDS = { ...TEXT_COMMANDS, ...NAV_COMMANDS }
+// `__proto__: null` so a user typing e.g. `toString` doesn't reach
+// `Object.prototype.toString` through the prototype chain and have
+// `dispatch()` accidentally call it. Spreading copies own enumerable
+// properties only, so the registries contain exactly the names we
+// registered — nothing inherited.
+const COMMANDS = { __proto__: null, ...TEXT_COMMANDS, ...NAV_COMMANDS }
+// Hidden registry — dispatchable by name (and via ctx.dispatch from
+// xargs), but excluded from the "Available: …" hint so the
+// commands here don't read as part of the documented surface.
+// Anything in here is intentionally narrow / single-purpose.
+const HIDDEN = { __proto__: null, sed }
 
 const KNOWN = Object.keys(COMMANDS).sort().join(', ')
 
@@ -50,7 +61,7 @@ export function createTerminal(sources, opts = {}) {
 }
 
 function dispatch(name, tokens, stdin, ctx) {
-  const cmd = COMMANDS[name]
+  const cmd = COMMANDS[name] ?? HIDDEN[name]
   if (!cmd) return unknownCommand(name)
   try {
     return cmd(stdin, tokens, ctx)

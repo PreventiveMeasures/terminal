@@ -422,6 +422,19 @@ describe('createTerminal — errors', () => {
     assert.match(r.stderr, /\bcat\b/u)
   })
 
+  it('Object.prototype names are not dispatchable as commands', () => {
+    // Without `__proto__: null` on the registries, `COMMANDS['toString']`
+    // would surface `Object.prototype.toString` and dispatch() would
+    // happily call it. Pin the registry isolation so a future spread
+    // refactor can't reintroduce the prototype chain.
+    const t = createTerminal(SOURCES)
+    for (const name of ['toString', 'constructor', 'hasOwnProperty', 'valueOf', '__proto__']) {
+      const r = t.run(name)
+      assert.equal(r.exitCode, 127, `${name}: expected 127`)
+      assert.match(r.stderr, /command not found/u, `${name}: expected "command not found"`)
+    }
+  })
+
   it('unterminated quote returns an error result, not a throw', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('echo "hi')
@@ -737,6 +750,94 @@ describe('createTerminal — count validation', () => {
     const r = t.run('head -n 9007199254740992 src/foo.js')
     assert.notEqual(r.exitCode, 0)
     assert.match(r.stderr, /out of range/u)
+  })
+})
+
+describe('createTerminal — sed line-range slice (narrow subset)', () => {
+  // Build a 300-line file we can carve ranges out of.
+  const NUMBERED = Array.from({ length: 300 }, (_, i) => `line ${i + 1}`).join('\n') + '\n'
+  const SRC = { 'big.txt': NUMBERED }
+
+  it('-n \'X,Yp\' prints lines X through Y inclusive from a file', () => {
+    const t = createTerminal(SRC)
+    const r = t.run("sed -n '140,195p' big.txt")
+    assert.equal(r.exitCode, 0)
+    const lines = r.stdout.split('\n').filter(Boolean)
+    assert.equal(lines[0], 'line 140')
+    assert.equal(lines.at(-1), 'line 195')
+    assert.equal(lines.length, 195 - 140 + 1)
+  })
+
+  it('-n \'X,Yp\' from a pipe reads stdin', () => {
+    const t = createTerminal(SRC)
+    const r = t.run("cat big.txt | sed -n '160,230p'")
+    assert.equal(r.exitCode, 0)
+    const lines = r.stdout.split('\n').filter(Boolean)
+    assert.equal(lines[0], 'line 160')
+    assert.equal(lines.at(-1), 'line 230')
+    assert.equal(lines.length, 230 - 160 + 1)
+  })
+
+  it('-n \'Np\' (single line) is supported as a degenerate range', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run("sed -n '42p' big.txt").stdout, 'line 42\n')
+  })
+
+  it('range past EOF clamps silently', () => {
+    const t = createTerminal(SRC)
+    const r = t.run("sed -n '295,500p' big.txt")
+    const lines = r.stdout.split('\n').filter(Boolean)
+    assert.deepEqual(lines, ['line 295', 'line 296', 'line 297', 'line 298', 'line 299', 'line 300'])
+  })
+
+  it('range entirely past EOF produces no output, exit 0', () => {
+    const t = createTerminal(SRC)
+    const r = t.run("sed -n '400,500p' big.txt")
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '')
+  })
+
+  it('rejects anything outside the narrow subset (single canonical message)', () => {
+    const t = createTerminal(SRC)
+    // Everything in this group should hit the same "only -n 'X[,Y]p'"
+    // message — including unknown flags (which would otherwise
+    // surface as parseArgs's generic "unknown option" error).
+    const unsupportedCases = [
+      'sed',                                // no args
+      "sed '1,5p' big.txt",                 // missing -n
+      "sed -n 's/foo/bar/g' big.txt",       // substitution
+      "sed -n '/foo/p' big.txt",            // regex address
+      "sed -n '1,5p;10,15p' big.txt",       // multiple scripts
+      "sed -i -n '1,2p' big.txt",           // unsupported flag
+      "sed -e '1p' big.txt",                // unsupported flag
+    ]
+    for (const cmd of unsupportedCases) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
+      assert.match(r.stderr, /only `-n 'X\[,Y\]p'`/u, `${cmd}: expected canonical message`)
+    }
+    // These hit specific (non-canonical) errors that name the
+    // actual problem — they don't get the generic unsupported text.
+    const specific = [
+      ["sed -n '0,5p' big.txt", /line numbers must be >= 1/u],
+      ["sed -n '200,100p' big.txt", /reversed range: 200,100/u],
+      ["sed -n '1,2p' big.txt other.txt", /at most one input file/u],
+    ]
+    for (const [cmd, re] of specific) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
+      assert.match(r.stderr, re, `${cmd}: expected specific error`)
+    }
+  })
+
+  it('is hidden — the unknown-command "Available" hint does not list sed', () => {
+    // Intentionally undocumented surface. Discoverable by using
+    // the exact subset, not by browsing the available list.
+    const t = createTerminal(SRC)
+    const r = t.run('frobnicate')
+    assert.match(r.stderr, /command not found/u)
+    assert.match(r.stderr, /Available: /u)
+    assert.doesNotMatch(r.stderr, /\bsed\b/u)
   })
 })
 
