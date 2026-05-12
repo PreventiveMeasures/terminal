@@ -19,6 +19,7 @@
 // the next gated step runs.
 
 import { createFs, resolve } from './fs.js'
+import { expandGlobs } from './glob.js'
 import { NAV_COMMANDS } from './nav-commands.js'
 import { parseLine } from './parse.js'
 import { sed } from './sed.js'
@@ -112,7 +113,11 @@ function runPipeline(stages, ctx) {
   let stderr = ''
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]
-    const result = dispatch(stage.argv[0], stage.argv.slice(1), stdin, ctx)
+    // Shell-style glob expansion: unquoted tokens with `*` / `?`
+    // get walked against the FS and replaced with their matches.
+    // argv[0] (the command name) is passed through verbatim.
+    const expanded = expandGlobs(stage.argv, stage.quoted ?? new Set(), ctx)
+    const result = dispatch(expanded[0], expanded.slice(1), stdin, ctx)
     const stageOut = stage.stdoutToNull ? '' : result.stdout
     const stageErr = stage.stderrToNull ? '' : result.stderr
     stderr += stageErr

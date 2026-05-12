@@ -32,17 +32,18 @@ export function parseLine(line) {
 
 function buildSteps(raw) {
   const steps = [{ gate: 'first', stages: [] }]
-  let stage = { argv: [] }
+  let stage = { argv: [], quoted: new Set() }
   for (let i = 0; i < raw.length; i++) {
     const t = raw[i]
     if (t.kind === 'pipe' || t.kind === 'and' || t.kind === 'or') {
       steps.at(-1).stages.push(stage)
-      stage = { argv: [] }
+      stage = { argv: [], quoted: new Set() }
       if (t.kind === 'and') steps.push({ gate: 'and', stages: [] })
       else if (t.kind === 'or') steps.push({ gate: 'or', stages: [] })
       continue
     }
     if (t.kind === 'redir') { i = applyRedir(stage, raw, i); continue }
+    if (t.quoted) stage.quoted.add(stage.argv.length)
     stage.argv.push(t.value)
   }
   steps.at(-1).stages.push(stage)
@@ -77,10 +78,16 @@ function tokenize(line) {
   let cur = ''
   let quote = null
   let inToken = false
+  // Sticky for the duration of one word: any quoting anywhere in
+  // the token marks the whole token as "quoted" so the glob
+  // expander leaves it literal. `dir/"*.js"` and `'dir/*.js'`
+  // both produce a single token with quoted=true.
+  let quoted = false
   const flush = () => {
-    if (inToken) tokens.push({ kind: 'word', value: cur })
+    if (inToken) tokens.push({ kind: 'word', value: cur, quoted })
     cur = ''
     inToken = false
+    quoted = false
   }
   for (let i = 0; i < line.length; i++) {
     const c = line[i]
@@ -89,7 +96,7 @@ function tokenize(line) {
       else cur += c
       continue
     }
-    if (c === "'" || c === '"') { quote = c; inToken = true; continue }
+    if (c === "'" || c === '"') { quote = c; inToken = true; quoted = true; continue }
     // `1>` / `2>` (and `1>>` / `2>>`) only at a token boundary, so
     // `cat2>foo` keeps `cat2` as one word and only `>` is the redirect.
     if (!inToken && (c === '1' || c === '2') && line[i + 1] === '>') {
@@ -160,6 +167,11 @@ export function parseArgs(tokens, schema = {}) {
   const positional = []
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
+    // `--` ends flag processing here, not at the top of the function:
+    // a value-taking option (`--name`, `-n`) that immediately precedes
+    // `--` consumes it as the value via `takeNext`, so the terminator
+    // check has to run AFTER any value-consumption opportunity. POSIX
+    // getopt behavior — pre-splitting the token list breaks it.
     if (t === '--') { positional.push(...tokens.slice(i + 1)); break }
     // Pure-dash tokens (`-`, `---`, `----`, …) are positional, not
     // flags. Without this `echo "---"` would die with

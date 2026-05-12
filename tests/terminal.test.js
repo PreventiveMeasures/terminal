@@ -457,6 +457,38 @@ describe('createTerminal — find / tree / path', () => {
     assert.match(r.stderr, /-name: no such file or directory/u)
   })
 
+  it('find: `-maxdepth` after `--` is a path, not the maxdepth option', () => {
+    // -maxdepth is extracted in a pre-pass (before primary normalization),
+    // so the `--` terminator has to be honored there too — otherwise
+    // `find -- -maxdepth 1` would set maxDepth=1 instead of treating
+    // both tokens as start paths.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find -- -maxdepth 1')
+    assert.notEqual(r.exitCode, 0)
+    assert.doesNotMatch(r.stderr, /-maxdepth requires/u)
+    assert.match(r.stderr, /-maxdepth: no such file or directory/u)
+  })
+
+  it('find -name accepts `--` as the literal glob value (POSIX getopt convention)', () => {
+    // A value-taking primary immediately followed by `--` consumes
+    // `--` as the value, not as the terminator. Matches getopt and
+    // the `-name -foo` precedent below.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find / -name --')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '') // no basename equals literal `--`
+  })
+
+  it('find -maxdepth surfaces "invalid count" when given `--` as value', () => {
+    // Not "requires a value" — the value WAS supplied (`--`),
+    // it just doesn't parse as a non-negative integer.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find / -maxdepth --')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /invalid count: --/u)
+    assert.doesNotMatch(r.stderr, /requires a value/u)
+  })
+
   it('find -name accepts a dash-prefixed value as the literal glob', () => {
     // parseArgs's takeNext takes whatever follows a value-flag, even
     // if it looks like another flag — useful here so a user can pass
@@ -807,6 +839,17 @@ describe('createTerminal — count validation', () => {
     assert.match(r.stderr, /invalid count/u)
   })
 
+  it('`head -n --` consumes `--` as the count value (POSIX getopt)', () => {
+    // A value-taking short option immediately followed by `--`
+    // consumes `--` as the value, not as the terminator. The value
+    // then fails parseNonNegativeInt with "invalid count", not
+    // "requires a value" (which would mean no value was supplied).
+    const t = createTerminal(SOURCES)
+    const r = t.run('head -n -- src/foo.js')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /invalid count: --/u)
+  })
+
   it('non-decimal counts (whitespace, hex, scientific) are rejected', () => {
     const t = createTerminal(SOURCES)
     for (const bad of ['" "', '0x10', '1e3', '+5', '-5', '1.5']) {
@@ -910,6 +953,202 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     assert.match(r.stderr, /command not found/u)
     assert.match(r.stderr, /Available: /u)
     assert.doesNotMatch(r.stderr, /\bsed\b/u)
+  })
+})
+
+describe('createTerminal — shell-style glob expansion', () => {
+  const SRC = {
+    'dir/foo.js': 'a\nb\nc\n',
+    'dir/bar.js': 'x\ny\n',
+    'dir/baz.md': 'z\n',
+    'other/qux.js': 'q\n',
+    '.hidden.js': 'h\n',
+  }
+
+  it('`wc -l dir/*.js` expands to the matching files', () => {
+    const t = createTerminal(SRC)
+    const r = t.run('wc -l dir/*.js')
+    assert.equal(r.exitCode, 0)
+    // bar.js (2 lines) + foo.js (3 lines), in lexicographic order,
+    // plus the total. Each line has a 7-wide right-aligned count.
+    assert.match(r.stdout, /\b2\b.*dir\/bar\.js/u)
+    assert.match(r.stdout, /\b3\b.*dir\/foo\.js/u)
+    assert.match(r.stdout, /\b5\b.*total/u)
+  })
+
+  it('a single-quoted pattern stays literal — no expansion', () => {
+    const t = createTerminal(SRC)
+    // Quoted: wc tries to read a file literally named `dir/*.js`.
+    const r = t.run("wc -l 'dir/*.js'")
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /no such file/u)
+  })
+
+  it('double-quoted pattern is also literal', () => {
+    const t = createTerminal(SRC)
+    const r = t.run('wc -l "dir/*.js"')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /no such file/u)
+  })
+
+  it('pattern with no matches passes through verbatim (bash default)', () => {
+    const t = createTerminal(SRC)
+    const r = t.run('wc -l dir/*.txt')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /dir\/\*\.txt: no such file/u)
+  })
+
+  it('absolute glob — `/dir/*.js`', () => {
+    const t = createTerminal(SRC)
+    const r = t.run('cat /dir/*.js')
+    // bar.js then foo.js (lex order).
+    assert.equal(r.stdout, 'x\ny\na\nb\nc\n')
+  })
+
+  it('multi-segment glob (`*/qux.js`) walks each matching dir', () => {
+    const t = createTerminal(SRC)
+    const r = t.run('cat */qux.js')
+    assert.equal(r.stdout, 'q\n')
+  })
+
+  it('dotfiles are not matched by a leading wildcard (bash default)', () => {
+    const t = createTerminal(SRC)
+    // `*.js` from root matches nothing — top-level .js is hidden,
+    // and `dir/*.js` files aren't in scope of root-level `*.js`.
+    // `cat` will report the unexpanded pattern as a missing file.
+    const r = t.run('cat *.js')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /\*\.js: no such file/u)
+    // Explicit `.` matches the dotfile.
+    const dot = t.run('cat .*.js')
+    assert.equal(dot.stdout, 'h\n')
+  })
+
+  it('the command name itself is never glob-expanded', () => {
+    // Even if a file named `cat` existed in cwd, `c*` shouldn't
+    // get picked up as a command. (No such file in SRC; just
+    // confirm the dispatcher treats argv[0] as a literal name.)
+    const t = createTerminal(SRC)
+    const r = t.run('c*')
+    assert.equal(r.exitCode, 127)
+    assert.match(r.stderr, /command not found/u)
+  })
+
+  it('preserves a trailing `/` on directory-only glob matches (bash convention)', () => {
+    const t = createTerminal({
+      'a/x.js': '',
+      'b/y.js': '',
+      'c.txt': '',
+    })
+    // `*/` matches directories only, with the slash preserved on
+    // each match — bash and the module's "preserve user-typed
+    // shape" contract. Echo prints argv joined by a space, so the
+    // expanded shape is directly observable.
+    assert.equal(t.run('echo */').stdout, 'a/ b/\n')
+  })
+
+  it('preserves a leading `./` prefix in expansion (bash convention)', () => {
+    const t = createTerminal(SRC)
+    // `./dir/*.js` should yield `./dir/bar.js`, not `dir/bar.js` —
+    // bash keeps the user-typed prefix so output reads naturally
+    // when the receiving command echoes its args.
+    const r = t.run('wc -l ./dir/*.js')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stdout, /\.\/dir\/bar\.js/u)
+    assert.match(r.stdout, /\.\/dir\/foo\.js/u)
+    assert.doesNotMatch(r.stdout, /(?<!\.\/)dir\/bar\.js/u)
+  })
+
+  it('expansion sorts results so order is stable across runs', () => {
+    const t = createTerminal({
+      'a/y.js': '',
+      'a/z.js': '',
+      'a/x.js': '',
+    })
+    const r = t.run('find a/*.js -type f').stdout.split('\n').filter(Boolean)
+    // Pattern expands into ['a/x.js', 'a/y.js', 'a/z.js'] which then
+    // become start paths for find. Three single-file finds, each
+    // emits its file. Order tracks the sort.
+    assert.deepEqual(r, ['a/x.js', 'a/y.js', 'a/z.js'])
+  })
+})
+
+describe('createTerminal — find -a / -o operators', () => {
+  const SRC = {
+    'src/foo.js': '',
+    'src/bar.js': '',
+    'src/baz.ts': '',
+    'src/data.json': '',
+    'src/sub/inner.js': '',
+    'README.md': '',
+  }
+
+  it('-o (OR) takes either left or right predicate', () => {
+    const t = createTerminal(SRC)
+    const r = new Set(t.run("find / -name '*.js' -o -name '*.ts'").stdout.split('\n').filter(Boolean))
+    assert.ok(r.has('/src/foo.js'))
+    assert.ok(r.has('/src/bar.js'))
+    assert.ok(r.has('/src/baz.ts'))
+    assert.ok(r.has('/src/sub/inner.js'))
+    assert.ok(!r.has('/src/data.json'))
+    assert.ok(!r.has('/README.md'))
+  })
+
+  it('-a (AND) is the implicit default; explicit form behaves the same', () => {
+    const t = createTerminal(SRC)
+    const a = new Set(t.run("find / -type f -name '*.js'").stdout.split('\n').filter(Boolean))
+    const b = new Set(t.run("find / -type f -a -name '*.js'").stdout.split('\n').filter(Boolean))
+    assert.deepEqual([...a].sort(), [...b].sort())
+    assert.ok(a.has('/src/foo.js'))
+    assert.ok(!a.has('/src')) // -type f excludes the dir
+  })
+
+  it('-a binds tighter than -o (standard precedence)', () => {
+    // `find / -name '*.ts' -o -name '*.js' -a -type d` parses as
+    // `(*.ts) OR (*.js AND type=d)`. Nothing matches the AND group
+    // (no .js dir), so only .ts files match.
+    const t = createTerminal(SRC)
+    const r = t.run("find / -name '*.ts' -o -name '*.js' -a -type d")
+      .stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(r, ['/src/baz.ts'])
+  })
+
+  it('-not / ! flips the predicate it directly precedes', () => {
+    const t = createTerminal(SRC)
+    // (-not name=*.js) AND (type=f) → .ts / .json / .md files
+    const r = new Set(t.run("find / -not -name '*.js' -a -type f").stdout.split('\n').filter(Boolean))
+    assert.ok(r.has('/src/baz.ts'))
+    assert.ok(r.has('/src/data.json'))
+    assert.ok(r.has('/README.md'))
+    assert.ok(!r.has('/src/foo.js'))
+  })
+
+  it('rejects malformed -o usage', () => {
+    const t = createTerminal(SRC)
+    for (const cmd of ['find / -o -name "*.js"', "find / -name '*.js' -o"]) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
+      assert.match(r.stderr, /-o/u)
+    }
+  })
+
+  it('rejects malformed -a usage (mirrors -o validation)', () => {
+    // `-a` is an explicit operator and should error on the same
+    // shapes `-o` does: leading (no LHS), trailing (no RHS), and
+    // consecutive (no expression between). Previously a silent
+    // no-op that let `find / -a` succeed match-all.
+    const t = createTerminal(SRC)
+    const cases = [
+      'find / -a',                       // no LHS, no RHS
+      "find / -a -name '*.js'",          // no LHS
+      "find / -name '*.js' -a",          // no RHS (trailing)
+      "find / -name '*.js' -a -a -type f", // consecutive operators
+    ]
+    for (const cmd of cases) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
+      assert.match(r.stderr, /-a/u, `${cmd}: stderr should mention -a`)
+    }
   })
 })
 

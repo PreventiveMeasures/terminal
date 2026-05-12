@@ -1,45 +1,178 @@
-// find — auditor's tree-walker, in its own file because the feature
-// set (POSIX-style `-name` / `-type` / `-path` primaries, GNU long
-// forms, `-not` / `!` negation, `-maxdepth` capping, the per-path
-// glob matcher, the BFS queue walker) doesn't fit nav-commands.js's
-// 300-line cap once you account for everything. The other nav
-// commands (pwd, cd, ls, tree, basename, dirname) stay there;
-// nav-commands.js re-exports the imported `find` so NAV_COMMANDS
-// keeps the same shape.
+// find — auditor's tree-walker, in its own file because the
+// feature set (POSIX-style `-name` / `-type` / `-path` primaries,
+// GNU long forms, `-not` / `!` negation, `-a` / `-o` boolean
+// combinators with precedence, `-maxdepth` capping, the per-path
+// glob matcher, the depth-aware walker) doesn't fit nav-commands.js's
+// 300-line cap.
+//
+// Predicate model: a list of OR-groups; each group is a list of
+// AND-ed predicates. `-a` is the implicit default; `-o` starts a
+// new group; `-not` / `!` flips the next predicate. `-maxdepth`
+// isn't part of the predicate tree — it's a global walker option
+// extracted up front so the walker can prune instead of filtering
+// after the fact.
 
 import { basename, resolve } from './fs.js'
-import { parseArgs } from './parse.js'
+import { compileGlob } from './glob.js'
 import { err, ok, parseNonNegativeInt } from './util.js'
 
-// Primary tokens accepted by find. Each gets normalized to the
-// long-form `--primary` so parseArgs's strict schema doesn't
-// unbundle `-name` into `-n -a -m -e`. Negation (`-not <primary>`
-// or `! <primary>`) is folded into a `--not-<primary>` token in
-// the same pass so the existing valueLong parsing handles both
-// signs uniformly.
 const PRIMARIES = new Set(['name', 'type', 'path', 'maxdepth'])
 
 export function find(_stdin, tokens, ctx) {
-  const normalized = normalizeFindTokens(tokens)
-  if (normalized.error) return normalized.error
-  const valueLong = [...PRIMARIES, ...[...PRIMARIES].map((p) => `not-${p}`)]
-  const { values, positional } = parseArgs(normalized.tokens, { valueLong })
-  const start = positional[0] ?? '.'
-  const startAbs = resolve(ctx.cwd, start)
-  if (!ctx.fs.isDir(startAbs) && !ctx.fs.isFile(startAbs)) {
-    return err(`find: ${start}: no such file or directory`)
-  }
-  const filters = buildFilters(values)
-  if (filters.error) return filters.error
+  const parsed = parseFindArgs(tokens)
+  if (parsed.error) return parsed.error
+  const { starts, maxDepth, groups } = parsed
   const out = []
-  for (const entry of walk(ctx.fs, startAbs, filters.maxDepth)) {
-    // POSIX find: output (and -path filtering) uses the user-typed
-    // prefix, not the resolved absolute path. `find /…` keeps
-    // absolute paths because the user asked for them.
-    const display = toDisplayPath(start, startAbs, entry.path)
-    if (matchFilters({ kind: entry.kind, path: display }, filters)) out.push(display)
+  for (const start of starts) {
+    const startAbs = resolve(ctx.cwd, start)
+    if (!ctx.fs.isDir(startAbs) && !ctx.fs.isFile(startAbs)) {
+      return err(`find: ${start}: no such file or directory`)
+    }
+    for (const entry of walk(ctx.fs, startAbs, maxDepth)) {
+      const display = toDisplayPath(start, startAbs, entry.path)
+      if (matchGroups(groups, { kind: entry.kind, path: display })) out.push(display)
+    }
   }
   return ok(out.length === 0 ? '' : out.join('\n') + '\n')
+}
+
+function parseFindArgs(tokens) {
+  const filtered = stripMaxDepth(tokens)
+  if (filtered.error) return filtered
+  return walkExprTokens(filtered.tokens, filtered.maxDepth)
+}
+
+// Extract `-maxdepth N` / `--maxdepth N` first. They're walker-global
+// options, not predicates — putting them in the predicate tree would
+// still need the walker to know N up front for pruning. The `--`
+// terminator is checked AFTER the maxdepth branch so `-maxdepth --`
+// surfaces the friendlier "invalid count" rather than "requires a
+// value" — matches POSIX getopt's "value-taking option consumes the
+// next token regardless" rule.
+function stripMaxDepth(tokens) {
+  const out = []
+  let maxDepth = Number.POSITIVE_INFINITY
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (t === '-maxdepth' || t === '--maxdepth') {
+      if (i + 1 >= tokens.length) return { error: err('find: -maxdepth requires a value') }
+      const r = parseNonNegativeInt(tokens[i + 1], 'find: -maxdepth')
+      if (r.error) return r
+      maxDepth = r.value
+      i++
+      continue
+    }
+    if (t === '--') {
+      out.push(...tokens.slice(i))
+      break
+    }
+    out.push(t)
+  }
+  return { tokens: out, maxDepth }
+}
+
+// Walk the remaining tokens building OR-groups of AND-ed predicates.
+// POSIX find: zero or more start paths come first, then the
+// expression. Once an expression token appears (primary or operator),
+// any later positional is rejected — paths can't be interleaved
+// with primaries. `--` ends primary recognition; trailing tokens
+// after it are paths.
+//
+// The `--` check sits AFTER the primary-with-value branch so
+// `-name --` consumes the literal `--` as the glob value, matching
+// POSIX getopt's "value-taking option consumes the next token
+// regardless" rule. Pre-splitting on `--` would break that.
+function walkExprTokens(tokens, maxDepth) {
+  const groups = [[]]
+  const starts = []
+  let pendingNot = false
+  let afterTerminator = false
+  let seenExpr = false
+  // Tracks an explicit boolean operator (`-a` / `-o`) that hasn't
+  // yet been balanced by a primary. Holds the operator string so
+  // the error can name it; cleared when a primary is consumed.
+  let expectingRhs = null
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (afterTerminator) { starts.push(t); continue }
+    if (t === '-not' || t === '!') {
+      if (pendingNot) return { error: err('find: `-not` cannot precede another `-not`') }
+      pendingNot = true; seenExpr = true; continue
+    }
+    if (t === '-a' || t === '-and' || t === '--and') {
+      if (pendingNot) return { error: err('find: `-not` must be followed by a primary') }
+      if (expectingRhs) return { error: err(`find: \`${expectingRhs}\` with no right-hand expression`) }
+      if (groups.at(-1).length === 0) return { error: err('find: `-a` with no left-hand expression') }
+      expectingRhs = '-a'; seenExpr = true; continue
+    }
+    if (t === '-o' || t === '-or' || t === '--or') {
+      if (pendingNot) return { error: err('find: `-not` must be followed by a primary') }
+      if (expectingRhs) return { error: err(`find: \`${expectingRhs}\` with no right-hand expression`) }
+      if (groups.at(-1).length === 0) return { error: err('find: `-o` with no left-hand expression') }
+      groups.push([]); expectingRhs = '-o'; seenExpr = true; continue
+    }
+    const primary = primaryFor(t)
+    if (primary !== null) {
+      if (i + 1 >= tokens.length) return { error: err(`find: ${t} requires a value`) }
+      const value = tokens[i + 1]
+      const checked = checkPrimary(primary, value)
+      if (checked.error) return checked
+      // Compile the glob regex once at parse time so the walker
+      // doesn't recompile it for every directory entry — large
+      // trees with `-name '*.js'` are the common case.
+      const pred = { kind: primary, value, negate: pendingNot }
+      if (primary === 'name' || primary === 'path') pred.re = compileGlob(value)
+      groups.at(-1).push(pred)
+      pendingNot = false; expectingRhs = null; seenExpr = true; i++
+      continue
+    }
+    if (t === '--') { afterTerminator = true; continue }
+    if (pendingNot) return { error: err(`find: \`-not\` must be followed by a primary, got: ${t}`) }
+    // Anything else that starts with `-` is an unknown option,
+    // not a path. Reject so a typo (`find -X /src`) surfaces here
+    // rather than as a "no such file or directory: -X" lower down.
+    if (t.startsWith('-') && t !== '-' && !/^-\d/u.test(t)) {
+      return { error: err(`find: unknown option: ${t}`) }
+    }
+    if (seenExpr) return { error: err(`find: paths must precede expression: ${t}`) }
+    starts.push(t)
+  }
+  if (pendingNot) return { error: err('find: trailing `-not` with no primary') }
+  if (expectingRhs) return { error: err(`find: \`${expectingRhs}\` with no right-hand expression`) }
+  return { starts: starts.length > 0 ? starts : ['.'], maxDepth, groups }
+}
+
+function primaryFor(token) {
+  if (token === '-maxdepth' || token === '--maxdepth') return null  // already stripped
+  if (token.startsWith('--') && PRIMARIES.has(token.slice(2))) return token.slice(2)
+  if (token.startsWith('-') && PRIMARIES.has(token.slice(1))) return token.slice(1)
+  return null
+}
+
+function checkPrimary(kind, value) {
+  if (kind === 'type' && value !== 'f' && value !== 'd') {
+    return { error: err(`find: -type/--type expects 'f' or 'd', got: ${value}`) }
+  }
+  return {}
+}
+
+// Top-level match: OR across groups, AND within. With no
+// predicates at all (`find /`), the single empty group matches
+// everything — `[].every(…)` is true.
+function matchGroups(groups, entry) {
+  return groups.some((g) => g.every((p) => matchPredicate(p, entry)))
+}
+
+function matchPredicate(p, entry) {
+  const hit = evalPredicate(p, entry)
+  return p.negate ? !hit : hit
+}
+
+function evalPredicate(p, entry) {
+  if (p.kind === 'type') return p.value === 'f' ? entry.kind === 'file' : entry.kind === 'dir'
+  if (p.kind === 'name') return p.re.test(basename(entry.path))
+  if (p.kind === 'path') return p.re.test(entry.path)
+  return false
 }
 
 function toDisplayPath(userPath, absRoot, absPath) {
@@ -47,90 +180,10 @@ function toDisplayPath(userPath, absRoot, absPath) {
   const rel = absRoot === '/' ? absPath.slice(1) : absPath.slice(absRoot.length + 1)
   // POSIX find prepends the user-typed prefix verbatim, including
   // `./` for a `.` start — important so a pattern like
-  // `*/node_modules/*` matches the descendants (`./node_modules/foo`
-  // contains a `/`; `node_modules/foo` doesn't). grep -r in this
+  // `*/node_modules/*` matches the descendants. grep -r in this
   // codebase drops the `./` instead; the two commands intentionally
   // diverge here, each following its own GNU convention.
   return userPath.endsWith('/') ? userPath + rel : userPath + '/' + rel
-}
-
-// Fold `-not <primary>` / `! <primary>` pairs into a single
-// `--not-<primary>` token before parseArgs sees them; rewrite bare
-// `-primary` to `--primary` so the strict short-flag rule doesn't
-// unbundle them. Stops at `--` so `-name` / `-not` etc. used as
-// literal paths after the terminator stay positional.
-function normalizeFindTokens(tokens) {
-  const out = []
-  let afterTerminator = false
-  let pendingNot = false
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i]
-    if (afterTerminator) { out.push(t); continue }
-    if (t === '-not' || t === '!') {
-      if (pendingNot) return { error: err('find: `-not` cannot precede another `-not`') }
-      pendingNot = true
-      continue
-    }
-    const primary = primaryFor(t)
-    if (pendingNot) {
-      if (primary === null) return { error: err(`find: \`-not\` must be followed by a primary, got: ${t}`) }
-      out.push(`--not-${primary}`)
-      pendingNot = false
-      continue
-    }
-    if (primary !== null) { out.push(`--${primary}`); continue }
-    out.push(t)
-    if (t === '--') afterTerminator = true
-  }
-  if (pendingNot) return { error: err('find: trailing `-not` with no primary') }
-  return { tokens: out }
-}
-
-function primaryFor(token) {
-  if (token.startsWith('--') && PRIMARIES.has(token.slice(2))) return token.slice(2)
-  if (token.startsWith('-') && PRIMARIES.has(token.slice(1))) return token.slice(1)
-  return null
-}
-
-function buildFilters(values) {
-  const typeFilter = checkType(values.get('type'))
-  if (typeFilter.error) return typeFilter
-  const notTypeFilter = checkType(values.get('not-type'))
-  if (notTypeFilter.error) return notTypeFilter
-  const maxDepth = values.has('maxdepth')
-    ? parseNonNegativeInt(values.get('maxdepth'), 'find: -maxdepth')
-    : { value: Number.POSITIVE_INFINITY }
-  if (maxDepth.error) return maxDepth
-  return {
-    typeFilter: typeFilter.value,
-    notTypeFilter: notTypeFilter.value,
-    namePattern: values.get('name'),
-    notNamePattern: values.get('not-name'),
-    pathPattern: values.get('path'),
-    notPathPattern: values.get('not-path'),
-    maxDepth: maxDepth.value,
-  }
-}
-
-function checkType(v) {
-  if (v === undefined || v === 'f' || v === 'd') return { value: v }
-  return { error: err(`find: -type/--type expects 'f' or 'd', got: ${v}`) }
-}
-
-function matchFilters(entry, f) {
-  if (f.typeFilter === 'f' && entry.kind !== 'file') return false
-  if (f.typeFilter === 'd' && entry.kind !== 'dir') return false
-  if (f.notTypeFilter === 'f' && entry.kind === 'file') return false
-  if (f.notTypeFilter === 'd' && entry.kind === 'dir') return false
-  const bn = basename(entry.path)
-  if (f.namePattern && !globMatch(bn, f.namePattern)) return false
-  if (f.notNamePattern && globMatch(bn, f.notNamePattern)) return false
-  // -path glob matches against the full path; `*` spans `/` (no
-  // POSIX-glob slash exemption), so `*/node_modules/*` is the
-  // standard exclude pattern.
-  if (f.pathPattern && !globMatch(entry.path, f.pathPattern)) return false
-  if (f.notPathPattern && globMatch(entry.path, f.notPathPattern)) return false
-  return true
 }
 
 // Yields `{ path, kind }`. Tracks depth internally so `maxDepth`
@@ -155,15 +208,4 @@ function* walk(fs, root, maxDepth = Number.POSITIVE_INFINITY) {
     }
     for (const f of files) yield { path: join(f), kind: 'file' }
   }
-}
-
-// Tiny glob matcher: `*` (any chars), `?` (any single char). No
-// braces / character classes — kept small. `*` spans `/`, matching
-// the convention auditors use when writing `-path '*/node_modules/*'`.
-function globMatch(name, pattern) {
-  const re = new RegExp('^' + pattern
-    .replace(/[.+^${}()|[\]\\]/gu, '\\$&')
-    .replace(/\*/gu, '.*')
-    .replace(/\?/gu, '.') + '$', 'u')
-  return re.test(name)
 }
