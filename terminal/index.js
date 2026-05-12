@@ -118,8 +118,19 @@ function runPipeline(stages, ctx) {
     // argv[0] (the command name) is passed through verbatim.
     const expanded = expandGlobs(stage.argv, stage.quoted ?? new Set(), ctx)
     const result = dispatch(expanded[0], expanded.slice(1), stdin, ctx)
-    const stageOut = stage.stdoutToNull ? '' : result.stdout
-    const stageErr = stage.stderrToNull ? '' : result.stderr
+    // Apply redirects in a fixed order: fd-to-fd merges first, then
+    // null sinks. This is bash's behavior for the common idioms
+    // (`>/dev/null 2>&1` silences both, `2>&1 | grep` sees both
+    // streams). Edge cases like `2>foo 2>&1` or `2>&1 >file` — where
+    // bash's left-to-right fd semantics produce different results
+    // depending on order — aren't modeled; the flag set is treated
+    // as commutative.
+    let stageOut = result.stdout
+    let stageErr = result.stderr
+    if (stage.mergeStderrToStdout) { stageOut += stageErr; stageErr = '' }
+    if (stage.mergeStdoutToStderr) { stageErr += stageOut; stageOut = '' }
+    if (stage.stdoutToNull) stageOut = ''
+    if (stage.stderrToNull) stageErr = ''
     stderr += stageErr
     if (i === stages.length - 1) {
       return { stdout: stageOut, stderr, exitCode: result.exitCode }

@@ -774,6 +774,79 @@ describe('createTerminal — /dev/null redirects', () => {
   })
 })
 
+describe('createTerminal — `2>&1` fd-to-fd redirects', () => {
+  it('`2>&1` merges stderr into stdout, leaves stderr empty', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('cat /nope 2>&1')
+    // cat /nope failed: error message that was previously on stderr
+    // is now on stdout. Exit code is preserved.
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stderr, '')
+    assert.match(r.stdout, /no such file/u)
+  })
+
+  it('`2>&1 | …` lets the next stage see both streams', () => {
+    const t = createTerminal(SOURCES)
+    // Without 2>&1, grep would see only cat's empty stdout. With it,
+    // cat's stderr is folded into the pipe so grep can match on it.
+    const r = t.run('cat /nope 2>&1 | grep "no such"')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stdout, /no such file/u)
+    assert.equal(r.stderr, '')
+  })
+
+  it('`>/dev/null 2>&1` silences both streams', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('cat /nope >/dev/null 2>&1')
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stdout, '')
+    assert.equal(r.stderr, '')
+  })
+
+  it('`1>&2` merges stdout into stderr (symmetric)', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('echo hi 1>&2')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '')
+    assert.equal(r.stderr, 'hi\n')
+  })
+
+  it('quoting suppresses fd-to-fd recognition', () => {
+    // `"2>&1"` is just an argv token — echo prints it verbatim.
+    const t = createTerminal(SOURCES)
+    const r = t.run('echo "2>&1"')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '2>&1\n')
+  })
+
+  it('redirect attaches to its own stage in a pipeline', () => {
+    const t = createTerminal(SOURCES)
+    // Only the first stage merges; head's own stderr (none here) is
+    // unaffected. Confirms the flag is per-stage, not per-pipeline.
+    const r = t.run('cat /nope 2>&1 | head -n 1')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stdout, /no such file/u)
+    assert.equal(r.stderr, '')
+  })
+
+  it('malformed `N>&` forms surface a redirect-target error, not "background processes"', () => {
+    // Per Copilot review: previously each of these tokenized as
+    // `2>` + a stray `&...` token, with the `&` triggering the
+    // background-process branch and producing a misleading error.
+    const t = createTerminal(SOURCES)
+    for (const cmd of [
+      'echo hi 2>&',         // missing fd
+      'echo hi 2>&3',        // invalid fd (only 1 / 2 supported)
+      'echo hi 2>&1foo',     // valid fd but no token boundary after
+    ]) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
+      assert.match(r.stderr, /2>&/u, `${cmd}: stderr should name the redirect`)
+      assert.doesNotMatch(r.stderr, /background processes/u, `${cmd}: should not surface amp error`)
+    }
+  })
+})
+
 describe('createTerminal — && / || sequencing', () => {
   it('`&&` runs the next step only when the previous succeeded', () => {
     const t = createTerminal(SOURCES)

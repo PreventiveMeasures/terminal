@@ -11,6 +11,9 @@
 //               the target (the virtual FS is read-only) and means
 //               "discard"
 //   `2>`      — redirect stderr; same `/dev/null`-only restriction
+//   `2>&1`    — merge stderr into stdout (and the symmetric `1>&2`).
+//               Applied before `/dev/null` sinks, so `>/dev/null 2>&1`
+//               silences both streams.
 //   `>>` / `1>>` / `2>>` — append form, rejected outright
 //
 // Boundary tokens are tagged by `kind`, not by string value, so a
@@ -52,12 +55,20 @@ function buildSteps(raw) {
 
 function applyRedir(stage, raw, i) {
   const op = raw[i]
-  const target = raw[i + 1]
   // Format the operator how the user would have typed it: bare `>`
   // / `>>` for stdout (fd=1 implied), `2>` / `2>>` for stderr.
   // Avoids confusing messages like "redirect `1>` requires a
   // target" when the user typed plain `>`.
   const prefix = op.fd === '1' ? '' : op.fd
+  // Fd-to-fd duplication (`2>&1` / `1>&2`): no file target to read,
+  // just set the merge flag. Same-fd forms (`1>&1` / `2>&2`) silently
+  // no-op — they're legal in bash and just redundant.
+  if (op.toFd) {
+    if (op.fd === '2' && op.toFd === '1') stage.mergeStderrToStdout = true
+    else if (op.fd === '1' && op.toFd === '2') stage.mergeStdoutToStderr = true
+    return i
+  }
+  const target = raw[i + 1]
   const label = prefix + '>' + (op.append ? '>' : '')
   if (op.append) {
     throw new Error(`filesystem is read-only — \`${label}\` append is not supported; use \`|\` to pipe or \`${prefix}>/dev/null\` to discard`)
@@ -99,8 +110,29 @@ function tokenize(line) {
     if (c === "'" || c === '"') { quote = c; inToken = true; quoted = true; continue }
     // `1>` / `2>` (and `1>>` / `2>>`) only at a token boundary, so
     // `cat2>foo` keeps `cat2` as one word and only `>` is the redirect.
+    // `2>&1` / `1>&2` is the fd-to-fd duplication form — encoded into
+    // a single redir token so applyRedir doesn't try to read a file
+    // target for it. The target fd must be followed by end-of-input
+    // or a delimiter so `2>&1foo` (which the user wrote as one
+    // token) doesn't silently split into a fd-dup plus a stray word.
     if (!inToken && (c === '1' || c === '2') && line[i + 1] === '>') {
       flush()
+      if (line[i + 2] === '&') {
+        const m = line[i + 3]
+        const after = line[i + 4]
+        if ((m === '1' || m === '2') && (after === undefined || /[\s|&>]/u.test(after))) {
+          tokens.push({ kind: 'redir', fd: c, toFd: m })
+          i += 3
+          continue
+        }
+        // `N>&` followed by anything else: bare (`N>&`), invalid fd
+        // (`N>&3`), or non-boundary junk (`N>&1foo`). Surface a
+        // redirect-target error up front instead of letting the
+        // bare `&` fall through to the amp / background-process
+        // branch — that error reads as "background processes are
+        // not supported" and obscures the real syntax issue.
+        throw new Error(`redirect \`${c}>&\` requires fd 1 or 2 followed by a token boundary`)
+      }
       if (line[i + 2] === '>') { tokens.push({ kind: 'redir', fd: c, append: true }); i += 2 }
       else { tokens.push({ kind: 'redir', fd: c, append: false }); i += 1 }
       continue
