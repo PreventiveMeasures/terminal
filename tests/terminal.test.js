@@ -552,6 +552,18 @@ describe('createTerminal — errors', () => {
     assert.notEqual(r.exitCode, 0)
     assert.match(r.stderr, /empty pipeline/u)
   })
+
+  it('grep invalid pattern names the syntax (ECMAScript /u)', () => {
+    // POSIX-grep users hit this when they type a bare `(` expecting
+    // it to match a literal — JS RegExp rejects it as an unterminated
+    // group. The error message has to surface the syntax up front so
+    // the underlying V8 message ("Unterminated group") makes sense.
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep "Function(" src/foo.js')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /ECMAScript RegExp/u)
+    assert.match(r.stderr, /\/u/u)
+  })
 })
 
 describe('createTerminal — strict option parsing', () => {

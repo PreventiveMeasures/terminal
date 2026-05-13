@@ -69,8 +69,12 @@ function compilePattern(pattern, flags) {
   // -w wraps in word-boundary anchors. Using a non-capturing group
   // keeps alternation (`foo|bar`) intact.
   const source = flags.has('w') ? `\\b(?:${pattern})\\b` : pattern
+  // The pattern syntax is JavaScript's `RegExp` in Unicode mode, NOT
+  // POSIX BRE/ERE — call this out in the error so a user expecting
+  // grep(1) semantics knows why `Function(` (a literal in POSIX
+  // grep-without-`-E`) errors as an unterminated group.
   try { return { re: new RegExp(source, flags.has('i') ? 'iu' : 'u') } } catch (e) {
-    return { error: err(`grep: invalid pattern: ${e.message}`) }
+    return { error: err(`grep: invalid pattern (ECMAScript RegExp in /u Unicode mode): ${e.message}`) }
   }
 }
 
