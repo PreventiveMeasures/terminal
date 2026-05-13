@@ -156,6 +156,34 @@ describe('createTerminal — text commands', () => {
     assert.doesNotMatch(r.stderr, /\[FILE\.\.\.\]/u)
   })
 
+  it('grep -F matches a literal pattern with regex metacharacters', () => {
+    // The original failure from PR #38: `Function(` was rejected
+    // as an unterminated group. With -F the `(` is escaped and
+    // grep finds the literal substring.
+    const t = createTerminal({ 'src/calls.js': 'foo()\nFunction(arg)\nbar\n' })
+    const r = t.run('grep -F "Function(" src/calls.js')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'Function(arg)\n')
+  })
+
+  it('grep -F treats `*` / `.` / `[` as literal characters', () => {
+    const t = createTerminal({ 'src/x.js': 'a.b\na*b\na[b\nxyz\n' })
+    assert.equal(t.run('grep -F a.b src/x.js').stdout, 'a.b\n')
+    assert.equal(t.run('grep -F a*b src/x.js').stdout, 'a*b\n')
+    assert.equal(t.run('grep -F "a[b" src/x.js').stdout, 'a[b\n')
+  })
+
+  it('grep -F composes with -i and -w', () => {
+    const t = createTerminal({ 'src/x.js': 'Function(x)\nmyFunction(y)\nfunction(z)\n' })
+    // -F + -i: case-insensitive literal.
+    assert.match(t.run('grep -Fi "FUNCTION(" src/x.js').stdout, /^Function\(x\)$/mu)
+    // -F + -w: word-boundary literal — `myFunction(` should NOT match
+    // when the search is `Function(` with -w (word boundary before F).
+    const w = t.run('grep -Fw "Function(" src/x.js')
+    assert.match(w.stdout, /^Function\(x\)$/mu)
+    assert.doesNotMatch(w.stdout, /myFunction/u)
+  })
+
   it('grep -r preserves an absolute starting path in the displayed name', () => {
     // Covers the displayName branch where userPath is absolute
     // (so the result keeps the leading `/`), distinct from the
@@ -1254,6 +1282,78 @@ describe('createTerminal — shell-style glob expansion', () => {
     // become start paths for find. Three single-file finds, each
     // emits its file. Order tracks the sort.
     assert.deepEqual(r, ['a/x.js', 'a/y.js', 'a/z.js'])
+  })
+})
+
+describe('createTerminal — brace expansion', () => {
+  const SRC = {
+    'src/foo.js': 'a\n',
+    'src/bar.js': 'b\n',
+    'src/baz.ts': 'c\n',
+  }
+
+  it('`{a,b,c}` expands into three argv items', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('echo {a,b,c}').stdout, 'a b c\n')
+  })
+
+  it('prefix and suffix attach to each alternative', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('echo pre{a,b}post').stdout, 'preapost prebpost\n')
+  })
+
+  it('adjacent groups produce the cartesian product', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('echo {a,b}{c,d}').stdout, 'ac ad bc bd\n')
+  })
+
+  it('nested groups expand inside-out per alternative', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('echo {a,b{c,d}}').stdout, 'a bc bd\n')
+  })
+
+  it('no comma → no expansion (`{a}`, `{}`, unmatched)', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('echo {a}').stdout, '{a}\n')
+    assert.equal(t.run('echo {}').stdout, '{}\n')
+    assert.equal(t.run('echo {abc').stdout, '{abc\n')
+  })
+
+  it('quoted braces stay literal', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('echo "{a,b}"').stdout, '{a,b}\n')
+    assert.equal(t.run("echo '{a,b}'").stdout, '{a,b}\n')
+  })
+
+  it('empty alternatives are preserved (`{,a,}` → 3 items, two empty)', () => {
+    // Bash compat: trailing/leading commas produce empty argv tokens.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('echo {,a,}').stdout, ' a \n')
+  })
+
+  it('feeds the glob expander — braces resolve first, then `*` matches', () => {
+    // `{src/foo,src/bar}*.js` → `src/foo*.js src/bar*.js` (brace),
+    // then glob each against the FS. Echo prints the resolved argv
+    // joined with spaces so the two-phase expansion is observable.
+    const t = createTerminal(SRC)
+    const r = t.run('echo {src/foo,src/bar}*.js')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stdout, /src\/foo\.js/u)
+    assert.match(r.stdout, /src\/bar\.js/u)
+  })
+
+  it('combines with real file paths (`cat src/{foo,bar}.js`)', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat src/{foo,bar}.js').stdout, 'a\nb\n')
+  })
+
+  it('command name (argv[0]) is never brace-expanded', () => {
+    // Matches expandGlobs' carve-out — expanding `{c,e}cho` into
+    // multiple tokens would be surprising and is rarely useful.
+    const t = createTerminal(SRC)
+    const r = t.run('{c,e}cho hi')
+    assert.equal(r.exitCode, 127)
+    assert.match(r.stderr, /command not found/u)
   })
 })
 

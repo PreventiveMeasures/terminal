@@ -1,9 +1,10 @@
 // grep — the auditor's main read tool. Lives in its own file
 // because the feature set (the standard line match, plus -A/-B/-C
 // context, -l/-L filename listing, -c counting, -o match-only,
-// -w word-boundary, -h/-H name forcing, all composable with -r/-i
-// /-v/-n) doesn't fit the 300-line cap in text-commands.js, and
-// because it's the command auditors reach for most often.
+// -w word-boundary, -F fixed-string, -h/-H name forcing, all
+// composable with -r/-i/-v/-n) doesn't fit the 300-line cap in
+// text-commands.js, and because it's the command auditors reach
+// for most often.
 //
 // The other helpers (readFilesRecursive, displayName, walking
 // inputs) are split out too so the per-mode renderers
@@ -13,11 +14,11 @@ import { resolve } from './fs.js'
 import { parseArgs } from './parse.js'
 import { err, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
 
-const USAGE = 'grep [-i] [-v] [-n] [-r] [-w] [-o] [-l] [-L] [-c] [-h] [-H] [-A N] [-B N] [-C N] PATTERN [PATH...]'
+const USAGE = 'grep [-i] [-v] [-n] [-r] [-w] [-o] [-F] [-l] [-L] [-c] [-h] [-H] [-A N] [-B N] [-C N] PATTERN [PATH...]'
 
 export function grep(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, {
-    short: ['i', 'v', 'n', 'r', 'l', 'L', 'c', 'w', 'h', 'H', 'o'],
+    short: ['i', 'v', 'n', 'r', 'l', 'L', 'c', 'w', 'h', 'H', 'o', 'F'],
     valueShort: ['A', 'B', 'C'],
   })
   if (positional.length === 0) return usage('grep', USAGE)
@@ -66,9 +67,17 @@ function checkConflicts(flags) {
 }
 
 function compilePattern(pattern, flags) {
+  // -F (fixed string): defer to `RegExp.escape` (Node ≥24.14 per
+  // package.json's engines.node — the standardized escape is more
+  // thorough than a hand-rolled metachar list, e.g. it also escapes
+  // letters and spaces to `\xNN` so the result is safe in any regex
+  // context). Composes with -w (word boundaries wrap the escaped
+  // form) and -i (RegExp `i` flag). Same hint suggested by the
+  // ECMAScript-RegExp error from PR #38.
+  let source = flags.has('F') ? RegExp.escape(pattern) : pattern
   // -w wraps in word-boundary anchors. Using a non-capturing group
   // keeps alternation (`foo|bar`) intact.
-  const source = flags.has('w') ? `\\b(?:${pattern})\\b` : pattern
+  if (flags.has('w')) source = `\\b(?:${source})\\b`
   // The pattern syntax is JavaScript's `RegExp` in Unicode mode, NOT
   // POSIX BRE/ERE — call this out in the error so a user expecting
   // grep(1) semantics knows why `Function(` (a literal in POSIX

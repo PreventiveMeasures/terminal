@@ -18,6 +18,7 @@
 // `2>/dev/null`. The final stage's exit code determines whether
 // the next gated step runs.
 
+import { expandBraces } from './braces.js'
 import { createFs, resolve } from './fs.js'
 import { expandGlobs } from './glob.js'
 import { NAV_COMMANDS } from './nav-commands.js'
@@ -114,10 +115,12 @@ function runPipeline(stages, ctx) {
   let stderr = ''
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]
-    // Shell-style glob expansion: unquoted tokens with `*` / `?`
-    // get walked against the FS and replaced with their matches.
-    // argv[0] (the command name) is passed through verbatim.
-    const expanded = expandGlobs(stage.argv, stage.quoted ?? new Set(), ctx)
+    // Brace expansion FIRST (`{foo,bar}*.js` → `foo*.js bar*.js`),
+    // then glob expansion against the FS. Quoted tokens and
+    // argv[0] (the command name) pass through verbatim through
+    // both phases — matching bash.
+    const braced = expandBraces(stage.argv, stage.quoted ?? new Set())
+    const expanded = expandGlobs(braced.argv, braced.quoted, ctx)
     const result = dispatch(expanded[0], expanded.slice(1), stdin, ctx)
     // Apply redirects in a fixed order: fd-to-fd merges first, then
     // null sinks. This is bash's behavior for the common idioms
