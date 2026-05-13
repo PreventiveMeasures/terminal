@@ -84,9 +84,10 @@ function safeRun(line, ctx) {
 
 // Loop the gated steps. The previous step's exit code controls
 // whether the next runs (bash semantics: `&&` runs on 0, `||` runs
-// on non-zero). Stdout/stderr from steps that DO run are
-// concatenated; skipped steps contribute nothing. The overall exit
-// code is from the LAST step that actually ran.
+// on non-zero; `;` always runs, like `first`). Stdout/stderr from
+// steps that DO run are concatenated; skipped steps contribute
+// nothing. The overall exit code is from the LAST step that
+// actually ran.
 function runSteps(steps, ctx) {
   let stdout = ''
   let stderr = ''

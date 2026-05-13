@@ -916,6 +916,105 @@ describe('createTerminal — && / || sequencing', () => {
   })
 })
 
+describe('createTerminal — `;` sequential separator', () => {
+  it('`cmd1 ; cmd2` runs both regardless of cmd1 exit', () => {
+    const t = createTerminal(SOURCES)
+    // First command fails (no /nope); second still runs. Final exit
+    // is the second command's, matching bash's `;` semantics.
+    const r = t.run('cat /nope 2>/dev/null ; echo after')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'after\n')
+  })
+
+  it('trailing `;` is a no-op (`cmd ;` == `cmd`)', () => {
+    // Trailing `;` would otherwise hit the empty-pipeline guard;
+    // tolerated so users typing `cmd ;` out of habit don't error.
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('echo hi ;').stdout, 'hi\n')
+    assert.equal(t.run('echo hi;').stdout, 'hi\n')
+    assert.equal(t.run('echo a ; echo b ;').stdout, 'a\nb\n')
+  })
+
+  it('reported failure: `cmd1 2>&1; cmd2 2>&1` (regression case)', () => {
+    // `;` next to `2>&1` was a layered failure: the fd-to-fd
+    // boundary check rejected the `;` and didn't even reach step
+    // separation. Both layers are now fixed.
+    const t = createTerminal(SOURCES)
+    const r = t.run('cat /nope 2>&1; echo hi 2>&1')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stdout, /no such file/u)
+    assert.match(r.stdout, /^hi$/mu)
+  })
+
+  it('leading `;` errors (empty left-hand step)', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('; echo hi')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /empty pipeline/u)
+  })
+
+  it('consecutive `;;` errors', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('echo a ;; echo b')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /empty pipeline/u)
+  })
+
+  it('a quoted `;` stays a literal argv token', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('echo "a;b"').stdout, 'a;b\n')
+  })
+
+  it('an unquoted mid-token `;` splits into two commands (bash compat)', () => {
+    // `echo a;b` is two commands in bash — `echo a`, then `b`
+    // (command not found). Whitespace is not required around `;`.
+    // Pinned because the PR adding `;` initially described it as
+    // "mid-word stays literal", which would diverge from bash.
+    const t = createTerminal(SOURCES)
+    const r = t.run('echo a;echo b')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'a\nb\n')
+  })
+})
+
+describe('createTerminal — `true` / `false` / `:` builtins', () => {
+  it('`true` exits 0 with no output (args ignored)', () => {
+    const t = createTerminal(SOURCES)
+    for (const cmd of ['true', 'true ignored args']) {
+      const r = t.run(cmd)
+      assert.equal(r.exitCode, 0)
+      assert.equal(r.stdout, '')
+      assert.equal(r.stderr, '')
+    }
+  })
+
+  it('`false` exits 1 with no output (args ignored)', () => {
+    const t = createTerminal(SOURCES)
+    for (const cmd of ['false', 'false ignored args']) {
+      const r = t.run(cmd)
+      assert.equal(r.exitCode, 1)
+      assert.equal(r.stdout, '')
+      assert.equal(r.stderr, '')
+    }
+  })
+
+  it('`:` (POSIX colon) is a no-op alias for `true`', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run(':')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '')
+  })
+
+  it('compose cleanly with `;` / `&&` / `||` gates', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('false && echo skipped').stdout, '')
+    assert.equal(t.run('false || echo recovered').stdout, 'recovered\n')
+    assert.equal(t.run('false; echo after').stdout, 'after\n')
+    assert.equal(t.run('true && echo yes').stdout, 'yes\n')
+    assert.equal(t.run('true || echo no').stdout, '')
+  })
+})
+
 describe('createTerminal — count validation', () => {
   it('empty string (e.g. `head -n "" file`) is rejected, not silently 0', () => {
     const t = createTerminal(SOURCES)

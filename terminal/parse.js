@@ -5,6 +5,9 @@
 //
 // Recognized boundary tokens:
 //   `|`       — pipe to the next stage in the current step
+//   `;`       — sequential run; next step runs regardless of the
+//               previous step's exit code (the unconditional sibling
+//               of `&&` / `||`)
 //   `&&`      — run next step only if current step exited 0
 //   `||`      — run next step only if current step exited non-zero
 //   `>` / `1>` — redirect stdout; only `/dev/null` is allowed as
@@ -24,6 +27,12 @@ export function parseLine(line) {
   for (const t of raw) {
     if (t.kind === 'amp') throw new Error('background processes (`&`) are not supported')
   }
+  // Trailing `;` is a no-op in bash; tolerate it so `cmd1; cmd2;`
+  // doesn't trip the empty-stage check below. We don't extend the
+  // same forgiveness to trailing `&&` / `||` because those would
+  // wait for continuation in bash — without a continuation prompt,
+  // erroring is the better signal.
+  while (raw.length > 0 && raw.at(-1).kind === 'semi') raw.pop()
   const steps = buildSteps(raw)
   for (const step of steps) {
     if (step.stages.length === 0 || step.stages.some((s) => s.argv.length === 0)) {
@@ -38,11 +47,12 @@ function buildSteps(raw) {
   let stage = { argv: [], quoted: new Set() }
   for (let i = 0; i < raw.length; i++) {
     const t = raw[i]
-    if (t.kind === 'pipe' || t.kind === 'and' || t.kind === 'or') {
+    if (t.kind === 'pipe' || t.kind === 'and' || t.kind === 'or' || t.kind === 'semi') {
       steps.at(-1).stages.push(stage)
       stage = { argv: [], quoted: new Set() }
       if (t.kind === 'and') steps.push({ gate: 'and', stages: [] })
       else if (t.kind === 'or') steps.push({ gate: 'or', stages: [] })
+      else if (t.kind === 'semi') steps.push({ gate: 'seq', stages: [] })
       continue
     }
     if (t.kind === 'redir') { i = applyRedir(stage, raw, i); continue }
@@ -120,7 +130,7 @@ function tokenize(line) {
       if (line[i + 2] === '&') {
         const m = line[i + 3]
         const after = line[i + 4]
-        if ((m === '1' || m === '2') && (after === undefined || /[\s|&>]/u.test(after))) {
+        if ((m === '1' || m === '2') && (after === undefined || /[\s|&>;]/u.test(after))) {
           tokens.push({ kind: 'redir', fd: c, toFd: m })
           i += 3
           continue
@@ -155,6 +165,7 @@ function tokenize(line) {
       else tokens.push({ kind: 'redir', fd: '1', append: false })
       continue
     }
+    if (c === ';') { flush(); tokens.push({ kind: 'semi' }); continue }
     if (/\s/u.test(c)) { flush(); continue }
     cur += c; inToken = true
   }

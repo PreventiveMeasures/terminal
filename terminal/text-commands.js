@@ -191,4 +191,13 @@ function xargsRun(ctx, cmd, baseArgs, items, chunkSize) {
   return { stdout, stderr, exitCode }
 }
 
-export const TEXT_COMMANDS = { cat, grep, head, tail, wc, sort, uniq, echo, xargs }
+// POSIX shell builtins: zero-arg, deterministic, useful for testing
+// `;` / `&&` / `||` chains and as stand-ins in pipelines. Args are
+// accepted and ignored, matching the spec.
+function cmdTrue() { return ok() }
+function cmdFalse() { return { stdout: '', stderr: '', exitCode: 1 } }
+
+export const TEXT_COMMANDS = {
+  cat, grep, head, tail, wc, sort, uniq, echo, xargs,
+  true: cmdTrue, false: cmdFalse, ':': cmdTrue,
+}
