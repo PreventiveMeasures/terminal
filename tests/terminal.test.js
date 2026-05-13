@@ -146,13 +146,16 @@ describe('createTerminal — text commands', () => {
     assert.match(r.stdout, /^src\/bar\.js:2:\/\/ TODO: doc this$/mu)
   })
 
-  it('grep usage line uses [PATH...] (covers directories under -r)', () => {
+  it('grep usage line documents PATTERN and [PATH...] (covers -r dirs and -e form)', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('grep')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /PATTERN \[PATH\.\.\.\]/u)
-    // Hard-rejects the old `[FILE...]` wording so a regression
-    // (re-narrowing the docs) shows up here.
+    // PATTERN is required (or supplied via -e); both forms must be
+    // mentioned. `[PATH...]` (not `[FILE...]`) so the docs cover
+    // recursive directory traversal under -r.
+    assert.match(r.stderr, /PATTERN/u)
+    assert.match(r.stderr, /-e PATTERN/u)
+    assert.match(r.stderr, /\[PATH\.\.\.\]/u)
     assert.doesNotMatch(r.stderr, /\[FILE\.\.\.\]/u)
   })
 
@@ -182,6 +185,479 @@ describe('createTerminal — text commands', () => {
     const w = t.run('grep -Fw "Function(" src/x.js')
     assert.match(w.stdout, /^Function\(x\)$/mu)
     assert.doesNotMatch(w.stdout, /myFunction/u)
+  })
+
+  it('grep default = BRE: regex metacharacters are literal', () => {
+    // The reason BRE is the default: auditors typing `function(arg)`
+    // expect a literal match, not a regex syntax error. Same for
+    // `+`, `?`, `|`, `{`, `}` — all literal in BRE.
+    const t = createTerminal({ 'src/x.js': 'Function(arg)\na+b\nfoo|bar\nx?y\n' })
+    assert.equal(t.run('grep "Function(arg)" src/x.js').stdout, 'Function(arg)\n')
+    assert.equal(t.run('grep "a+b" src/x.js').stdout, 'a+b\n')
+    assert.equal(t.run('grep "foo|bar" src/x.js').stdout, 'foo|bar\n')
+    assert.equal(t.run('grep "x?y" src/x.js').stdout, 'x?y\n')
+  })
+
+  it('grep default = BRE: backslashed `\\(` `\\|` `\\+` `\\?` are the metachar forms', () => {
+    // The escaping is INVERTED from ES: in BRE the backslash turns
+    // a literal into a metachar (group, alternation, repetition).
+    const t = createTerminal({ 'src/x.js': 'apple\nbanana\nab\naab\nax\n' })
+    // \(apple\|banana\) — alternation inside a group.
+    assert.match(t.run('grep "\\(apple\\|banana\\)" src/x.js').stdout, /apple\nbanana/u)
+    // a\+b — one-or-more `a` then `b`.
+    const plus = t.run('grep "a\\+b" src/x.js').stdout.split('\n').filter(Boolean)
+    assert.deepEqual(plus.sort(), ['aab', 'ab'])
+    // a\?x — optional `a` then `x`.
+    assert.match(t.run('grep "a\\?x" src/x.js').stdout, /ax/u)
+  })
+
+  it('grep -E (ERE) restores ECMAScript metachar semantics', () => {
+    const t = createTerminal({ 'src/x.js': 'apple\nbanana\ncherry\n' })
+    assert.match(t.run('grep -E "apple|banana" src/x.js').stdout, /apple\nbanana/u)
+    // The same pattern in BRE would search for the literal string
+    // `apple|banana`, which doesn't appear in the file → exit 1.
+    assert.equal(t.run('grep "apple|banana" src/x.js').exitCode, 1)
+  })
+
+  it('grep -G is the explicit form of the BRE default', () => {
+    const t = createTerminal({ 'src/x.js': 'Function(arg)\n' })
+    assert.equal(t.run('grep -G "Function(arg)" src/x.js').stdout, 'Function(arg)\n')
+  })
+
+  it('grep -E / -F / -G are mutually exclusive', () => {
+    const t = createTerminal({ 'src/x.js': 'hi\n' })
+    for (const cmd of ['grep -EF foo src/x.js', 'grep -EG foo src/x.js', 'grep -FG foo src/x.js']) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
+      assert.match(r.stderr, /mutually exclusive/u)
+    }
+  })
+
+  it('grep character class contents pass through under BRE', () => {
+    // `[(){}+?|]` inside `[...]` is just a literal char set in both
+    // BRE and ES — the translator must not "swap escaping" inside
+    // the class. Pinning the full set so a future regression on
+    // any one of them shows up here.
+    const t = createTerminal({ 'src/x.js': 'a(b\na)b\na{b\na}b\na+b\na?b\na|b\nxyz\n' })
+    for (const ch of ['(', ')', '{', '}', '+', '?', '|']) {
+      assert.equal(t.run(`grep "[${ch}]" src/x.js`).stdout, `a${ch}b\n`, `[${ch}] should match a${ch}b`)
+    }
+  })
+
+  it('grep BRE: bare trailing `\\` errors cleanly (matches GNU)', () => {
+    // Real GNU grep also rejects this — but with a clean "Trailing
+    // backslash" message rather than echoing the post-translation
+    // ES regex. Pin both: non-zero exit AND a short message that
+    // doesn't leak `/u:` or `Invalid regular expression`.
+    const t = createTerminal({ 'server/foo.ts': 'x\n' })
+    const r = t.run("grep -r '\\' server/")
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /trailing backslash/iu)
+    assert.doesNotMatch(r.stderr, /Invalid regular expression/u)
+  })
+
+  it('grep BRE: `\\<` and `\\>` translate to word boundaries (GNU extension)', () => {
+    // `\<word\>` is the GNU BRE muscle-memory form for matching a
+    // whole word. Mapped to ES `\b` so the common pattern works.
+    const t = createTerminal({
+      'src/x.js': 'session\nsession_id\nmy_session\nsession.start\n',
+    })
+    const r = t.run("grep '\\<session\\>' src/x.js")
+    const lines = r.stdout.split('\n').filter(Boolean).sort()
+    // `\b` is symmetric so `session_id` and `my_session` are excluded
+    // (the underscore is a word char on both sides). `session.start`
+    // matches because `.` is non-word.
+    assert.deepEqual(lines, ['session', 'session.start'])
+  })
+
+  it('grep BRE: -w composes with alternation', () => {
+    const t = createTerminal({ 'src/x.js': 'apple pie\nbanana bread\napplesauce\n' })
+    // -w wraps the translated source in `\b(?:...)\b` — confirm
+    // that the BRE-style alternation `\(apple\|banana\)` still
+    // gets the word-boundary wrap correctly.
+    const r = t.run("grep -w '\\(apple\\|banana\\)' src/x.js")
+    const lines = r.stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(lines, ['apple pie', 'banana bread'])
+    // `applesauce` excluded by -w (no word boundary between e and s).
+  })
+
+  it('grep BRE: escaped backslash `\\\\` matches a literal backslash', () => {
+    // The standard way to grep for a backslash in GNU BRE: `\\` in
+    // the pattern. Verifies that our translator doesn't accidentally
+    // consume the trailing `\` of `\\` as the start of an escape.
+    const t = createTerminal({ 'src/x.js': 'a\\b\nxyz\n' })
+    assert.equal(t.run("grep '\\\\' src/x.js").stdout, 'a\\b\n')
+  })
+
+  it('grep BRE: backslash sequences inside character classes pass through', () => {
+    // The class-passthrough rule covers escape sequences too:
+    // `[\\d]` is a digit class, `[\\\\]` is a class containing
+    // a literal backslash, `[\\]]` is a class containing a literal
+    // `]`. Pinning all three so a future "fix" to the class tracker
+    // doesn't quietly break them.
+    const t = createTerminal({ 'src/x.js': 'abc123\na\\b\na]b\nxyz\n' })
+    assert.match(t.run("grep '[\\d]' src/x.js").stdout, /abc123/u)
+    assert.equal(t.run("grep '[\\\\]' src/x.js").stdout, 'a\\b\n')
+    assert.equal(t.run("grep '[\\]]' src/x.js").stdout, 'a]b\n')
+  })
+
+  it('grep BRE: degenerate `\\(\\)` empty group and `\\|` empty alternation compile', () => {
+    // Both are odd but legal in BRE and translate to legal ES.
+    // Test that they don't crash the translator — the regexes just
+    // happen to match the empty string between every char, so any
+    // non-empty line "matches".
+    const t = createTerminal({ 'src/x.js': 'hello\n' })
+    assert.equal(t.run("grep '\\(\\)' src/x.js").exitCode, 0)
+    assert.equal(t.run("grep '\\|' src/x.js").exitCode, 0)
+  })
+
+  it('grep BRE: leading `*` is literal (matches ugrep / GNU)', () => {
+    // POSIX BRE: `*` with no preceding atom is literal `*`. ES
+    // rejects this as "Nothing to repeat", so unfixed our grep
+    // would silently fail to find `*foo` in C source (pointer
+    // notation, markdown bullets). Verified against `/usr/bin/grep
+    // '*foo' file` which matches `*foo` and exits 0.
+    const t = createTerminal({ 'src/x.js': 'foo\n*foo\n*bar\n' })
+    assert.equal(t.run("grep '*foo' src/x.js").stdout, '*foo\n')
+    // Same rule after `^` when `^` is an anchor at position 0.
+    const r = t.run("grep '^*' src/x.js")
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '*foo\n*bar\n')
+  })
+
+  it('grep BRE: `*` after a LITERAL `^` still quantifies it (Copilot #40)', () => {
+    // `a^*b` — the `^` is mid-pattern (literal in BRE), so `*`
+    // quantifies it: matches a + zero-or-more literal `^` + b.
+    // Previously we treated any `^*` sequence as "anchor + literal
+    // `*`" regardless of position, breaking this case. Verified
+    // vs `/usr/bin/grep 'a^*b'` returning a^^b / a^b / ab.
+    const t = createTerminal({ 'src/x.js': 'a^^b\na^b\nab\nax\n' })
+    const lines = t.run("grep 'a^*b' src/x.js").stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(lines, ['a^^b', 'a^b', 'ab'])
+  })
+
+  it('grep BRE: backslash inside `[...]` consumes the next char', () => {
+    // Copilot review #40: an escaped `]` inside a class shouldn't
+    // prematurely end class tracking, otherwise subsequent metachars
+    // (like the `{}` in `\p{L}`) would get BRE-swap-translated and
+    // the pattern would fail to compile. Confirms the class tracker
+    // tracks escapes properly. Real `\p{L}` Unicode-property class
+    // matches Greek letters; ugrep doesn't recognize `\p{L}` in BRE
+    // (we extend, GNU-style).
+    const t = createTerminal({ 'uni.txt': 'abc\n123\nαβγ\n' })
+    const r = t.run("grep '[a\\]b\\p{L}]' uni.txt")
+    assert.equal(r.exitCode, 0)
+    const lines = r.stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(lines, ['abc', 'αβγ'])
+  })
+
+  it('grep: invalid pattern exits 2 (POSIX), not 1', () => {
+    // POSIX (and GNU / ugrep): exit 2 for "syntax error in pattern",
+    // exit 1 for "no match", exit 0 for "match". Our trailing-`\`
+    // and -E "(" cases both surface as syntax errors.
+    const t = createTerminal({ 'src/x.js': 'hello\n' })
+    assert.equal(t.run("grep '\\' src/x.js").exitCode, 2)
+    assert.equal(t.run("grep -E '(' src/x.js").exitCode, 2)
+  })
+
+  it('grep: error label reflects -i flag (`/iu` not `/u`)', () => {
+    // Minor accuracy: the label tells users which RegExp flags were
+    // actually in effect when the compile failed. Hard-coding `/u`
+    // hid the fact that `-i` was set.
+    const t = createTerminal({ 'src/x.js': 'hi\n' })
+    const r = t.run("grep -iE '(' src/x.js")
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /\/iu/u)
+  })
+
+  it('grep BRE: `^` is literal mid-pattern, anchor at start (matches ugrep)', () => {
+    // POSIX BRE: `^` is an anchor only at position 0. Elsewhere
+    // literal. ES treats `^` as anchor everywhere — would silently
+    // break grepping for `foo^bar` or `a^b`.
+    const t = createTerminal({ 'src/x.js': 'foo\n*foo\nfoo^bar\nfoo$bar\n' })
+    // `^foo` at start: anchor — matches lines beginning with `foo`.
+    const start = t.run("grep '^foo' src/x.js").stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(start, ['foo', 'foo$bar', 'foo^bar'])
+    // `foo^bar` mid-pattern: literal — matches the line `foo^bar`.
+    assert.equal(t.run("grep 'foo^bar' src/x.js").stdout, 'foo^bar\n')
+    // `^^foo`: first `^` anchor, second literal. No line starts
+    // with literal `^foo` → no match.
+    assert.equal(t.run("grep '^^foo' src/x.js").exitCode, 1)
+  })
+
+  it('grep BRE: `$` is literal mid-pattern, anchor at end (matches ugrep)', () => {
+    // Mirrors the `^` rule.
+    const t = createTerminal({ 'src/x.js': 'foo\n*foo\nfoo^bar\nfoo$bar\n' })
+    // `foo$` at end: anchor — matches lines ending in `foo`.
+    const end = t.run("grep 'foo$' src/x.js").stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(end, ['*foo', 'foo'])
+    // `foo$bar` mid-pattern: UNESCAPED `$` is literal — this is the
+    // post-fix behaviour, and would have returned exit 1 under the
+    // old ES-everywhere-anchor default (foo can't both end the line
+    // and be followed by `bar`).
+    assert.equal(t.run("grep 'foo$bar' src/x.js").stdout, 'foo$bar\n')
+  })
+
+  it('grep BRE: `^` / `$` keep anchor semantics adjacent to `\\(` / `\\)`', () => {
+    // GNU extension: `^` right after `\(` is still an anchor;
+    // `$` right before `\)` likewise. Verified against ugrep.
+    const t = createTerminal({ 'src/x.js': 'foo\n*foo\nfoo^bar\nfoo$bar\n' })
+    const group = t.run("grep '\\(^foo\\)' src/x.js").stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(group, ['foo', 'foo$bar', 'foo^bar'])
+    const endGroup = t.run("grep '\\(foo$\\)' src/x.js").stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(endGroup, ['*foo', 'foo'])
+  })
+
+  it('grep BRE: `\\{n,m\\}` and `\\{n\\}` bounded quantifiers', () => {
+    // BRE: `\{n,m\}` is the bounded quantifier; the bare `{n,m}`
+    // form is literal. Verified output matches ugrep.
+    const t = createTerminal({ 'src/x.js': 'a\nab\naab\naaab\nbb\n' })
+    // `a\{2,3\}` → 2 or 3 consecutive `a`s.
+    const two = t.run("grep 'a\\{2,3\\}' src/x.js").stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(two, ['aaab', 'aab'])
+    // `a\{2\}` → exactly 2 consecutive `a`s.
+    const exact = t.run("grep 'a\\{2\\}' src/x.js").stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(exact, ['aaab', 'aab'])
+    // (Pattern matches anywhere on the line — `aaab` has `aa` substring.)
+  })
+
+  it('grep: empty pattern matches every line (POSIX)', () => {
+    // `grep '' file` is "match the empty string against every
+    // line" — succeeds on every non-empty line. Verified vs ugrep.
+    const t = createTerminal({ 'src/x.js': 'a\nb\nc\n' })
+    const r = t.run("grep '' src/x.js")
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'a\nb\nc\n')
+  })
+
+  it('grep BRE: `\\(group\\)\\N` backreference', () => {
+    // BRE supports back-references via `\1`..`\9` referring to
+    // earlier `\(...\)` groups. Both ugrep and our ES translation
+    // accept them; we matched ugrep's exit-1 / no-match behaviour
+    // on the data set, but the pattern compiles cleanly.
+    const t = createTerminal({ 'src/x.js': 'foofoo\nfoo\nbar\n' })
+    const r = t.run("grep '\\(foo\\)\\1' src/x.js")
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'foofoo\n')
+  })
+
+  it('grep BRE: backslash before non-special char is literal (`\\a` → `a`)', () => {
+    // Copilot review #40: ES /u rejects identity escapes for
+    // non-syntactic chars (`\a`, `\_`, `\@`) as SyntaxError, but
+    // POSIX BRE treats them as literal `a` / `_` / `@`. Without
+    // this, valid BRE patterns silently fail to compile.
+    // Verified against `/usr/bin/grep '\a' file` matching every
+    // line containing `a` and exiting 0.
+    const t = createTerminal({ 'f.txt': 'apple\nbanana\ncar\n_under\nxyz\n' })
+    // `\a` → literal `a`
+    const a = t.run("grep '\\a' f.txt").stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(a, ['apple', 'banana', 'car'])
+    // `\_` → literal `_`
+    assert.equal(t.run("grep '\\_' f.txt").stdout, '_under\n')
+    // `\@` → literal `@`, no matches
+    assert.equal(t.run("grep '\\@' f.txt").exitCode, 1)
+    // `\b` (GNU extension): word boundary, every non-empty line has one
+    assert.equal(t.run("grep '\\b' f.txt").exitCode, 0)
+  })
+
+  it('grep `-e PATTERN`: single pattern', () => {
+    // -e exists primarily so a pattern can start with `-` without
+    // being mistaken for a flag.
+    const t = createTerminal({ 'f.txt': 'apple\n-dash\nbanana\n' })
+    assert.equal(t.run("grep -e -dash f.txt").stdout, '-dash\n')
+    // Inline form too.
+    assert.equal(t.run("grep -e-dash f.txt").stdout, '-dash\n')
+  })
+
+  it('grep `-e PATTERN -e PATTERN`: a line matches if ANY pattern matches', () => {
+    // Each `-e` pattern is compiled into its own RegExp; a line
+    // matches when any of them does. (Previously combined as
+    // `(?:p1)|(?:p2)` — changed because alternation shifts
+    // backreference group numbers across patterns.) Verified vs
+    // `/usr/bin/grep -e apple -e car` which prints both.
+    const t = createTerminal({ 'f.txt': 'apple\nbanana\ncar\ndog\n' })
+    const r = t.run("grep -e apple -e car f.txt")
+    assert.equal(r.exitCode, 0)
+    const lines = r.stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(lines, ['apple', 'car'])
+  })
+
+  it('grep `-e` stranded errors with exit 2', () => {
+    const t = createTerminal({ 'f.txt': 'foo\n' })
+    const r = t.run("grep f.txt -e")
+    assert.equal(r.exitCode, 2)
+    assert.match(r.stderr, /-e requires an argument/u)
+  })
+
+  it('grep `-e` composes with -i / -E / -F', () => {
+    const t = createTerminal({ 'f.txt': 'Foo\nbar(\nbaz\n' })
+    // -e + -i: case-insensitive
+    assert.match(t.run("grep -ie foo f.txt").stdout, /^Foo$/mu)
+    // -e + -F: literal -e value
+    assert.equal(t.run("grep -Fe 'bar('  f.txt").stdout, 'bar(\n')
+    // Two patterns with -E semantics
+    const r = t.run("grep -E -e 'foo|bar' -e 'baz' f.txt")
+    const lines = r.stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(lines, ['bar(', 'baz'])
+  })
+
+  it('grep `-ie PATTERN` bundled, repeated: all patterns kept (Copilot #40)', () => {
+    // Before the bundled-aware pre-pass, the second `-ie` would
+    // overwrite the first in parseArgs's single-value-per-key Map
+    // and one of the patterns silently disappeared. Verified vs
+    // `/usr/bin/grep -ie foo -ie bar` returning both matches.
+    const t = createTerminal({ 'f.txt': 'FOO\nbar\nhi\n' })
+    const lines = t.run('grep -ie foo -ie bar f.txt').stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(lines, ['FOO', 'bar'])
+    // Bundled inline form too.
+    const lines2 = t.run('grep -iefoo -iebar f.txt').stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(lines2, ['FOO', 'bar'])
+  })
+
+  it('grep BRE: negated class `[^a]` excludes only `a`, NOT also `^` (Copilot #40)', () => {
+    // The `[` branch was emitting the leading `^` and then NOT
+    // advancing past it, so the next iteration reprocessed it
+    // inside the class — `[^a]` became `[^^a]` which excluded
+    // `^` from the negated set. Verified vs ugrep matching both
+    // `b` and `^` (i.e. everything that isn't `a`).
+    const t = createTerminal({ 'f.txt': 'a\nb\n^\n' })
+    const lines = t.run("grep '[^a]' f.txt").stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(lines, ['^', 'b'])
+  })
+
+  it('grep `-A -- -e foo file` keeps -e reachable through value consumption (Copilot #40)', () => {
+    // `-A` is a value-taking short, so `--` is its value (and
+    // parseNonNegativeInt rejects it). Pre-pass must NOT treat `--`
+    // as a terminator that skips over `-e foo` — that would have
+    // surfaced as "unknown option: -e" from parseArgs.
+    const t = createTerminal({ 'file': 'foo\nbar\n' })
+    const r = t.run('grep -A -- -e foo file')
+    assert.notEqual(r.exitCode, 0)
+    // Error should name -A (the bad value), NOT complain about -e.
+    assert.match(r.stderr, /-A/u)
+    assert.doesNotMatch(r.stderr, /unknown option: -e/u)
+  })
+
+  it('grep BRE: leading `]` inside class is literal (Copilot #40 / POSIX)', () => {
+    // POSIX: `[]a]` is a class containing `]` and `a`; `[^]a]` is
+    // its negation. ES /u rejects `[]` as empty-class. Translator
+    // now escapes the leading `]` to `\]` so the same characters
+    // land in the class. Verified vs `/usr/bin/grep '[]a]'` /
+    // `'[^]a]'` returning every line.
+    const t = createTerminal({ 'f.txt': 'apple\nx]y\nz[a]b\n' })
+    const including = t.run("grep '[]a]' f.txt").stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(including, ['apple', 'x]y', 'z[a]b'])
+    const negated = t.run("grep '[^]a]' f.txt").stdout.split('\n').filter(Boolean).sort()
+    // Every line has at least one char that isn't `]` or `a`.
+    assert.deepEqual(negated, ['apple', 'x]y', 'z[a]b'])
+  })
+
+  it('grep BRE: trailing `\\` inside class errors cleanly (Copilot #40)', () => {
+    // `grep '[\' file` is unterminated; previously surfaced as
+    // V8's noisy "Invalid regular expression: /[\/u: \ at end".
+    // Now reports the same clean "trailing backslash" message used
+    // for the outside-class case. Both ugrep and GNU treat the
+    // unterminated class as a syntax error (exit 2).
+    const t = createTerminal({ 'f.txt': 'hi\n' })
+    const r = t.run("grep '[\\' f.txt")
+    assert.equal(r.exitCode, 2)
+    assert.match(r.stderr, /trailing backslash/u)
+    assert.doesNotMatch(r.stderr, /Invalid regular expression/u)
+  })
+
+  it('grep -o with multiple -e: dedupe overlapping matches (Copilot #40)', () => {
+    // Previous implementation emitted every regex's match independently,
+    // so `-e foo -e fo` on `foofoo` produced six lines (foo+fo per
+    // occurrence). ugrep / GNU grep emit one per non-overlapping
+    // leftmost-longest position. Verified vs `/usr/bin/grep -oe foo
+    // -e fo` returning three lines (foofoo has 2 + foo bar has 1).
+    const t = createTerminal({ 'f.txt': 'foofoo\nfoo bar\n' })
+    const r = t.run('grep -oe foo -e fo f.txt')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'foo\nfoo\nfoo\n')
+  })
+
+  it('grep -o drops zero-length matches (Copilot #40)', () => {
+    // `\b` and `\(\)` match at zero width. Emitting them under -o
+    // produces a wall of blank lines (worse: multi-`-e` repeats per
+    // pattern at the same index because the cursor doesn't advance
+    // past an empty match). ugrep / GNU grep drop zero-length
+    // matches in -o mode; we do the same.
+    const t = createTerminal({ 'f.txt': 'abc def\n' })
+    assert.equal(t.run("grep -o '\\b' f.txt").stdout, '')
+    assert.equal(t.run("grep -oe '\\b' -e '\\(\\)' f.txt").stdout, '')
+    // Non-empty matches still emit normally.
+    assert.equal(t.run('grep -o def f.txt').stdout, 'def\n')
+  })
+
+  it('grep BRE: `\\u{...}` validates hex body and code-point range (Copilot #40)', () => {
+    // Without validation, `\u{zz}` or `\u{110000}` passed through
+    // to ES which errored. With validation, the body must be 1-6
+    // hex digits AND ≤ 0x10FFFF (ES /u code-point cap); else drop
+    // the backslash and treat `u{...}` as literal.
+    const t = createTerminal({ 'f.txt': 'apple\nu{zz}line\nu{110000}data\n' })
+    // Invalid hex: drop backslash, match literal `u{zz}` substring.
+    assert.equal(t.run("grep '\\u{zz}' f.txt").stdout, 'u{zz}line\n')
+    // Out-of-range code point: same drop-backslash fallback.
+    assert.equal(t.run("grep '\\u{110000}' f.txt").stdout, 'u{110000}data\n')
+    // Valid hex stays as the ES Unicode escape (0x41 = 'A'; data has none).
+    assert.equal(t.run("grep '\\u{41}' f.txt").exitCode, 1)
+  })
+
+  it('grep BRE: control-letter escapes are literal letters (`\\t` → `t`, `\\0` → `0`)', () => {
+    // Strict POSIX BRE (and ugrep / GNU grep) treats `\t`, `\n`,
+    // `\r`, `\f`, `\v`, `\0` as literal letters, NOT as ES control
+    // escapes. Copilot #40 caught `\0` specifically: `\01` would
+    // hit V8's legacy-octal "Invalid decimal escape" error.
+    const t = createTerminal({ 'f.txt': 'no tab\nwith\ttab\nplain\n01abc\nzero\n' })
+    // `\t` → literal `t` (matches lines with letter `t`)
+    const tt = t.run("grep '\\t' f.txt").stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(tt, ['no tab', 'with\ttab'])
+    // `\0` → literal `0`
+    assert.equal(t.run("grep '\\0' f.txt").stdout, '01abc\n')
+    // `\01` → literal `01` (would previously throw "Invalid decimal escape")
+    assert.equal(t.run("grep '\\01' f.txt").stdout, '01abc\n')
+    // `\v` → literal `v`, no `v` in data
+    assert.equal(t.run("grep '\\v' f.txt").exitCode, 1)
+  })
+
+  it('grep multi `-e`: backreferences stay local to each pattern (Copilot #40)', () => {
+    // The earlier `(?:p1)|(?:p2)` combining shifted group numbers
+    // across patterns, so pattern2's `\1` could accidentally refer
+    // to pattern1's first group. Compiling regexes separately fixes
+    // it. Verified vs ugrep matching only `bazbaz`.
+    const t = createTerminal({ 'f.txt': 'bazfoo\nbazbaz\nbar\n' })
+    const r = t.run("grep -e '\\(foo\\)\\(bar\\)' -e '\\(baz\\)\\1' f.txt")
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'bazbaz\n')
+  })
+
+  it('grep BRE: multi-char escape starters validate their suffix (Copilot #40)', () => {
+    // `\x`, `\u`, `\p`, `\k`, `\c` require specific suffixes in ES /u
+    // (`\xHH`, `\u{...}` / `\uHHHH`, `\p{...}`, `\k<...>`, `\cX`).
+    // Without the suffix, POSIX BRE / ugrep treat them as literal.
+    // Previously we kept the backslash and tripped ES syntax errors.
+    const t = createTerminal({ 'f.txt': 'apple\nx-ray\n_under\n[bracket]\nαβγ\n' })
+    assert.equal(t.run("grep '\\x' f.txt").stdout, 'x-ray\n')      // literal x
+    assert.equal(t.run("grep '\\u' f.txt").stdout, '_under\n')     // literal u
+    assert.equal(t.run("grep '\\p' f.txt").stdout, 'apple\n')      // literal p
+    assert.equal(t.run("grep '\\k' f.txt").stdout, '[bracket]\n')  // literal k
+    assert.equal(t.run("grep '\\c' f.txt").stdout, '[bracket]\n')  // literal c
+    // But the VALID forms still work as ES escapes.
+    const greek = t.run("grep '\\p{L}' f.txt").stdout.split('\n').filter(Boolean).sort()
+    assert.ok(greek.includes('αβγ'))  // Unicode letter property class
+  })
+
+  it('grep BRE: identity escapes inside `[...]` are literal (Copilot #40)', () => {
+    // `[\_]` should be a class containing `_` (ES /u rejects `\_`
+    // as an Invalid escape, but POSIX BRE treats it as literal `_`).
+    // Verified vs ugrep matching the `_under` line.
+    const t = createTerminal({ 'f.txt': 'apple\n_under\nxyz\n' })
+    assert.equal(t.run("grep '[\\_]' f.txt").stdout, '_under\n')
+    // `[\a]`: with backslash dropped, class is `[a]` — matches `apple`.
+    // (POSIX would also include the literal `\` in the class, but
+    // none of our data has a backslash, so the result is the same.)
+    assert.equal(t.run("grep '[\\a]' f.txt").stdout, 'apple\n')
   })
 
   it('grep -r preserves an absolute starting path in the displayed name', () => {
@@ -218,6 +694,16 @@ describe('createTerminal — text commands', () => {
     const r = t.run('grep -C 1 TODO src/foo.js')
     assert.equal(r.exitCode, 0)
     assert.equal(r.stdout, 'const x = 1\n// TODO: fix\nconst y = 2\n')
+  })
+
+  it('grep -C validates its value even when -A and -B are also explicit', () => {
+    // Without the dedicated check, `-C` would fall through `??`
+    // because both -A and -B took precedence — a typo in -C would
+    // be silently dropped. The error message should name -C.
+    const t = createTerminal(SOURCES)
+    const r = t.run('grep -C garbage -A 1 -B 1 TODO src/foo.js')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /-C/u)
   })
 
   it('grep -A/-B inserts `--` between non-adjacent context groups in one file', () => {
@@ -264,7 +750,8 @@ describe('createTerminal — text commands', () => {
     const t = createTerminal({
       'urls.txt': 'see http://a.example/x and http://b.example/y for more\nand http://c.example/z\n',
     })
-    const r = t.run('grep -o "http://[^ ]+" urls.txt')
+    // `+` is ERE / ECMAScript; default is BRE where `+` is literal.
+    const r = t.run('grep -oE "http://[^ ]+" urls.txt')
     const matches = r.stdout.split('\n').filter(Boolean)
     assert.deepEqual(matches, ['http://a.example/x', 'http://b.example/y', 'http://c.example/z'])
   })
@@ -340,6 +827,36 @@ describe('createTerminal — text commands', () => {
     const t = createTerminal(SOURCES)
     assert.equal(t.run('head -n 1 src/foo.js').stdout, 'const x = 1\n')
     assert.equal(t.run('tail -n 1 src/foo.js').stdout, 'const y = 2\n')
+  })
+
+  it('sort orders ascending by default; -r reverses; -u dedupes', () => {
+    // Verified against `/usr/bin/sort` and `/usr/bin/sort -r`/`-u`.
+    const t = createTerminal({
+      'words.txt': 'banana\ncherry\napple\n',
+      'dups.txt': 'b\na\nb\nc\na\nc\n',
+    })
+    assert.equal(t.run('cat words.txt | sort').stdout, 'apple\nbanana\ncherry\n')
+    assert.equal(t.run('cat words.txt | sort -r').stdout, 'cherry\nbanana\napple\n')
+    assert.equal(t.run('cat dups.txt | sort -u').stdout, 'a\nb\nc\n')
+  })
+
+  it('uniq -c counts CONSECUTIVE runs (not totals — matches coreutils)', () => {
+    // GNU `uniq` only collapses adjacent duplicates; non-adjacent
+    // dupes keep separate count rows. Width 7 + space + value.
+    const t = createTerminal({ 'f.txt': 'a\na\nb\na\n' })
+    assert.equal(t.run('cat f.txt | uniq -c').stdout, '      2 a\n      1 b\n      1 a\n')
+  })
+
+  it('ls multi-target partial failure: matches succeed on stdout, misses on stderr', () => {
+    // Already pinned in the basics block (line 54) but not against
+    // an actual data file — confirm here that stdout still carries
+    // the successful target's listing alongside stderr for the miss.
+    const t = createTerminal(SOURCES)
+    const r = t.run('ls src nope')
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stderr, /nope:.*no such file/u)
+    assert.match(r.stdout, /foo\.js/u)
+    assert.doesNotMatch(r.stdout, /nope/u)
   })
 })
 
@@ -542,6 +1059,30 @@ describe('createTerminal — find / tree / path', () => {
     assert.match(r.stdout, /util\//u)
     assert.match(r.stdout, /log\.js/u)
   })
+
+  it('tree errors when the target is not a directory or is missing', () => {
+    const t = createTerminal(SOURCES)
+    const missing = t.run('tree /nope')
+    assert.notEqual(missing.exitCode, 0)
+    assert.match(missing.stderr, /not a directory/u)
+    const onFile = t.run('tree src/foo.js')
+    assert.notEqual(onFile.exitCode, 0)
+    assert.match(onFile.stderr, /not a directory/u)
+  })
+
+  it('basename and dirname handle root, trailing slash, and unrooted names (matches coreutils)', () => {
+    const t = createTerminal(SOURCES)
+    // Pinning behaviour verified against `/usr/bin/basename` and
+    // `/usr/bin/dirname` on each case.
+    assert.equal(t.run('basename /foo/bar').stdout, 'bar\n')
+    assert.equal(t.run('basename /foo/').stdout, 'foo\n')   // trailing slash stripped
+    assert.equal(t.run('basename /').stdout, '/\n')         // root returns root
+    assert.equal(t.run('basename foo').stdout, 'foo\n')     // unrooted
+    assert.equal(t.run('dirname /foo/bar').stdout, '/foo\n')
+    assert.equal(t.run('dirname /foo').stdout, '/\n')       // root parent
+    assert.equal(t.run('dirname /').stdout, '/\n')          // root → root
+    assert.equal(t.run('dirname foo').stdout, '.\n')        // unrooted → .
+  })
 })
 
 describe('createTerminal — errors', () => {
@@ -581,16 +1122,15 @@ describe('createTerminal — errors', () => {
     assert.match(r.stderr, /empty pipeline/u)
   })
 
-  it('grep invalid pattern names the syntax (ECMAScript /u)', () => {
-    // POSIX-grep users hit this when they type a bare `(` expecting
-    // it to match a literal — JS RegExp rejects it as an unterminated
-    // group. The error message has to surface the syntax up front so
-    // the underlying V8 message ("Unterminated group") makes sense.
+  it('grep invalid pattern names the dialect in the error', () => {
+    // With the default BRE dialect, a bare `(` is literal, so the
+    // user's original "Function(" case no longer errors — covered
+    // in the BRE-default describe block below. But asking for ERE
+    // explicitly preserves the ECMAScript-style error path.
     const t = createTerminal(SOURCES)
-    const r = t.run('grep "Function(" src/foo.js')
+    const r = t.run('grep -E "Function(" src/foo.js')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /ECMAScript RegExp/u)
-    assert.match(r.stderr, /\/u/u)
+    assert.match(r.stderr, /ERE|ECMAScript/u)
   })
 })
 

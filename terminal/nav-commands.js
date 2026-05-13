@@ -117,13 +117,13 @@ function dirItemsFor(fs, dir) {
 
 function basenameCmd(_stdin, tokens) {
   const { positional } = parseArgs(tokens)
-  if (positional.length === 0) return usage('basename', 'basename PATH')
+  if (positional.length === 0) return usage('basename PATH')
   return ok(baseName(positional[0]) + '\n')
 }
 
 function dirnameCmd(_stdin, tokens) {
   const { positional } = parseArgs(tokens)
-  if (positional.length === 0) return usage('dirname', 'dirname PATH')
+  if (positional.length === 0) return usage('dirname PATH')
   return ok(dirName(positional[0]) + '\n')
 }
 

@@ -16,7 +16,7 @@ export const err = (msg, code = 1) => ({
   exitCode: code,
 })
 
-export const usage = (_cmd, line) => err(`usage: ${line}`, 2)
+export const usage = (line) => err(`usage: ${line}`, 2)
 
 // Split a string into lines, dropping the trailing empty element
 // produced by a trailing newline. `''` returns `[]` (no lines)
