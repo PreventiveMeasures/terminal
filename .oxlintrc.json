@@ -1,0 +1,69 @@
+{
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error"
+  },
+  "plugins": [
+    "import",
+    "node",
+    "promise",
+    "unicorn"
+  ],
+  "rules": {
+    "no-warning-comments": "off",
+    "no-inline-comments": "off",
+    "no-underscore-dangle": "off",
+    "curly": [
+      "error",
+      "multi-line"
+    ],
+    "eqeqeq": [
+      "error",
+      "smart"
+    ],
+    "sort-imports": [
+      "error",
+      {
+        "ignoreDeclarationSort": true
+      }
+    ],
+    "max-lines": [
+      "error",
+      {
+        "max": 300,
+        "skipBlankLines": true,
+        "skipComments": true
+      }
+    ],
+    "max-lines-per-function": [
+      "error",
+      {
+        "max": 80,
+        "skipBlankLines": true,
+        "skipComments": true
+      }
+    ],
+    "no-var": "error",
+    "default-case": "error",
+    "no-undef": "error",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/explicit-length-check": "off",
+    "unicorn/no-array-callback-reference": "off",
+    "unicorn/no-array-sort": "off",
+    "unicorn/prefer-at": "off",
+    "unicorn/prefer-string-replace-all": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "tests/**"
+      ],
+      "rules": {
+        "max-lines-per-function": "off",
+        "max-lines": "off"
+      }
+    }
+  ]
+}
