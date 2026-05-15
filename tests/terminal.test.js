@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { createTerminal } from '../terminal/index.js'
+import { createTerminal } from '@preventive/terminal'
 
 const SOURCES = {
   'src/foo.js': 'const x = 1\n// TODO: fix\nconst y = 2\n',

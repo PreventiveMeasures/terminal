@@ -23,27 +23,27 @@
     "access": "public"
   },
   "type": "module",
-  "main": "terminal/index.js",
+  "main": "src/index.js",
   "exports": {
     ".": {
-      "default": "./terminal/index.js"
+      "default": "./src/index.js"
     }
   },
   "files": [
-    "terminal/braces.js",
-    "terminal/find.js",
-    "terminal/fs.js",
-    "terminal/glob.js",
-    "terminal/grep.js",
-    "terminal/index.js",
-    "terminal/nav-commands.js",
-    "terminal/parse.js",
-    "terminal/sed.js",
-    "terminal/text-commands.js",
-    "terminal/util.js"
+    "src/braces.js",
+    "src/find.js",
+    "src/fs.js",
+    "src/glob.js",
+    "src/grep.js",
+    "src/index.js",
+    "src/nav-commands.js",
+    "src/parse.js",
+    "src/sed.js",
+    "src/text-commands.js",
+    "src/util.js"
   ],
   "scripts": {
-    "lint": "oxlint -c .oxlintrc.json ./terminal/ ./tests/",
+    "lint": "oxlint -c .oxlintrc.json ./src/ ./tests/",
     "test": "node --test ./tests/*.test.js"
   },
   "dependencies": {},
