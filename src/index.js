@@ -285,7 +285,13 @@ function complete(line, ctx) {
   const segment = line.slice(segStart)
   const wordStart = lastWordStart(segment)
   const word = segment.slice(wordStart)
-  const commandPosition = segment.slice(0, wordStart).trim() === ''
+  const before = segment.slice(0, wordStart).trim()
+  const commandPosition = before === ''
+  // Resolve the leading token of the segment so per-command rules
+  // can fire on bin-prefixed forms too (`/usr/bin/cd` ≡ `cd`).
+  // Empty in command position — `command` is only consulted on the
+  // arg-position branch where `before` is non-empty by definition.
+  const command = commandPosition ? '' : resolveCommand(before.split(/\s+/u)[0])
   // Everything up to (but not including) the trailing word is
   // preserved verbatim — that's what makes each variant a drop-in
   // replacement for the entire input line.
@@ -297,7 +303,7 @@ function complete(line, ctx) {
   // started at a later index, and `head` would end in whitespace).
   // `||` / `&&` / `;` aren't touched — only single-pipe completion.
   const sep = pipe && head.endsWith('|') ? ' ' : ''
-  return completeWord(word, commandPosition, pipe, ctx).map((w) => head + sep + w)
+  return completeWord(word, commandPosition, pipe, command, ctx).map((w) => head + sep + w)
 }
 
 // In command position, bin-prefix and `./` / `/` path completion
@@ -327,9 +333,10 @@ function complete(line, ctx) {
 // In argument position the rules collapse to `completePath` so
 // `cat src/f` works the same as `cat ./src/f` — unless we're after
 // a `|`, where the piped stream is the data source and file
-// arguments would be misleading.
-function completeWord(word, commandPosition, pipe, ctx) {
-  if (!commandPosition) return pipe ? [] : completePath(word, ctx)
+// arguments would be misleading. For `cd`, completion restricts
+// to directories (files aren't valid `cd` targets).
+function completeWord(word, commandPosition, pipe, command, ctx) {
+  if (!commandPosition) return pipe ? [] : completePath(word, ctx, command === 'cd')
   const names = pipe ? PIPE_NAMES : COMMAND_NAMES
   for (const prefix of BIN_PREFIXES) {
     if (word.startsWith(prefix)) {
@@ -381,7 +388,7 @@ function lastWordStart(s) {
   return 0
 }
 
-function completePath(word, ctx) {
+function completePath(word, ctx, dirsOnly = false) {
   const lastSlash = word.lastIndexOf('/')
   const dirPart = word.slice(0, lastSlash + 1)
   const partial = word.slice(lastSlash + 1)
@@ -397,6 +404,9 @@ function completePath(word, ctx) {
     if (!showDot && name.startsWith('.')) continue
     if (name.startsWith(partial)) out.push(dirPart + name + '/')
   }
+  // `cd` and similar dir-only commands skip the file pass — files
+  // wouldn't be valid arguments and listing them would mislead.
+  if (dirsOnly) return out
   for (const name of files) {
     if (!showDot && name.startsWith('.')) continue
     if (name.startsWith(partial)) out.push(dirPart + name)
