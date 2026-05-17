@@ -199,5 +199,11 @@ function cmdFalse() { return { stdout: '', stderr: '', exitCode: 1 } }
 
 export const TEXT_COMMANDS = {
   cat, grep, head, tail, wc, sort, uniq, echo, xargs,
+}
+
+// Dispatchable but unlisted: `true` / `false` / `:` are useful in
+// chained pipelines but uninteresting to surface in completion or
+// the "command not found" hint. index.js folds these into HIDDEN.
+export const TRIVIAL_COMMANDS = {
   true: cmdTrue, false: cmdFalse, ':': cmdTrue,
 }

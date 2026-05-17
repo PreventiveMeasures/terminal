@@ -2841,17 +2841,43 @@ describe('createTerminal — complete: corner cases', () => {
     assert.ok(t.complete('./.').includes('./.hidden'))
   })
 
-  it('hidden commands (sed) are invisible to completion', () => {
+  it('hidden commands (sed, true, false, :) are invisible to completion', () => {
     const t = createTerminal(SOURCES)
-    // `sed` is HIDDEN — typing the full name yields no completions
-    // even though dispatch would accept it.
-    assert.deepEqual(t.complete('sed'), [])
-    // Public command list (sampled via the `se` prefix) excludes sed.
+    // Each name dispatches but isn't surfaced by the completion API.
+    for (const name of ['sed', 'true', 'false', ':']) {
+      assert.deepEqual(t.complete(name), [], `${name} should be hidden`)
+      assert.ok(!t.complete('/usr/bin/').includes('/usr/bin/' + name))
+      assert.deepEqual(t.complete('/usr/bin/' + name), [])
+    }
+    // Empty completion (the full command list) doesn't include any of them.
+    const all = t.complete('')
+    for (const name of ['sed', 'true', 'false', ':']) {
+      assert.ok(!all.includes(name), `${name} should be absent from empty completion`)
+    }
+    // Sampled prefix `se` doesn't surface sed either.
     assert.ok(!t.complete('se').includes('sed'))
-    // Bin-prefix completion also filters HIDDEN out.
-    assert.ok(!t.complete('/usr/bin/').includes('/usr/bin/sed'))
-    assert.deepEqual(t.complete('/usr/bin/sed'), [])
-    assert.deepEqual(t.complete('/bin/sed'), [])
+    // Dispatch still works — these are HIDDEN, not removed.
+    assert.equal(t.run('true').exitCode, 0)
+    assert.equal(t.run('false').exitCode, 1)
+    assert.equal(t.run(':').exitCode, 0)
+    assert.equal(t.run('false || true').exitCode, 0)
+  })
+
+  it('empty completion lists ls first, then by priority', () => {
+    const t = createTerminal(SOURCES)
+    const all = t.complete('')
+    assert.equal(all[0], 'ls')
+    // Spot-check priority groupings: navigation comes before text
+    // commands, text commands before extras, extras before path
+    // utilities.
+    const idx = (name) => all.indexOf(name)
+    assert.ok(idx('cd') < idx('cat'), 'cd before cat')
+    assert.ok(idx('cat') < idx('grep'), 'cat before grep')
+    assert.ok(idx('grep') < idx('head'), 'grep before head')
+    assert.ok(idx('uniq') < idx('xargs'), 'uniq before xargs')
+    assert.ok(idx('xargs') < idx('tree'), 'xargs before tree')
+    assert.ok(idx('basename') < idx('dirname'), 'basename before dirname')
+    assert.ok(idx('dirname') === all.length - 1, 'dirname is last')
   })
 
   it('bin-prefix completion fires only in command position', () => {

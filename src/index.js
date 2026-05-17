@@ -30,7 +30,7 @@ import { expandGlobs } from './glob.js'
 import { NAV_COMMANDS } from './nav-commands.js'
 import { parseLine } from './parse.js'
 import { sed } from './sed.js'
-import { TEXT_COMMANDS } from './text-commands.js'
+import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './text-commands.js'
 import { err } from './util.js'
 
 // `__proto__: null` so a user typing e.g. `toString` doesn't reach
@@ -42,14 +42,36 @@ const COMMANDS = { __proto__: null, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_
 // Hidden registry — dispatchable by name (and via ctx.dispatch from
 // xargs), but excluded from the "Available: …" hint so the
 // commands here don't read as part of the documented surface.
-// Anything in here is intentionally narrow / single-purpose.
-const HIDDEN = { __proto__: null, sed }
+// `sed` is narrow/single-purpose; the TRIVIAL_COMMANDS (`true` /
+// `false` / `:`) are dispatchable for pipeline-testing but too
+// uninteresting to mention.
+const HIDDEN = { __proto__: null, sed, ...TRIVIAL_COMMANDS }
 
-// Sorted list of public command names. `KNOWN` (the user-visible
-// "not found" hint) and `complete()` (tab completion) both derive
-// from this — HIDDEN entries are intentionally excluded from both.
-const COMMAND_NAMES = Object.keys(COMMANDS).sort()
+// Command priority for tab completion and the "not found" hint.
+// `ls` is the natural entry point (browse before doing anything),
+// then roughly by everyday-use frequency. Commands present in
+// COMMANDS but missing from this list fall through at the end
+// (alphabetical), so a new command never silently disappears from
+// completion if someone forgets to update the priority list.
+const COMMAND_ORDER = [
+  'ls', 'cd', 'pwd', 'cat', 'grep', 'find',
+  'head', 'tail', 'wc', 'sort', 'uniq',
+  'cut', 'tr', 'nl', 'tac',
+  'echo', 'xargs', 'seq',
+  'tree', 'which', 'basename', 'dirname',
+]
+const COMMAND_NAMES = orderedCommandNames()
 const KNOWN = COMMAND_NAMES.join(', ')
+
+function orderedCommandNames() {
+  const remaining = new Set(Object.keys(COMMANDS))
+  const out = []
+  for (const name of COMMAND_ORDER) {
+    if (remaining.delete(name)) out.push(name)
+  }
+  out.push(...[...remaining].sort())
+  return out
+}
 
 export function createTerminal(sources, opts = {}) {
   const fs = createFs(sources)
