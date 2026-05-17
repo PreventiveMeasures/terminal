@@ -2660,33 +2660,35 @@ describe('createTerminal — complete', () => {
     assert.deepEqual(t.complete('/bin/gre'), ['/bin/grep'])
   })
 
-  it('`/` lists root entries, dirs trailing-slashed', () => {
+  it('`/` lists root entries, dirs trailing-slashed (when input has whitespace)', () => {
     const t = createTerminal(SOURCES)
-    const c = t.complete('/')
-    assert.ok(c.includes('/src/'))
-    assert.ok(c.includes('/README.md'))
+    // Bare `/` would suppress (no-whitespace rule) — anchor with `cat ` to
+    // exercise path completion mechanics.
+    const c = t.complete('cat /')
+    assert.ok(c.includes('cat /src/'))
+    assert.ok(c.includes('cat /README.md'))
     // Dotfiles hidden unless partial starts with '.'
-    assert.ok(!c.includes('/.hidden'))
-    assert.ok(t.complete('/.').includes('/.hidden'))
+    assert.ok(!c.includes('cat /.hidden'))
+    assert.ok(t.complete('cat /.').includes('cat /.hidden'))
   })
 
   it('`./` lists cwd entries relative to the current cwd', () => {
     const t = createTerminal(SOURCES, { cwd: '/src' })
-    const c = t.complete('./')
-    assert.ok(c.includes('./foo.js'))
-    assert.ok(c.includes('./bar.js'))
-    assert.ok(c.includes('./util/'))
+    const c = t.complete('cat ./')
+    assert.ok(c.includes('cat ./foo.js'))
+    assert.ok(c.includes('cat ./bar.js'))
+    assert.ok(c.includes('cat ./util/'))
   })
 
   it('subdirectory path completion preserves the typed prefix', () => {
     const t = createTerminal(SOURCES)
-    assert.deepEqual(t.complete('/src/f'), ['/src/foo.js'])
-    assert.deepEqual(t.complete('./src/f'), ['./src/foo.js'])
+    assert.deepEqual(t.complete('cat /src/f'), ['cat /src/foo.js'])
+    assert.deepEqual(t.complete('cat ./src/f'), ['cat ./src/foo.js'])
   })
 
   it('returns [] for paths under a missing directory', () => {
     const t = createTerminal(SOURCES)
-    assert.deepEqual(t.complete('/nope/foo'), [])
+    assert.deepEqual(t.complete('cat /nope/foo'), [])
   })
 
   it('pipe / `&&` / `||` / `;` reset to command position', () => {
@@ -2843,13 +2845,15 @@ describe('createTerminal — complete: corner cases', () => {
 
   it('dotfile gating: hidden entries surface only when partial starts with `.`', () => {
     const t = createTerminal(SOURCES)
-    assert.ok(!t.complete('/').some((s) => s.endsWith('.hidden')))
-    assert.ok(t.complete('/.').includes('/.hidden'))
-    assert.ok(t.complete('/.h').includes('/.hidden'))
-    assert.deepEqual(t.complete('/.x'), [])
+    // Anchor with `cat ` so path completion fires (bare `/`-prefixed
+    // tokens are suppressed by the no-whitespace rule).
+    assert.ok(!t.complete('cat /').some((s) => s.endsWith('.hidden')))
+    assert.ok(t.complete('cat /.').includes('cat /.hidden'))
+    assert.ok(t.complete('cat /.h').includes('cat /.hidden'))
+    assert.deepEqual(t.complete('cat /.x'), [])
     // Same for ./ at root.
-    assert.ok(!t.complete('./').some((s) => s.endsWith('.hidden')))
-    assert.ok(t.complete('./.').includes('./.hidden'))
+    assert.ok(!t.complete('cat ./').some((s) => s.endsWith('.hidden')))
+    assert.ok(t.complete('cat ./.').includes('cat ./.hidden'))
   })
 
   it('hidden commands (sed, true, false, :) are invisible to completion', () => {
@@ -3183,14 +3187,14 @@ describe('createTerminal — complete: corner cases', () => {
 
   it('cwd is live: cd changes what `./` resolves to', () => {
     const t = createTerminal(SOURCES)
-    const atRoot = t.complete('./')
-    assert.ok(atRoot.includes('./src/'))
-    assert.ok(atRoot.includes('./README.md'))
+    const atRoot = t.complete('cat ./')
+    assert.ok(atRoot.includes('cat ./src/'))
+    assert.ok(atRoot.includes('cat ./README.md'))
     t.run('cd src')
-    const atSrc = t.complete('./')
-    assert.ok(atSrc.includes('./foo.js'))
-    assert.ok(atSrc.includes('./util/'))
-    assert.ok(!atSrc.some((s) => s.startsWith('./src')))
+    const atSrc = t.complete('cat ./')
+    assert.ok(atSrc.includes('cat ./foo.js'))
+    assert.ok(atSrc.includes('cat ./util/'))
+    assert.ok(!atSrc.some((s) => s.includes('./src')))
   })
 
   it('path completion at deep nested subdirectories', () => {
@@ -3199,17 +3203,51 @@ describe('createTerminal — complete: corner cases', () => {
       'a/b/c/d/f.js': 'y',
       'a/b/c/other.js': 'z',
     })
-    const c = t.complete('/a/b/c/d/')
-    assert.deepEqual(c.sort(), ['/a/b/c/d/e.js', '/a/b/c/d/f.js'])
-    assert.deepEqual(t.complete('/a/b/c/d/e'), ['/a/b/c/d/e.js'])
-    assert.deepEqual(t.complete('/a/b/c/o'), ['/a/b/c/other.js'])
+    const c = t.complete('cat /a/b/c/d/')
+    assert.deepEqual(c.sort(), ['cat /a/b/c/d/e.js', 'cat /a/b/c/d/f.js'])
+    assert.deepEqual(t.complete('cat /a/b/c/d/e'), ['cat /a/b/c/d/e.js'])
+    assert.deepEqual(t.complete('cat /a/b/c/o'), ['cat /a/b/c/other.js'])
   })
 
   it('fully-typed token completes to itself (single-match echo)', () => {
     const t = createTerminal(SOURCES)
     assert.deepEqual(t.complete('grep'), ['grep'])
+    // Bin-prefix paths still complete even without whitespace — they
+    // resolve as commands, not files.
     assert.deepEqual(t.complete('/usr/bin/grep'), ['/usr/bin/grep'])
-    assert.deepEqual(t.complete('/README.md'), ['/README.md'])
-    assert.deepEqual(t.complete('/src/foo.js'), ['/src/foo.js'])
+    // Bare paths need a whitespace anchor to fire path completion.
+    assert.deepEqual(t.complete('cat /README.md'), ['cat /README.md'])
+    assert.deepEqual(t.complete('cat /src/foo.js'), ['cat /src/foo.js'])
+  })
+
+  it('no-whitespace input suppresses path completion (bare paths aren\'t executable)', () => {
+    const t = createTerminal(SOURCES)
+    // Bare `./` / `/` / path-prefixed tokens at the head of a line
+    // would look like commands but the dispatcher only recognizes
+    // BIN_PREFIXES — surfacing them would lead to "command not found".
+    assert.deepEqual(t.complete('./'), [])
+    assert.deepEqual(t.complete('/'), [])
+    assert.deepEqual(t.complete('./src/f'), [])
+    assert.deepEqual(t.complete('/src/f'), [])
+    assert.deepEqual(t.complete('/.hidden'), [])
+    // Bare names that don't match any command also return [] (already
+    // the prior behavior — bare names go through the command list,
+    // not the FS).
+    assert.deepEqual(t.complete('src'), [])
+    assert.deepEqual(t.complete('src/f'), [])
+    // Bin-prefixed commands are exempt — they resolve as commands.
+    assert.deepEqual(t.complete('/usr/bin/gre'), ['/usr/bin/grep'])
+    assert.deepEqual(t.complete('/bin/cat'), ['/bin/cat'])
+    // Bare command-name completion still works — `gre` matches the
+    // public `grep`, no files involved.
+    assert.deepEqual(t.complete('gre'), ['grep'])
+    // Any whitespace in the line unlocks path completion. Leading
+    // whitespace works too, even though it's unusual.
+    assert.ok(t.complete(' ./').includes(' ./src/'))
+    assert.ok(t.complete('cat ./').includes('cat ./src/'))
+    // After `;` / `&&` / `||`, the no-whitespace rule still applies
+    // to the WHOLE line (not just the segment).
+    assert.deepEqual(t.complete('a;./script'), [])
+    assert.ok(t.complete('a; ./').includes('a; ./src/'))
   })
 })

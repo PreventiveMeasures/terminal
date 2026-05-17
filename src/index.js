@@ -259,7 +259,13 @@ function unknownCommand(name) {
 //   1. Command position, bin-prefixed token (`/usr/bin/grep…`)
 //      → command list, bin prefix preserved on the way out.
 //   2. Command position, token starting with `/` or `./` → walk the
-//      virtual FS (lets users complete `./script.js`-style paths).
+//      virtual FS — UNLESS the line is whitespace-free (just `./`
+//      or `/src/foo`, no `cat ./`), in which case `[]`. Bare paths
+//      at the head of a line look like commands to the user, but
+//      the dispatcher only recognizes BIN_PREFIXES (`/usr/bin/…`)
+//      as command paths; suggesting other paths would lead to
+//      "command not found". Bare-name tokens (`src`, `foo`) fall
+//      through to the command-list filter and need no extra check.
 //   3. Command position, anything else → command list.
 //   4. Argument position → walk the virtual FS treating the trailing
 //      word as a path. `cat src/f` is equivalent to `cat ./src/f`;
@@ -294,7 +300,14 @@ function complete(line, ctx) {
   // started at a later index, and `head` would end in whitespace).
   // `||` / `&&` / `;` aren't touched — only single-pipe completion.
   const sep = pipe && head.endsWith('|') ? ' ' : ''
-  return completeWord(word, commandPosition, pipe, ctx).map((w) => head + sep + w)
+  // Path completion is suppressed when (a) after a `|` (the piped
+  // stream is the data source, not a file) or (b) the line has no
+  // whitespace yet — the user is still typing the first command,
+  // and bare paths aren't executable in this virtual FS (only
+  // BIN_PREFIXES dispatch). Bin-prefix and command-name completion
+  // are unaffected.
+  const suppressPath = pipe || !/\s/u.test(line)
+  return completeWord(word, commandPosition, pipe, suppressPath, ctx).map((w) => head + sep + w)
 }
 
 // In command position, bin-prefix and `./` / `/` path completion
@@ -313,8 +326,8 @@ function complete(line, ctx) {
 // `/usr/bin/...` shortcut is meaningful for argv[0] only. Surfacing
 // it in arg position would mislead the user into `cat /usr/bin/grep`
 // against a path that doesn't exist in the virtual FS.
-function completeWord(word, commandPosition, pipe, ctx) {
-  if (!commandPosition) return pipe ? [] : completePath(word, ctx)
+function completeWord(word, commandPosition, pipe, suppressPath, ctx) {
+  if (!commandPosition) return suppressPath ? [] : completePath(word, ctx)
   const names = pipe ? PIPE_NAMES : COMMAND_NAMES
   for (const prefix of BIN_PREFIXES) {
     if (word.startsWith(prefix)) {
@@ -322,7 +335,7 @@ function completeWord(word, commandPosition, pipe, ctx) {
       return names.filter((n) => n.startsWith(suffix)).map((n) => prefix + n)
     }
   }
-  if (word.startsWith('/') || word.startsWith('./')) return pipe ? [] : completePath(word, ctx)
+  if (word.startsWith('/') || word.startsWith('./')) return suppressPath ? [] : completePath(word, ctx)
   return names.filter((n) => n.startsWith(word))
 }
 
