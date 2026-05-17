@@ -2841,17 +2841,212 @@ describe('createTerminal — complete: corner cases', () => {
     assert.ok(t.complete('./.').includes('./.hidden'))
   })
 
-  it('hidden commands (sed) are invisible to completion', () => {
+  it('hidden commands (sed, true, false, :) are invisible to completion', () => {
     const t = createTerminal(SOURCES)
-    // `sed` is HIDDEN — typing the full name yields no completions
-    // even though dispatch would accept it.
-    assert.deepEqual(t.complete('sed'), [])
-    // Public command list (sampled via the `se` prefix) excludes sed.
+    // Each name dispatches but isn't surfaced by the completion API.
+    for (const name of ['sed', 'true', 'false', ':']) {
+      assert.deepEqual(t.complete(name), [], `${name} should be hidden`)
+      assert.ok(!t.complete('/usr/bin/').includes('/usr/bin/' + name))
+      assert.deepEqual(t.complete('/usr/bin/' + name), [])
+    }
+    // Empty completion (the full command list) doesn't include any of them.
+    const all = t.complete('')
+    for (const name of ['sed', 'true', 'false', ':']) {
+      assert.ok(!all.includes(name), `${name} should be absent from empty completion`)
+    }
+    // Sampled prefix `se` doesn't surface sed either.
     assert.ok(!t.complete('se').includes('sed'))
-    // Bin-prefix completion also filters HIDDEN out.
-    assert.ok(!t.complete('/usr/bin/').includes('/usr/bin/sed'))
-    assert.deepEqual(t.complete('/usr/bin/sed'), [])
-    assert.deepEqual(t.complete('/bin/sed'), [])
+    // Dispatch still works — these are HIDDEN, not removed.
+    assert.equal(t.run('true').exitCode, 0)
+    assert.equal(t.run('false').exitCode, 1)
+    assert.equal(t.run(':').exitCode, 0)
+    assert.equal(t.run('false || true').exitCode, 0)
+  })
+
+  it('empty completion lists ls first, then by auditor priority', () => {
+    const t = createTerminal(SOURCES)
+    const all = t.complete('')
+    assert.equal(all[0], 'ls')
+    // Spot-check the priority groupings.
+    const idx = (name) => all.indexOf(name)
+    // Browse + read + search come first.
+    assert.ok(idx('cd') < idx('cat'), 'cd before cat')
+    assert.ok(idx('cat') < idx('grep'), 'cat before grep')
+    assert.ok(idx('grep') < idx('find'), 'grep before find')
+    // pwd drops below cat/grep — the prompt already shows cwd.
+    assert.ok(idx('cat') < idx('pwd'), 'cat before pwd')
+    assert.ok(idx('grep') < idx('pwd'), 'grep before pwd')
+    assert.ok(idx('xargs') < idx('pwd'), 'xargs before pwd (pwd is rare in audit flows)')
+    // tree sits near the listing tools, not at the very end.
+    assert.ok(idx('wc') < idx('tree'), 'wc before tree')
+    assert.ok(idx('tree') < idx('sort'), 'tree before sort')
+    // Path utilities are the tail.
+    assert.ok(idx('basename') < idx('dirname'), 'basename before dirname')
+    assert.equal(idx('dirname'), all.length - 1, 'dirname is last')
+  })
+
+  it('after `|`, completion only suggests commands that consume stdin', () => {
+    const t = createTerminal(SOURCES)
+    // Non-pipeable: ls / pwd / cd / find / tree / echo / seq / which /
+    // basename / dirname — none of them read stdin, so none should
+    // surface as a pipe target.
+    for (const name of ['ls', 'pwd', 'cd', 'find', 'tree', 'echo', 'seq', 'which', 'basename', 'dirname']) {
+      assert.deepEqual(t.complete('cat | ' + name), [], `${name} should not be a pipe target`)
+    }
+    // A prefix that only matches non-pipeable commands (`l` → ls) is [].
+    assert.deepEqual(t.complete('cat | l'), [])
+    // Pipeable: every PIPE_NAMES entry surfaces for the empty trailing word.
+    const c = t.complete('cat | ')
+    for (const name of ['grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'xargs', 'tr', 'nl', 'tac', 'cat']) {
+      assert.ok(c.includes('cat | ' + name), `${name} should be a pipe target`)
+    }
+    // Empty completion straight after `|` has length 12 — full pipe set.
+    assert.equal(c.length, 12)
+  })
+
+  it('pipe-target priority lists grep first', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.complete('cat | ')[0], 'cat | grep')
+    // Most common pipe targets come before transforms / passthrough.
+    const c = t.complete('cat | ')
+    const idx = (full) => c.indexOf(full)
+    assert.ok(idx('cat | grep') < idx('cat | sort'), 'grep before sort')
+    assert.ok(idx('cat | head') < idx('cat | xargs'), 'head before xargs')
+    assert.ok(idx('cat | xargs') < idx('cat | cat'), 'xargs before cat (cat passthrough is last)')
+  })
+
+  it('`||` / `&&` / `;` are not pipes — full command list applies', () => {
+    const t = createTerminal(SOURCES)
+    // `ls` is non-pipeable but legal after the non-pipe separators.
+    assert.deepEqual(t.complete('cat || l'), ['cat || ls'])
+    assert.deepEqual(t.complete('cat && l'), ['cat && ls'])
+    assert.deepEqual(t.complete('cat ; l'), ['cat ; ls'])
+    // Likewise for empty trailing word — fresh command position with
+    // the FULL command list, including non-pipeable commands.
+    assert.ok(t.complete('cat || ').includes('cat || ls'))
+    assert.ok(t.complete('cat && ').includes('cat && pwd'))
+    assert.ok(t.complete('cat ; ').includes('cat ; find'))
+  })
+
+  it('bin-prefix completion after `|` also restricts to pipe targets', () => {
+    const t = createTerminal(SOURCES)
+    // grep IS pipeable — bin-prefix path resolves.
+    assert.deepEqual(t.complete('cat | /usr/bin/gre'), ['cat | /usr/bin/grep'])
+    assert.deepEqual(t.complete('cat | /bin/he'), ['cat | /bin/head'])
+    // ls / find / pwd are NOT pipeable — even with the bin prefix.
+    assert.deepEqual(t.complete('cat | /usr/bin/l'), [])
+    assert.deepEqual(t.complete('cat | /usr/bin/ls'), [])
+    assert.deepEqual(t.complete('cat | /bin/find'), [])
+    assert.deepEqual(t.complete('cat | /usr/bin/pwd'), [])
+  })
+
+  it('every pipe target dispatches as a real command', () => {
+    // Sanity guard: PIPE_NAMES must be a subset of the public command
+    // set so completion never offers a name that fails at runtime.
+    const t = createTerminal(SOURCES)
+    const allNames = new Set(t.complete(''))
+    const pipeTargets = t.complete('cat | ').map((s) => s.slice('cat | '.length))
+    for (const name of pipeTargets) {
+      assert.ok(allNames.has(name), `${name} is a pipe target but missing from COMMAND_NAMES`)
+    }
+  })
+
+  it('pipe at the very start of a line is recognized as command position', () => {
+    const t = createTerminal({})
+    // A bare `| gre` reads as "no prior command, but the next slot is
+    // a pipe target". Useful when the consumer pre-inserts the pipe.
+    assert.deepEqual(t.complete(' | gre'), [' | grep'])
+    assert.deepEqual(t.complete(' | l'), [])
+  })
+
+  it('`|` without surrounding whitespace still pipe-filters', () => {
+    const t = createTerminal({})
+    assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])
+    // ls is non-pipeable even when the user squishes the pipe in.
+    assert.deepEqual(t.complete('cat|l'), [])
+    // Empty trailing word: full pipe set, glued to `cat|`.
+    const c = t.complete('cat|')
+    assert.equal(c.length, 12)
+    assert.equal(c[0], 'cat|grep')
+  })
+
+  it('multi-pipe pipelines filter on the most recent `|`', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('cat | grep TODO | he'), ['cat | grep TODO | head'])
+    // ls is non-pipeable — still rejected several pipes in.
+    assert.deepEqual(t.complete('cat | grep TODO | ls'), [])
+    assert.deepEqual(t.complete('cat | grep TODO | l'), [])
+  })
+
+  it('`||` after a `|` resets the trailing word to the full command list', () => {
+    const t = createTerminal(SOURCES)
+    // Last separator is `||`, not `|` — pipe filter doesn't carry over.
+    assert.deepEqual(t.complete('cat | grep || l'), ['cat | grep || ls'])
+    assert.ok(t.complete('cat | grep || ').includes('cat | grep || ls'))
+    assert.ok(t.complete('cat | grep || ').includes('cat | grep || pwd'))
+  })
+
+  it('pipe filter is gated on command position only — arg position still walks the FS', () => {
+    const t = createTerminal(SOURCES)
+    // After `cat | grep TODO `, we're in argument position. The
+    // pipe-filter doesn't restrict path tokens.
+    assert.deepEqual(t.complete('cat | grep TODO /src/f'), ['cat | grep TODO /src/foo.js'])
+    const c = t.complete('cat | grep TODO ')
+    assert.ok(c.includes('cat | grep TODO src/'))
+    assert.ok(c.includes('cat | grep TODO README.md'))
+  })
+
+  it('explicit `./` / `/` path tokens after `|` walk the FS, not PIPE_NAMES', () => {
+    const t = createTerminal({ 'script.sh': 'x', 'data.txt': 'y' })
+    // A `./`-prefixed token in command position is the user opting
+    // into FS completion — pipe-filter respects that and returns
+    // virtual-FS entries, not pipe targets.
+    const c1 = t.complete('cat | ./')
+    assert.ok(c1.includes('cat | ./script.sh'))
+    assert.ok(c1.includes('cat | ./data.txt'))
+    // Same for absolute paths.
+    const c2 = t.complete('cat | /script')
+    assert.deepEqual(c2, ['cat | /script.sh'])
+  })
+
+  it('HIDDEN pipeable command (sed) stays invisible after `|`', () => {
+    const t = createTerminal(SOURCES)
+    // sed reads stdin but is HIDDEN, so absent from PIPE_NAMES.
+    assert.deepEqual(t.complete('cat | sed'), [])
+    assert.deepEqual(t.complete('cat | /usr/bin/sed'), [])
+    // `s` prefix matches the public pipeable `sort`, not the hidden `sed`.
+    assert.deepEqual(t.complete('cat | s'), ['cat | sort'])
+  })
+
+  it('non-pipeable public commands (seq, which, tree) are absent from pipe completion', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('cat | seq'), [])
+    assert.deepEqual(t.complete('cat | which'), [])
+    assert.deepEqual(t.complete('cat | tree'), [])
+    // `t` matches tail / tr / tac (pipeable) but NOT tree.
+    const c = t.complete('cat | t')
+    assert.ok(c.includes('cat | tail'))
+    assert.ok(c.includes('cat | tr'))
+    assert.ok(c.includes('cat | tac'))
+    assert.ok(!c.includes('cat | tree'))
+  })
+
+  it('tab and mixed whitespace between `|` and the pipe target', () => {
+    const t = createTerminal({})
+    assert.deepEqual(t.complete('cat |\tgre'), ['cat |\tgrep'])
+    assert.deepEqual(t.complete('cat\t|\tgre'), ['cat\t|\tgrep'])
+    assert.deepEqual(t.complete('cat   |    gre'), ['cat   |    grep'])
+    // Empty trailing word with funky whitespace prefix still pipe-filters.
+    assert.ok(t.complete('cat |  ').includes('cat |  grep'))
+  })
+
+  it('non-pipeable first command does not affect completion (no validation)', () => {
+    // `echo | gre` — `echo` ignores stdin, so the pipe is wasted in
+    // practice. Completion doesn't second-guess what the user typed
+    // upstream of the trailing word; it just completes `gre`.
+    const t = createTerminal({})
+    assert.deepEqual(t.complete('echo | gre'), ['echo | grep'])
+    assert.deepEqual(t.complete('pwd | he'), ['pwd | head'])
   })
 
   it('bin-prefix completion fires only in command position', () => {

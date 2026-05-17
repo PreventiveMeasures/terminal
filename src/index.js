@@ -30,7 +30,7 @@ import { expandGlobs } from './glob.js'
 import { NAV_COMMANDS } from './nav-commands.js'
 import { parseLine } from './parse.js'
 import { sed } from './sed.js'
-import { TEXT_COMMANDS } from './text-commands.js'
+import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './text-commands.js'
 import { err } from './util.js'
 
 // `__proto__: null` so a user typing e.g. `toString` doesn't reach
@@ -42,14 +42,51 @@ const COMMANDS = { __proto__: null, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_
 // Hidden registry — dispatchable by name (and via ctx.dispatch from
 // xargs), but excluded from the "Available: …" hint so the
 // commands here don't read as part of the documented surface.
-// Anything in here is intentionally narrow / single-purpose.
-const HIDDEN = { __proto__: null, sed }
+// `sed` is narrow/single-purpose; the TRIVIAL_COMMANDS (`true` /
+// `false` / `:`) are dispatchable for pipeline-testing but too
+// uninteresting to mention.
+const HIDDEN = { __proto__: null, sed, ...TRIVIAL_COMMANDS }
 
-// Sorted list of public command names. `KNOWN` (the user-visible
-// "not found" hint) and `complete()` (tab completion) both derive
-// from this — HIDDEN entries are intentionally excluded from both.
-const COMMAND_NAMES = Object.keys(COMMANDS).sort()
+// Command priority for tab completion and the "not found" hint —
+// ordered for a code auditor: list & navigate, read, search, then
+// downstream pipelines. `pwd` lands near the end because the prompt
+// already tells you where you are; `seq` / `which` / `basename` /
+// `dirname` rarely earn their slot in an audit session. Commands
+// present in COMMANDS but missing from this list fall through at
+// the end alphabetically — a new command never silently drops out
+// of completion if someone forgets to update the priority list.
+const COMMAND_ORDER = [
+  'ls', 'cd', 'cat', 'grep', 'find',
+  'head', 'tail', 'wc', 'tree',
+  'sort', 'uniq', 'cut', 'tr', 'nl', 'tac',
+  'xargs', 'echo',
+  'pwd', 'seq', 'which', 'basename', 'dirname',
+]
+const COMMAND_NAMES = orderedCommandNames()
 const KNOWN = COMMAND_NAMES.join(', ')
+
+// Pipe-target priority. After `|` the next command receives the
+// previous stage's stdout as stdin — completing `... | ls` would
+// be misleading since ls ignores its stdin. PIPE_NAMES is the
+// hand-curated subset of COMMAND_NAMES whose handlers actually
+// read `stdin` (no `_stdin` underscore on their first param). No
+// alphabetical fallback here: adding a pipeable command should be
+// a deliberate decision, not a silent default.
+const PIPE_NAMES = [
+  'grep', 'head', 'tail', 'wc',
+  'sort', 'uniq', 'cut', 'xargs',
+  'tr', 'nl', 'tac', 'cat',
+]
+
+function orderedCommandNames() {
+  const remaining = new Set(Object.keys(COMMANDS))
+  const out = []
+  for (const name of COMMAND_ORDER) {
+    if (remaining.delete(name)) out.push(name)
+  }
+  out.push(...[...remaining].sort())
+  return out
+}
 
 export function createTerminal(sources, opts = {}) {
   const fs = createFs(sources)
@@ -228,12 +265,17 @@ function unknownCommand(name) {
 //      word as a path. `cat src/f` is equivalent to `cat ./src/f`;
 //      empty trailing word lists the whole cwd, like bash.
 //
+// Commands directly after a `|` are restricted to PIPE_NAMES — only
+// commands that consume stdin make sense as pipe targets. `||` /
+// `&&` / `;` don't trigger this filter since each starts a fresh
+// pipeline with its own stdin.
+//
 // Quote-blind by design (in both the boundary scan and the tail
 // word): `parse.js` handles quoting for execution, but completion
 // runs on partial input where quote state is mid-flight. Separators
 // or whitespace inside a quoted region currently leak through.
 function complete(line, ctx) {
-  const segStart = lastCommandBoundary(line)
+  const { index: segStart, pipe } = lastCommandBoundary(line)
   const segment = line.slice(segStart)
   const wordStart = lastWordStart(segment)
   const word = segment.slice(wordStart)
@@ -242,7 +284,7 @@ function complete(line, ctx) {
   // preserved verbatim — that's what makes each variant a drop-in
   // replacement for the entire input line.
   const head = line.slice(0, segStart + wordStart)
-  return completeWord(word, commandPosition, ctx).map((w) => head + w)
+  return completeWord(word, commandPosition, pipe, ctx).map((w) => head + w)
 }
 
 // In command position, bin-prefix and `./` / `/` path completion
@@ -255,40 +297,48 @@ function complete(line, ctx) {
 // `/usr/bin/...` shortcut is meaningful for argv[0] only. Surfacing
 // it in arg position would mislead the user into `cat /usr/bin/grep`
 // against a path that doesn't exist in the virtual FS.
-function completeWord(word, commandPosition, ctx) {
+function completeWord(word, commandPosition, pipe, ctx) {
   if (!commandPosition) return completePath(word, ctx)
+  const names = pipe ? PIPE_NAMES : COMMAND_NAMES
   for (const prefix of BIN_PREFIXES) {
     if (word.startsWith(prefix)) {
       const suffix = word.slice(prefix.length)
-      return COMMAND_NAMES.filter((n) => n.startsWith(suffix)).map((n) => prefix + n)
+      return names.filter((n) => n.startsWith(suffix)).map((n) => prefix + n)
     }
   }
   if (word.startsWith('/') || word.startsWith('./')) return completePath(word, ctx)
-  return COMMAND_NAMES.filter((n) => n.startsWith(word))
+  return names.filter((n) => n.startsWith(word))
 }
 
 // Index just past the last unquoted `|`, `||`, `&&`, or `;` in
-// `line`. Two-char lookahead for `||` / `&&` is why this is an
-// index loop rather than a for-of.
+// `line`, plus whether that last boundary was a single `|` (so the
+// caller can restrict completion to pipe-target commands).
+// Two-char lookahead for `||` / `&&` is why this is an index loop
+// rather than a for-of.
 function lastCommandBoundary(line) {
-  let last = 0
+  let index = 0
+  let pipe = false
   let i = 0
   while (i < line.length) {
     const c = line[i]
     if (c === '|') {
-      i += line[i + 1] === '|' ? 2 : 1
-      last = i
+      const or = line[i + 1] === '|'
+      i += or ? 2 : 1
+      index = i
+      pipe = !or
     } else if (c === '&' && line[i + 1] === '&') {
       i += 2
-      last = i
+      index = i
+      pipe = false
     } else if (c === ';') {
       i++
-      last = i
+      index = i
+      pipe = false
     } else {
       i++
     }
   }
-  return last
+  return { index, pipe }
 }
 
 // Start index of the trailing run of non-whitespace characters.
