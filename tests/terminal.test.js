@@ -51,6 +51,64 @@ describe('createTerminal — basics', () => {
     assert.ok(all.includes('.hidden'))
   })
 
+  it('ls -1 is accepted and produces the same one-per-line output as bare ls', () => {
+    // No TTY notion in this virtual terminal, so ls is always
+    // one-per-line. `-1` exists for script-compat: tools that
+    // defensively prefix `-1` shouldn't trip "unknown option".
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('ls -1').stdout, t.run('ls').stdout)
+    // Composes with the existing -a / -l flags via bundling, both
+    // when `1` leads the bundle and when it trails.
+    assert.equal(t.run('ls -1a').stdout, t.run('ls -a').stdout)
+    assert.equal(t.run('ls -1l').stdout, t.run('ls -l').stdout)
+    assert.equal(t.run('ls -a1').stdout, t.run('ls -a').stdout)
+    assert.equal(t.run('ls -la1').stdout, t.run('ls -la').stdout)
+  })
+
+  it('ls is one-per-line whenever its output reaches a pipe (direct, subshell, or group)', () => {
+    // Pin pipe-target behavior NOW so a future "table output when
+    // interactive" ls has to deliberately preserve pipe semantics.
+    // All three forms should produce the same bytes as the explicit
+    // `ls -1 | cat`, regardless of how the output route is shaped.
+    const t = createTerminal(SOURCES)
+    const baseline = t.run('ls -1 | cat').stdout
+    assert.equal(t.run('ls | cat').stdout, baseline, 'direct pipe')
+    assert.equal(t.run('(ls) | cat').stdout, baseline, 'subshell pipe')
+    // Two ls'es inside the subshell — exercises that group stdout
+    // concatenates through the pipe (each ls produces the baseline,
+    // so the cat downstream sees baseline + baseline). Catches a
+    // future regression where group stdout would, say, get a
+    // terminator inserted between steps or columns get rebuilt.
+    assert.equal(t.run('(ls; ls) | cat').stdout, baseline + baseline, 'subshell+sequence pipe')
+  })
+
+  it('ls -- -1 treats `-1` as a literal filename (terminator honored)', () => {
+    // The pre-parseArgs `-1` strip would otherwise silently drop a
+    // literal `-1` filename — leaking abstraction. After `--`,
+    // every following token must reach parseArgs/lsTarget as-is.
+    const t = createTerminal(SOURCES)
+    const r = t.run('ls -- -1')
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stderr, /-1: no such file/u)
+  })
+
+  it('ls -10 / -123 (pure-digit shorts) stay positional, matching head -5 shorthand', () => {
+    // Mixed bundles like `-1a` get their `1` stripped because the
+    // intent is clearly "POSIX -1 + other flags". Pure-digit tokens
+    // are NOT bundle-shaped — parseArgs's `^-\d` guard already
+    // classifies them as positional. ls then tries to read them as
+    // filenames and reports "no such file" rather than mangling
+    // them into a malformed flag set.
+    const t = createTerminal(SOURCES)
+    assert.match(t.run('ls -10').stderr, /-10: no such file/u)
+    assert.match(t.run('ls -123').stderr, /-123: no such file/u)
+  })
+
+  it('ls -1 -1 is idempotent (multiple -1 flags collapse to a no-op)', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('ls -1 -1').stdout, t.run('ls').stdout)
+  })
+
   it('ls routes per-target "no such file" to stderr (not stdout) on partial failure', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('ls src nope')
@@ -845,6 +903,39 @@ describe('createTerminal — text commands', () => {
     // dupes keep separate count rows. Width 7 + space + value.
     const t = createTerminal({ 'f.txt': 'a\na\nb\na\n' })
     assert.equal(t.run('cat f.txt | uniq -c').stdout, '      2 a\n      1 b\n      1 a\n')
+  })
+
+  it('uniq -d keeps only lines that recurred in a run; -u keeps only one-shots', () => {
+    // For input a a b a a a c:
+    // runs are (a,2), (b,1), (a,3), (c,1).
+    // -d keeps runs with count >= 2 → one `a` per repeated run.
+    // -u keeps runs with count == 1 → `b`, `c`.
+    const t = createTerminal({ 'f.txt': 'a\na\nb\na\na\na\nc\n' })
+    assert.equal(t.run('cat f.txt | uniq -d').stdout, 'a\na\n')
+    assert.equal(t.run('cat f.txt | uniq -u').stdout, 'b\nc\n')
+    // -cd: count column with only the duplicate runs.
+    assert.equal(t.run('cat f.txt | uniq -cd').stdout, '      2 a\n      3 a\n')
+  })
+
+  it('uniq -d -u together produces no output (empty intersection)', () => {
+    // A line can't simultaneously be a duplicate AND a one-shot.
+    // GNU behaves the same way (or errors on some versions); we
+    // pick the silent-empty path so scripts passing both flags
+    // by accident don't blow up.
+    const t = createTerminal({ 'f.txt': 'a\na\nb\n' })
+    const r = t.run('cat f.txt | uniq -du')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '')
+  })
+
+  it('uniq -i compares case-insensitively; output preserves the first occurrence as-is', () => {
+    // Apple / APPLE collapse into one run; the kept text is the
+    // FIRST line of the run (`Apple`), not normalized to lowercase.
+    const t = createTerminal({ 'f.txt': 'Apple\nAPPLE\napple\nBanana\nbanana\n' })
+    assert.equal(t.run('cat f.txt | uniq -i').stdout, 'Apple\nBanana\n')
+    // -ic combines correctly: count reflects the case-insensitive
+    // grouping (3 + 2).
+    assert.equal(t.run('cat f.txt | uniq -ic').stdout, '      3 Apple\n      2 Banana\n')
   })
 
   it('ls multi-target partial failure: matches succeed on stdout, misses on stderr', () => {

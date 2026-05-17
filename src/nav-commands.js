@@ -23,7 +23,18 @@ function cd(_stdin, tokens, ctx) {
 }
 
 function ls(_stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['l', 'a'] })
+  // `-1` (force one-per-line) is accepted but a no-op today: ls
+  // already emits one entry per line because the virtual terminal
+  // has no TTY notion, so there's no multi-column mode to switch
+  // out of. We still accept the flag so scripts that defensively
+  // prefix `-1` (in case a future ls grows table output) keep
+  // working unchanged.
+  //
+  // parseArgs's `^-\d/` guard (which keeps `head -5` shorthand
+  // working) treats `-1` and `-1a` as positionals, so peel the
+  // `1` out of the token list before parsing — `-1`, `-1a`, `-a1`,
+  // and `-la1` all reach the schema cleanly that way.
+  const { flags, positional } = parseArgs(stripDashOne(tokens), { short: ['l', 'a'] })
   const opts = { long: flags.has('l'), all: flags.has('a') }
   const targets = positional.length > 0 ? positional : ['.']
   const out = []
@@ -44,6 +55,32 @@ function ls(_stdin, tokens, ctx) {
     stderr: errs.length === 0 ? '' : errs.join('\n') + '\n',
     exitCode,
   }
+}
+
+// Drop the POSIX `-1` flag from a token list before parseArgs sees
+// it. Handles three shapes:
+//   `-1`         standalone → removed
+//   `-1<rest>`   leading-1 bundle → `-<rest>` (parseArgs's `^-\d`
+//                guard would otherwise classify it as positional)
+//   `-<rest>1<rest>` non-leading-1 bundle → strip the `1` in place
+// Only MIXED bundles (letters + digits) get their `1` stripped —
+// pure-digit tokens like `-10` stay positional, matching how
+// parseArgs treats `head -5` shorthand. `--` ends the strip so a
+// literal `-1` filename after the terminator survives.
+function stripDashOne(tokens) {
+  const out = []
+  let afterTerminator = false
+  for (const t of tokens) {
+    if (afterTerminator) { out.push(t); continue }
+    if (t === '--') { out.push(t); afterTerminator = true; continue }
+    if (t === '-1') continue
+    if (/^-[a-zA-Z0-9]+$/u.test(t) && t.includes('1') && /[a-zA-Z]/u.test(t)) {
+      out.push('-' + t.slice(1).replaceAll('1', ''))
+      continue
+    }
+    out.push(t)
+  }
+  return out
 }
 
 function lsTarget(target, multiple, opts, ctx) {

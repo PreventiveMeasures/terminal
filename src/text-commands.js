@@ -124,18 +124,39 @@ function sort(stdin, tokens) {
   return ok(lines.length === 0 ? '' : lines.join('\n') + '\n')
 }
 
+// Collapse adjacent duplicate lines from stdin. Flags compose:
+//   -c    prefix each kept line with its run count (7-wide right-aligned)
+//   -d    keep only lines that appeared >= 2 times in their run
+//   -u    keep only lines that appeared exactly once
+//   -i    case-insensitive comparison (output preserves original case)
+// `-d` and `-u` together produces no output (the empty intersection)
+// rather than erroring — matches what GNU does on common versions
+// and avoids surprising scripts that pass both flags.
 function uniq(stdin, tokens) {
-  const { flags } = parseArgs(tokens, { short: ['c'] })
+  const { flags } = parseArgs(tokens, { short: ['c', 'd', 'u', 'i'] })
+  const showCount = flags.has('c')
+  const onlyDups = flags.has('d')
+  const onlyUniques = flags.has('u')
+  const ignoreCase = flags.has('i')
+  const norm = (s) => ignoreCase ? s.toLowerCase() : s
   const lines = splitLines(stdin)
   const out = []
   let prev = null
+  let prevKey = null
   let count = 0
   const flush = () => {
-    if (prev !== null) out.push(flags.has('c') ? `${String(count).padStart(7)} ${prev}` : prev)
+    if (prev === null) return
+    const isDup = count >= 2
+    const keep = (onlyDups && onlyUniques) ? false
+      : onlyDups ? isDup
+      : onlyUniques ? !isDup
+      : true
+    if (keep) out.push(showCount ? `${String(count).padStart(7)} ${prev}` : prev)
   }
   for (const l of lines) {
-    if (l === prev) { count++; continue }
-    flush(); prev = l; count = 1
+    const key = norm(l)
+    if (key === prevKey) { count++; continue }
+    flush(); prev = l; prevKey = key; count = 1
   }
   flush()
   return ok(out.length === 0 ? '' : out.join('\n') + '\n')
