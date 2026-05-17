@@ -74,10 +74,39 @@ describe('createTerminal — basics', () => {
     const baseline = t.run('ls -1 | cat').stdout
     assert.equal(t.run('ls | cat').stdout, baseline, 'direct pipe')
     assert.equal(t.run('(ls) | cat').stdout, baseline, 'subshell pipe')
-    // The subshell's last command is `true` (no output), so its
-    // stdout is just ls's — confirms that combining ls with a
-    // sibling step inside a subshell doesn't change pipe semantics.
-    assert.equal(t.run('(ls; true) | cat').stdout, baseline, 'subshell+sequence pipe')
+    // Two ls'es inside the subshell — exercises that group stdout
+    // concatenates through the pipe (each ls produces the baseline,
+    // so the cat downstream sees baseline + baseline). Catches a
+    // future regression where group stdout would, say, get a
+    // terminator inserted between steps or columns get rebuilt.
+    assert.equal(t.run('(ls; ls) | cat').stdout, baseline + baseline, 'subshell+sequence pipe')
+  })
+
+  it('ls -- -1 treats `-1` as a literal filename (terminator honored)', () => {
+    // The pre-parseArgs `-1` strip would otherwise silently drop a
+    // literal `-1` filename — leaking abstraction. After `--`,
+    // every following token must reach parseArgs/lsTarget as-is.
+    const t = createTerminal(SOURCES)
+    const r = t.run('ls -- -1')
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stderr, /-1: no such file/u)
+  })
+
+  it('ls -10 / -123 (pure-digit shorts) stay positional, matching head -5 shorthand', () => {
+    // Mixed bundles like `-1a` get their `1` stripped because the
+    // intent is clearly "POSIX -1 + other flags". Pure-digit tokens
+    // are NOT bundle-shaped — parseArgs's `^-\d` guard already
+    // classifies them as positional. ls then tries to read them as
+    // filenames and reports "no such file" rather than mangling
+    // them into a malformed flag set.
+    const t = createTerminal(SOURCES)
+    assert.match(t.run('ls -10').stderr, /-10: no such file/u)
+    assert.match(t.run('ls -123').stderr, /-123: no such file/u)
+  })
+
+  it('ls -1 -1 is idempotent (multiple -1 flags collapse to a no-op)', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('ls -1 -1').stdout, t.run('ls').stdout)
   })
 
   it('ls routes per-target "no such file" to stderr (not stdout) on partial failure', () => {
