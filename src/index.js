@@ -258,17 +258,23 @@ function unknownCommand(name) {
 // Priority order for what fills that slot:
 //   1. Command position, bin-prefixed token (`/usr/bin/grep…`)
 //      → command list, bin prefix preserved on the way out.
-//   2. Command position, token starting with `/` or `./` → walk the
-//      virtual FS (lets users complete `./script.js`-style paths).
+//   2. Command position, token starting with `/` or `./` → `[]`.
+//      Paths look like commands at the head of a segment, but the
+//      dispatcher only recognizes BIN_PREFIXES as command paths;
+//      everything else would be "command not found", so we don't
+//      surface them. `./script.js`, `/src/foo`, `a;./x`, `a; ./x`
+//      — all suppressed.
 //   3. Command position, anything else → command list.
 //   4. Argument position → walk the virtual FS treating the trailing
 //      word as a path. `cat src/f` is equivalent to `cat ./src/f`;
 //      empty trailing word lists the whole cwd, like bash.
 //
-// Commands directly after a `|` are restricted to PIPE_NAMES — only
-// commands that consume stdin make sense as pipe targets. `||` /
-// `&&` / `;` don't trigger this filter since each starts a fresh
-// pipeline with its own stdin.
+// After a `|`, completion is doubly restricted: the command-name
+// list shrinks to PIPE_NAMES (only commands that consume stdin),
+// AND argument-position path completion is suppressed — the piped
+// stream is the real data source, so file arguments would mislead
+// the user. `||` / `&&` / `;` don't trigger any of this since each
+// starts a fresh pipeline with its own stdin.
 //
 // Quote-blind by design (in both the boundary scan and the tail
 // word): `parse.js` handles quoting for execution, but completion
@@ -297,15 +303,33 @@ function complete(line, ctx) {
 // In command position, bin-prefix and `./` / `/` path completion
 // have to be handled explicitly — bare names there resolve against
 // the command list, not the FS. In argument position the rules
-// collapse: every token goes through `completePath` so `cat src/f`
-// works the same as `cat ./src/f`.
+// usually collapse to a `completePath` walk so `cat src/f` works
+// the same as `cat ./src/f`.
+//
+// After a `|`, path completion is suppressed entirely: the piped
+// stream is the data source, so offering file arguments would
+// mislead users (`cat 1 | grep PATTERN /etc/hosts` shadows the
+// pipe input). Only the command-name completion at the head of
+// the pipe segment survives.
 //
 // `resolveCommand` strips bin prefixes when dispatching, so the
 // `/usr/bin/...` shortcut is meaningful for argv[0] only. Surfacing
 // it in arg position would mislead the user into `cat /usr/bin/grep`
 // against a path that doesn't exist in the virtual FS.
+// In command position, bin-prefix completion is the only way a
+// path-looking token gets surfaced — `resolveCommand` strips
+// BIN_PREFIXES at dispatch time, so `/usr/bin/grep` actually runs.
+// Everything else starting with `/` or `./` would dispatch to
+// "command not found" (no PATH lookup, no FS-resolved execution),
+// so we return `[]` rather than mislead the user. Bare names fall
+// through to the command-list filter.
+//
+// In argument position the rules collapse to `completePath` so
+// `cat src/f` works the same as `cat ./src/f` — unless we're after
+// a `|`, where the piped stream is the data source and file
+// arguments would be misleading.
 function completeWord(word, commandPosition, pipe, ctx) {
-  if (!commandPosition) return completePath(word, ctx)
+  if (!commandPosition) return pipe ? [] : completePath(word, ctx)
   const names = pipe ? PIPE_NAMES : COMMAND_NAMES
   for (const prefix of BIN_PREFIXES) {
     if (word.startsWith(prefix)) {
@@ -313,7 +337,7 @@ function completeWord(word, commandPosition, pipe, ctx) {
       return names.filter((n) => n.startsWith(suffix)).map((n) => prefix + n)
     }
   }
-  if (word.startsWith('/') || word.startsWith('./')) return completePath(word, ctx)
+  if (word.startsWith('/') || word.startsWith('./')) return []
   return names.filter((n) => n.startsWith(word))
 }
 
