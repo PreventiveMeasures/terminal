@@ -1,4 +1,4 @@
-/** Virtual source tree: a map of absolute-or-relative paths to file contents. */
+/** Virtual source tree: a map of file paths (leading `/` optional) to file contents. */
 export interface Sources {
   [path: string]: string
 }
@@ -29,5 +29,9 @@ export interface Terminal {
   cwd(): string
 }
 
-/** Create an in-memory terminal over a `{ path: content }` source tree. */
+/**
+ * Create an in-memory terminal over a `{ path: content }` source tree.
+ *
+ * @throws if `opts.cwd` does not resolve to an existing directory.
+ */
 export function createTerminal(sources: Sources, opts?: CreateTerminalOptions): Terminal
