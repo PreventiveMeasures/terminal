@@ -3253,4 +3253,60 @@ describe('createTerminal — complete: corner cases', () => {
     assert.ok(t.complete('a ; cat ./').includes('a ; cat ./src/'))
     assert.deepEqual(t.complete('cat /src/f'), ['cat /src/foo.js'])
   })
+
+  it('cd suggests only directories (files are not valid `cd` targets)', () => {
+    const t = createTerminal({
+      'src/foo.js': 'x',
+      'src/util/log.js': 'y',
+      'README.md': 'z',
+      'dist/index.js': 'w',
+    })
+    // Empty trailing word: cwd dirs only, no files.
+    const c = t.complete('cd ')
+    assert.ok(c.includes('cd src/'))
+    assert.ok(c.includes('cd dist/'))
+    assert.ok(!c.includes('cd README.md'))
+    // Partial dir name.
+    assert.deepEqual(t.complete('cd sr'), ['cd src/'])
+    // Subdir — only `util/` survives, no `foo.js`.
+    assert.deepEqual(t.complete('cd src/'), ['cd src/util/'])
+    // `./` and `/` paths follow the same rule.
+    assert.ok(t.complete('cd ./').includes('cd ./src/'))
+    assert.ok(!t.complete('cd ./').some((s) => s.endsWith('README.md')))
+    assert.ok(t.complete('cd /').includes('cd /src/'))
+    assert.ok(!t.complete('cd /').some((s) => s.endsWith('README.md')))
+  })
+
+  it('cd via bin prefix (`/usr/bin/cd`) still does dirs-only completion', () => {
+    const t = createTerminal({ 'src/foo.js': 'x', 'README.md': 'y' })
+    // resolveCommand collapses `/usr/bin/cd` to `cd`, so the
+    // per-command rule fires for both spellings.
+    for (const cmd of ['/usr/bin/cd', '/bin/cd']) {
+      const c = t.complete(cmd + ' ')
+      assert.ok(c.includes(cmd + ' src/'), `${cmd} should suggest src/`)
+      assert.ok(!c.includes(cmd + ' README.md'), `${cmd} should NOT suggest README.md`)
+    }
+  })
+
+  it('cd dotfile gating: hidden dirs surface only when partial starts with `.`', () => {
+    const t = createTerminal({
+      'src/foo.js': 'x',
+      '.config/settings.json': 'y',
+    })
+    // `.config/` is a hidden dir — invisible by default.
+    assert.ok(!t.complete('cd ').some((s) => s.includes('.config')))
+    // Surfaces once the partial starts with '.'.
+    assert.ok(t.complete('cd .').includes('cd .config/'))
+  })
+
+  it('cd dirs-only doesn\'t leak into other commands', () => {
+    // Regression: cat / grep / etc. still see files as before.
+    const t = createTerminal({ 'src/foo.js': 'x', 'README.md': 'y' })
+    const c = t.complete('cat ')
+    assert.ok(c.includes('cat src/'))
+    assert.ok(c.includes('cat README.md'))
+    const g = t.complete('grep PATT ')
+    assert.ok(g.includes('grep PATT src/'))
+    assert.ok(g.includes('grep PATT README.md'))
+  })
 })
