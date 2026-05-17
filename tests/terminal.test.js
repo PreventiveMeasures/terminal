@@ -3000,27 +3000,44 @@ describe('createTerminal — complete: corner cases', () => {
     assert.ok(t.complete('cat | grep || ').includes('cat | grep || pwd'))
   })
 
-  it('pipe filter is gated on command position only — arg position still walks the FS', () => {
+  it('path completion is suppressed everywhere after `|` (file args mislead the user)', () => {
     const t = createTerminal(SOURCES)
-    // After `cat | grep TODO `, we're in argument position. The
-    // pipe-filter doesn't restrict path tokens.
-    assert.deepEqual(t.complete('cat | grep TODO /src/f'), ['cat | grep TODO /src/foo.js'])
-    const c = t.complete('cat | grep TODO ')
-    assert.ok(c.includes('cat | grep TODO src/'))
-    assert.ok(c.includes('cat | grep TODO README.md'))
+    // Argument position after `|` — empty word would list cwd in
+    // the no-pipe case (`cat ` → [src/, README.md]); with the pipe
+    // it's [].
+    assert.deepEqual(t.complete('cat | grep TODO '), [])
+    // Argument position, bare path partial.
+    assert.deepEqual(t.complete('cat | grep TODO src/f'), [])
+    // Argument position, `/`-prefixed path.
+    assert.deepEqual(t.complete('cat | grep TODO /src/f'), [])
+    // Argument position, `./`-prefixed path.
+    assert.deepEqual(t.complete('cat | grep TODO ./src/f'), [])
+    // Command position right after `|`, `./` / `/` path tokens are
+    // also suppressed — even though they'd be FS lookups without
+    // the pipe context.
+    assert.deepEqual(t.complete('cat | ./'), [])
+    assert.deepEqual(t.complete('cat | /src/f'), [])
   })
 
-  it('explicit `./` / `/` path tokens after `|` walk the FS, not PIPE_NAMES', () => {
-    const t = createTerminal({ 'script.sh': 'x', 'data.txt': 'y' })
-    // A `./`-prefixed token in command position is the user opting
-    // into FS completion — pipe-filter respects that and returns
-    // virtual-FS entries, not pipe targets.
-    const c1 = t.complete('cat | ./')
-    assert.ok(c1.includes('cat | ./script.sh'))
-    assert.ok(c1.includes('cat | ./data.txt'))
-    // Same for absolute paths.
-    const c2 = t.complete('cat | /script')
-    assert.deepEqual(c2, ['cat | /script.sh'])
+  it('but bin-prefixed command names still complete after `|` (they are commands, not files)', () => {
+    const t = createTerminal(SOURCES)
+    // `/usr/bin/grep` is parsed as a command alias, not a file path,
+    // so bin-prefix completion still resolves against PIPE_NAMES.
+    assert.deepEqual(t.complete('cat | /usr/bin/gre'), ['cat | /usr/bin/grep'])
+    assert.deepEqual(t.complete('cat | /bin/he'), ['cat | /bin/head'])
+    // Non-pipeable bin-prefixed commands still return [] — same as before.
+    assert.deepEqual(t.complete('cat | /usr/bin/l'), [])
+  })
+
+  it('`||` / `&&` / `;` after a pipe restore normal path completion', () => {
+    const t = createTerminal(SOURCES)
+    // After these separators we're in a fresh statement context —
+    // file args mean files again.
+    assert.deepEqual(t.complete('cat ; grep PATT src/f'), ['cat ; grep PATT src/foo.js'])
+    assert.deepEqual(t.complete('cat && grep PATT /src/f'), ['cat && grep PATT /src/foo.js'])
+    const c = t.complete('cat || grep PATT ')
+    assert.ok(c.includes('cat || grep PATT src/'))
+    assert.ok(c.includes('cat || grep PATT README.md'))
   })
 
   it('HIDDEN pipeable command (sed) stays invisible after `|`', () => {

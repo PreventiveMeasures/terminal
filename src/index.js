@@ -265,10 +265,13 @@ function unknownCommand(name) {
 //      word as a path. `cat src/f` is equivalent to `cat ./src/f`;
 //      empty trailing word lists the whole cwd, like bash.
 //
-// Commands directly after a `|` are restricted to PIPE_NAMES — only
-// commands that consume stdin make sense as pipe targets. `||` /
-// `&&` / `;` don't trigger this filter since each starts a fresh
-// pipeline with its own stdin.
+// After a `|`, completion is doubly restricted: the command-name
+// list shrinks to PIPE_NAMES (only commands that consume stdin),
+// and path completion is suppressed entirely — `cat | grep PATT `
+// returns [] rather than listing cwd, since the piped stream is
+// the real data source and file arguments would mislead the user.
+// `||` / `&&` / `;` don't trigger any of this since each starts a
+// fresh pipeline with its own stdin.
 //
 // Quote-blind by design (in both the boundary scan and the tail
 // word): `parse.js` handles quoting for execution, but completion
@@ -297,15 +300,21 @@ function complete(line, ctx) {
 // In command position, bin-prefix and `./` / `/` path completion
 // have to be handled explicitly — bare names there resolve against
 // the command list, not the FS. In argument position the rules
-// collapse: every token goes through `completePath` so `cat src/f`
-// works the same as `cat ./src/f`.
+// usually collapse to a `completePath` walk so `cat src/f` works
+// the same as `cat ./src/f`.
+//
+// After a `|`, path completion is suppressed entirely: the piped
+// stream is the data source, so offering file arguments would
+// mislead users (`cat 1 | grep PATTERN /etc/hosts` shadows the
+// pipe input). Only the command-name completion at the head of
+// the pipe segment survives.
 //
 // `resolveCommand` strips bin prefixes when dispatching, so the
 // `/usr/bin/...` shortcut is meaningful for argv[0] only. Surfacing
 // it in arg position would mislead the user into `cat /usr/bin/grep`
 // against a path that doesn't exist in the virtual FS.
 function completeWord(word, commandPosition, pipe, ctx) {
-  if (!commandPosition) return completePath(word, ctx)
+  if (!commandPosition) return pipe ? [] : completePath(word, ctx)
   const names = pipe ? PIPE_NAMES : COMMAND_NAMES
   for (const prefix of BIN_PREFIXES) {
     if (word.startsWith(prefix)) {
@@ -313,7 +322,7 @@ function completeWord(word, commandPosition, pipe, ctx) {
       return names.filter((n) => n.startsWith(suffix)).map((n) => prefix + n)
     }
   }
-  if (word.startsWith('/') || word.startsWith('./')) return completePath(word, ctx)
+  if (word.startsWith('/') || word.startsWith('./')) return pipe ? [] : completePath(word, ctx)
   return names.filter((n) => n.startsWith(word))
 }
 
