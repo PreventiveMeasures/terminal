@@ -258,14 +258,12 @@ function unknownCommand(name) {
 // Priority order for what fills that slot:
 //   1. Command position, bin-prefixed token (`/usr/bin/grep…`)
 //      → command list, bin prefix preserved on the way out.
-//   2. Command position, token starting with `/` or `./` → walk the
-//      virtual FS — UNLESS the line is whitespace-free (just `./`
-//      or `/src/foo`, no `cat ./`), in which case `[]`. Bare paths
-//      at the head of a line look like commands to the user, but
-//      the dispatcher only recognizes BIN_PREFIXES (`/usr/bin/…`)
-//      as command paths; suggesting other paths would lead to
-//      "command not found". Bare-name tokens (`src`, `foo`) fall
-//      through to the command-list filter and need no extra check.
+//   2. Command position, token starting with `/` or `./` → `[]`.
+//      Paths look like commands at the head of a segment, but the
+//      dispatcher only recognizes BIN_PREFIXES as command paths;
+//      everything else would be "command not found", so we don't
+//      surface them. `./script.js`, `/src/foo`, `a;./x`, `a; ./x`
+//      — all suppressed.
 //   3. Command position, anything else → command list.
 //   4. Argument position → walk the virtual FS treating the trailing
 //      word as a path. `cat src/f` is equivalent to `cat ./src/f`;
@@ -273,11 +271,10 @@ function unknownCommand(name) {
 //
 // After a `|`, completion is doubly restricted: the command-name
 // list shrinks to PIPE_NAMES (only commands that consume stdin),
-// and path completion is suppressed entirely — `cat | grep PATT `
-// returns [] rather than listing cwd, since the piped stream is
-// the real data source and file arguments would mislead the user.
-// `||` / `&&` / `;` don't trigger any of this since each starts a
-// fresh pipeline with its own stdin.
+// AND argument-position path completion is suppressed — the piped
+// stream is the real data source, so file arguments would mislead
+// the user. `||` / `&&` / `;` don't trigger any of this since each
+// starts a fresh pipeline with its own stdin.
 //
 // Quote-blind by design (in both the boundary scan and the tail
 // word): `parse.js` handles quoting for execution, but completion
@@ -300,14 +297,7 @@ function complete(line, ctx) {
   // started at a later index, and `head` would end in whitespace).
   // `||` / `&&` / `;` aren't touched — only single-pipe completion.
   const sep = pipe && head.endsWith('|') ? ' ' : ''
-  // Path completion is suppressed when (a) after a `|` (the piped
-  // stream is the data source, not a file) or (b) the line has no
-  // whitespace yet — the user is still typing the first command,
-  // and bare paths aren't executable in this virtual FS (only
-  // BIN_PREFIXES dispatch). Bin-prefix and command-name completion
-  // are unaffected.
-  const suppressPath = pipe || !/\s/u.test(line)
-  return completeWord(word, commandPosition, pipe, suppressPath, ctx).map((w) => head + sep + w)
+  return completeWord(word, commandPosition, pipe, ctx).map((w) => head + sep + w)
 }
 
 // In command position, bin-prefix and `./` / `/` path completion
@@ -326,8 +316,20 @@ function complete(line, ctx) {
 // `/usr/bin/...` shortcut is meaningful for argv[0] only. Surfacing
 // it in arg position would mislead the user into `cat /usr/bin/grep`
 // against a path that doesn't exist in the virtual FS.
-function completeWord(word, commandPosition, pipe, suppressPath, ctx) {
-  if (!commandPosition) return suppressPath ? [] : completePath(word, ctx)
+// In command position, bin-prefix completion is the only way a
+// path-looking token gets surfaced — `resolveCommand` strips
+// BIN_PREFIXES at dispatch time, so `/usr/bin/grep` actually runs.
+// Everything else starting with `/` or `./` would dispatch to
+// "command not found" (no PATH lookup, no FS-resolved execution),
+// so we return `[]` rather than mislead the user. Bare names fall
+// through to the command-list filter.
+//
+// In argument position the rules collapse to `completePath` so
+// `cat src/f` works the same as `cat ./src/f` — unless we're after
+// a `|`, where the piped stream is the data source and file
+// arguments would be misleading.
+function completeWord(word, commandPosition, pipe, ctx) {
+  if (!commandPosition) return pipe ? [] : completePath(word, ctx)
   const names = pipe ? PIPE_NAMES : COMMAND_NAMES
   for (const prefix of BIN_PREFIXES) {
     if (word.startsWith(prefix)) {
@@ -335,7 +337,7 @@ function completeWord(word, commandPosition, pipe, suppressPath, ctx) {
       return names.filter((n) => n.startsWith(suffix)).map((n) => prefix + n)
     }
   }
-  if (word.startsWith('/') || word.startsWith('./')) return suppressPath ? [] : completePath(word, ctx)
+  if (word.startsWith('/') || word.startsWith('./')) return []
   return names.filter((n) => n.startsWith(word))
 }
 

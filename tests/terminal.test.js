@@ -3220,34 +3220,37 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat /src/foo.js'), ['cat /src/foo.js'])
   })
 
-  it('no-whitespace input suppresses path completion (bare paths aren\'t executable)', () => {
+  it('command-position path tokens are always suppressed (only BIN_PREFIXES dispatch)', () => {
     const t = createTerminal(SOURCES)
-    // Bare `./` / `/` / path-prefixed tokens at the head of a line
-    // would look like commands but the dispatcher only recognizes
-    // BIN_PREFIXES — surfacing them would lead to "command not found".
+    // `./` / `/` at the head of a segment look like commands but
+    // resolveCommand only recognizes BIN_PREFIXES — anything else
+    // would dispatch to "command not found".
     assert.deepEqual(t.complete('./'), [])
     assert.deepEqual(t.complete('/'), [])
     assert.deepEqual(t.complete('./src/f'), [])
     assert.deepEqual(t.complete('/src/f'), [])
     assert.deepEqual(t.complete('/.hidden'), [])
-    // Bare names that don't match any command also return [] (already
-    // the prior behavior — bare names go through the command list,
-    // not the FS).
+    // Bare names hit the command-list filter, not the FS — `src`
+    // matches no command, so [].
     assert.deepEqual(t.complete('src'), [])
     assert.deepEqual(t.complete('src/f'), [])
     // Bin-prefixed commands are exempt — they resolve as commands.
     assert.deepEqual(t.complete('/usr/bin/gre'), ['/usr/bin/grep'])
     assert.deepEqual(t.complete('/bin/cat'), ['/bin/cat'])
-    // Bare command-name completion still works — `gre` matches the
-    // public `grep`, no files involved.
+    // Bare command-name completion still works.
     assert.deepEqual(t.complete('gre'), ['grep'])
-    // Any whitespace in the line unlocks path completion. Leading
-    // whitespace works too, even though it's unusual.
-    assert.ok(t.complete(' ./').includes(' ./src/'))
-    assert.ok(t.complete('cat ./').includes('cat ./src/'))
-    // After `;` / `&&` / `||`, the no-whitespace rule still applies
-    // to the WHOLE line (not just the segment).
+    // Leading whitespace doesn't change "we're in command position".
+    assert.deepEqual(t.complete(' ./'), [])
+    assert.deepEqual(t.complete('\t./'), [])
+    // After `;` / `&&` / `||`, the next segment is also command
+    // position — same suppression, regardless of intervening spaces.
     assert.deepEqual(t.complete('a;./script'), [])
-    assert.ok(t.complete('a; ./').includes('a; ./src/'))
+    assert.deepEqual(t.complete('a; ./'), [])
+    assert.deepEqual(t.complete('a && /src/f'), [])
+    // BUT: if the path is preceded by an already-typed command in
+    // the same segment, it's argument position — completion fires.
+    assert.ok(t.complete('cat ./').includes('cat ./src/'))
+    assert.ok(t.complete('a ; cat ./').includes('a ; cat ./src/'))
+    assert.deepEqual(t.complete('cat /src/f'), ['cat /src/foo.js'])
   })
 })
