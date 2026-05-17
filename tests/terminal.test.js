@@ -1095,6 +1095,33 @@ describe('createTerminal — errors', () => {
     assert.match(r.stderr, /\bcat\b/u)
   })
 
+  it('/bin/, /sbin/, /usr/bin/, /usr/local/bin/ prefixes resolve to the registered command', () => {
+    const t = createTerminal(SOURCES)
+    // Bare and prefixed forms produce identical results for any
+    // registered command — same stdout, same exit code.
+    const bare = t.run('ls')
+    for (const prefix of ['/bin/', '/sbin/', '/usr/bin/', '/usr/local/bin/']) {
+      const r = t.run(`${prefix}ls`)
+      assert.equal(r.stdout, bare.stdout, `${prefix}ls: stdout mismatch`)
+      assert.equal(r.exitCode, bare.exitCode, `${prefix}ls: exit mismatch`)
+    }
+    // Args pass through to the resolved command.
+    assert.equal(t.run('/bin/echo hi').stdout, 'hi\n')
+    assert.equal(t.run('/usr/bin/grep TODO src/foo.js').stdout, '// TODO: fix\n')
+    assert.equal(t.run('/usr/local/bin/echo hi').stdout, 'hi\n')
+    // Works inside pipelines too — dispatch is the single entry point.
+    assert.equal(t.run('echo hi | /bin/cat').stdout, 'hi\n')
+  })
+
+  it('prefixed names that do not resolve to a known command still error', () => {
+    const t = createTerminal(SOURCES)
+    // The bare name isn't registered, so the prefix isn't stripped
+    // and the not-found error reflects what was typed.
+    const r = t.run('/bin/frobnicate')
+    assert.equal(r.exitCode, 127)
+    assert.match(r.stderr, /\/bin\/frobnicate: command not found/u)
+  })
+
   it('Object.prototype names are not dispatchable as commands', () => {
     // Without `__proto__: null` on the registries, `COMMANDS['toString']`
     // would surface `Object.prototype.toString` and dispatch() would
