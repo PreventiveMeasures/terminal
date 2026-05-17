@@ -2230,32 +2230,34 @@ describe('createTerminal — which', () => {
     assert.equal(t.run('which which').stdout, '/usr/bin/which\n')
   })
 
-  it('unknown command: silent on stdout, exit 1', () => {
-    // Matches GNU `which`: prints nothing for misses and bumps the
-    // exit code so callers can detect "not all found".
+  it('unknown command: prints `<name> not found` on stdout, exit 1', () => {
+    // Matches the zsh `which` builtin shape: misses are reported
+    // inline (so a multi-arg call shows which ones failed) and the
+    // exit code bumps so callers can still detect "not all found".
     const t = createTerminal({})
     const r = t.run('which frobnicate')
     assert.equal(r.exitCode, 1)
-    assert.equal(r.stdout, '')
+    assert.equal(r.stdout, 'frobnicate not found\n')
     assert.equal(r.stderr, '')
   })
 
-  it('mixed: only known names print; exit 1 if any were unknown', () => {
+  it('mixed: paths and not-found interleave in argv order; exit 1 if any miss', () => {
     const t = createTerminal({})
     const r = t.run('which ls frobnicate cat')
     assert.equal(r.exitCode, 1)
-    assert.equal(r.stdout, '/usr/bin/ls\n/usr/bin/cat\n')
+    assert.equal(r.stdout, '/usr/bin/ls\nfrobnicate not found\n/usr/bin/cat\n')
   })
 
   it('does NOT participate in the /bin prefix mapping', () => {
     // `dispatch` strips `/bin/` etc. when the bare name is known,
     // but `which` checks registry membership directly. So
     // `which /bin/ls` looks up the literal `/bin/ls` name (not
-    // registered) and exits 1. This keeps which's contract simple
-    // — strip the prefix yourself if you want the fake path.
+    // registered) and reports it as missing. This keeps which's
+    // contract simple — strip the prefix yourself if you want the
+    // fake path.
     const t = createTerminal({})
     const r = t.run('which /bin/ls')
     assert.equal(r.exitCode, 1)
-    assert.equal(r.stdout, '')
+    assert.equal(r.stdout, '/bin/ls not found\n')
   })
 })

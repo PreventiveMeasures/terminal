@@ -224,11 +224,11 @@ function squeezeChars(s, set) {
 }
 
 // Print the fake `/usr/bin/<name>` for each known command. Unknown
-// names are silent on stdout and bump the exit code to 1, matching
-// GNU `which`. The fake-path mapping is one-way: this command does
-// NOT participate in the `/bin/` / `/usr/bin/` prefix stripping
-// that `dispatch` does — checking the registry directly keeps the
-// lookup local and avoids feedback with that resolver.
+// names emit `<name> not found` (zsh-builtin style, on stdout) and
+// bump the exit code to 1. The fake-path mapping is one-way: this
+// command does NOT participate in the `/bin/` / `/usr/bin/` prefix
+// stripping that `dispatch` does — checking the registry directly
+// keeps the lookup local and avoids feedback with that resolver.
 function whichCmd(_stdin, tokens, ctx) {
   const { positional } = parseArgs(tokens)
   if (positional.length === 0) return usage('which COMMAND...')
@@ -236,9 +236,9 @@ function whichCmd(_stdin, tokens, ctx) {
   let exitCode = 0
   for (const name of positional) {
     if (ctx.hasCommand(name)) out.push(`/usr/bin/${name}`)
-    else exitCode = 1
+    else { out.push(`${name} not found`); exitCode = 1 }
   }
-  return { stdout: out.length === 0 ? '' : out.join('\n') + '\n', stderr: '', exitCode }
+  return { stdout: out.join('\n') + '\n', stderr: '', exitCode }
 }
 
 export const EXTRA_COMMANDS = { cut, tac, tr, seq, nl, which: whichCmd }
