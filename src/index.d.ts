@@ -1,7 +1,5 @@
-/** Virtual source tree: a map of file paths (leading `/` optional) to file contents. */
-export interface Sources {
-  [path: string]: string
-}
+/** Virtual source tree: file paths (leading `/` optional) to file contents, as either a plain object or a `Map`. */
+export type Sources = Record<string, string> | Map<string, string>
 
 /** Options for {@link createTerminal}. */
 export interface CreateTerminalOptions {
