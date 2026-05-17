@@ -2331,3 +2331,341 @@ describe('createTerminal — which', () => {
     assert.equal(r.stdout, '/bin/ls not found\n')
   })
 })
+
+describe('createTerminal — complete', () => {
+  it('empty input lists every public command', () => {
+    const t = createTerminal(SOURCES)
+    const c = t.complete('')
+    // Sample a handful from both registries; full membership check
+    // would tie the test to the exact command set and add no value.
+    for (const name of ['cat', 'grep', 'pwd', 'cd', 'ls', 'find', 'echo']) {
+      assert.ok(c.includes(name), `expected ${name} in completions`)
+    }
+    // HIDDEN commands (sed) are intentionally excluded — matches the
+    // "Available: …" hint surfaced by unknownCommand().
+    assert.ok(!c.includes('sed'))
+  })
+
+  it('command-name prefix narrows to commands starting with it', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('gre'), ['grep'])
+    const c = t.complete('c')
+    assert.ok(c.includes('cat'))
+    assert.ok(c.includes('cd'))
+    // Negative: nothing starting with 'c' should leak in (e.g. grep)
+    for (const name of c) assert.ok(name.startsWith('c'))
+  })
+
+  it('returns [] when no command matches the prefix', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('zzz'), [])
+  })
+
+  it('bin prefixes list commands under that prefix', () => {
+    const t = createTerminal(SOURCES)
+    for (const prefix of ['/usr/local/bin/', '/usr/bin/', '/bin/', '/sbin/']) {
+      const c = t.complete(prefix)
+      assert.ok(c.includes(prefix + 'grep'), `${prefix} should list grep`)
+      assert.ok(c.includes(prefix + 'cat'))
+      // Prefix is preserved on every entry.
+      for (const entry of c) assert.ok(entry.startsWith(prefix))
+    }
+  })
+
+  it('bin prefix + partial narrows to commands with that suffix', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('/usr/bin/gre'), ['/usr/bin/grep'])
+    assert.deepEqual(t.complete('/bin/gre'), ['/bin/grep'])
+  })
+
+  it('`/` lists root entries, dirs trailing-slashed', () => {
+    const t = createTerminal(SOURCES)
+    const c = t.complete('/')
+    assert.ok(c.includes('/src/'))
+    assert.ok(c.includes('/README.md'))
+    // Dotfiles hidden unless partial starts with '.'
+    assert.ok(!c.includes('/.hidden'))
+    assert.ok(t.complete('/.').includes('/.hidden'))
+  })
+
+  it('`./` lists cwd entries relative to the current cwd', () => {
+    const t = createTerminal(SOURCES, { cwd: '/src' })
+    const c = t.complete('./')
+    assert.ok(c.includes('./foo.js'))
+    assert.ok(c.includes('./bar.js'))
+    assert.ok(c.includes('./util/'))
+  })
+
+  it('subdirectory path completion preserves the typed prefix', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('/src/f'), ['/src/foo.js'])
+    assert.deepEqual(t.complete('./src/f'), ['./src/foo.js'])
+  })
+
+  it('returns [] for paths under a missing directory', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('/nope/foo'), [])
+  })
+
+  it('pipe / `&&` / `||` / `;` reset to command position', () => {
+    const t = createTerminal(SOURCES)
+    // Full-line replacements: everything before the trailing word is
+    // preserved verbatim, so the caller can drop a result in unmodified.
+    assert.deepEqual(t.complete('cat foo | gre'), ['cat foo | grep'])
+    assert.deepEqual(t.complete('cat foo && gre'), ['cat foo && grep'])
+    assert.deepEqual(t.complete('cat foo || gre'), ['cat foo || grep'])
+    assert.deepEqual(t.complete('cat foo ; gre'), ['cat foo ; grep'])
+    // `||` shouldn't be misread as two `|`s — the next-segment word
+    // should still see an empty command-position word, not "|".
+    const c = t.complete('cat foo ||')
+    assert.ok(c.includes('cat foo ||grep'))
+  })
+
+  it('argument-position bare names path-complete against cwd', () => {
+    // `cat src/f` is treated as `cat ./src/f` — both walk the FS.
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('cat src/f'), ['cat src/foo.js'])
+    assert.deepEqual(t.complete('cat src'), ['cat src/'])
+    // From inside /src, bare `fo` finds foo.js without any `./` prefix.
+    const tSrc = createTerminal(SOURCES, { cwd: '/src' })
+    assert.deepEqual(tSrc.complete('cat fo'), ['cat foo.js'])
+    // Trailing space → empty word → cwd listing (like bash).
+    const c = t.complete('cat ')
+    assert.ok(c.includes('cat src/'))
+    assert.ok(c.includes('cat README.md'))
+    // No match still yields [].
+    assert.deepEqual(t.complete('cat zzz'), [])
+  })
+
+  it('path completion in argument position works after a command', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('cat /src/f'), ['cat /src/foo.js'])
+    const c = t.complete('cat ./')
+    assert.ok(c.includes('cat ./src/'))
+    assert.ok(c.includes('cat ./README.md'))
+  })
+})
+
+describe('createTerminal — complete: full-line contract', () => {
+  it('every variant is a drop-in replacement for the whole input', () => {
+    const t = createTerminal(SOURCES)
+    // Caller does NOT need to tokenize — each result string can be
+    // set directly as the new input.
+    assert.deepEqual(t.complete('gre'), ['grep'])
+    assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])
+    assert.deepEqual(t.complete('cat foo | gre'), ['cat foo | grep'])
+    assert.deepEqual(t.complete('  echo hi ; gre'), ['  echo hi ; grep'])
+    assert.deepEqual(t.complete('cat foo | /usr/bin/gre'), ['cat foo | /usr/bin/grep'])
+    assert.deepEqual(t.complete('echo bar && cat ./src/f'), ['echo bar && cat ./src/foo.js'])
+  })
+
+  it('leading whitespace and inline tabs survive verbatim', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('   gre'), ['   grep'])
+    assert.deepEqual(t.complete('\tgre'), ['\tgrep'])
+    assert.deepEqual(t.complete('a |\tgre'), ['a |\tgrep'])
+  })
+})
+
+describe('createTerminal — complete: corner cases', () => {
+  it('whitespace-only input is empty command position (returns all commands)', () => {
+    const t = createTerminal(SOURCES)
+    // Leading whitespace is preserved verbatim in each full-line variant.
+    for (const input of [' ', '   ', '\t', '\n', '\t  ']) {
+      const c = t.complete(input)
+      assert.ok(c.includes(input + 'cat'), `expected ${JSON.stringify(input + 'cat')}`)
+      assert.ok(c.includes(input + 'grep'), `expected ${JSON.stringify(input + 'grep')}`)
+    }
+  })
+
+  it('separator-only input resets to fresh command position', () => {
+    const t = createTerminal(SOURCES)
+    // Each form: the trailing word is empty and the command-position
+    // check sees `''.trim() === ''` → all commands. The separator chars
+    // are kept verbatim as a prefix on each variant.
+    for (const input of ['|', ';', '||', '&&', '|;||&&', ';   ', ' && ']) {
+      const c = t.complete(input)
+      assert.ok(c.includes(input + 'grep'), `expected ${JSON.stringify(input + 'grep')}`)
+    }
+  })
+
+  it('command-position unknown prefix returns []', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('zzz'), [])
+    assert.deepEqual(t.complete('xyz123'), [])
+    // After a pipe, still command position — same rule applies.
+    assert.deepEqual(t.complete('cat | zzz'), [])
+  })
+
+  it('arg-position empty word lists everything in cwd', () => {
+    const t = createTerminal(SOURCES)
+    // Trailing space → empty trailing word in arg position → cwd
+    // listing, line prefix preserved verbatim.
+    for (const input of ['cat ', 'grep -n ', 'cat foo ']) {
+      const c = t.complete(input)
+      assert.ok(c.includes(input + 'src/'), `expected ${JSON.stringify(input + 'src/')}`)
+      assert.ok(c.includes(input + 'README.md'))
+      // Dotfiles stay hidden when partial is empty.
+      assert.ok(!c.some((s) => s.endsWith('.hidden')))
+    }
+    // Empty FS → empty cwd listing → [].
+    assert.deepEqual(createTerminal({}).complete('cat '), [])
+  })
+
+  it('arg-position bare names walk the FS (equivalent to `./`-prefixed)', () => {
+    const t = createTerminal(SOURCES)
+    // `cat src/f` matches `cat ./src/f` 1:1.
+    assert.deepEqual(t.complete('cat src/f'), t.complete('cat ./src/f').map((s) => s.replace('./', '')))
+    assert.deepEqual(t.complete('cat src/f'), ['cat src/foo.js'])
+    assert.deepEqual(t.complete('cat src/'), ['cat src/util/', 'cat src/bar.js', 'cat src/foo.js'])
+    assert.deepEqual(t.complete('cat src'), ['cat src/'])
+    // Misses (no FS entry under cwd-relative path) still return [].
+    assert.deepEqual(t.complete('cat fo'), [])
+    assert.deepEqual(t.complete('cat zzz/foo'), [])
+  })
+
+  it('path completion returns [] when the directory is missing', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('/nope/'), [])
+    assert.deepEqual(t.complete('/nope/foo'), [])
+    assert.deepEqual(t.complete('./nope/'), [])
+    assert.deepEqual(t.complete('./nope/foo'), [])
+    // Deep nesting under a missing intermediate.
+    assert.deepEqual(t.complete('/src/nope/foo'), [])
+  })
+
+  it('path completion treats a file-as-dir as missing (returns [])', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('/README.md/'), [])
+    assert.deepEqual(t.complete('/src/foo.js/'), [])
+    assert.deepEqual(t.complete('./README.md/foo'), [])
+  })
+
+  it('path completion returns [] when nothing in the directory matches', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('/zzz'), [])
+    assert.deepEqual(t.complete('/src/zzz'), [])
+    assert.deepEqual(t.complete('./zzz'), [])
+  })
+
+  it('dotfile gating: hidden entries surface only when partial starts with `.`', () => {
+    const t = createTerminal(SOURCES)
+    assert.ok(!t.complete('/').some((s) => s.endsWith('.hidden')))
+    assert.ok(t.complete('/.').includes('/.hidden'))
+    assert.ok(t.complete('/.h').includes('/.hidden'))
+    assert.deepEqual(t.complete('/.x'), [])
+    // Same for ./ at root.
+    assert.ok(!t.complete('./').some((s) => s.endsWith('.hidden')))
+    assert.ok(t.complete('./.').includes('./.hidden'))
+  })
+
+  it('hidden commands (sed) are invisible to completion', () => {
+    const t = createTerminal(SOURCES)
+    // `sed` is HIDDEN — typing the full name yields no completions
+    // even though dispatch would accept it.
+    assert.deepEqual(t.complete('sed'), [])
+    // Public command list (sampled via the `se` prefix) excludes sed.
+    assert.ok(!t.complete('se').includes('sed'))
+    // Bin-prefix completion also filters HIDDEN out.
+    assert.ok(!t.complete('/usr/bin/').includes('/usr/bin/sed'))
+    assert.deepEqual(t.complete('/usr/bin/sed'), [])
+    assert.deepEqual(t.complete('/bin/sed'), [])
+  })
+
+  it('bin-prefix completion fires only in command position', () => {
+    const t = createTerminal(SOURCES)
+    // Command position (start of segment) — yes.
+    assert.ok(t.complete('/usr/bin/').includes('/usr/bin/grep'))
+    // Arg position — no. `/usr/bin/` isn't in the virtual FS, so path
+    // completion fails over to [] rather than surfacing fake "commands".
+    assert.deepEqual(t.complete('cat /usr/bin/'), [])
+    assert.deepEqual(t.complete('cat /usr/bin/gre'), [])
+    assert.deepEqual(t.complete('echo /bin/'), [])
+  })
+
+  it('bin-prefix completion resumes after a pipe (next stage = command position)', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('cat foo | /usr/bin/gre'), ['cat foo | /usr/bin/grep'])
+    assert.deepEqual(t.complete('cat foo && /bin/cat'), ['cat foo && /bin/cat'])
+  })
+
+  it('bin-prefix without trailing slash falls into path completion', () => {
+    const t = createTerminal(SOURCES)
+    // `/usr/bin` isn't a BIN_PREFIX (those all end in /). It becomes a
+    // plain path lookup, and the virtual FS has no /usr.
+    assert.deepEqual(t.complete('/usr/bin'), [])
+    assert.deepEqual(t.complete('/bin'), [])
+    assert.deepEqual(t.complete('/sbin'), [])
+  })
+
+  it('empty filesystem: path completion is [] but commands still work', () => {
+    const t = createTerminal({})
+    assert.deepEqual(t.complete('/'), [])
+    assert.deepEqual(t.complete('/foo'), [])
+    assert.deepEqual(t.complete('./'), [])
+    // Command set is intrinsic to the terminal — independent of FS.
+    assert.ok(t.complete('').includes('cat'))
+    assert.ok(t.complete('/usr/bin/').includes('/usr/bin/cat'))
+  })
+
+  it('separators without surrounding whitespace still split', () => {
+    const t = createTerminal(SOURCES)
+    // Full-line replacement preserves the literal `|` / `;` / `&&` / `||`
+    // glue exactly as typed — no spaces are inserted on the caller's behalf.
+    assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])
+    assert.deepEqual(t.complete('cat;gre'), ['cat;grep'])
+    assert.deepEqual(t.complete('a||b||gre'), ['a||b||grep'])
+    assert.deepEqual(t.complete('a&&b&&gre'), ['a&&b&&grep'])
+    // Mixed and chained.
+    assert.deepEqual(t.complete('a|b;c&&d||gre'), ['a|b;c&&d||grep'])
+  })
+
+  it('multiple consecutive separators behave like one', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('a ;;; gre'), ['a ;;; grep'])
+    assert.deepEqual(t.complete('a |||| gre'), ['a |||| grep'])
+    assert.ok(t.complete('a ; ; ; ').includes('a ; ; ; grep'))
+  })
+
+  it('single `&` is not a separator (only `&&` is)', () => {
+    const t = createTerminal(SOURCES)
+    // `foo&` reads as a single command-position word; no public command
+    // matches that literal, so [].
+    assert.deepEqual(t.complete('foo&'), [])
+    // `foo&&` IS a separator — fresh command position after it.
+    assert.ok(t.complete('foo&&').includes('foo&&cat'))
+    assert.deepEqual(t.complete('foo&&gre'), ['foo&&grep'])
+  })
+
+  it('cwd is live: cd changes what `./` resolves to', () => {
+    const t = createTerminal(SOURCES)
+    const atRoot = t.complete('./')
+    assert.ok(atRoot.includes('./src/'))
+    assert.ok(atRoot.includes('./README.md'))
+    t.run('cd src')
+    const atSrc = t.complete('./')
+    assert.ok(atSrc.includes('./foo.js'))
+    assert.ok(atSrc.includes('./util/'))
+    assert.ok(!atSrc.some((s) => s.startsWith('./src')))
+  })
+
+  it('path completion at deep nested subdirectories', () => {
+    const t = createTerminal({
+      'a/b/c/d/e.js': 'x',
+      'a/b/c/d/f.js': 'y',
+      'a/b/c/other.js': 'z',
+    })
+    const c = t.complete('/a/b/c/d/')
+    assert.deepEqual(c.sort(), ['/a/b/c/d/e.js', '/a/b/c/d/f.js'])
+    assert.deepEqual(t.complete('/a/b/c/d/e'), ['/a/b/c/d/e.js'])
+    assert.deepEqual(t.complete('/a/b/c/o'), ['/a/b/c/other.js'])
+  })
+
+  it('fully-typed token completes to itself (single-match echo)', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('grep'), ['grep'])
+    assert.deepEqual(t.complete('/usr/bin/grep'), ['/usr/bin/grep'])
+    assert.deepEqual(t.complete('/README.md'), ['/README.md'])
+    assert.deepEqual(t.complete('/src/foo.js'), ['/src/foo.js'])
+  })
+})

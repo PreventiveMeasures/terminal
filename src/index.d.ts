@@ -25,6 +25,20 @@ export interface Terminal {
   run(line: string): RunResult
   /** Current working directory. */
   cwd(): string
+  /**
+   * Tab-completion. Each entry is a full-line replacement for `line` —
+   * the partial trailing word is filled in, everything before it (prior
+   * args, separators, whitespace) is preserved verbatim. Consumers can
+   * drop a result in without tokenizing the input themselves: e.g.
+   * `complete('cat|gre')` returns `['cat|grep']`.
+   *
+   * In command position, completes command names (including under bin
+   * prefixes like `/usr/bin/`). In argument position, walks the virtual
+   * FS treating the trailing word as a path (relative to cwd unless it
+   * starts with `/`); directories carry a trailing `/`. Returns `[]`
+   * when nothing matches.
+   */
+  complete(line: string): string[]
 }
 
 /**
