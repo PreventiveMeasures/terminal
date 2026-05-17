@@ -40,7 +40,11 @@ const COMMANDS = { __proto__: null, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_
 // Anything in here is intentionally narrow / single-purpose.
 const HIDDEN = { __proto__: null, sed }
 
-const KNOWN = Object.keys(COMMANDS).sort().join(', ')
+// Sorted list of public command names. `KNOWN` (the user-visible
+// "not found" hint) and `complete()` (tab completion) both derive
+// from this — HIDDEN entries are intentionally excluded from both.
+const COMMAND_NAMES = Object.keys(COMMANDS).sort()
+const KNOWN = COMMAND_NAMES.join(', ')
 
 export function createTerminal(sources, opts = {}) {
   const fs = createFs(sources)
@@ -64,6 +68,7 @@ export function createTerminal(sources, opts = {}) {
   return {
     run: (line) => safeRun(line, ctx),
     cwd: () => ctx.cwd,
+    complete: (line) => complete(line, ctx),
   }
 }
 
@@ -174,4 +179,116 @@ function runPipeline(stages, ctx) {
 
 function unknownCommand(name) {
   return err(`${name}: command not found. Available: ${KNOWN}`, 127)
+}
+
+// Tab-completion. Returns full-line replacements (NOT just word
+// replacements): each entry preserves everything in `line` before
+// the trailing word verbatim, so callers can drop one in without
+// tokenizing or splicing — `cat|gre` → `cat|grep`.
+//
+// The trailing word is the run of non-whitespace at the end of the
+// current command segment (after the last `|` / `&&` / `||` / `;`).
+// Priority order for what fills that slot:
+//   1. Command position, bin-prefixed token (`/usr/bin/grep…`)
+//      → command list, bin prefix preserved on the way out.
+//   2. Command position, token starting with `/` or `./` → walk the
+//      virtual FS (lets users complete `./script.js`-style paths).
+//   3. Command position, anything else → command list.
+//   4. Argument position → walk the virtual FS treating the trailing
+//      word as a path. `cat src/f` is equivalent to `cat ./src/f`;
+//      empty trailing word lists the whole cwd, like bash.
+//
+// Quote-blind by design (in both the boundary scan and the tail
+// word): `parse.js` handles quoting for execution, but completion
+// runs on partial input where quote state is mid-flight. Separators
+// or whitespace inside a quoted region currently leak through.
+function complete(line, ctx) {
+  const segStart = lastCommandBoundary(line)
+  const segment = line.slice(segStart)
+  const wordStart = lastWordStart(segment)
+  const word = segment.slice(wordStart)
+  const commandPosition = segment.slice(0, wordStart).trim() === ''
+  // Everything up to (but not including) the trailing word is
+  // preserved verbatim — that's what makes each variant a drop-in
+  // replacement for the entire input line.
+  const head = line.slice(0, segStart + wordStart)
+  return completeWord(word, commandPosition, ctx).map((w) => head + w)
+}
+
+// In command position, bin-prefix and `./` / `/` path completion
+// have to be handled explicitly — bare names there resolve against
+// the command list, not the FS. In argument position the rules
+// collapse: every token goes through `completePath` so `cat src/f`
+// works the same as `cat ./src/f`.
+//
+// `resolveCommand` strips bin prefixes when dispatching, so the
+// `/usr/bin/...` shortcut is meaningful for argv[0] only. Surfacing
+// it in arg position would mislead the user into `cat /usr/bin/grep`
+// against a path that doesn't exist in the virtual FS.
+function completeWord(word, commandPosition, ctx) {
+  if (!commandPosition) return completePath(word, ctx)
+  for (const prefix of BIN_PREFIXES) {
+    if (word.startsWith(prefix)) {
+      const suffix = word.slice(prefix.length)
+      return COMMAND_NAMES.filter((n) => n.startsWith(suffix)).map((n) => prefix + n)
+    }
+  }
+  if (word.startsWith('/') || word.startsWith('./')) return completePath(word, ctx)
+  return COMMAND_NAMES.filter((n) => n.startsWith(word))
+}
+
+// Index just past the last unquoted `|`, `||`, `&&`, or `;` in
+// `line`. Two-char lookahead for `||` / `&&` is why this is an
+// index loop rather than a for-of.
+function lastCommandBoundary(line) {
+  let last = 0
+  let i = 0
+  while (i < line.length) {
+    const c = line[i]
+    if (c === '|') {
+      i += line[i + 1] === '|' ? 2 : 1
+      last = i
+    } else if (c === '&' && line[i + 1] === '&') {
+      i += 2
+      last = i
+    } else if (c === ';') {
+      i++
+      last = i
+    } else {
+      i++
+    }
+  }
+  return last
+}
+
+// Start index of the trailing run of non-whitespace characters.
+// `'cat foo '` → 8 (empty word after the space). `'cat foo'` → 4.
+function lastWordStart(s) {
+  for (let i = s.length - 1; i >= 0; i--) {
+    if (/\s/u.test(s[i])) return i + 1
+  }
+  return 0
+}
+
+function completePath(word, ctx) {
+  const lastSlash = word.lastIndexOf('/')
+  const dirPart = word.slice(0, lastSlash + 1)
+  const partial = word.slice(lastSlash + 1)
+  const absDir = resolve(ctx.cwd, dirPart)
+  if (!ctx.fs.isDir(absDir)) return []
+  const { dirs, files } = ctx.fs.listDir(absDir)
+  // Bash convention: dotfiles surface only once the partial itself
+  // starts with `.`. Otherwise typing `/` would dump every hidden
+  // entry every time.
+  const showDot = partial.startsWith('.')
+  const out = []
+  for (const name of dirs) {
+    if (!showDot && name.startsWith('.')) continue
+    if (name.startsWith(partial)) out.push(dirPart + name + '/')
+  }
+  for (const name of files) {
+    if (!showDot && name.startsWith('.')) continue
+    if (name.startsWith(partial)) out.push(dirPart + name)
+  }
+  return out
 }
