@@ -7,7 +7,7 @@
 // originals.
 
 import { parseArgs } from './parse.js'
-import { err, ok, readFilesFor, splitLines, usage } from './util.js'
+import { err, joinLines, ok, readFilesFor, splitLines, usage } from './util.js'
 
 // Reverse line order: read stdin (or each file in order, reversed
 // individually) and emit. Matches GNU `tac`'s per-file behavior —
@@ -21,16 +21,21 @@ function tac(stdin, tokens, ctx) {
   if (r.error) return r.error
   const out = []
   for (const { content } of r.inputs) out.push(...splitLines(content).toReversed())
-  return ok(out.length === 0 ? '' : out.join('\n') + '\n')
+  return ok(joinLines(out))
 }
 
 // Generate a numeric sequence, one per line. Forms:
-//   seq LAST            → 1, 2, …, LAST              (step 1)
+//   seq LAST            → 1, 2, …, LAST              (step 1, even if LAST < 1 → empty)
 //   seq FIRST LAST      → FIRST..LAST                (step ±1, sign auto-picked)
 //   seq FIRST INCR LAST → FIRST, FIRST+INCR, …       (INCR may be negative)
 // Integers only — floats and scientific notation are rejected so
 // `seq 1 0.1 2` doesn't silently misbehave. parseNonNegativeInt
 // can't be reused because seq legitimately accepts negatives.
+//
+// Auto-sign is gated to the two-arg form on purpose. In the one-arg
+// form FIRST is fixed at 1 and `seq 0` / `seq -5` should print
+// nothing (the loop just doesn't fire) — matching GNU. The earlier
+// shared auto-sign made `seq 0` emit `1\n0\n`, which is wrong.
 function seq(_stdin, tokens) {
   const { positional } = parseArgs(tokens)
   if (positional.length === 0 || positional.length > 3) {
@@ -41,14 +46,15 @@ function seq(_stdin, tokens) {
     if (!/^-?\d+$/u.test(t)) return err(`seq: invalid integer: ${t}`)
     nums.push(Number(t))
   }
-  const first = nums.length === 1 ? 1 : nums[0]
-  const last = nums.at(-1)
-  const incr = nums.length === 3 ? nums[1] : (first <= last ? 1 : -1)
+  let first, incr, last
+  if (nums.length === 1) { first = 1; incr = 1; last = nums[0] }
+  else if (nums.length === 2) { first = nums[0]; last = nums[1]; incr = first <= last ? 1 : -1 }
+  else { [first, incr, last] = nums }
   if (incr === 0) return err('seq: increment must be non-zero')
   const out = []
   if (incr > 0) for (let n = first; n <= last; n += incr) out.push(String(n))
   else for (let n = first; n >= last; n += incr) out.push(String(n))
-  return ok(out.length === 0 ? '' : out.join('\n') + '\n')
+  return ok(joinLines(out))
 }
 
 // Number lines with `cat -n`-style formatting (6-wide right-aligned
@@ -74,7 +80,7 @@ function nl(stdin, tokens, ctx) {
       }
     }
   }
-  return ok(out.length === 0 ? '' : out.join('\n') + '\n')
+  return ok(joinLines(out))
 }
 
 // Extract characters (`-c LIST`) or delimiter-separated fields
@@ -97,10 +103,10 @@ function cut(stdin, tokens, ctx) {
   const out = []
   for (const { content } of r.inputs) {
     for (const line of splitLines(content)) {
-      out.push(hasF ? cutFields(line, delim, list.ranges) : pickByPositions(line, list.ranges).join(''))
+      out.push(hasF ? cutFields(line, delim, list.ranges) : pickByPositions([...line], list.ranges).join(''))
     }
   }
-  return ok(out.length === 0 ? '' : out.join('\n') + '\n')
+  return ok(joinLines(out))
 }
 
 function parseCutList(spec) {
@@ -184,20 +190,25 @@ function tr(stdin, tokens) {
   return ok([...stdin].map((c) => map.get(c) ?? c).join(''))
 }
 
+// Pre-split into an array of code-point characters so a single
+// astral codepoint (e.g. an emoji) reads as ONE unit rather than
+// the high/low surrogate pair `spec[i]` would otherwise expose.
+// Ranges then walk code-point values, not code units.
 function expandTrSet(spec) {
+  const units = [...spec]
   const chars = []
   let i = 0
   const readUnit = () => {
-    if (spec[i] !== '\\') return spec[i++]
-    if (i + 1 >= spec.length) return null
-    const e = spec[i + 1]
+    if (units[i] !== '\\') return units[i++]
+    if (i + 1 >= units.length) return null
+    const e = units[i + 1]
     i += 2
     return e === 'n' ? '\n' : e === 't' ? '\t' : e === '\\' ? '\\' : e === '0' ? '\0' : e
   }
-  while (i < spec.length) {
+  while (i < units.length) {
     const c = readUnit()
     if (c === null) return { error: err('tr: trailing backslash in set') }
-    if (spec[i] === '-' && i + 1 < spec.length) {
+    if (units[i] === '-' && i + 1 < units.length) {
       i++
       const endC = readUnit()
       if (endC === null) return { error: err('tr: trailing backslash in set') }
@@ -238,7 +249,7 @@ function whichCmd(_stdin, tokens, ctx) {
     if (ctx.hasCommand(name)) out.push(`/usr/bin/${name}`)
     else { out.push(`${name} not found`); exitCode = 1 }
   }
-  return { stdout: out.join('\n') + '\n', stderr: '', exitCode }
+  return { stdout: joinLines(out), stderr: '', exitCode }
 }
 
 export const EXTRA_COMMANDS = { cut, tac, tr, seq, nl, which: whichCmd }

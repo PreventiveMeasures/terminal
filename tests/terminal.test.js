@@ -2059,6 +2059,16 @@ describe('createTerminal — tac', () => {
     assert.equal(t.run('cat a.txt b.txt | tac').stdout, '4\n3\n2\n1\n')
   })
 
+  it('input without a trailing newline still emits each line on its own row', () => {
+    // splitLines drops the trailing empty produced by a final `\n`
+    // but doesn't add one when missing — so `"a\nb"` (no trailing)
+    // and `"a\nb\n"` both parse to ['a','b']. tac then reverses to
+    // ['b','a'] and joinLines adds a single trailing newline, so
+    // the output is the same in both cases.
+    const t = createTerminal({ 'no-nl.txt': 'a\nb' })
+    assert.equal(t.run('tac no-nl.txt').stdout, 'b\na\n')
+  })
+
   it('empty input produces empty output (exit 0)', () => {
     const t = createTerminal({ 'empty.txt': '' })
     const r = t.run('tac empty.txt')
@@ -2099,6 +2109,19 @@ describe('createTerminal — seq', () => {
     const t = createTerminal({})
     assert.equal(t.run('seq 3 | xargs echo').stdout, '1 2 3\n')
   })
+
+  it('one-arg form with LAST <= 0 prints nothing (matches GNU)', () => {
+    // Regression: earlier auto-sign logic ran for the 1-arg form
+    // too, so `seq 0` picked incr=-1 and emitted `1\n0\n`. GNU `seq
+    // 0` / `seq -5` are empty because FIRST is fixed at 1 and the
+    // ascending loop `1<=0` / `1<=-5` doesn't fire.
+    const t = createTerminal({})
+    assert.equal(t.run('seq 0').exitCode, 0)
+    assert.equal(t.run('seq 0').stdout, '')
+    assert.equal(t.run('seq -5').stdout, '')
+    // The 2-arg form keeps its auto-sign behavior, untouched.
+    assert.equal(t.run('seq 5 1').stdout, '5\n4\n3\n2\n1\n')
+  })
 })
 
 describe('createTerminal — nl', () => {
@@ -2113,6 +2136,14 @@ describe('createTerminal — nl', () => {
   it('-b a numbers EVERY line, including blanks', () => {
     const t = createTerminal({ 'f.txt': 'a\n\nb\n' })
     assert.equal(t.run('nl -b a f.txt').stdout, '     1\ta\n     2\t\n     3\tb\n')
+  })
+
+  it('line counter continues across multiple files (no per-file reset)', () => {
+    // GNU `nl a b` defaults to no reset (one "logical page" across
+    // input). Pin this so a future `nl` rework can't silently
+    // change to per-file numbering.
+    const t = createTerminal({ 'a.txt': 'x\ny\n', 'b.txt': 'z\n' })
+    assert.equal(t.run('nl a.txt b.txt').stdout, '     1\tx\n     2\ty\n     3\tz\n')
   })
 
   it('rejects unsupported -b styles with a message naming the valid options', () => {
@@ -2149,6 +2180,24 @@ describe('createTerminal — cut', () => {
     assert.equal(t.run('cut -c 1-3 f.txt').stdout, 'abc\nABC\n')
     // Output is in position order, NOT list order — matches GNU.
     assert.equal(t.run('cut -c 4,1 f.txt').stdout, 'ad\nAD\n')
+  })
+
+  it('-c open-ended range past end-of-line clamps gracefully', () => {
+    // `Math.min(Infinity, len)` is `len`, so `-c 2-` on a 1-char
+    // line picks nothing (the loop never enters) and on a 5-char
+    // line picks chars 2..5. Pins the open-ended edge.
+    const t = createTerminal({ 'f.txt': 'a\nhello\n' })
+    assert.equal(t.run('cut -c 2- f.txt').stdout, '\nello\n')
+  })
+
+  it('-c is codepoint-aware: a single emoji counts as one position', () => {
+    // `[...line]` splits by code-point, so an astral char like a
+    // family emoji is one position, not a surrogate pair. Without
+    // this, `cut -c 1` on `😀abc` would emit half a surrogate and
+    // downstream commands would see mojibake.
+    const t = createTerminal({ 'f.txt': '😀abc\n' })
+    assert.equal(t.run('cut -c 1 f.txt').stdout, '😀\n')
+    assert.equal(t.run('cut -c 2-3 f.txt').stdout, 'ab\n')
   })
 
   it('lines without the delimiter pass through verbatim (no -s)', () => {
@@ -2212,6 +2261,27 @@ describe('createTerminal — tr', () => {
     assert.match(t.run('echo x | tr -ds a b').stderr, /-d combined with -s/u)
     assert.match(t.run('echo x | tr a').stderr, /usage:/u)
     assert.match(t.run('tr').stderr, /usage:/u)
+  })
+
+  it('-d with an empty SET is a no-op (input passes through unchanged)', () => {
+    // Filtering against an empty Set keeps every char. Documenting
+    // the current behavior rather than erroring — GNU is fine with
+    // `tr -d ""` too.
+    const t = createTerminal({})
+    assert.equal(t.run('echo hello | tr -d ""').stdout, 'hello\n')
+  })
+
+  it('astral codepoints (emoji) read as single units in SET and ranges', () => {
+    // Pre-splitting the spec with `[...spec]` means a single emoji
+    // is one unit, not a surrogate pair. Range walking then uses
+    // codepoint values (`codePointAt`/`fromCodePoint`), so a small
+    // emoji range translates each member correctly.
+    const t = createTerminal({})
+    // Single-codepoint translate: 😀 → X.
+    assert.equal(t.run('echo "a😀b" | tr "😀" X').stdout, 'aXb\n')
+    // Range over astral codepoints: 😀 (U+1F600), 😁 (U+1F601),
+    // 😂 (U+1F602) all map to X.
+    assert.equal(t.run('echo "😀😁😂" | tr "😀-😂" X').stdout, 'XXX\n')
   })
 })
 
