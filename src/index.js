@@ -17,6 +17,11 @@
 // `|`) that may suppress stdout/stderr via `>/dev/null` and
 // `2>/dev/null`. The final stage's exit code determines whether
 // the next gated step runs.
+//
+// `(...)` subshells parse to a stage whose `group` is a nested
+// step list. They run with an isolated cwd (snapshot/restore
+// around the inner runSteps) so `(cd src; pwd)` reports `/src`
+// without changing the outer terminal's cwd.
 
 import { expandBraces } from './braces.js'
 import { EXTRA_COMMANDS } from './extra-commands.js'
@@ -106,7 +111,8 @@ function safeRun(line, ctx) {
     const trimmed = line.trim()
     if (trimmed === '') return { stdout: '', stderr: '', exitCode: 0, cwd: ctx.cwd }
     const steps = parseLine(trimmed)
-    return runSteps(steps, ctx)
+    const r = runSteps(steps, ctx, '')
+    return { ...r, cwd: ctx.cwd }
   } catch (e) {
     return { ...err(`error: ${e.message}`), cwd: ctx.cwd }
   }
@@ -118,15 +124,22 @@ function safeRun(line, ctx) {
 // steps that DO run are concatenated; skipped steps contribute
 // nothing. The overall exit code is from the LAST step that
 // actually ran.
-function runSteps(steps, ctx) {
+//
+// `initialStdin` is only meaningful for subshell groups: when a
+// `(...)` appears in a pipeline (`echo hi | (cat)`), the upstream
+// output becomes the group's stdin and is delivered to the first
+// step's pipeline. Later steps inside the group start with empty
+// stdin, same as at top level.
+function runSteps(steps, ctx, initialStdin) {
   let stdout = ''
   let stderr = ''
   let exitCode = 0
   let ran = false
-  for (const step of steps) {
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
     if (step.gate === 'and' && exitCode !== 0) continue
     if (step.gate === 'or' && exitCode === 0) continue
-    const r = runPipeline(step.stages, ctx)
+    const r = runPipeline(step.stages, ctx, i === 0 ? initialStdin : '')
     stdout += r.stdout
     stderr += r.stderr
     exitCode = r.exitCode
@@ -136,21 +149,15 @@ function runSteps(steps, ctx) {
   // skipped gate, which parseLine doesn't currently produce), keep
   // exitCode at 0 — same as bash's empty-list status.
   if (!ran) exitCode = 0
-  return { stdout, stderr, exitCode, cwd: ctx.cwd }
+  return { stdout, stderr, exitCode }
 }
 
-function runPipeline(stages, ctx) {
-  let stdin = ''
+function runPipeline(stages, ctx, initialStdin) {
+  let stdin = initialStdin
   let stderr = ''
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]
-    // Brace expansion FIRST (`{foo,bar}*.js` → `foo*.js bar*.js`),
-    // then glob expansion against the FS. Quoted tokens and
-    // argv[0] (the command name) pass through verbatim through
-    // both phases — matching bash.
-    const braced = expandBraces(stage.argv, stage.quoted ?? new Set())
-    const expanded = expandGlobs(braced.argv, braced.quoted, ctx)
-    const result = dispatch(expanded[0], expanded.slice(1), stdin, ctx)
+    const result = stage.group ? runGroup(stage.group, ctx, stdin) : runStage(stage, ctx, stdin)
     // Apply redirects in a fixed order: fd-to-fd merges first, then
     // null sinks. This is bash's behavior for the common idioms
     // (`>/dev/null 2>&1` silences both, `2>&1 | grep` sees both
@@ -175,6 +182,29 @@ function runPipeline(stages, ctx) {
   }
   // Unreachable: stages is non-empty (parseLine guarantees it).
   return { stdout: '', stderr, exitCode: 0 }
+}
+
+function runStage(stage, ctx, stdin) {
+  // Brace expansion FIRST (`{foo,bar}*.js` → `foo*.js bar*.js`),
+  // then glob expansion against the FS. Quoted tokens and
+  // argv[0] (the command name) pass through verbatim through
+  // both phases — matching bash.
+  const braced = expandBraces(stage.argv, stage.quoted ?? new Set())
+  const expanded = expandGlobs(braced.argv, braced.quoted, ctx)
+  return dispatch(expanded[0], expanded.slice(1), stdin, ctx)
+}
+
+// Subshell: snapshot the cwd, run the nested step list, restore.
+// The try/finally keeps the restore safe across thrown errors
+// (parse errors are caught earlier in safeRun, but a future
+// command that throws raw would otherwise leak its cwd change).
+function runGroup(steps, ctx, stdin) {
+  const savedCwd = ctx.cwd
+  try {
+    return runSteps(steps, ctx, stdin)
+  } finally {
+    ctx.cwd = savedCwd
+  }
 }
 
 function unknownCommand(name) {

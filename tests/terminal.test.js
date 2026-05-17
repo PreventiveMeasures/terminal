@@ -1572,6 +1572,288 @@ describe('createTerminal — `;` sequential separator', () => {
   })
 })
 
+describe('createTerminal — `(...)` subshell grouping', () => {
+  it('`(cmd)` runs the inner pipeline and surfaces its output / exit', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('(echo hi)')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'hi\n')
+    assert.equal(r.stderr, '')
+  })
+
+  it('`(cd dir; pwd)` reports the inner cwd but does NOT leak it', () => {
+    // The defining feature of a subshell: cwd changes are scoped to
+    // the group. `pwd` inside sees the moved cwd; after the group
+    // returns, the outer terminal is right back where it started.
+    const t = createTerminal(SOURCES)
+    assert.equal(t.cwd(), '/')
+    const r = t.run('(cd src; pwd)')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '/src\n')
+    assert.equal(t.cwd(), '/')
+    // Independent confirmation: pwd outside still reads `/`.
+    assert.equal(t.run('pwd').stdout, '/\n')
+  })
+
+  it('cwd is restored even when the inner pipeline fails partway', () => {
+    // `cd src` moves the inner cwd; the next command exits 1; the
+    // group as a whole still has to put the outer cwd back.
+    const t = createTerminal(SOURCES)
+    const r = t.run('(cd src && false)')
+    assert.equal(r.exitCode, 1)
+    assert.equal(t.cwd(), '/')
+  })
+
+  it('`(...) | cmd` pipes the group output into the next stage', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('(echo a; echo b; echo c) | grep b')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'b\n')
+  })
+
+  it('`cmd | (...)` delivers stdin to the group\'s first step only', () => {
+    // Bash semantics for a string-typed stdin: the group "owns" the
+    // pipe, and within the group only the first command in the first
+    // step gets to read it. Later steps (after `;`/gates) see empty.
+    const t = createTerminal(SOURCES)
+    const r = t.run('echo hi | (cat; echo done)')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'hi\ndone\n')
+  })
+
+  it('`cmd | (true; cat)` — second step sees empty stdin (documented divergence)', () => {
+    // Diverges from real bash (where `cat` would inherit the pipe fd
+    // and print "hi"). Our string-typed pipe can only deliver stdin
+    // to one consumer, and the chosen consumer is the first step.
+    // Pinning this so a future "let any step read it" change is a
+    // deliberate decision, not an accident.
+    const t = createTerminal(SOURCES)
+    const r = t.run('echo hi | (true; cat)')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '')
+  })
+
+  it('stdin reaches a multi-stage pipeline inside the group', () => {
+    // The "first step" caveat is about steps (`;`/gates), not stages
+    // (`|`). Within the group's first step, the pipeline threads stdin
+    // through stages normally, so `(cat | wc -l)` should count.
+    const t = createTerminal(SOURCES)
+    const r = t.run('echo hi | (cat | wc -l)')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stdout, /^\s*1$/mu)
+  })
+
+  it('groups on both sides of `|`', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('(echo a; echo b) | (cat; echo c)')
+    assert.equal(r.exitCode, 0)
+    // Left group emits "a\nb\n", right group's first step (cat) reads
+    // it; the second step (echo c) sees empty stdin and prints "c".
+    assert.equal(r.stdout, 'a\nb\nc\n')
+  })
+
+  it('brace and glob expansion happen inside groups', () => {
+    // Both expansions are stage-local — they live in runStage, which
+    // the group's inner runSteps reaches through runPipeline. Worth
+    // pinning because the group path skips runStage entirely; if a
+    // future refactor moves expansion to runPipeline's outer scope
+    // it could regress.
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('(echo {a,b,c})').stdout, 'a b c\n')
+    // Glob uses the SUBSHELL's cwd, not the outer's. cd inside the
+    // group moves into src; the star expands against /src.
+    const r = t.run('(cd src; ls *.js)')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stdout, /foo\.js/u)
+    assert.match(r.stdout, /bar\.js/u)
+  })
+
+  it('`(... && ... ; ... || ...)` runs multi-gate chains inside the group', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('(true && echo y; false || echo n)')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'y\nn\n')
+    // Inner failure shadows outer gate: group exits with the LAST
+    // step's exit code, just like a bash subshell.
+    const failed = t.run('(true; false) && echo never')
+    assert.equal(failed.exitCode, 1)
+    assert.equal(failed.stdout, '')
+  })
+
+  it('group cwd is restored to the OUTER cwd (not always `/`)', () => {
+    // The save/restore must use the cwd at the moment the group
+    // started, not a hardcoded root. Cover this by parking the
+    // outer terminal in /src first.
+    const t = createTerminal(SOURCES, { cwd: '/src' })
+    assert.equal(t.cwd(), '/src')
+    const r = t.run('(cd /; pwd)')
+    assert.equal(r.stdout, '/\n')
+    assert.equal(t.cwd(), '/src')
+    // Sequential groups: each restore is independent, none leak.
+    t.run('(cd /); (cd util)')
+    assert.equal(t.cwd(), '/src')
+  })
+
+  it('`(...) || cmd` and `(...) && cmd` gate on the group\'s exit', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('(false) || echo recovered').stdout, 'recovered\n')
+    assert.equal(t.run('(true) && echo yes').stdout, 'yes\n')
+    assert.equal(t.run('(false) && echo skipped').stdout, '')
+    // Inner gate determines the group's exit code.
+    const inner = t.run('(false || true) && echo yes')
+    assert.equal(inner.exitCode, 0)
+    assert.equal(inner.stdout, 'yes\n')
+  })
+
+  it('`(...) >/dev/null` redirects apply to the whole group', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('(echo a; echo b) >/dev/null')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '')
+    // 2>&1 on the group merges everything; the trailing /dev/null then
+    // discards the merged stream — both stdout AND stderr must be empty.
+    const silenced = t.run('(cat /nope; echo ok) 2>&1 >/dev/null')
+    assert.equal(silenced.stdout, '')
+    assert.equal(silenced.stderr, '')
+  })
+
+  it('leading redirects attach to a following group (bash compat)', () => {
+    // `>/dev/null (cmd)` is bash-equivalent to `(cmd) >/dev/null`.
+    // The redirect flag set by applyRedir must survive when the
+    // in-flight stage acquires its `group`.
+    const t = createTerminal(SOURCES)
+    const dropped = t.run('>/dev/null (echo hi)')
+    assert.equal(dropped.exitCode, 0)
+    assert.equal(dropped.stdout, '')
+    // Same for 2>&1: merge sets a flag, then the group runs, then the
+    // merge applies to the group's combined output.
+    const merged = t.run('2>&1 (cat /nope)')
+    assert.match(merged.stdout, /no such file/u)
+    assert.equal(merged.stderr, '')
+    // Leading + trailing redirects on the same group must both apply.
+    const both = t.run('2>&1 (cat /nope; echo ok) >/dev/null')
+    assert.equal(both.stdout, '')
+    assert.equal(both.stderr, '')
+    // Leading redirect on a nested group attaches to the OUTER group,
+    // not the inner — the inner is parsed by a separate buildSteps
+    // call that starts with a fresh stage.
+    const nested = t.run('>/dev/null ((echo hi))')
+    assert.equal(nested.exitCode, 0)
+    assert.equal(nested.stdout, '')
+  })
+
+  it('`(cmd 2>&1)` parses without whitespace before `)`', () => {
+    // Regression: the `N>&M` boundary-after check originally listed
+    // only `\s|&>;` as valid delimiters, so `2>&1)` mis-parsed as
+    // "fd-dup followed by junk" and errored. `(` / `)` must count
+    // as boundaries here too.
+    const t = createTerminal(SOURCES)
+    const r = t.run('(cat /nope 2>&1)')
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stdout, /no such file/u)
+    assert.equal(r.stderr, '')
+    // Symmetric `1>&2)` form.
+    const sym = t.run('(echo hi 1>&2)')
+    assert.equal(sym.stdout, '')
+    assert.match(sym.stderr, /^hi$/mu)
+  })
+
+  it('a group whose only contents are redirects errors (not silently dropped)', () => {
+    // `(>/dev/null)` and `(echo a; >/dev/null)` both produce a step
+    // whose stage has redirect flags but no argv. finishGroup must
+    // NOT treat that as the trailing-`;` case — the redirect would
+    // vanish and the user would never know. Also covers `2>&1` (a
+    // merge flag, not a null sink) to pin that hasRedirects checks
+    // the full flag set, not just the null sinks.
+    const t = createTerminal(SOURCES)
+    for (const cmd of [
+      '(>/dev/null)',
+      '(echo a; >/dev/null)',
+      '(2>&1)',
+      '(echo a; 2>&1)',
+    ]) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0, `${cmd} should error`)
+      assert.match(r.stderr, /empty pipeline/u, `${cmd} should report empty pipeline`)
+    }
+  })
+
+  it('nested `((...))` parses and runs', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('((echo nested))')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'nested\n')
+    // Inner cd is still isolated from the outer terminal.
+    t.run('((cd src; cd util))')
+    assert.equal(t.cwd(), '/')
+  })
+
+  it('whitespace around `(` / `)` is optional (bash compat)', () => {
+    // `(echo a)`, `( echo a )`, and `(echo a;)` should all be
+    // accepted; the tokenizer flushes on `(` / `)` the same way it
+    // flushes on `;` / `|`.
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('(echo a)').stdout, 'a\n')
+    assert.equal(t.run('( echo a )').stdout, 'a\n')
+    assert.equal(t.run('(echo a;)').stdout, 'a\n')
+    assert.equal(t.run('(echo a);echo b').stdout, 'a\nb\n')
+  })
+
+  it('quoted parens stay literal in argv', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('echo "(a)"').stdout, '(a)\n')
+    assert.equal(t.run("echo '(a;b)'").stdout, '(a;b)\n')
+  })
+
+  it('`()` (empty subshell) errors with a distinct message', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('()')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /empty subshell/u)
+  })
+
+  it('unmatched `(` and `)` error with clear messages', () => {
+    const t = createTerminal(SOURCES)
+    const open = t.run('(echo a')
+    assert.notEqual(open.exitCode, 0)
+    assert.match(open.stderr, /unmatched `\(`/u)
+    const close = t.run('echo a)')
+    assert.notEqual(close.exitCode, 0)
+    assert.match(close.stderr, /unexpected `\)`/u)
+  })
+
+  it('`(` mid-stage errors instead of producing an argv+group hybrid', () => {
+    // `echo a (echo b)` has no sensible interpretation — the stage
+    // already has argv tokens when the `(` appears. Better to surface
+    // a syntax error than to silently drop or merge.
+    const t = createTerminal(SOURCES)
+    const r = t.run('echo a (echo b)')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /unexpected `\(`/u)
+  })
+
+  it('a stray word after `)` errors', () => {
+    // After `)` the only legal continuations are a boundary
+    // (`|`/`;`/`&&`/`||`) or a redirect; bare words don't fit.
+    const t = createTerminal(SOURCES)
+    const r = t.run('(echo a) hi')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /after `\)`/u)
+  })
+
+  it('a redirect between two groups errors instead of producing a hybrid', () => {
+    // `(echo a) 2>&1 (echo b)`: the redirect attaches to the in-flight
+    // stage (which now has `group` set from the first `(...)`), then
+    // the second `(` tries to set `group` again — the paren_open guard
+    // catches this. Pinned so a future "let groups chain" change is
+    // a deliberate decision, not silent state accumulation.
+    const t = createTerminal(SOURCES)
+    const r = t.run('(echo a) 2>&1 (echo b)')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /unexpected `\(`/u)
+  })
+})
+
 describe('createTerminal — `true` / `false` / `:` builtins', () => {
   it('`true` exits 0 with no output (args ignored)', () => {
     const t = createTerminal(SOURCES)
