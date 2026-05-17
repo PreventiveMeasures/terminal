@@ -24,8 +24,10 @@
   },
   "type": "module",
   "main": "src/index.js",
+  "types": "src/index.d.ts",
   "exports": {
     ".": {
+      "types": "./src/index.d.ts",
       "default": "./src/index.js"
     }
   },
@@ -35,6 +37,7 @@
     "src/fs.js",
     "src/glob.js",
     "src/grep.js",
+    "src/index.d.ts",
     "src/index.js",
     "src/nav-commands.js",
     "src/parse.js",
