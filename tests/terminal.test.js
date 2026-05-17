@@ -1621,6 +1621,79 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     assert.equal(r.stdout, 'hi\ndone\n')
   })
 
+  it('`cmd | (true; cat)` — second step sees empty stdin (documented divergence)', () => {
+    // Diverges from real bash (where `cat` would inherit the pipe fd
+    // and print "hi"). Our string-typed pipe can only deliver stdin
+    // to one consumer, and the chosen consumer is the first step.
+    // Pinning this so a future "let any step read it" change is a
+    // deliberate decision, not an accident.
+    const t = createTerminal(SOURCES)
+    const r = t.run('echo hi | (true; cat)')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '')
+  })
+
+  it('stdin reaches a multi-stage pipeline inside the group', () => {
+    // The "first step" caveat is about steps (`;`/gates), not stages
+    // (`|`). Within the group's first step, the pipeline threads stdin
+    // through stages normally, so `(cat | wc -l)` should count.
+    const t = createTerminal(SOURCES)
+    const r = t.run('echo hi | (cat | wc -l)')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stdout, /^\s*1$/mu)
+  })
+
+  it('groups on both sides of `|`', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('(echo a; echo b) | (cat; echo c)')
+    assert.equal(r.exitCode, 0)
+    // Left group emits "a\nb\n", right group's first step (cat) reads
+    // it; the second step (echo c) sees empty stdin and prints "c".
+    assert.equal(r.stdout, 'a\nb\nc\n')
+  })
+
+  it('brace and glob expansion happen inside groups', () => {
+    // Both expansions are stage-local — they live in runStage, which
+    // the group's inner runSteps reaches through runPipeline. Worth
+    // pinning because the group path skips runStage entirely; if a
+    // future refactor moves expansion to runPipeline's outer scope
+    // it could regress.
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('(echo {a,b,c})').stdout, 'a b c\n')
+    // Glob uses the SUBSHELL's cwd, not the outer's. cd inside the
+    // group moves into src; the star expands against /src.
+    const r = t.run('(cd src; ls *.js)')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stdout, /foo\.js/u)
+    assert.match(r.stdout, /bar\.js/u)
+  })
+
+  it('`(... && ... ; ... || ...)` runs multi-gate chains inside the group', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('(true && echo y; false || echo n)')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'y\nn\n')
+    // Inner failure shadows outer gate: group exits with the LAST
+    // step's exit code, just like a bash subshell.
+    const failed = t.run('(true; false) && echo never')
+    assert.equal(failed.exitCode, 1)
+    assert.equal(failed.stdout, '')
+  })
+
+  it('group cwd is restored to the OUTER cwd (not always `/`)', () => {
+    // The save/restore must use the cwd at the moment the group
+    // started, not a hardcoded root. Cover this by parking the
+    // outer terminal in /src first.
+    const t = createTerminal(SOURCES, { cwd: '/src' })
+    assert.equal(t.cwd(), '/src')
+    const r = t.run('(cd /; pwd)')
+    assert.equal(r.stdout, '/\n')
+    assert.equal(t.cwd(), '/src')
+    // Sequential groups: each restore is independent, none leak.
+    t.run('(cd /); (cd util)')
+    assert.equal(t.cwd(), '/src')
+  })
+
   it('`(...) || cmd` and `(...) && cmd` gate on the group\'s exit', () => {
     const t = createTerminal(SOURCES)
     assert.equal(t.run('(false) || echo recovered').stdout, 'recovered\n')
@@ -1637,9 +1710,56 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     const r = t.run('(echo a; echo b) >/dev/null')
     assert.equal(r.exitCode, 0)
     assert.equal(r.stdout, '')
-    // 2>&1 on the group merges everything before /dev/null drops it.
+    // 2>&1 on the group merges everything; the trailing /dev/null then
+    // discards the merged stream — both stdout AND stderr must be empty.
     const silenced = t.run('(cat /nope; echo ok) 2>&1 >/dev/null')
+    assert.equal(silenced.stdout, '')
     assert.equal(silenced.stderr, '')
+  })
+
+  it('leading redirects attach to a following group (bash compat)', () => {
+    // `>/dev/null (cmd)` is bash-equivalent to `(cmd) >/dev/null`.
+    // The redirect flag set by applyRedir must survive when the
+    // in-flight stage acquires its `group`.
+    const t = createTerminal(SOURCES)
+    const dropped = t.run('>/dev/null (echo hi)')
+    assert.equal(dropped.exitCode, 0)
+    assert.equal(dropped.stdout, '')
+    // Same for 2>&1: merge sets a flag, then the group runs, then the
+    // merge applies to the group's combined output.
+    const merged = t.run('2>&1 (cat /nope)')
+    assert.match(merged.stdout, /no such file/u)
+    assert.equal(merged.stderr, '')
+  })
+
+  it('`(cmd 2>&1)` parses without whitespace before `)`', () => {
+    // Regression: the `N>&M` boundary-after check originally listed
+    // only `\s|&>;` as valid delimiters, so `2>&1)` mis-parsed as
+    // "fd-dup followed by junk" and errored. `(` / `)` must count
+    // as boundaries here too.
+    const t = createTerminal(SOURCES)
+    const r = t.run('(cat /nope 2>&1)')
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stdout, /no such file/u)
+    assert.equal(r.stderr, '')
+    // Symmetric `1>&2)` form.
+    const sym = t.run('(echo hi 1>&2)')
+    assert.equal(sym.stdout, '')
+    assert.match(sym.stderr, /^hi$/mu)
+  })
+
+  it('a group whose only contents are redirects errors (not silently dropped)', () => {
+    // `(>/dev/null)` and `(echo a; >/dev/null)` both produce a step
+    // whose stage has redirect flags but no argv. finishGroup must
+    // NOT treat that as the trailing-`;` case — the redirect would
+    // vanish and the user would never know.
+    const t = createTerminal(SOURCES)
+    const only = t.run('(>/dev/null)')
+    assert.notEqual(only.exitCode, 0)
+    assert.match(only.stderr, /empty pipeline/u)
+    const trailing = t.run('(echo a; >/dev/null)')
+    assert.notEqual(trailing.exitCode, 0)
+    assert.match(trailing.stderr, /empty pipeline/u)
   })
 
   it('nested `((...))` parses and runs', () => {

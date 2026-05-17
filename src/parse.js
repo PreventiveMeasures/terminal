@@ -78,7 +78,11 @@ function buildSteps(raw, start, inGroup) {
       // + group hybrid with no sensible semantics, so error early.
       if (stage.group || stage.argv.length > 0) throw new Error('unexpected `(`')
       const inner = buildSteps(raw, i + 1, true)
-      stage = { group: inner.steps, quoted: new Set() }
+      // Mutate (not replace) the in-flight stage so leading redirects
+      // attach to the group: `>/dev/null (echo a)` carries a
+      // stdoutToNull flag set by the earlier applyRedir, and we
+      // want it to silence the group's output.
+      stage.group = inner.steps
       i = inner.consumed
       continue
     }
@@ -111,9 +115,12 @@ function buildSteps(raw, start, inGroup) {
 //   - `(echo a;)` — trailing `;` before `)`, mirroring the top-level
 //     trailing-semi tolerance. The semi already pushed an empty new
 //     step; drop it here.
+// "Empty" excludes redirects: `(>/dev/null)` and `(echo a; >/dev/null)`
+// must NOT silently drop the redirect — they fall through to the
+// regular validator and surface as "empty pipeline stage".
 function finishGroup(steps, stage, consumed) {
   const lastStep = steps.at(-1)
-  const stageEmpty = !stage.group && stage.argv.length === 0
+  const stageEmpty = !stage.group && stage.argv.length === 0 && !hasRedirects(stage)
   if (stageEmpty && lastStep.stages.length === 0) {
     if (steps.length === 1) throw new Error('empty subshell `()`')
     steps.pop()
@@ -121,6 +128,11 @@ function finishGroup(steps, stage, consumed) {
     lastStep.stages.push(stage)
   }
   return { steps, consumed }
+}
+
+function hasRedirects(stage) {
+  return Boolean(stage.stdoutToNull || stage.stderrToNull
+    || stage.mergeStderrToStdout || stage.mergeStdoutToStderr)
 }
 
 function applyRedir(stage, raw, i) {
@@ -190,7 +202,7 @@ function tokenize(line) {
       if (line[i + 2] === '&') {
         const m = line[i + 3]
         const after = line[i + 4]
-        if ((m === '1' || m === '2') && (after === undefined || /[\s|&>;]/u.test(after))) {
+        if ((m === '1' || m === '2') && (after === undefined || /[\s|&>;()]/u.test(after))) {
           tokens.push({ kind: 'redir', fd: c, toFd: m })
           i += 3
           continue
