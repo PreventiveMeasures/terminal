@@ -33,6 +33,7 @@
   },
   "files": [
     "src/braces.js",
+    "src/extra-commands.js",
     "src/find.js",
     "src/fs.js",
     "src/glob.js",

@@ -29,6 +29,12 @@ export function splitLines(s) {
   return lines
 }
 
+// Inverse of `splitLines` for command output: empty array stays
+// empty (no bare newline), non-empty gets a trailing newline so
+// the next command sees one line per element. Pinning the
+// convention here keeps each command from re-implementing it.
+export const joinLines = (lines) => lines.length === 0 ? '' : lines.join('\n') + '\n'
+
 // Resolve and read each file path against the virtual filesystem.
 // Returns `{ inputs }` on success or `{ error }` on the first
 // failure. The dir-vs-missing distinction matters: `cat src`
