@@ -47,18 +47,20 @@ const COMMANDS = { __proto__: null, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_
 // uninteresting to mention.
 const HIDDEN = { __proto__: null, sed, ...TRIVIAL_COMMANDS }
 
-// Command priority for tab completion and the "not found" hint.
-// `ls` is the natural entry point (browse before doing anything),
-// then roughly by everyday-use frequency. Commands present in
-// COMMANDS but missing from this list fall through at the end
-// (alphabetical), so a new command never silently disappears from
-// completion if someone forgets to update the priority list.
+// Command priority for tab completion and the "not found" hint —
+// ordered for a code auditor: list & navigate, read, search, then
+// downstream pipelines. `pwd` lands near the end because the prompt
+// already tells you where you are; `seq` / `which` / `basename` /
+// `dirname` rarely earn their slot in an audit session. Commands
+// present in COMMANDS but missing from this list fall through at
+// the end alphabetically — a new command never silently drops out
+// of completion if someone forgets to update the priority list.
 const COMMAND_ORDER = [
-  'ls', 'cd', 'pwd', 'cat', 'grep', 'find',
-  'head', 'tail', 'wc', 'sort', 'uniq',
-  'cut', 'tr', 'nl', 'tac',
-  'echo', 'xargs', 'seq',
-  'tree', 'which', 'basename', 'dirname',
+  'ls', 'cd', 'cat', 'grep', 'find',
+  'head', 'tail', 'wc', 'tree',
+  'sort', 'uniq', 'cut', 'tr', 'nl', 'tac',
+  'xargs', 'echo',
+  'pwd', 'seq', 'which', 'basename', 'dirname',
 ]
 const COMMAND_NAMES = orderedCommandNames()
 const KNOWN = COMMAND_NAMES.join(', ')

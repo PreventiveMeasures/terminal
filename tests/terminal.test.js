@@ -2863,21 +2863,26 @@ describe('createTerminal — complete: corner cases', () => {
     assert.equal(t.run('false || true').exitCode, 0)
   })
 
-  it('empty completion lists ls first, then by priority', () => {
+  it('empty completion lists ls first, then by auditor priority', () => {
     const t = createTerminal(SOURCES)
     const all = t.complete('')
     assert.equal(all[0], 'ls')
-    // Spot-check priority groupings: navigation comes before text
-    // commands, text commands before extras, extras before path
-    // utilities.
+    // Spot-check the priority groupings.
     const idx = (name) => all.indexOf(name)
+    // Browse + read + search come first.
     assert.ok(idx('cd') < idx('cat'), 'cd before cat')
     assert.ok(idx('cat') < idx('grep'), 'cat before grep')
-    assert.ok(idx('grep') < idx('head'), 'grep before head')
-    assert.ok(idx('uniq') < idx('xargs'), 'uniq before xargs')
-    assert.ok(idx('xargs') < idx('tree'), 'xargs before tree')
+    assert.ok(idx('grep') < idx('find'), 'grep before find')
+    // pwd drops below cat/grep — the prompt already shows cwd.
+    assert.ok(idx('cat') < idx('pwd'), 'cat before pwd')
+    assert.ok(idx('grep') < idx('pwd'), 'grep before pwd')
+    assert.ok(idx('xargs') < idx('pwd'), 'xargs before pwd (pwd is rare in audit flows)')
+    // tree sits near the listing tools, not at the very end.
+    assert.ok(idx('wc') < idx('tree'), 'wc before tree')
+    assert.ok(idx('tree') < idx('sort'), 'tree before sort')
+    // Path utilities are the tail.
     assert.ok(idx('basename') < idx('dirname'), 'basename before dirname')
-    assert.ok(idx('dirname') === all.length - 1, 'dirname is last')
+    assert.equal(idx('dirname'), all.length - 1, 'dirname is last')
   })
 
   it('bin-prefix completion fires only in command position', () => {
