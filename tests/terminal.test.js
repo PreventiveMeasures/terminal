@@ -2042,3 +2042,220 @@ describe('createTerminal — head/tail -N shorthand', () => {
     assert.match(stderrErr, /`2>/u)
   })
 })
+
+describe('createTerminal — tac', () => {
+  it('reverses line order from stdin and from a file', () => {
+    const t = createTerminal({ 'lines.txt': 'a\nb\nc\n' })
+    assert.equal(t.run('cat lines.txt | tac').stdout, 'c\nb\na\n')
+    assert.equal(t.run('tac lines.txt').stdout, 'c\nb\na\n')
+  })
+
+  it('reverses each file independently then concatenates (GNU per-file semantics)', () => {
+    // GNU `tac a b` reverses each file separately — not the
+    // concatenated stream. Use `cat a b | tac` to reverse the
+    // combined stream instead.
+    const t = createTerminal({ 'a.txt': '1\n2\n', 'b.txt': '3\n4\n' })
+    assert.equal(t.run('tac a.txt b.txt').stdout, '2\n1\n4\n3\n')
+    assert.equal(t.run('cat a.txt b.txt | tac').stdout, '4\n3\n2\n1\n')
+  })
+
+  it('empty input produces empty output (exit 0)', () => {
+    const t = createTerminal({ 'empty.txt': '' })
+    const r = t.run('tac empty.txt')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '')
+  })
+})
+
+describe('createTerminal — seq', () => {
+  it('one-arg form counts 1..LAST', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('seq 4').stdout, '1\n2\n3\n4\n')
+  })
+
+  it('two-arg form counts FIRST..LAST; descending range auto-picks -1', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('seq 3 5').stdout, '3\n4\n5\n')
+    // Descending: `seq 5 3` defaults the increment to -1 (GNU does
+    // this when FIRST > LAST in the 2-arg form). Without the auto-
+    // detect, the loop would step +1 and emit nothing.
+    assert.equal(t.run('seq 5 3').stdout, '5\n4\n3\n')
+  })
+
+  it('three-arg form uses explicit increment (positive and negative)', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('seq 1 2 7').stdout, '1\n3\n5\n7\n')
+    assert.equal(t.run('seq 10 -3 1').stdout, '10\n7\n4\n1\n')
+  })
+
+  it('rejects floats, scientific, and zero increment', () => {
+    const t = createTerminal({})
+    assert.match(t.run('seq 1.5').stderr, /invalid integer/u)
+    assert.match(t.run('seq 1e3').stderr, /invalid integer/u)
+    assert.match(t.run('seq 1 0 5').stderr, /non-zero/u)
+  })
+
+  it('feeds xargs cleanly', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('seq 3 | xargs echo').stdout, '1 2 3\n')
+  })
+})
+
+describe('createTerminal — nl', () => {
+  it('default (-b t) numbers non-empty lines; empties pass through unprefixed', () => {
+    const t = createTerminal({ 'f.txt': 'a\n\nb\n\nc\n' })
+    const r = t.run('nl f.txt')
+    // Empties stay as the bare empty line — no number, no tab.
+    // Numbered lines keep cat-n's 6-wide right-aligned format.
+    assert.equal(r.stdout, '     1\ta\n\n     2\tb\n\n     3\tc\n')
+  })
+
+  it('-b a numbers EVERY line, including blanks', () => {
+    const t = createTerminal({ 'f.txt': 'a\n\nb\n' })
+    assert.equal(t.run('nl -b a f.txt').stdout, '     1\ta\n     2\t\n     3\tb\n')
+  })
+
+  it('rejects unsupported -b styles with a message naming the valid options', () => {
+    // Real nl supports `-b n` (no numbering) and `-b pREGEX` too,
+    // but those are out of scope. The error should make that clear.
+    const t = createTerminal({ 'f.txt': 'a\n' })
+    const r = t.run('nl -b n f.txt')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /only `a` and `t`/u)
+  })
+
+  it('reads from stdin when no file is given', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('echo hello | nl').stdout, '     1\thello\n')
+  })
+})
+
+describe('createTerminal — cut', () => {
+  it('-f extracts fields with default tab delimiter', () => {
+    const t = createTerminal({ 'tsv.txt': 'a\tb\tc\nd\te\tf\n' })
+    assert.equal(t.run('cut -f 2 tsv.txt').stdout, 'b\ne\n')
+    assert.equal(t.run('cut -f 1,3 tsv.txt').stdout, 'a\tc\nd\tf\n')
+  })
+
+  it('-d sets the field delimiter; -f LIST supports ranges and open-ended', () => {
+    const t = createTerminal({ 'csv.txt': 'a,b,c,d,e\n1,2,3,4,5\n' })
+    assert.equal(t.run('cut -d , -f 2-4 csv.txt').stdout, 'b,c,d\n2,3,4\n')
+    assert.equal(t.run('cut -d , -f 3- csv.txt').stdout, 'c,d,e\n3,4,5\n')
+    assert.equal(t.run('cut -d , -f -2 csv.txt').stdout, 'a,b\n1,2\n')
+  })
+
+  it('-c picks characters by 1-indexed position', () => {
+    const t = createTerminal({ 'f.txt': 'abcdef\nABCDEF\n' })
+    assert.equal(t.run('cut -c 1-3 f.txt').stdout, 'abc\nABC\n')
+    // Output is in position order, NOT list order — matches GNU.
+    assert.equal(t.run('cut -c 4,1 f.txt').stdout, 'ad\nAD\n')
+  })
+
+  it('lines without the delimiter pass through verbatim (no -s)', () => {
+    const t = createTerminal({ 'mixed.txt': 'a,b,c\nNOCOMMA\nd,e,f\n' })
+    assert.equal(t.run('cut -d , -f 2 mixed.txt').stdout, 'b\nNOCOMMA\ne\n')
+  })
+
+  it('rejects malformed shapes with specific messages', () => {
+    const t = createTerminal({ 'f.txt': 'a,b\n' })
+    // Neither -f nor -c.
+    assert.match(t.run('cut f.txt').stderr, /usage:/u)
+    // Both -f and -c.
+    assert.match(t.run('cut -f 1 -c 1 f.txt').stderr, /usage:/u)
+    // -d with -c.
+    assert.match(t.run('cut -d , -c 1 f.txt').stderr, /-d is only valid with -f/u)
+    // Reversed range.
+    assert.match(t.run('cut -c 5-2 f.txt').stderr, /reversed range/u)
+    // Multi-char delim.
+    assert.match(t.run('cut -d ,, -f 1 f.txt').stderr, /single character/u)
+  })
+
+  it('composes naturally in a pipeline', () => {
+    const t = createTerminal({ 'csv.txt': 'name,age\nalice,30\nbob,25\n' })
+    assert.equal(t.run('tail -n 2 csv.txt | cut -d , -f 1').stdout, 'alice\nbob\n')
+  })
+})
+
+describe('createTerminal — tr', () => {
+  it('translate: SET1 → SET2 char-by-char', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('echo hello | tr a-z A-Z').stdout, 'HELLO\n')
+    assert.equal(t.run('echo abc | tr abc xyz').stdout, 'xyz\n')
+  })
+
+  it('-d deletes every char in SET', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('echo "a1b2c3" | tr -d 0-9').stdout, 'abc\n')
+  })
+
+  it('-s squeezes runs of SET chars', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('echo "aaabbbccc" | tr -s a-z').stdout, 'abc\n')
+    // Only listed chars squeeze; others pass through unchanged.
+    assert.equal(t.run('echo "aaaXXXbbb" | tr -s a').stdout, 'aXXXbbb\n')
+  })
+
+  it('SET2 shorter than SET1 → last SET2 char is padded (GNU default)', () => {
+    const t = createTerminal({})
+    // a→x, b→y, c→y (padded), d→y (padded)
+    assert.equal(t.run('echo abcd | tr abcd xy').stdout, 'xyyy\n')
+  })
+
+  it('escape sequences and ranges parse in sets', () => {
+    const t = createTerminal({})
+    // `\t` → space, `\n` left alone in the data, range `a-c` works.
+    assert.equal(t.run('echo "a\tb\tc" | tr "\t" " "').stdout, 'a b c\n')
+  })
+
+  it('rejects -d combined with -s and missing operands', () => {
+    const t = createTerminal({})
+    assert.match(t.run('echo x | tr -ds a b').stderr, /-d combined with -s/u)
+    assert.match(t.run('echo x | tr a').stderr, /usage:/u)
+    assert.match(t.run('tr').stderr, /usage:/u)
+  })
+})
+
+describe('createTerminal — which', () => {
+  it('prints /usr/bin/<name> for each registered command', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('which ls').stdout, '/usr/bin/ls\n')
+    assert.equal(t.run('which grep cat echo').stdout, '/usr/bin/grep\n/usr/bin/cat\n/usr/bin/echo\n')
+  })
+
+  it('finds which itself (registry membership, not hardcoded list)', () => {
+    // Confirms `which` looks up against the live registry rather
+    // than a baked-in name table — otherwise it would miss itself
+    // and any future additions.
+    const t = createTerminal({})
+    assert.equal(t.run('which which').stdout, '/usr/bin/which\n')
+  })
+
+  it('unknown command: silent on stdout, exit 1', () => {
+    // Matches GNU `which`: prints nothing for misses and bumps the
+    // exit code so callers can detect "not all found".
+    const t = createTerminal({})
+    const r = t.run('which frobnicate')
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stdout, '')
+    assert.equal(r.stderr, '')
+  })
+
+  it('mixed: only known names print; exit 1 if any were unknown', () => {
+    const t = createTerminal({})
+    const r = t.run('which ls frobnicate cat')
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stdout, '/usr/bin/ls\n/usr/bin/cat\n')
+  })
+
+  it('does NOT participate in the /bin prefix mapping', () => {
+    // `dispatch` strips `/bin/` etc. when the bare name is known,
+    // but `which` checks registry membership directly. So
+    // `which /bin/ls` looks up the literal `/bin/ls` name (not
+    // registered) and exits 1. This keeps which's contract simple
+    // — strip the prefix yourself if you want the fake path.
+    const t = createTerminal({})
+    const r = t.run('which /bin/ls')
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stdout, '')
+  })
+})

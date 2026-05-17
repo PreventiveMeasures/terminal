@@ -19,6 +19,7 @@
 // the next gated step runs.
 
 import { expandBraces } from './braces.js'
+import { EXTRA_COMMANDS } from './extra-commands.js'
 import { createFs, resolve } from './fs.js'
 import { expandGlobs } from './glob.js'
 import { NAV_COMMANDS } from './nav-commands.js'
@@ -32,7 +33,7 @@ import { err } from './util.js'
 // `dispatch()` accidentally call it. Spreading copies own enumerable
 // properties only, so the registries contain exactly the names we
 // registered — nothing inherited.
-const COMMANDS = { __proto__: null, ...TEXT_COMMANDS, ...NAV_COMMANDS }
+const COMMANDS = { __proto__: null, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_COMMANDS }
 // Hidden registry — dispatchable by name (and via ctx.dispatch from
 // xargs), but excluded from the "Available: …" hint so the
 // commands here don't read as part of the documented surface.
@@ -55,6 +56,10 @@ export function createTerminal(sources, opts = {}) {
   // the full command set, and lets command modules stay free of
   // back-references into index.js.
   ctx.dispatch = (name, tokens, stdin) => dispatch(name, tokens, stdin, ctx)
+  // `which` looks up names against the registries to print a fake
+  // `/usr/bin/<name>` path. Exposing a predicate (rather than the
+  // registry objects) keeps the registries internal to index.js.
+  ctx.hasCommand = (name) => Boolean(COMMANDS[name] || HIDDEN[name])
   if (!fs.isDir(ctx.cwd)) throw new Error(`createTerminal: cwd is not a directory: ${ctx.cwd}`)
   return {
     run: (line) => safeRun(line, ctx),
