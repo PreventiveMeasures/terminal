@@ -1095,20 +1095,20 @@ describe('createTerminal — errors', () => {
     assert.match(r.stderr, /\bcat\b/u)
   })
 
-  it('/bin/ and /usr/bin/ prefixes resolve to the registered command', () => {
+  it('/bin/, /sbin/, /usr/bin/, /usr/local/bin/ prefixes resolve to the registered command', () => {
     const t = createTerminal(SOURCES)
     // Bare and prefixed forms produce identical results for any
     // registered command — same stdout, same exit code.
     const bare = t.run('ls')
-    const bin = t.run('/bin/ls')
-    const usrBin = t.run('/usr/bin/ls')
-    assert.equal(bin.stdout, bare.stdout)
-    assert.equal(bin.exitCode, bare.exitCode)
-    assert.equal(usrBin.stdout, bare.stdout)
-    assert.equal(usrBin.exitCode, bare.exitCode)
+    for (const prefix of ['/bin/', '/sbin/', '/usr/bin/', '/usr/local/bin/']) {
+      const r = t.run(`${prefix}ls`)
+      assert.equal(r.stdout, bare.stdout, `${prefix}ls: stdout mismatch`)
+      assert.equal(r.exitCode, bare.exitCode, `${prefix}ls: exit mismatch`)
+    }
     // Args pass through to the resolved command.
     assert.equal(t.run('/bin/echo hi').stdout, 'hi\n')
     assert.equal(t.run('/usr/bin/grep TODO src/foo.js').stdout, '// TODO: fix\n')
+    assert.equal(t.run('/usr/local/bin/echo hi').stdout, 'hi\n')
     // Works inside pipelines too — dispatch is the single entry point.
     assert.equal(t.run('echo hi | /bin/cat').stdout, 'hi\n')
   })
