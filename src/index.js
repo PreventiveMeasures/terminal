@@ -62,8 +62,26 @@ export function createTerminal(sources, opts = {}) {
   }
 }
 
+// Strip a leading `/bin/` or `/usr/bin/` from `name` when the bare
+// name resolves to a registered command. Matches what users with
+// shell muscle memory tend to type — `/bin/ls`, `/usr/bin/grep` —
+// without exposing the virtual FS as a real PATH. If the stripped
+// name isn't registered, fall through with the original so the
+// not-found error reflects what was typed.
+const BIN_PREFIXES = ['/usr/bin/', '/bin/']
+function resolveCommand(name) {
+  for (const prefix of BIN_PREFIXES) {
+    if (name.startsWith(prefix)) {
+      const stripped = name.slice(prefix.length)
+      if (COMMANDS[stripped] || HIDDEN[stripped]) return stripped
+    }
+  }
+  return name
+}
+
 function dispatch(name, tokens, stdin, ctx) {
-  const cmd = COMMANDS[name] ?? HIDDEN[name]
+  const resolved = resolveCommand(name)
+  const cmd = COMMANDS[resolved] ?? HIDDEN[resolved]
   if (!cmd) return unknownCommand(name)
   try {
     return cmd(stdin, tokens, ctx)
