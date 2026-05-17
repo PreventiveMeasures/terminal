@@ -284,7 +284,14 @@ function complete(line, ctx) {
   // preserved verbatim — that's what makes each variant a drop-in
   // replacement for the entire input line.
   const head = line.slice(0, segStart + wordStart)
-  return completeWord(word, commandPosition, pipe, ctx).map((w) => head + w)
+  // After a single `|`, ensure a space sits between the pipe and
+  // the completion: `cat|gre` → `cat| grep`, `cat |` → `cat | grep`.
+  // `head.endsWith('|')` is exactly the "no whitespace was typed
+  // after the `|`" case (otherwise the trailing word would have
+  // started at a later index, and `head` would end in whitespace).
+  // `||` / `&&` / `;` aren't touched — only single-pipe completion.
+  const sep = pipe && head.endsWith('|') ? ' ' : ''
+  return completeWord(word, commandPosition, pipe, ctx).map((w) => head + sep + w)
 }
 
 // In command position, bin-prefix and `./` / `/` path completion

@@ -2734,7 +2734,8 @@ describe('createTerminal — complete: full-line contract', () => {
     // Caller does NOT need to tokenize — each result string can be
     // set directly as the new input.
     assert.deepEqual(t.complete('gre'), ['grep'])
-    assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])
+    // Pipe completion auto-inserts a space when the user didn't.
+    assert.deepEqual(t.complete('cat|gre'), ['cat| grep'])
     assert.deepEqual(t.complete('cat foo | gre'), ['cat foo | grep'])
     assert.deepEqual(t.complete('  echo hi ; gre'), ['  echo hi ; grep'])
     assert.deepEqual(t.complete('cat foo | /usr/bin/gre'), ['cat foo | /usr/bin/grep'])
@@ -2764,10 +2765,20 @@ describe('createTerminal — complete: corner cases', () => {
     const t = createTerminal(SOURCES)
     // Each form: the trailing word is empty and the command-position
     // check sees `''.trim() === ''` → all commands. The separator chars
-    // are kept verbatim as a prefix on each variant.
-    for (const input of ['|', ';', '||', '&&', '|;||&&', ';   ', ' && ']) {
-      const c = t.complete(input)
-      assert.ok(c.includes(input + 'grep'), `expected ${JSON.stringify(input + 'grep')}`)
+    // are kept verbatim as a prefix on each variant. The single-pipe
+    // case auto-inserts a space (`|` → `| grep`); other separators
+    // are left exactly as typed.
+    const cases = [
+      ['|',         '| grep'],
+      [';',         ';grep'],
+      ['||',        '||grep'],
+      ['&&',        '&&grep'],
+      ['|;||&&',    '|;||&&grep'],
+      [';   ',      ';   grep'],
+      [' && ',      ' && grep'],
+    ]
+    for (const [input, expected] of cases) {
+      assert.ok(t.complete(input).includes(expected), `expected ${JSON.stringify(expected)} for ${JSON.stringify(input)}`)
     }
   })
 
@@ -2959,15 +2970,18 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete(' | l'), [])
   })
 
-  it('`|` without surrounding whitespace still pipe-filters', () => {
+  it('`|` without surrounding whitespace still pipe-filters and inserts a space', () => {
     const t = createTerminal({})
-    assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])
+    // Auto-inserted space sits between the `|` and the completion.
+    assert.deepEqual(t.complete('cat|gre'), ['cat| grep'])
     // ls is non-pipeable even when the user squishes the pipe in.
     assert.deepEqual(t.complete('cat|l'), [])
-    // Empty trailing word: full pipe set, glued to `cat|`.
+    // Empty trailing word: full pipe set, each glued to `cat| ` with a space.
     const c = t.complete('cat|')
     assert.equal(c.length, 12)
-    assert.equal(c[0], 'cat|grep')
+    assert.equal(c[0], 'cat| grep')
+    // Every variant has the inserted space — no `cat|grep` leaks through.
+    for (const variant of c) assert.ok(variant.startsWith('cat| '), `expected "cat| " prefix on ${variant}`)
   })
 
   it('multi-pipe pipelines filter on the most recent `|`', () => {
@@ -3033,11 +3047,47 @@ describe('createTerminal — complete: corner cases', () => {
 
   it('tab and mixed whitespace between `|` and the pipe target', () => {
     const t = createTerminal({})
+    // Whitespace (tab or space) sitting after the `|` counts as
+    // already-present — no extra space is inserted.
     assert.deepEqual(t.complete('cat |\tgre'), ['cat |\tgrep'])
     assert.deepEqual(t.complete('cat\t|\tgre'), ['cat\t|\tgrep'])
     assert.deepEqual(t.complete('cat   |    gre'), ['cat   |    grep'])
     // Empty trailing word with funky whitespace prefix still pipe-filters.
     assert.ok(t.complete('cat |  ').includes('cat |  grep'))
+  })
+
+  it('auto-inserts a space after `|` when one is missing', () => {
+    const t = createTerminal({})
+    // The two cases the user called out directly.
+    assert.deepEqual(t.complete('cat 1 |'), [
+      'cat 1 | grep', 'cat 1 | head', 'cat 1 | tail', 'cat 1 | wc',
+      'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs',
+      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | cat',
+    ])
+    assert.deepEqual(t.complete('cat 1 | '), [
+      'cat 1 | grep', 'cat 1 | head', 'cat 1 | tail', 'cat 1 | wc',
+      'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs',
+      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | cat',
+    ])
+    // Partial pipe-target word: space goes between `|` and the word.
+    assert.deepEqual(t.complete('cat |gre'), ['cat | grep'])
+    assert.deepEqual(t.complete('cat|gre'), ['cat| grep'])
+    // Bare `|` at the very start of a line: same treatment.
+    assert.ok(t.complete('|').includes('| grep'))
+    // Bin-prefix completion after a no-space pipe gets the space too.
+    assert.deepEqual(t.complete('cat|/usr/bin/gre'), ['cat| /usr/bin/grep'])
+  })
+
+  it('space insertion is single-pipe-only — `||` / `&&` / `;` stay verbatim', () => {
+    const t = createTerminal({})
+    // `||` / `&&` / `;` start fresh statements with their own stdin,
+    // so the pipe-completion convenience doesn't apply.
+    assert.deepEqual(t.complete('cat||gre'), ['cat||grep'])
+    assert.deepEqual(t.complete('cat&&gre'), ['cat&&grep'])
+    assert.deepEqual(t.complete('cat;gre'), ['cat;grep'])
+    // Even when the last separator is `||` after an earlier `|`, the
+    // last-separator type wins — no space inserted.
+    assert.deepEqual(t.complete('cat|grep||l'), ['cat|grep||ls'])
   })
 
   it('non-pipeable first command does not affect completion (no validation)', () => {
@@ -3087,13 +3137,13 @@ describe('createTerminal — complete: corner cases', () => {
 
   it('separators without surrounding whitespace still split', () => {
     const t = createTerminal(SOURCES)
-    // Full-line replacement preserves the literal `|` / `;` / `&&` / `||`
-    // glue exactly as typed — no spaces are inserted on the caller's behalf.
-    assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])
+    // `;` / `&&` / `||` are preserved verbatim — no spaces inserted.
+    // Single `|` is the exception: pipe completion auto-inserts a space.
+    assert.deepEqual(t.complete('cat|gre'), ['cat| grep'])
     assert.deepEqual(t.complete('cat;gre'), ['cat;grep'])
     assert.deepEqual(t.complete('a||b||gre'), ['a||b||grep'])
     assert.deepEqual(t.complete('a&&b&&gre'), ['a&&b&&grep'])
-    // Mixed and chained.
+    // Mixed and chained: last separator is `||`, so no space inserted.
     assert.deepEqual(t.complete('a|b;c&&d||gre'), ['a|b;c&&d||grep'])
   })
 
