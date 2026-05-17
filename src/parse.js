@@ -1,7 +1,8 @@
 // Tokenize a command line and split it into a sequence of pipeline
 // steps with short-circuit gates (`&&` / `||`) between them. Each
 // step is a list of stages connected by `|`; each stage carries
-// its argv plus optional stdout/stderr suppression flags.
+// its argv plus optional stdout/stderr suppression flags, OR
+// (for a subshell stage) a nested `group` of inner steps.
 //
 // Recognized boundary tokens:
 //   `|`       — pipe to the next stage in the current step
@@ -10,6 +11,11 @@
 //               of `&&` / `||`)
 //   `&&`      — run next step only if current step exited 0
 //   `||`      — run next step only if current step exited non-zero
+//   `(` `)`   — subshell grouping. The contents parse as their own
+//               step list and run with an isolated cwd (so `cd`
+//               inside `()` doesn't leak out). The group itself
+//               occupies one stage slot and can be piped, gated,
+//               and redirected like any other stage.
 //   `>` / `1>` — redirect stdout; only `/dev/null` is allowed as
 //               the target (the virtual FS is read-only) and means
 //               "discard"
@@ -20,7 +26,7 @@
 //   `>>` / `1>>` / `2>>` — append form, rejected outright
 //
 // Boundary tokens are tagged by `kind`, not by string value, so a
-// quoted `"|"` / `">"` / `"&&"` stays an ordinary word.
+// quoted `"|"` / `">"` / `"("` stays an ordinary word.
 
 export function parseLine(line) {
   const raw = tokenize(line)
@@ -33,34 +39,88 @@ export function parseLine(line) {
   // wait for continuation in bash — without a continuation prompt,
   // erroring is the better signal.
   while (raw.length > 0 && raw.at(-1).kind === 'semi') raw.pop()
-  const steps = buildSteps(raw)
-  for (const step of steps) {
-    if (step.stages.length === 0 || step.stages.some((s) => s.argv.length === 0)) {
-      throw new Error('empty pipeline stage')
-    }
-  }
+  const { steps, consumed } = buildSteps(raw, 0, false)
+  if (consumed !== raw.length) throw new Error('unexpected `)`')
+  validateSteps(steps)
   return steps
 }
 
-function buildSteps(raw) {
+// A "group stage" carries no argv — its content is the nested
+// `steps`. Its argv is unreachable, but checking `.group` first lets
+// the same validator handle both shapes.
+function validateSteps(steps) {
+  for (const step of steps) {
+    if (step.stages.length === 0) throw new Error('empty pipeline stage')
+    for (const s of step.stages) {
+      if (s.group) validateSteps(s.group)
+      else if (s.argv.length === 0) throw new Error('empty pipeline stage')
+    }
+  }
+}
+
+// Recursive: when `inGroup` is true we're parsing the inside of a
+// `(...)` and stop at the matching `)`. The returned `consumed`
+// index points one past the consumed `)` (or one past the last
+// token at top level), letting the caller resume from there.
+function buildSteps(raw, start, inGroup) {
   const steps = [{ gate: 'first', stages: [] }]
   let stage = { argv: [], quoted: new Set() }
-  for (let i = 0; i < raw.length; i++) {
+  let i = start
+  while (i < raw.length) {
     const t = raw[i]
+    if (t.kind === 'paren_close') {
+      if (!inGroup) throw new Error('unexpected `)`')
+      return finishGroup(steps, stage, i + 1)
+    }
+    if (t.kind === 'paren_open') {
+      // A subshell occupies a whole stage slot. Allowing tokens to
+      // accumulate before it (`echo a (cmd)`) would create an argv
+      // + group hybrid with no sensible semantics, so error early.
+      if (stage.group || stage.argv.length > 0) throw new Error('unexpected `(`')
+      const inner = buildSteps(raw, i + 1, true)
+      stage = { group: inner.steps, quoted: new Set() }
+      i = inner.consumed
+      continue
+    }
     if (t.kind === 'pipe' || t.kind === 'and' || t.kind === 'or' || t.kind === 'semi') {
       steps.at(-1).stages.push(stage)
       stage = { argv: [], quoted: new Set() }
       if (t.kind === 'and') steps.push({ gate: 'and', stages: [] })
       else if (t.kind === 'or') steps.push({ gate: 'or', stages: [] })
       else if (t.kind === 'semi') steps.push({ gate: 'seq', stages: [] })
+      i++
       continue
     }
-    if (t.kind === 'redir') { i = applyRedir(stage, raw, i); continue }
+    if (t.kind === 'redir') { i = applyRedir(stage, raw, i) + 1; continue }
+    // After a closing `)` the only legal continuations are a boundary
+    // token (handled above) or a redirect target for the group itself
+    // (also above). Stray words like `(echo a) hi` land here.
+    if (stage.group) throw new Error('unexpected token after `)`')
     if (t.quoted) stage.quoted.add(stage.argv.length)
     stage.argv.push(t.value)
+    i++
   }
+  if (inGroup) throw new Error('unmatched `(`')
   steps.at(-1).stages.push(stage)
-  return steps
+  return { steps, consumed: i }
+}
+
+// Close out a `(...)` group. Two cases need care:
+//   - `()` — truly empty subshell, distinct error from the generic
+//     "empty pipeline stage" so the user sees what they did wrong.
+//   - `(echo a;)` — trailing `;` before `)`, mirroring the top-level
+//     trailing-semi tolerance. The semi already pushed an empty new
+//     step; drop it here.
+function finishGroup(steps, stage, consumed) {
+  const lastStep = steps.at(-1)
+  const stageEmpty = !stage.group && stage.argv.length === 0
+  if (stageEmpty && lastStep.stages.length === 0) {
+    if (steps.length === 1) throw new Error('empty subshell `()`')
+    steps.pop()
+  } else {
+    lastStep.stages.push(stage)
+  }
+  return { steps, consumed }
 }
 
 function applyRedir(stage, raw, i) {
@@ -166,6 +226,11 @@ function tokenize(line) {
       continue
     }
     if (c === ';') { flush(); tokens.push({ kind: 'semi' }); continue }
+    // `(` / `)` flush mid-word the same way `;` / `|` do, so
+    // `(echo a)` and `( echo a )` produce identical token streams
+    // and `echo a;(echo b)` doesn't need whitespace around `(`.
+    if (c === '(') { flush(); tokens.push({ kind: 'paren_open' }); continue }
+    if (c === ')') { flush(); tokens.push({ kind: 'paren_close' }); continue }
     if (/\s/u.test(c)) { flush(); continue }
     cur += c; inToken = true
   }
