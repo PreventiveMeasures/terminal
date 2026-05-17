@@ -1730,6 +1730,16 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     const merged = t.run('2>&1 (cat /nope)')
     assert.match(merged.stdout, /no such file/u)
     assert.equal(merged.stderr, '')
+    // Leading + trailing redirects on the same group must both apply.
+    const both = t.run('2>&1 (cat /nope; echo ok) >/dev/null')
+    assert.equal(both.stdout, '')
+    assert.equal(both.stderr, '')
+    // Leading redirect on a nested group attaches to the OUTER group,
+    // not the inner — the inner is parsed by a separate buildSteps
+    // call that starts with a fresh stage.
+    const nested = t.run('>/dev/null ((echo hi))')
+    assert.equal(nested.exitCode, 0)
+    assert.equal(nested.stdout, '')
   })
 
   it('`(cmd 2>&1)` parses without whitespace before `)`', () => {
@@ -1752,14 +1762,20 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     // `(>/dev/null)` and `(echo a; >/dev/null)` both produce a step
     // whose stage has redirect flags but no argv. finishGroup must
     // NOT treat that as the trailing-`;` case — the redirect would
-    // vanish and the user would never know.
+    // vanish and the user would never know. Also covers `2>&1` (a
+    // merge flag, not a null sink) to pin that hasRedirects checks
+    // the full flag set, not just the null sinks.
     const t = createTerminal(SOURCES)
-    const only = t.run('(>/dev/null)')
-    assert.notEqual(only.exitCode, 0)
-    assert.match(only.stderr, /empty pipeline/u)
-    const trailing = t.run('(echo a; >/dev/null)')
-    assert.notEqual(trailing.exitCode, 0)
-    assert.match(trailing.stderr, /empty pipeline/u)
+    for (const cmd of [
+      '(>/dev/null)',
+      '(echo a; >/dev/null)',
+      '(2>&1)',
+      '(echo a; 2>&1)',
+    ]) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0, `${cmd} should error`)
+      assert.match(r.stderr, /empty pipeline/u, `${cmd} should report empty pipeline`)
+    }
   })
 
   it('nested `((...))` parses and runs', () => {
@@ -1823,6 +1839,18 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     const r = t.run('(echo a) hi')
     assert.notEqual(r.exitCode, 0)
     assert.match(r.stderr, /after `\)`/u)
+  })
+
+  it('a redirect between two groups errors instead of producing a hybrid', () => {
+    // `(echo a) 2>&1 (echo b)`: the redirect attaches to the in-flight
+    // stage (which now has `group` set from the first `(...)`), then
+    // the second `(` tries to set `group` again — the paren_open guard
+    // catches this. Pinned so a future "let groups chain" change is
+    // a deliberate decision, not silent state accumulation.
+    const t = createTerminal(SOURCES)
+    const r = t.run('(echo a) 2>&1 (echo b)')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /unexpected `\(`/u)
   })
 })
 
