@@ -33,6 +33,8 @@
   },
   "files": [
     "src/braces.js",
+    "src/bre.js",
+    "src/complete.js",
     "src/extra-commands.js",
     "src/find.js",
     "src/fs.js",
