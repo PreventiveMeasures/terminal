@@ -112,9 +112,12 @@ function formatWc(counts, name, which) {
   return parts.join(' ') + (name ? ' ' + name : '')
 }
 
-function sort(stdin, tokens) {
-  const { flags } = parseArgs(tokens, { short: ['r', 'u'] })
-  let lines = splitLines(stdin)
+function sort(stdin, tokens, ctx) {
+  const { flags, positional } = parseArgs(tokens, { short: ['r', 'u'] })
+  const r = positional.length > 0 ? readFilesFor('sort', positional, ctx) : { inputs: [{ name: null, content: stdin }] }
+  if (r.error) return r.error
+  // `sort a b` orders the concatenation of all inputs, matching coreutils.
+  let lines = splitLines(r.inputs.map((f) => f.content).join(''))
   lines.sort()
   if (flags.has('r')) lines.reverse()
   if (flags.has('u')) {
@@ -132,14 +135,16 @@ function sort(stdin, tokens) {
 // `-d` and `-u` together produces no output (the empty intersection)
 // rather than erroring — matches what GNU does on common versions
 // and avoids surprising scripts that pass both flags.
-function uniq(stdin, tokens) {
-  const { flags } = parseArgs(tokens, { short: ['c', 'd', 'u', 'i'] })
+function uniq(stdin, tokens, ctx) {
+  const { flags, positional } = parseArgs(tokens, { short: ['c', 'd', 'u', 'i'] })
+  const r = positional.length > 0 ? readFilesFor('uniq', positional, ctx) : { inputs: [{ name: null, content: stdin }] }
+  if (r.error) return r.error
   const showCount = flags.has('c')
   const onlyDups = flags.has('d')
   const onlyUniques = flags.has('u')
   const ignoreCase = flags.has('i')
   const norm = (s) => ignoreCase ? s.toLowerCase() : s
-  const lines = splitLines(stdin)
+  const lines = splitLines(r.inputs.map((f) => f.content).join(''))
   const out = []
   let prev = null
   let prevKey = null
@@ -162,10 +167,51 @@ function uniq(stdin, tokens) {
   return ok(out.length === 0 ? '' : out.join('\n') + '\n')
 }
 
+// `-n` drops the trailing newline; `-e` enables backslash-escape
+// interpretation (`-E`, the default, disables it). The parser tracks
+// flags in a set, not by order, so when both `-e` and `-E` appear we
+// honor `-e` rather than bash's last-one-wins — a rare combination.
 function echo(_stdin, tokens) {
-  const { flags, positional } = parseArgs(tokens, { short: ['n'] })
-  const out = positional.join(' ')
-  return ok(flags.has('n') ? out : out + '\n')
+  const { flags, positional } = parseArgs(tokens, { short: ['n', 'e', 'E'] })
+  let out = positional.join(' ')
+  let trailingNewline = !flags.has('n')
+  if (flags.has('e')) {
+    const r = interpretEscapes(out)
+    out = r.text
+    // `\c` halts output and suppresses the trailing newline.
+    if (r.stop) trailingNewline = false
+  }
+  return ok(trailingNewline ? out + '\n' : out)
+}
+
+// Backslash escapes recognized by GNU coreutils `echo -e`. `\c` stops
+// all further output; octal `\0NNN` (up to 3 digits) and hex `\xHH`
+// (up to 2 digits) map to the matching code point. An unrecognized
+// escape keeps its backslash literal, as GNU does.
+function interpretEscapes(s) {
+  // letter -> code point: BEL, BS, ESC, FF, LF, CR, TAB, VT, backslash.
+  const simple = { a: 7, b: 8, e: 27, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92 }
+  let out = ''
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== '\\' || i + 1 >= s.length) { out += s[i]; continue }
+    const c = s[++i]
+    if (c === 'c') return { text: out, stop: true }
+    if (c in simple) { out += String.fromCodePoint(simple[c]); continue }
+    if (c === '0') {
+      let digits = ''
+      while (digits.length < 3 && /[0-7]/u.test(s[i + 1] ?? '')) digits += s[++i]
+      out += String.fromCodePoint(digits === '' ? 0 : parseInt(digits, 8))
+      continue
+    }
+    if (c === 'x' && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) {
+      let digits = ''
+      while (digits.length < 2 && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) digits += s[++i]
+      out += String.fromCodePoint(parseInt(digits, 16))
+      continue
+    }
+    out += '\\' + c
+  }
+  return { text: out, stop: false }
 }
 
 // Read whitespace-separated tokens from stdin and append them as

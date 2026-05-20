@@ -938,6 +938,63 @@ describe('createTerminal — text commands', () => {
     assert.equal(t.run('cat f.txt | uniq -ic').stdout, '      3 Apple\n      2 Banana\n')
   })
 
+  it('sort reads filename arguments (not just stdin)', () => {
+    // Regression: `sort <file>` used to silently ignore the file and
+    // emit nothing with exit 0, breaking pipelines like `sort f | uniq`.
+    const t = createTerminal({ 'words.txt': 'banana\ncherry\napple\n' })
+    assert.equal(t.run('sort words.txt').stdout, 'apple\nbanana\ncherry\n')
+    assert.equal(t.run('sort -r words.txt').stdout, 'cherry\nbanana\napple\n')
+    // Stays composable downstream now that it actually emits.
+    assert.equal(t.run('sort words.txt | uniq -c').stdout, '      1 apple\n      1 banana\n      1 cherry\n')
+  })
+
+  it('sort merges multiple file arguments before ordering (coreutils behavior)', () => {
+    const t = createTerminal({ 'a.txt': 'b\nd\n', 'b.txt': 'a\nc\n' })
+    assert.equal(t.run('sort a.txt b.txt').stdout, 'a\nb\nc\nd\n')
+  })
+
+  it('uniq reads filename arguments (not just stdin)', () => {
+    // Regression: `uniq <file>` / `uniq -c <file>` used to return
+    // empty stdout with exit 0 instead of reading the file.
+    const t = createTerminal({ 'f.txt': 'a\na\nb\na\n' })
+    assert.equal(t.run('uniq f.txt').stdout, 'a\nb\na\n')
+    assert.equal(t.run('uniq -c f.txt').stdout, '      2 a\n      1 b\n      1 a\n')
+  })
+
+  it('sort / uniq report missing files instead of silently emitting nothing', () => {
+    const t = createTerminal({ 'f.txt': 'a\n' })
+    const s = t.run('sort nope.txt')
+    assert.equal(s.exitCode, 1)
+    assert.match(s.stderr, /sort: nope\.txt: no such file/u)
+    const u = t.run('uniq nope.txt')
+    assert.equal(u.exitCode, 1)
+    assert.match(u.stderr, /uniq: nope\.txt: no such file/u)
+  })
+
+  it('echo -e interprets backslash escapes; default leaves them literal', () => {
+    // Without -e, escapes pass through verbatim (the historical
+    // behavior); -e turns `\n`, `\t`, etc. into the real characters.
+    const t = createTerminal({})
+    assert.equal(t.run('echo "a\\nb"').stdout, 'a\\nb\n')
+    assert.equal(t.run('echo -e "a\\nb"').stdout, 'a\nb\n')
+    assert.equal(t.run('echo -e "x\\ty"').stdout, 'x\ty\n')
+    // -E is the explicit "no interpretation" form and is accepted.
+    assert.equal(t.run('echo -E "a\\nb"').stdout, 'a\\nb\n')
+    // -n still suppresses the trailing newline, and bundles with -e.
+    assert.equal(t.run('echo -ne "a\\nb"').stdout, 'a\nb')
+    // Unrecognized escapes keep their backslash, matching GNU.
+    assert.equal(t.run('echo -e "\\q"').stdout, '\\q\n')
+  })
+
+  it('echo -e supports octal/hex escapes and `\\c` halting output', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('echo -e "\\0101"').stdout, 'A\n')
+    assert.equal(t.run('echo -e "\\x41"').stdout, 'A\n')
+    // `\c` stops output and suppresses the trailing newline, dropping
+    // the rest of the line and any following arguments.
+    assert.equal(t.run('echo -e "a\\cb" c').stdout, 'a')
+  })
+
   it('ls multi-target partial failure: matches succeed on stdout, misses on stderr', () => {
     // Already pinned in the basics block (line 54) but not against
     // an actual data file — confirm here that stdout still carries
@@ -2494,6 +2551,24 @@ describe('createTerminal — seq', () => {
     assert.equal(t.run('seq -5').stdout, '')
     // The 2-arg form keeps its auto-sign behavior, untouched.
     assert.equal(t.run('seq 5 1').stdout, '5\n4\n3\n2\n1\n')
+  })
+
+  it('caps oversized ranges instead of OOMing the buffered pipeline', () => {
+    // Pipelines materialize each stage's output, so an unbounded seq
+    // (e.g. `seq 1 1000000000 | head -1`) would build a billion lines
+    // and run out of memory. The count is rejected before allocating.
+    const t = createTerminal({})
+    const big = t.run('seq 1 1000000000')
+    assert.equal(big.exitCode, 1)
+    assert.match(big.stderr, /range too large/u)
+    // The original OOM repro: seq errors, head sees empty stdin.
+    assert.equal(t.run('seq 1 1000000000 | head -1').stdout, '')
+    // Large descending and out-of-safe-range counts are caught too.
+    assert.match(t.run('seq 1000000000 -1 1').stderr, /range too large/u)
+    assert.match(t.run('seq 1 99999999999999999999').stderr, /range too large/u)
+    // Just over the limit is rejected; the limit itself is allowed.
+    assert.match(t.run('seq 1 1000001').stderr, /range too large/u)
+    assert.equal(t.run('seq 1 1000000').exitCode, 0)
   })
 })
 
