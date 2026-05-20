@@ -266,6 +266,10 @@ function tokenize(line) {
 //                (e.g. `n` for `head -n 5`); inline `-n5` also works
 //   valueLong  — long flags that consume the next token as value
 //                (e.g. `name` for `find --name foo`)
+//   repeatable — value flags (short or long) that may appear more than
+//                once; their values collect into an ARRAY in `values`
+//                (e.g. `e` for `grep -e a -e b` → `['a', 'b']`) instead
+//                of the last-wins scalar a plain value flag stores.
 //   stopAtFirstPositional — when true, stop parsing flags as soon
 //                as a non-flag positional appears; the rest of the
 //                tokens are pushed as positional verbatim. Used by
@@ -281,6 +285,7 @@ export function parseArgs(tokens, schema = {}) {
   const long = asSet(schema.long)
   const valueShort = asSet(schema.valueShort)
   const valueLong = asSet(schema.valueLong)
+  const repeatable = asSet(schema.repeatable)
   const stopEarly = schema.stopAtFirstPositional ?? false
   const flags = new Set()
   const values = new Map()
@@ -300,13 +305,13 @@ export function parseArgs(tokens, schema = {}) {
     if (/^-+$/u.test(t)) { positional.push(t); continue }
     if (t.startsWith('--') && t.length > 2) {
       const name = t.slice(2)
-      if (valueLong.has(name)) values.set(name, takeNext(tokens, ++i, `--${name}`))
+      if (valueLong.has(name) || repeatable.has(name)) addValue(values, repeatable, name, takeNext(tokens, ++i, `--${name}`))
       else if (long.has(name)) flags.add(name)
       else throw new Error(`unknown option: --${name}`)
       continue
     }
     if (t.startsWith('-') && t.length > 1 && !/^-\d/u.test(t)) {
-      i = consumeShorts(tokens, i, short, valueShort, flags, values)
+      i = consumeShorts(tokens, i, short, valueShort, repeatable, flags, values)
       continue
     }
     if (stopEarly) { positional.push(...tokens.slice(i)); break }
@@ -321,18 +326,27 @@ function asSet(v) {
 }
 
 function takeNext(tokens, i, label) {
-  if (i >= tokens.length) throw new Error(`${label} requires a value`)
+  if (i >= tokens.length) throw new Error(`${label} requires an argument`)
   return tokens[i]
 }
 
-function consumeShorts(tokens, i, short, valueShort, flags, values) {
+// Store a value flag's argument. Repeatable flags accumulate into an
+// array (`-e a -e b` → `['a', 'b']`); the rest keep the last value.
+function addValue(values, repeatable, name, val) {
+  if (!repeatable.has(name)) { values.set(name, val); return }
+  const prev = values.get(name)
+  if (prev) prev.push(val)
+  else values.set(name, [val])
+}
+
+function consumeShorts(tokens, i, short, valueShort, repeatable, flags, values) {
   const chars = tokens[i].slice(1)
   for (let j = 0; j < chars.length; j++) {
     const c = chars[j]
-    if (valueShort.has(c)) {
+    if (valueShort.has(c) || repeatable.has(c)) {
       // Inline value (`-n5`) wins over the next token.
-      if (j + 1 < chars.length) { values.set(c, chars.slice(j + 1)); return i }
-      values.set(c, takeNext(tokens, ++i, `-${c}`))
+      if (j + 1 < chars.length) { addValue(values, repeatable, c, chars.slice(j + 1)); return i }
+      addValue(values, repeatable, c, takeNext(tokens, ++i, `-${c}`))
       return i
     }
     if (!short.has(c)) throw new Error(`unknown option: -${c}`)

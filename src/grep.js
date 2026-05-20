@@ -15,7 +15,7 @@
 
 import { relativeTo, resolve } from './fs.js'
 import { parseArgs } from './parse.js'
-import { err, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
+import { err, joinLines, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
 
 // Two forms because PATTERN is required UNLESS -e is given. Listing
 // both makes the conditional explicit — bare `[PATTERN]` would read
@@ -24,26 +24,20 @@ import { err, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from '.
 const FLAGS = '[-i] [-v] [-n] [-r] [-w] [-o] [-E|-F|-G] [-l] [-L] [-c] [-h] [-H] [-A N] [-B N] [-C N]'
 const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} -e PATTERN ... [PATH...]`
 
-// Shared schema for parseArgs and extractEPatterns. The bundled-`-e`
-// pre-pass needs to know which other shorts take a value so it
-// doesn't try to split `-Ae 5` (which is `-A=e`) as `-A -e 5`.
 const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'l', 'L', 'c', 'w', 'h', 'H', 'o', 'E', 'F', 'G']
 const VALUE_SHORTS = ['A', 'B', 'C']
-const VALUE_SHORTS_SET = new Set(VALUE_SHORTS)
 
 export function grep(stdin, tokens, ctx) {
-  // Pre-pass `-e PATTERN` / `-ePATTERN` out of the token stream so
-  // parseArgs only sees the remaining flags / paths. Multiple `-e`
-  // are OR'd together. Patterns may start with `-`, which is the
-  // primary reason `-e` exists beyond multi-pattern. Stops at `--`.
-  // Pre-pass strips every `-e` form (explicit, inline, bundled) so
-  // parseArgs never sees `-e` at all and we keep ALL of the patterns
-  // — including repeated bundles like `-ie foo -ie bar` which would
-  // otherwise lose one via parseArgs's single-value-per-key Map.
-  const eRes = extractEPatterns(tokens)
-  if (eRes.error) return eRes.error
-  const { ePatterns, remaining } = eRes
-  const { flags, values, positional } = parseArgs(remaining, { short: SHORT_FLAGS, valueShort: VALUE_SHORTS })
+  // `-e` is a repeatable value flag, so `-e a -e b` (and the bundled
+  // `-ie foo` / inline `-efoo` forms) collect every pattern into an
+  // array — they're OR'd together, and a pattern may start with `-`.
+  // parseArgs throws on a bad flag / stranded `-e`; grep's usage
+  // errors exit 2 (GNU), distinct from dispatch's generic exit 1.
+  let parsed
+  try { parsed = parseArgs(tokens, { short: SHORT_FLAGS, valueShort: VALUE_SHORTS, repeatable: ['e'] }) }
+  catch (e) { return err(`grep: ${e.message}`, 2) }
+  const { flags, values, positional } = parsed
+  const ePatterns = values.get('e') ?? []
   // If any `-e` patterns were collected, every positional is a file;
   // otherwise the first positional is the pattern.
   let patterns, rest
@@ -94,48 +88,6 @@ function checkConflicts(flags) {
     return err(`grep: ${dialects.map((f) => `-${f}`).join(' / ')} are mutually exclusive`)
   }
   return null
-}
-
-// Pull every `-e PATTERN` form out of the token stream (explicit,
-// inline `-efoo`, bundled `-ie foo` / `-iefoo`). Stops at `--`.
-// parseArgs can't do this because its values Map keeps only the
-// last value per key, dropping `foo` in `-e foo -e bar`. Bundle
-// scan stops at the first value-taking short (`-Ae` is `-A=e`,
-// not a bundle ending in `-e`).
-function extractEPatterns(tokens) {
-  const ePatterns = []
-  const remaining = []
-  let afterTerminator = false
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i]
-    if (afterTerminator) { remaining.push(t); continue }
-    if (t === '--') { remaining.push(t); afterTerminator = true; continue }
-    if (!t.startsWith('-') || t.length < 2 || t.startsWith('--') || /^-\d/u.test(t)) {
-      remaining.push(t); continue
-    }
-    // Walk the bundle for `e`; capture chars before as bool flags.
-    // If the bundle ends in a value-taking short (no inline value),
-    // the next token is its value — pass both through verbatim so
-    // parseArgs's value-consumption matches across `--` correctly
-    // (`-A -- -e foo` keeps `-e` reachable for our extraction).
-    let eIdx = -1, preBundle = '', valueShortAtEnd = false
-    for (let j = 1; j < t.length; j++) {
-      if (t[j] === 'e') { eIdx = j; break }
-      if (VALUE_SHORTS_SET.has(t[j])) { valueShortAtEnd = j === t.length - 1; break }
-      preBundle += t[j]
-    }
-    if (eIdx < 0) {
-      remaining.push(t)
-      if (valueShortAtEnd && i + 1 < tokens.length) { remaining.push(tokens[i + 1]); i++ }
-      continue
-    }
-    const inline = t.slice(eIdx + 1)
-    if (inline.length > 0) ePatterns.push(inline)
-    else if (i + 1 >= tokens.length) return { error: err('grep: option -e requires an argument', 2) }
-    else { ePatterns.push(tokens[i + 1]); i++ }
-    if (preBundle.length > 0) remaining.push('-' + preBundle)
-  }
-  return { ePatterns, remaining }
 }
 
 function compilePatterns(patterns, flags) {
@@ -491,7 +443,7 @@ function grepListFiles(inputs, res, invert, listNonMatching) {
       out.push(name ?? '(standard input)')
     }
   }
-  return out.length > 0 ? ok(out.join('\n') + '\n') : noMatch()
+  return out.length > 0 ? ok(joinLines(out)) : noMatch()
 }
 
 // -c prints per-file match counts. With showName, each line is
@@ -513,5 +465,5 @@ function grepCount(inputs, res, invert, showName) {
     else lines.push(String(count))
   }
   if (lines.length === 0) return noMatch()
-  return { stdout: lines.join('\n') + '\n', stderr: '', exitCode: anyMatched ? 0 : 1 }
+  return { stdout: joinLines(lines), stderr: '', exitCode: anyMatched ? 0 : 1 }
 }
