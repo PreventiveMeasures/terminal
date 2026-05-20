@@ -12,7 +12,7 @@
 // extracted up front: `-maxdepth` prunes the descent, while
 // `-mindepth` filters which visited entries are reported.
 
-import { basename, resolve } from './fs.js'
+import { basename, joinPath, relativeTo, resolve } from './fs.js'
 import { compileGlob } from './glob.js'
 import { err, ok, parseNonNegativeInt } from './util.js'
 
@@ -186,7 +186,7 @@ function evalPredicate(p, entry) {
 
 function toDisplayPath(userPath, absRoot, absPath) {
   if (absPath === absRoot) return userPath
-  const rel = absRoot === '/' ? absPath.slice(1) : absPath.slice(absRoot.length + 1)
+  const rel = relativeTo(absRoot, absPath)
   // POSIX find prepends the user-typed prefix verbatim, including
   // `./` for a `.` start — important so a pattern like
   // `*/node_modules/*` matches the descendants. grep -r in this
@@ -210,12 +210,11 @@ function* walk(fs, root, maxDepth = Number.POSITIVE_INFINITY) {
     if (cur.depth >= maxDepth) continue
     const { dirs, files } = fs.listDir(cur.path)
     const depth = cur.depth + 1
-    const join = (n) => cur.path === '/' ? '/' + n : cur.path + '/' + n
     for (const d of dirs) {
-      const path = join(d)
+      const path = joinPath(cur.path, d)
       yield { path, kind: 'dir', depth }
       queue.push({ path, depth })
     }
-    for (const f of files) yield { path: join(f), kind: 'file', depth }
+    for (const f of files) yield { path: joinPath(cur.path, f), kind: 'file', depth }
   }
 }

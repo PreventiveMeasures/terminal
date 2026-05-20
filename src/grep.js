@@ -13,7 +13,7 @@
 //       common shapes (`(`, `|`, `+`, `?`, `{n,m}`).
 //   -F  fixed string — every metachar literal via `RegExp.escape`.
 
-import { resolve } from './fs.js'
+import { relativeTo, resolve } from './fs.js'
 import { parseArgs } from './parse.js'
 import { err, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
 
@@ -181,6 +181,10 @@ function compilePatterns(patterns, flags) {
 
 // `res.some((re) => re.test(line))` — line matches when any -e regex does.
 function anyMatch(res, line) { return res.some((re) => re.test(line)) }
+
+// grep's "found nothing" result: empty output, exit 1. POSIX reserves
+// exit 1 for "no lines matched" — distinct from the exit-2 error path.
+const noMatch = () => ({ stdout: '', stderr: '', exitCode: 1 })
 
 // Translate POSIX-style BRE to ES regex by swapping which form is
 // the metachar: in BRE `(` `)` `{` `}` `+` `?` `|` are literal and
@@ -383,7 +387,7 @@ function readFilesRecursive(cmd, paths, ctx) {
 }
 
 function displayName(userPath, absRoot, absFile) {
-  const rel = absRoot === '/' ? absFile.slice(1) : absFile.slice(absRoot.length + 1)
+  const rel = relativeTo(absRoot, absFile)
   if (userPath === '.') return rel
   return userPath.endsWith('/') ? userPath + rel : userPath + '/' + rel
 }
@@ -403,9 +407,7 @@ function grepRun(inputs, res, opts) {
     if (fileBlock.lines.length > 0) blocks.push(fileBlock.lines.join('\n'))
   }
   const output = blocks.join('\n')
-  return matched
-    ? ok(output + (output ? '\n' : ''))
-    : { stdout: '', stderr: '', exitCode: 1 }
+  return matched ? ok(output + (output ? '\n' : '')) : noMatch()
 }
 
 function grepFileBlock(lines, res, name, opts) {
@@ -489,9 +491,7 @@ function grepListFiles(inputs, res, invert, listNonMatching) {
       out.push(name ?? '(standard input)')
     }
   }
-  return out.length > 0
-    ? ok(out.join('\n') + '\n')
-    : { stdout: '', stderr: '', exitCode: 1 }
+  return out.length > 0 ? ok(out.join('\n') + '\n') : noMatch()
 }
 
 // -c prints per-file match counts. With showName, each line is
@@ -512,7 +512,6 @@ function grepCount(inputs, res, invert, showName) {
     if (showName) lines.push(`${name ?? '(standard input)'}:${count}`)
     else lines.push(String(count))
   }
-  return lines.length === 0
-    ? { stdout: '', stderr: '', exitCode: 1 }
-    : { stdout: lines.join('\n') + '\n', stderr: '', exitCode: anyMatched ? 0 : 1 }
+  if (lines.length === 0) return noMatch()
+  return { stdout: lines.join('\n') + '\n', stderr: '', exitCode: anyMatched ? 0 : 1 }
 }

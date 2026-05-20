@@ -3,7 +3,7 @@
 // tokens through parseArgs with a strict schema so unknown flags
 // fail fast instead of being silently dropped.
 
-import { basename as baseName, dirname as dirName, resolve } from './fs.js'
+import { basename as baseName, dirname as dirName, joinPath, resolve } from './fs.js'
 import { find } from './find.js'
 import { parseArgs } from './parse.js'
 import { err, ok, usage } from './util.js'
@@ -97,7 +97,7 @@ function lsTarget(target, multiple, opts, ctx) {
   }
   for (const name of files) {
     if (!opts.all && name.startsWith('.')) continue
-    const childAbs = abs === '/' ? '/' + name : abs + '/' + name
+    const childAbs = joinPath(abs, name)
     lines.push(formatLsRow(name, ctx.fs.readFile(childAbs).length, false, opts.long))
   }
   return { lines }
@@ -134,7 +134,7 @@ function treeWalk(fs, root, out) {
     out.push(frame.prefix + (last ? '└── ' : '├── ') + n + (isDir ? '/' : ''))
     frame.i++
     if (!isDir) continue
-    const childDir = frame.dir === '/' ? '/' + n : frame.dir + '/' + n
+    const childDir = joinPath(frame.dir, n)
     stack.push({
       dir: childDir,
       prefix: frame.prefix + (last ? '    ' : '│   '),

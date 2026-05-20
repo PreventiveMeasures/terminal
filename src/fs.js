@@ -42,6 +42,20 @@ export function basename(path) {
   return p.slice(i + 1)
 }
 
+// Join an already-normalized directory path with a child name,
+// avoiding the `//foo` double slash at the root (`/` + `foo` → `/foo`).
+export function joinPath(dir, name) {
+  return dir === '/' ? '/' + name : dir + '/' + name
+}
+
+// Path of `abs` relative to ancestor directory `root`, with no leading
+// slash. Assumes `abs` sits strictly under `root` (callers guarantee
+// it); `root === '/'` just drops the leading slash. Spans multiple
+// levels: relativeTo('/a', '/a/b/c') === 'b/c'.
+export function relativeTo(root, abs) {
+  return root === '/' ? abs.slice(1) : abs.slice(root.length + 1)
+}
+
 // Build the filesystem. Accepts either a Map or a plain object
 // keyed by path. Non-string values are skipped — callers that
 // hand us a mixed-content map (binary blobs alongside source
@@ -101,8 +115,8 @@ function* walkFiles(fs, root) {
   for (let i = 0; i < queue.length; i++) {
     const cur = queue[i]
     const { dirs, files } = fs.listDir(cur)
-    for (const f of files) yield cur === '/' ? '/' + f : cur + '/' + f
-    for (const d of dirs) queue.push(cur === '/' ? '/' + d : cur + '/' + d)
+    for (const f of files) yield joinPath(cur, f)
+    for (const d of dirs) queue.push(joinPath(cur, d))
   }
 }
 
