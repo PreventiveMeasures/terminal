@@ -96,28 +96,41 @@ export function createFs(sources) {
   return fs
 }
 
-// Generator over every absolute file path under `root`. Yields
-// `root` itself when it's a file. Walks each directory's files in
-// lexicographic order before descending into subdirectories — gives
-// a stable "files first, then deeper" listing that's friendly for
-// grep -r / xargs / similar consumers. Uses an index pointer
-// instead of Array.shift for O(n) traversal even on wide trees.
+// The single tree traversal: a breadth-first generator over `root` and
+// every descendant, yielding `{ path, kind, depth }` (depth 0 = root,
+// 1 = its children, …). `maxDepth` caps the descent. `find` consumes
+// this directly (depth drives -mindepth/-maxdepth); `walkFiles` filters
+// it to file paths. An index pointer (not Array.shift) keeps traversal
+// O(n) on wide trees.
 //
 // Note: this virtual FS has no empty directories — `childMap` only
-// holds dirs registered as ancestors of a file, so a leaf dir with
-// no files can't exist by construction (see `ensureDir`). The walk
-// still copes if one ever appears: a dir with empty `dirs` and
-// `files` simply yields nothing on its iteration.
-function* walkFiles(fs, root) {
-  if (fs.isFile(root)) { yield root; return }
+// holds dirs registered as ancestors of a file (see `ensureDir`) — but
+// the walk copes if one appears: empty `dirs`/`files` just yields
+// nothing on that iteration.
+export function* walkTree(fs, root, maxDepth = Number.POSITIVE_INFINITY) {
+  if (fs.isFile(root)) { yield { path: root, kind: 'file', depth: 0 }; return }
   if (!fs.isDir(root)) return
-  const queue = [root]
+  yield { path: root, kind: 'dir', depth: 0 }
+  const queue = [{ path: root, depth: 0 }]
   for (let i = 0; i < queue.length; i++) {
     const cur = queue[i]
-    const { dirs, files } = fs.listDir(cur)
-    for (const f of files) yield joinPath(cur, f)
-    for (const d of dirs) queue.push(joinPath(cur, d))
+    if (cur.depth >= maxDepth) continue
+    const { dirs, files } = fs.listDir(cur.path)
+    const depth = cur.depth + 1
+    for (const d of dirs) {
+      const path = joinPath(cur.path, d)
+      yield { path, kind: 'dir', depth }
+      queue.push({ path, depth })
+    }
+    for (const f of files) yield { path: joinPath(cur.path, f), kind: 'file', depth }
   }
+}
+
+// Every absolute file path under `root` (or `root` itself if it's a
+// file), in walkTree order — files of a directory before its
+// subdirectories' files. Friendly for grep -r / xargs consumers.
+function* walkFiles(fs, root) {
+  for (const entry of walkTree(fs, root)) if (entry.kind === 'file') yield entry.path
 }
 
 // Register `path` as a directory in the child index, bubbling up

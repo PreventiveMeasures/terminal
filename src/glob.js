@@ -18,7 +18,7 @@
 //   receiving command to report "no such file" with the user's
 //   original text.
 
-import { resolve } from './fs.js'
+import { joinPath, resolve } from './fs.js'
 
 const META = /[*?]/u
 
@@ -129,8 +129,8 @@ function expandSegment(candidates, seg, isLast, ctx) {
   return next
 }
 
+// Like joinPath, but a `.` parent (cwd-relative root) yields the bare
+// child so expansion output stays relative (`foo.js`, not `./foo.js`).
 function joinSeg(parent, child) {
-  if (parent === '.') return child
-  if (parent === '/') return '/' + child
-  return parent + '/' + child
+  return parent === '.' ? child : joinPath(parent, child)
 }
