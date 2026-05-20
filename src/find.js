@@ -1,27 +1,27 @@
 // find — auditor's tree-walker, in its own file because the
 // feature set (POSIX-style `-name` / `-type` / `-path` primaries,
 // GNU long forms, `-not` / `!` negation, `-a` / `-o` boolean
-// combinators with precedence, `-maxdepth` capping, the per-path
-// glob matcher, the depth-aware walker) doesn't fit nav-commands.js's
-// 300-line cap.
+// combinators with precedence, `-mindepth` / `-maxdepth` depth
+// bounds, the per-path glob matcher, the depth-aware walker)
+// doesn't fit nav-commands.js's 300-line cap.
 //
 // Predicate model: a list of OR-groups; each group is a list of
 // AND-ed predicates. `-a` is the implicit default; `-o` starts a
-// new group; `-not` / `!` flips the next predicate. `-maxdepth`
-// isn't part of the predicate tree — it's a global walker option
-// extracted up front so the walker can prune instead of filtering
-// after the fact.
+// new group; `-not` / `!` flips the next predicate. `-mindepth` /
+// `-maxdepth` aren't predicates — they're global walker options
+// extracted up front: `-maxdepth` prunes the descent, while
+// `-mindepth` filters which visited entries are reported.
 
 import { basename, resolve } from './fs.js'
 import { compileGlob } from './glob.js'
 import { err, ok, parseNonNegativeInt } from './util.js'
 
-const PRIMARIES = new Set(['name', 'type', 'path', 'maxdepth'])
+const PRIMARIES = new Set(['name', 'type', 'path', 'mindepth', 'maxdepth'])
 
 export function find(_stdin, tokens, ctx) {
   const parsed = parseFindArgs(tokens)
   if (parsed.error) return parsed.error
-  const { starts, maxDepth, groups } = parsed
+  const { starts, minDepth, maxDepth, groups } = parsed
   const out = []
   for (const start of starts) {
     const startAbs = resolve(ctx.cwd, start)
@@ -29,6 +29,7 @@ export function find(_stdin, tokens, ctx) {
       return err(`find: ${start}: no such file or directory`)
     }
     for (const entry of walk(ctx.fs, startAbs, maxDepth)) {
+      if (entry.depth < minDepth) continue
       const display = toDisplayPath(start, startAbs, entry.path)
       if (matchGroups(groups, { kind: entry.kind, path: display })) out.push(display)
     }
@@ -37,28 +38,34 @@ export function find(_stdin, tokens, ctx) {
 }
 
 function parseFindArgs(tokens) {
-  const filtered = stripMaxDepth(tokens)
+  const filtered = stripDepthOpts(tokens)
   if (filtered.error) return filtered
-  return walkExprTokens(filtered.tokens, filtered.maxDepth)
+  return walkExprTokens(filtered.tokens, filtered.minDepth, filtered.maxDepth)
 }
 
-// Extract `-maxdepth N` / `--maxdepth N` first. They're walker-global
-// options, not predicates — putting them in the predicate tree would
-// still need the walker to know N up front for pruning. The `--`
-// terminator is checked AFTER the maxdepth branch so `-maxdepth --`
-// surfaces the friendlier "invalid count" rather than "requires a
-// value" — matches POSIX getopt's "value-taking option consumes the
-// next token regardless" rule.
-function stripMaxDepth(tokens) {
+// Extract `-mindepth N` / `-maxdepth N` (and `--` long forms) first.
+// They're walker-global options, not predicates — `-maxdepth` prunes
+// the descent, `-mindepth` gates the output, and both want N up front
+// rather than threaded through the predicate tree. The `--` terminator
+// is checked AFTER the depth branch so `-maxdepth --` surfaces the
+// friendlier "invalid count" rather than "requires a value" — matches
+// POSIX getopt's "value-taking option consumes the next token
+// regardless" rule.
+function stripDepthOpts(tokens) {
   const out = []
+  let minDepth = 0
   let maxDepth = Number.POSITIVE_INFINITY
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
-    if (t === '-maxdepth' || t === '--maxdepth') {
-      if (i + 1 >= tokens.length) return { error: err('find: -maxdepth requires a value') }
-      const r = parseNonNegativeInt(tokens[i + 1], 'find: -maxdepth')
+    const opt = t === '-mindepth' || t === '--mindepth' ? 'mindepth'
+      : t === '-maxdepth' || t === '--maxdepth' ? 'maxdepth'
+      : null
+    if (opt) {
+      if (i + 1 >= tokens.length) return { error: err(`find: -${opt} requires a value`) }
+      const r = parseNonNegativeInt(tokens[i + 1], `find: -${opt}`)
       if (r.error) return r
-      maxDepth = r.value
+      if (opt === 'mindepth') minDepth = r.value
+      else maxDepth = r.value
       i++
       continue
     }
@@ -68,7 +75,7 @@ function stripMaxDepth(tokens) {
     }
     out.push(t)
   }
-  return { tokens: out, maxDepth }
+  return { tokens: out, minDepth, maxDepth }
 }
 
 // Walk the remaining tokens building OR-groups of AND-ed predicates.
@@ -82,7 +89,7 @@ function stripMaxDepth(tokens) {
 // `-name --` consumes the literal `--` as the glob value, matching
 // POSIX getopt's "value-taking option consumes the next token
 // regardless" rule. Pre-splitting on `--` would break that.
-function walkExprTokens(tokens, maxDepth) {
+function walkExprTokens(tokens, minDepth, maxDepth) {
   const groups = [[]]
   const starts = []
   let pendingNot = false
@@ -139,11 +146,13 @@ function walkExprTokens(tokens, maxDepth) {
   }
   if (pendingNot) return { error: err('find: trailing `-not` with no primary') }
   if (expectingRhs) return { error: err(`find: \`${expectingRhs}\` with no right-hand expression`) }
-  return { starts: starts.length > 0 ? starts : ['.'], maxDepth, groups }
+  return { starts: starts.length > 0 ? starts : ['.'], minDepth, maxDepth, groups }
 }
 
 function primaryFor(token) {
-  if (token === '-maxdepth' || token === '--maxdepth') return null  // already stripped
+  // -mindepth / -maxdepth are stripped before we get here; never treat
+  // them as primaries even if one slips through.
+  if (/^--?(?:min|max)depth$/u.test(token)) return null
   if (token.startsWith('--') && PRIMARIES.has(token.slice(2))) return token.slice(2)
   if (token.startsWith('-') && PRIMARIES.has(token.slice(1))) return token.slice(1)
   return null
@@ -190,8 +199,8 @@ function toDisplayPath(userPath, absRoot, absPath) {
 // can cap recursion: depth 0 is the start path, depth 1 is its
 // direct children, and so on. Matches POSIX `find -maxdepth N`.
 function* walk(fs, root, maxDepth = Number.POSITIVE_INFINITY) {
-  if (fs.isFile(root)) { yield { path: root, kind: 'file' }; return }
-  yield { path: root, kind: 'dir' }
+  if (fs.isFile(root)) { yield { path: root, kind: 'file', depth: 0 }; return }
+  yield { path: root, kind: 'dir', depth: 0 }
   // Index pointer instead of Array.shift() — shift() is O(n) per
   // call because it reindexes the rest of the array, making BFS
   // O(n²) on large trees.
@@ -200,12 +209,13 @@ function* walk(fs, root, maxDepth = Number.POSITIVE_INFINITY) {
     const cur = queue[qi]
     if (cur.depth >= maxDepth) continue
     const { dirs, files } = fs.listDir(cur.path)
+    const depth = cur.depth + 1
     const join = (n) => cur.path === '/' ? '/' + n : cur.path + '/' + n
     for (const d of dirs) {
       const path = join(d)
-      yield { path, kind: 'dir' }
-      queue.push({ path, depth: cur.depth + 1 })
+      yield { path, kind: 'dir', depth }
+      queue.push({ path, depth })
     }
-    for (const f of files) yield { path: join(f), kind: 'file' }
+    for (const f of files) yield { path: join(f), kind: 'file', depth }
   }
 }

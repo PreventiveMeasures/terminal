@@ -1172,6 +1172,44 @@ describe('createTerminal — find / tree / path', () => {
     assert.ok(d3.has('/src/util/log.js'))
   })
 
+  it('find -mindepth N skips entries shallower than N (0 = include start)', () => {
+    // Verified against `/usr/bin/find`. Same SOURCES depths as the
+    // -maxdepth test: 0 = `/`, 1 = /src + /README.md + /.hidden,
+    // 2 = /src/{foo,bar}.js + /src/util, 3 = /src/util/log.js.
+    const t = createTerminal(SOURCES)
+    const m1 = new Set(t.run('find / -mindepth 1').stdout.split('\n').filter(Boolean))
+    assert.ok(!m1.has('/'))            // the start point is dropped
+    assert.ok(m1.has('/src'))
+    assert.ok(m1.has('/src/util/log.js'))
+    const m2 = new Set(t.run('find / -mindepth 2').stdout.split('\n').filter(Boolean))
+    assert.ok(!m2.has('/'))
+    assert.ok(!m2.has('/src'))         // depth-1 entries dropped
+    assert.ok(!m2.has('/README.md'))
+    assert.ok(m2.has('/src/foo.js'))   // depth-2 entries kept
+    assert.ok(m2.has('/src/util/log.js'))
+    // `--mindepth` long form; depth 3 leaves only the deepest file.
+    assert.deepEqual(
+      t.run('find / --mindepth 3').stdout.split('\n').filter(Boolean),
+      ['/src/util/log.js'],
+    )
+    // -mindepth 0 keeps the start point (the default).
+    assert.ok(new Set(t.run('find / -mindepth 0').stdout.split('\n').filter(Boolean)).has('/'))
+    // Shares the depth-option parser with -maxdepth, so it validates too.
+    assert.match(t.run('find / -mindepth foo').stderr, /-mindepth: invalid count/u)
+  })
+
+  it('find combines -mindepth and -maxdepth to select an exact depth band', () => {
+    // Verified against `/usr/bin/find -mindepth 2 -maxdepth 2`.
+    const t = createTerminal(SOURCES)
+    const band = new Set(t.run('find / -mindepth 2 -maxdepth 2').stdout.split('\n').filter(Boolean))
+    assert.ok(band.has('/src/foo.js'))
+    assert.ok(band.has('/src/util'))
+    assert.ok(!band.has('/src'))             // depth 1 excluded by -mindepth
+    assert.ok(!band.has('/src/util/log.js')) // depth 3 excluded by -maxdepth
+    // -mindepth greater than -maxdepth selects nothing (matches GNU).
+    assert.equal(t.run('find / -mindepth 3 -maxdepth 1').stdout, '')
+  })
+
   it('find -path PATTERN matches against the full path, `*` spans `/`', () => {
     const t = createTerminal(SOURCES)
     const r = t.run("find / -path '*/util/*'").stdout.split('\n').filter(Boolean)
