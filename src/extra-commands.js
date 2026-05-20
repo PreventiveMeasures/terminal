@@ -7,7 +7,7 @@
 // originals.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, ok, readFilesFor, splitLines, usage } from './util.js'
+import { err, joinLines, ok, okWith, readInputs, splitLines, usage } from './util.js'
 
 // Reverse line order: read stdin (or each file in order, reversed
 // individually) and emit. Matches GNU `tac`'s per-file behavior —
@@ -17,11 +17,10 @@ import { err, joinLines, ok, readFilesFor, splitLines, usage } from './util.js'
 // emitted anything.
 function tac(stdin, tokens, ctx) {
   const { positional } = parseArgs(tokens)
-  const r = positional.length > 0 ? readFilesFor('tac', positional, ctx) : { inputs: [{ name: null, content: stdin }] }
-  if (r.error) return r.error
+  const r = readInputs('tac', positional, stdin, ctx)
   const out = []
   for (const { content } of r.inputs) out.push(...splitLines(content).toReversed())
-  return ok(joinLines(out))
+  return okWith(joinLines(out), r)
 }
 
 // Cap on how many elements `seq` will materialize. Pipelines buffer
@@ -82,8 +81,7 @@ function nl(stdin, tokens, ctx) {
   const { values, positional } = parseArgs(tokens, { valueShort: ['b'] })
   const style = values.get('b') ?? 't'
   if (style !== 'a' && style !== 't') return err(`nl: -b: only \`a\` and \`t\` are supported (got \`${style}\`)`)
-  const r = positional.length > 0 ? readFilesFor('nl', positional, ctx) : { inputs: [{ name: null, content: stdin }] }
-  if (r.error) return r.error
+  const r = readInputs('nl', positional, stdin, ctx)
   const out = []
   let n = 0
   for (const { content } of r.inputs) {
@@ -96,7 +94,7 @@ function nl(stdin, tokens, ctx) {
       }
     }
   }
-  return ok(joinLines(out))
+  return okWith(joinLines(out), r)
 }
 
 // Extract characters (`-c LIST`) or delimiter-separated fields
@@ -114,15 +112,14 @@ function cut(stdin, tokens, ctx) {
   if (list.error) return list.error
   const delim = values.get('d') ?? '\t'
   if (hasF && delim.length !== 1) return err('cut: -d delimiter must be a single character')
-  const r = positional.length > 0 ? readFilesFor('cut', positional, ctx) : { inputs: [{ name: null, content: stdin }] }
-  if (r.error) return r.error
+  const r = readInputs('cut', positional, stdin, ctx)
   const out = []
   for (const { content } of r.inputs) {
     for (const line of splitLines(content)) {
       out.push(hasF ? cutFields(line, delim, list.ranges) : pickByPositions([...line], list.ranges).join(''))
     }
   }
-  return ok(joinLines(out))
+  return okWith(joinLines(out), r)
 }
 
 function parseCutList(spec) {

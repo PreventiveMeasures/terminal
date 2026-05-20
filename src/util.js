@@ -36,21 +36,40 @@ export function splitLines(s) {
 export const joinLines = (lines) => lines.length === 0 ? '' : lines.join('\n') + '\n'
 
 // Resolve and read each file path against the virtual filesystem.
-// Returns `{ inputs }` on success or `{ error }` on the first
-// failure. The dir-vs-missing distinction matters: `cat src`
-// pointing at a directory should say "is a directory", not "no
-// such file or directory" — the path exists, it's just not
-// readable as a file. Matches GNU cat / head / tail behavior.
+// Reads every path it can rather than aborting on the first bad one,
+// collecting a stderr line per missing/dir path — so `cat a missing b`
+// still emits a and b (matching coreutils' partial-failure behavior).
+// Returns `{ inputs, stderr, failed }`: `inputs` for the readable
+// files in order, `stderr` with one error line per failure, and
+// `failed` true if any path errored. The dir-vs-missing distinction
+// matters: `cat src` pointing at a directory should say "is a
+// directory", not "no such file or directory" — the path exists, it's
+// just not readable as a file. Matches GNU cat / head / tail.
 export function readFilesFor(cmd, files, ctx) {
   const inputs = []
+  let stderr = ''
+  let failed = false
   for (const f of files) {
     const abs = resolve(ctx.cwd, f)
-    if (ctx.fs.isDir(abs)) return { error: err(`${cmd}: ${f}: is a directory`) }
-    if (!ctx.fs.isFile(abs)) return { error: err(`${cmd}: ${f}: no such file or directory`) }
+    if (ctx.fs.isDir(abs)) { stderr += `${cmd}: ${f}: is a directory\n`; failed = true; continue }
+    if (!ctx.fs.isFile(abs)) { stderr += `${cmd}: ${f}: no such file or directory\n`; failed = true; continue }
     inputs.push({ name: f, content: ctx.fs.readFile(abs) })
   }
-  return { inputs }
+  return { inputs, stderr, failed }
 }
+
+// File inputs with a stdin fallback: with no file operands a command
+// reads stdin (one nameless input); otherwise it reads the named
+// files via readFilesFor with the same partial-failure semantics.
+export function readInputs(cmd, files, stdin, ctx) {
+  if (files.length === 0) return { inputs: [{ name: null, content: stdin }], stderr: '', failed: false }
+  return readFilesFor(cmd, files, ctx)
+}
+
+// Pair a command's stdout with the partial-failure outcome from
+// readInputs / readFilesFor: surface the per-file errors on stderr and
+// exit 1 if any input failed, even when some files were read.
+export const okWith = (stdout, r) => ({ stdout, stderr: r.stderr, exitCode: r.failed ? 1 : 0 })
 
 // Parse a non-negative decimal count. The digits-only regex rejects
 // empty strings (`Number('')` is 0, which would otherwise sneak
