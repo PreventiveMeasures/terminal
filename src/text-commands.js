@@ -89,25 +89,18 @@ function pickWcFlags(flags) {
   return { l: true, w: true, c: true }
 }
 
+// `wc -c` counts BYTES. content is a JS string (UTF-16 code units), so
+// measure its UTF-8 length — the encoding this models — via TextEncoder:
+// `é` is 2 bytes, an emoji 4. Plain `.length` would return code units
+// and disagree with coreutils on multibyte text.
+const utf8 = new TextEncoder()
+
 function wcCounts(content) {
   return {
     l: (content.match(/\n/gu) ?? []).length,
     w: (content.match(/\S+/gu) ?? []).length,
-    c: utf8ByteLength(content),
+    c: utf8.encode(content).length,
   }
-}
-
-// `wc -c` counts BYTES. content is a JS string (UTF-16 code units), so
-// encode to UTF-8 — the encoding this models — for the byte count:
-// ASCII is 1, `é` is 2, an emoji is 4. Plain `.length` returns code
-// units, which undercounts multibyte text and disagrees with coreutils.
-function utf8ByteLength(s) {
-  let bytes = 0
-  for (const ch of s) {
-    const cp = ch.codePointAt(0)
-    bytes += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4
-  }
-  return bytes
 }
 
 function formatWc(counts, name, which) {
