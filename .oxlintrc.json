@@ -11,6 +11,9 @@
     "promise",
     "unicorn"
   ],
+  "globals": {
+    "TextEncoder": "readonly"
+  },
   "rules": {
     "no-warning-comments": "off",
     "no-inline-comments": "off",
