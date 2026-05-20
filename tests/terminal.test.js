@@ -142,6 +142,57 @@ describe('createTerminal — text commands', () => {
     assert.match(t.run('wc src').stderr, /is a directory/u)
   })
 
+  it('multi-file: an unreadable operand does not discard the readable files', () => {
+    // Regression: readFilesFor used to abort on the first missing/dir
+    // path, throwing away output for the valid files — so
+    // `cat a missing b | sort` silently produced nothing. Now valid
+    // files are emitted, the bad path errors on stderr, and exit is
+    // non-zero (matching coreutils' partial-failure behavior).
+    const t = createTerminal({ 'a.txt': 'AAA\n', 'b.txt': 'BBB\n', 'dir/inner.txt': 'x\n' })
+    const r = t.run('cat a.txt missing.txt b.txt')
+    assert.equal(r.stdout, 'AAA\nBBB\n')
+    assert.match(r.stderr, /missing\.txt: no such file or directory/u)
+    assert.equal(r.exitCode, 1)
+    // The pipeline that used to come up empty now carries the data.
+    assert.equal(t.run('cat a.txt missing.txt b.txt | sort').stdout, 'AAA\nBBB\n')
+    // A directory operand is reported too, without dropping the files.
+    const d = t.run('cat a.txt dir b.txt')
+    assert.equal(d.stdout, 'AAA\nBBB\n')
+    assert.match(d.stderr, /dir: is a directory/u)
+    assert.equal(d.exitCode, 1)
+  })
+
+  it('multi-file partial failure spans wc / head / sort / cut; all-missing stays empty', () => {
+    const t = createTerminal({ 'a.txt': 'AAA\nzzz\n', 'b.txt': 'BBB\n' })
+    // wc still tallies the readable files (with a total) and exits 1.
+    const w = t.run('wc -l a.txt missing.txt b.txt')
+    assert.match(w.stdout, /a\.txt/u)
+    assert.match(w.stdout, /b\.txt/u)
+    assert.match(w.stdout, /total/u)
+    assert.equal(w.exitCode, 1)
+    // head keeps its `==>` headers for the files it could read.
+    const h = t.run('head -n1 a.txt missing.txt b.txt')
+    assert.match(h.stdout, /==> a\.txt <==\nAAA/u)
+    assert.match(h.stdout, /==> b\.txt <==\nBBB/u)
+    assert.equal(h.exitCode, 1)
+    assert.equal(t.run('sort a.txt missing.txt b.txt').stdout, 'AAA\nBBB\nzzz\n')
+    assert.equal(t.run('cut -c1 a.txt missing.txt').stdout, 'A\nz\n')
+    // When every operand is unreadable, stdout is empty (no stray
+    // newline) and exit is non-zero.
+    const all = t.run('wc m1 m2')
+    assert.equal(all.stdout, '')
+    assert.equal(all.exitCode, 1)
+  })
+
+  it('grep keeps scanning readable files past an unreadable one (exit 2)', () => {
+    const t = createTerminal({ 'a.txt': 'AAA\n', 'b.txt': 'BBB\n' })
+    const r = t.run('grep A a.txt missing.txt b.txt')
+    assert.match(r.stdout, /a\.txt:AAA/u)
+    assert.match(r.stderr, /missing\.txt: no such file or directory/u)
+    // GNU grep exits 2 when an error occurs, outranking the 0/1 match status.
+    assert.equal(r.exitCode, 2)
+  })
+
   it('grep finds matches and -n prefixes line numbers', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('grep TODO src/foo.js')

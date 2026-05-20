@@ -8,7 +8,7 @@
 // same reason: surface it on demand, don't advertise it.
 
 import { parseArgs } from './parse.js'
-import { err, ok, readFilesFor, splitLines } from './util.js'
+import { err, okWith, readInputs, splitLines } from './util.js'
 
 const SCRIPT = /^(\d+)(?:,(\d+))?p$/u
 
@@ -29,18 +29,14 @@ export function sed(stdin, tokens, ctx) {
   if (end < start) return err(`sed: reversed range: ${start},${end}`)
   const files = positional.slice(1)
   if (files.length > 1) return err('sed: at most one input file is supported')
-  let content = stdin
-  if (files.length === 1) {
-    const r = readFilesFor('sed', files, ctx)
-    if (r.error) return r.error
-    content = r.inputs[0].content
-  }
+  const r = readInputs('sed', files, stdin, ctx)
+  const content = r.inputs[0]?.content ?? ''
   const lines = splitLines(content)
   // `slice(start-1, end)`: inclusive on both ends in 1-indexed
   // terms (matching sed). Out-of-range starts/ends just clamp —
   // sed prints nothing past EOF without complaining.
   const sliced = lines.slice(start - 1, end)
-  return ok(sliced.length > 0 ? sliced.join('\n') + '\n' : '')
+  return okWith(sliced.length > 0 ? sliced.join('\n') + '\n' : '', r)
 }
 
 function unsupported() {

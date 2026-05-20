@@ -58,20 +58,18 @@ export function grep(stdin, tokens, ctx) {
   if (ctxLines.error) return ctxLines.error
   const recursive = flags.has('r')
   const r = grepInputs(recursive, stdin, rest, ctx)
-  if (r.error) return r.error
   const showName = pickShowName(flags, recursive, rest.length)
   const invert = flags.has('v')
-  if (flags.has('l')) return grepListFiles(r.inputs, re.res, invert, false)
-  if (flags.has('L')) return grepListFiles(r.inputs, re.res, invert, true)
-  if (flags.has('c')) return grepCount(r.inputs, re.res, invert, showName)
-  return grepRun(r.inputs, re.res, {
-    showName,
-    invert,
-    showLine: flags.has('n'),
-    only: flags.has('o'),
-    after: ctxLines.after,
-    before: ctxLines.before,
-  })
+  const opts = { showName, invert, showLine: flags.has('n'), only: flags.has('o'), after: ctxLines.after, before: ctxLines.before }
+  const result = flags.has('l') ? grepListFiles(r.inputs, re.res, invert, false)
+    : flags.has('L') ? grepListFiles(r.inputs, re.res, invert, true)
+    : flags.has('c') ? grepCount(r.inputs, re.res, invert, showName)
+    : grepRun(r.inputs, re.res, opts)
+  // Unreadable file/dir operands don't abort the search: scan what we
+  // can, then prepend their errors and force grep's exit-2 ("an error
+  // occurred"), which outranks the 0/1 match status.
+  if (r.failed) return { stdout: result.stdout, stderr: r.stderr + result.stderr, exitCode: 2 }
+  return result
 }
 
 // parseArgs collapses flags into a Set so order is lost; with no
@@ -359,7 +357,7 @@ function pickShowName(flags, recursive, nFiles) {
 function grepInputs(recursive, stdin, rest, ctx) {
   if (recursive) return readFilesRecursive('grep', rest.length > 0 ? rest : ['.'], ctx)
   if (rest.length > 0) return readFilesFor('grep', rest, ctx)
-  return { inputs: [{ name: null, content: stdin }] }
+  return { inputs: [{ name: null, content: stdin }], stderr: '', failed: false }
 }
 
 // Expand each path into the list of files to scan: a file path
@@ -371,15 +369,17 @@ function grepInputs(recursive, stdin, rest, ctx) {
 // not `/src/bar.js:…`), matching GNU grep's output convention.
 function readFilesRecursive(cmd, paths, ctx) {
   const inputs = []
+  let stderr = ''
+  let failed = false
   for (const p of paths) {
     const abs = resolve(ctx.cwd, p)
     if (ctx.fs.isFile(abs)) { inputs.push({ name: p, content: ctx.fs.readFile(abs) }); continue }
-    if (!ctx.fs.isDir(abs)) return { error: err(`${cmd}: ${p}: no such file or directory`) }
+    if (!ctx.fs.isDir(abs)) { stderr += `${cmd}: ${p}: no such file or directory\n`; failed = true; continue }
     for (const filePath of ctx.fs.walkFiles(abs)) {
       inputs.push({ name: displayName(p, abs, filePath), content: ctx.fs.readFile(filePath) })
     }
   }
-  return { inputs }
+  return { inputs, stderr, failed }
 }
 
 function displayName(userPath, absRoot, absFile) {

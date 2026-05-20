@@ -6,18 +6,14 @@
 // `${name}: ${message}` and returns an exit-1 stderr result.
 
 import { parseArgs } from './parse.js'
-import { err, ok, parseNonNegativeInt, readFilesFor, splitLines } from './util.js'
+import { err, joinLines, ok, okWith, parseNonNegativeInt, readInputs, splitLines } from './util.js'
 import { grep } from './grep.js'
 
 function cat(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['n'] })
-  let content = stdin
-  if (positional.length > 0) {
-    const r = readFilesFor('cat', positional, ctx)
-    if (r.error) return r.error
-    content = r.inputs.map((f) => f.content).join('')
-  }
-  return ok(flags.has('n') ? numberLines(content) : content)
+  const r = readInputs('cat', positional, stdin, ctx)
+  const content = r.inputs.map((f) => f.content).join('')
+  return okWith(flags.has('n') ? numberLines(content) : content, r)
 }
 
 // GNU `cat -n` numbers lines starting from 1, right-aligned in a
@@ -60,8 +56,7 @@ function applyDashNumberShorthand(values, positional) {
 }
 
 function takeLines(cmd, stdin, files, ctx, picker) {
-  const r = files.length > 0 ? readFilesFor(cmd, files, ctx) : { inputs: [{ name: null, content: stdin }] }
-  if (r.error) return r.error
+  const r = readInputs(cmd, files, stdin, ctx)
   const showHeader = r.inputs.length > 1
   const blocks = []
   for (let i = 0; i < r.inputs.length; i++) {
@@ -70,14 +65,13 @@ function takeLines(cmd, stdin, files, ctx, picker) {
     if (showHeader) blocks.push(`${i > 0 ? '\n' : ''}==> ${name} <==\n${picked}${picked ? '\n' : ''}`)
     else if (picked.length > 0) blocks.push(picked + '\n')
   }
-  return ok(blocks.join(''))
+  return okWith(blocks.join(''), r)
 }
 
 function wc(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c'] })
   const which = pickWcFlags(flags)
-  const r = positional.length > 0 ? readFilesFor('wc', positional, ctx) : { inputs: [{ name: null, content: stdin }] }
-  if (r.error) return r.error
+  const r = readInputs('wc', positional, stdin, ctx)
   const lines = []
   const total = { l: 0, w: 0, c: 0 }
   for (const { name, content } of r.inputs) {
@@ -86,7 +80,7 @@ function wc(stdin, tokens, ctx) {
     total.l += counts.l; total.w += counts.w; total.c += counts.c
   }
   if (r.inputs.length > 1) lines.push(formatWc(total, 'total', which))
-  return ok(lines.join('\n') + '\n')
+  return okWith(joinLines(lines), r)
 }
 
 function pickWcFlags(flags) {
@@ -114,8 +108,7 @@ function formatWc(counts, name, which) {
 
 function sort(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['r', 'u'] })
-  const r = positional.length > 0 ? readFilesFor('sort', positional, ctx) : { inputs: [{ name: null, content: stdin }] }
-  if (r.error) return r.error
+  const r = readInputs('sort', positional, stdin, ctx)
   // `sort a b` orders the concatenation of all inputs, matching coreutils.
   let lines = splitLines(r.inputs.map((f) => f.content).join(''))
   lines.sort()
@@ -124,7 +117,7 @@ function sort(stdin, tokens, ctx) {
     const seen = new Set()
     lines = lines.filter((l) => seen.has(l) ? false : (seen.add(l), true))
   }
-  return ok(lines.length === 0 ? '' : lines.join('\n') + '\n')
+  return okWith(joinLines(lines), r)
 }
 
 // Collapse adjacent duplicate lines from stdin. Flags compose:
@@ -137,8 +130,7 @@ function sort(stdin, tokens, ctx) {
 // and avoids surprising scripts that pass both flags.
 function uniq(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['c', 'd', 'u', 'i'] })
-  const r = positional.length > 0 ? readFilesFor('uniq', positional, ctx) : { inputs: [{ name: null, content: stdin }] }
-  if (r.error) return r.error
+  const r = readInputs('uniq', positional, stdin, ctx)
   const showCount = flags.has('c')
   const onlyDups = flags.has('d')
   const onlyUniques = flags.has('u')
@@ -164,7 +156,7 @@ function uniq(stdin, tokens, ctx) {
     flush(); prev = l; prevKey = key; count = 1
   }
   flush()
-  return ok(out.length === 0 ? '' : out.join('\n') + '\n')
+  return okWith(joinLines(out), r)
 }
 
 // `-n` drops the trailing newline; `-e` enables backslash-escape
