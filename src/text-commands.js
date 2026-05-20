@@ -6,14 +6,13 @@
 // `${name}: ${message}` and returns an exit-1 stderr result.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, ok, okWith, parseNonNegativeInt, readInputs, splitLines } from './util.js'
+import { err, joinLines, ok, okWith, parseNonNegativeInt, readContent, readInputs, splitLines } from './util.js'
 import { grep } from './grep.js'
 
 function cat(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['n'] })
-  const r = readInputs('cat', positional, stdin, ctx)
-  const content = r.inputs.map((f) => f.content).join('')
-  return okWith(flags.has('n') ? numberLines(content) : content, r)
+  const r = readContent('cat', positional, stdin, ctx)
+  return okWith(flags.has('n') ? numberLines(r.content) : r.content, r)
 }
 
 // GNU `cat -n` numbers lines starting from 1, right-aligned in a
@@ -108,9 +107,9 @@ function formatWc(counts, name, which) {
 
 function sort(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['n', 'r', 'u'] })
-  const r = readInputs('sort', positional, stdin, ctx)
   // `sort a b` orders the concatenation of all inputs, matching coreutils.
-  let lines = splitLines(r.inputs.map((f) => f.content).join(''))
+  const r = readContent('sort', positional, stdin, ctx)
+  let lines = splitLines(r.content)
   const numeric = flags.has('n')
   const unique = flags.has('u')
   if (numeric) {
@@ -160,13 +159,13 @@ function numericKey(line) {
 // and avoids surprising scripts that pass both flags.
 function uniq(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['c', 'd', 'u', 'i'] })
-  const r = readInputs('uniq', positional, stdin, ctx)
+  const r = readContent('uniq', positional, stdin, ctx)
   const showCount = flags.has('c')
   const onlyDups = flags.has('d')
   const onlyUniques = flags.has('u')
   const ignoreCase = flags.has('i')
   const norm = (s) => ignoreCase ? s.toLowerCase() : s
-  const lines = splitLines(r.inputs.map((f) => f.content).join(''))
+  const lines = splitLines(r.content)
   const out = []
   let prev = null
   let prevKey = null

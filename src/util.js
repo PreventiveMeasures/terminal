@@ -61,9 +61,20 @@ export function readFilesFor(cmd, files, ctx) {
 // File inputs with a stdin fallback: with no file operands a command
 // reads stdin (one nameless input); otherwise it reads the named
 // files via readFilesFor with the same partial-failure semantics.
+// This is the per-file model — callers that need file names/boundaries
+// (wc, head, grep) iterate `.inputs`.
 export function readInputs(cmd, files, stdin, ctx) {
   if (files.length === 0) return { inputs: [{ name: null, content: stdin }], stderr: '', failed: false }
   return readFilesFor(cmd, files, ctx)
+}
+
+// The concatenated-stream model: every readable input joined into one
+// string, file boundaries dropped. For commands that treat all input
+// as a single stream (cat, sort, uniq). Carries the same partial-
+// failure stderr/failed so callers can hand it straight to okWith.
+export function readContent(cmd, files, stdin, ctx) {
+  const r = readInputs(cmd, files, stdin, ctx)
+  return { content: r.inputs.map((f) => f.content).join(''), stderr: r.stderr, failed: r.failed }
 }
 
 // Pair a command's stdout with the partial-failure outcome from

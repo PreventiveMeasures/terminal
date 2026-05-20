@@ -15,7 +15,7 @@
 
 import { relativeTo, resolve } from './fs.js'
 import { parseArgs } from './parse.js'
-import { err, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
+import { err, joinLines, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
 
 // Two forms because PATTERN is required UNLESS -e is given. Listing
 // both makes the conditional explicit — bare `[PATTERN]` would read
@@ -443,7 +443,7 @@ function grepListFiles(inputs, res, invert, listNonMatching) {
       out.push(name ?? '(standard input)')
     }
   }
-  return out.length > 0 ? ok(out.join('\n') + '\n') : noMatch()
+  return out.length > 0 ? ok(joinLines(out)) : noMatch()
 }
 
 // -c prints per-file match counts. With showName, each line is
@@ -465,5 +465,5 @@ function grepCount(inputs, res, invert, showName) {
     else lines.push(String(count))
   }
   if (lines.length === 0) return noMatch()
-  return { stdout: lines.join('\n') + '\n', stderr: '', exitCode: anyMatched ? 0 : 1 }
+  return { stdout: joinLines(lines), stderr: '', exitCode: anyMatched ? 0 : 1 }
 }
