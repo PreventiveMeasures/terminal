@@ -24,6 +24,14 @@ function tac(stdin, tokens, ctx) {
   return ok(joinLines(out))
 }
 
+// Cap on how many elements `seq` will materialize. Pipelines buffer
+// each stage's entire output as a string (no lazy streaming), so an
+// unbounded `seq 1 1000000000 | head -1` builds a billion lines and
+// OOMs instead of stopping after the first. Real seq streams; we
+// can't, so we bound the count. A million lines dwarfs any realistic
+// interactive use and stays comfortably within memory.
+const MAX_SEQ_ELEMENTS = 1_000_000
+
 // Generate a numeric sequence, one per line. Forms:
 //   seq LAST            → 1, 2, …, LAST              (step 1, even if LAST < 1 → empty)
 //   seq FIRST LAST      → FIRST..LAST                (step ±1, sign auto-picked)
@@ -51,6 +59,14 @@ function seq(_stdin, tokens) {
   else if (nums.length === 2) { first = nums[0]; last = nums[1]; incr = first <= last ? 1 : -1 }
   else { [first, incr, last] = nums }
   if (incr === 0) return err('seq: increment must be non-zero')
+  // Reject oversized ranges up front (before allocating) so a huge
+  // `seq` can't OOM the buffered pipeline. Compute the count directly
+  // rather than counting in the loop.
+  const inRange = incr > 0 ? first <= last : first >= last
+  const count = inRange ? Math.floor(Math.abs(last - first) / Math.abs(incr)) + 1 : 0
+  if (count > MAX_SEQ_ELEMENTS) {
+    return err(`seq: range too large: ${count} elements exceeds limit of ${MAX_SEQ_ELEMENTS}`)
+  }
   const out = []
   if (incr > 0) for (let n = first; n <= last; n += incr) out.push(String(n))
   else for (let n = first; n >= last; n += incr) out.push(String(n))

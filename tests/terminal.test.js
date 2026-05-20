@@ -2552,6 +2552,24 @@ describe('createTerminal — seq', () => {
     // The 2-arg form keeps its auto-sign behavior, untouched.
     assert.equal(t.run('seq 5 1').stdout, '5\n4\n3\n2\n1\n')
   })
+
+  it('caps oversized ranges instead of OOMing the buffered pipeline', () => {
+    // Pipelines materialize each stage's output, so an unbounded seq
+    // (e.g. `seq 1 1000000000 | head -1`) would build a billion lines
+    // and run out of memory. The count is rejected before allocating.
+    const t = createTerminal({})
+    const big = t.run('seq 1 1000000000')
+    assert.equal(big.exitCode, 1)
+    assert.match(big.stderr, /range too large/u)
+    // The original OOM repro: seq errors, head sees empty stdin.
+    assert.equal(t.run('seq 1 1000000000 | head -1').stdout, '')
+    // Large descending and out-of-safe-range counts are caught too.
+    assert.match(t.run('seq 1000000000 -1 1').stderr, /range too large/u)
+    assert.match(t.run('seq 1 99999999999999999999').stderr, /range too large/u)
+    // Just over the limit is rejected; the limit itself is allowed.
+    assert.match(t.run('seq 1 1000001').stderr, /range too large/u)
+    assert.equal(t.run('seq 1 1000000').exitCode, 0)
+  })
 })
 
 describe('createTerminal — nl', () => {
