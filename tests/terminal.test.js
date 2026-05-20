@@ -949,6 +949,39 @@ describe('createTerminal — text commands', () => {
     assert.equal(t.run('cat dups.txt | sort -u').stdout, 'a\nb\nc\n')
   })
 
+  it('sort -n orders by numeric value (default sort is lexicographic)', () => {
+    // Verified against `/usr/bin/sort -n`. Lexicographic sort puts
+    // `100` before `2`; numeric sort gets the magnitudes right.
+    const t = createTerminal({ 'n.txt': '10\n9\n100\n2\n' })
+    assert.equal(t.run('cat n.txt | sort').stdout, '10\n100\n2\n9\n')
+    assert.equal(t.run('cat n.txt | sort -n').stdout, '2\n9\n10\n100\n')
+    assert.equal(t.run('cat n.txt | sort -rn').stdout, '100\n10\n9\n2\n')
+    // Reads file arguments like the rest of sort.
+    assert.equal(t.run('sort -n n.txt').stdout, '2\n9\n10\n100\n')
+  })
+
+  it('sort -n handles negatives, decimals, and non-numeric lines (as 0)', () => {
+    // Verified against `/usr/bin/sort -n`.
+    const t = createTerminal({})
+    assert.equal(t.run('echo -e "-5\\n3\\n-10\\n0" | sort -n').stdout, '-10\n-5\n0\n3\n')
+    assert.equal(t.run('echo -e "1.5\\n1.25\\n1.1" | sort -n').stdout, '1.1\n1.25\n1.5\n')
+    // Lines without a leading number sort as 0, ordered among
+    // themselves by the whole line (GNU's last-resort comparison).
+    assert.equal(t.run('echo -e "foo\\n3\\n1\\nbar" | sort -n').stdout, 'bar\nfoo\n1\n3\n')
+    // Equal numeric value, different text: whole line breaks the tie.
+    assert.equal(t.run('echo -e "10 b\\n10 a\\n2 c" | sort -n').stdout, '2 c\n10 a\n10 b\n')
+  })
+
+  it('sort -nu dedupes by numeric value, keeping the first in input order', () => {
+    // Verified against `/usr/bin/sort -nu` / `-rnu`. `1` and `01` are
+    // the same value, so -u keeps whichever appeared first; the
+    // last-resort tiebreak is suppressed under -u.
+    const t = createTerminal({})
+    assert.equal(t.run('echo -e "1\\n01\\n2" | sort -nu').stdout, '1\n2\n')
+    assert.equal(t.run('echo -e "01\\n1\\n2" | sort -nu').stdout, '01\n2\n')
+    assert.equal(t.run('echo -e "1\\n01\\n2" | sort -rnu').stdout, '2\n1\n')
+  })
+
   it('uniq -c counts CONSECUTIVE runs (not totals — matches coreutils)', () => {
     // GNU `uniq` only collapses adjacent duplicates; non-adjacent
     // dupes keep separate count rows. Width 7 + space + value.
