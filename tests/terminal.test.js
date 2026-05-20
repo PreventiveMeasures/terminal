@@ -2307,6 +2307,18 @@ describe('createTerminal — shell-style glob expansion', () => {
     assert.match(r.stdout, /\b5\b.*total/u)
   })
 
+  it('wc -c counts bytes (UTF-8), not UTF-16 code units', () => {
+    // Verified against `/usr/bin/wc -c`: ASCII is 1 byte, `é` is 2,
+    // an emoji is 4 — so plain string `.length` (code units) would
+    // undercount the last two. The `c` column is the byte count.
+    const t = createTerminal({ 'a.txt': 'abc\n', 'u.txt': 'café\n', 'e.txt': '😀\n' })
+    assert.match(t.run('wc -c a.txt').stdout, /^\s*4 a\.txt$/mu)
+    assert.match(t.run('wc -c u.txt').stdout, /^\s*6 u\.txt$/mu)
+    assert.match(t.run('wc -c e.txt').stdout, /^\s*5 e\.txt$/mu)
+    // The byte count also flows into the default (no-flag) c column.
+    assert.match(t.run('wc u.txt').stdout, /\b6\b/u)
+  })
+
   it('a single-quoted pattern stays literal — no expansion', () => {
     const t = createTerminal(SRC)
     // Quoted: wc tries to read a file literally named `dir/*.js`.

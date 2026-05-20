@@ -93,8 +93,21 @@ function wcCounts(content) {
   return {
     l: (content.match(/\n/gu) ?? []).length,
     w: (content.match(/\S+/gu) ?? []).length,
-    c: content.length,
+    c: utf8ByteLength(content),
   }
+}
+
+// `wc -c` counts BYTES. content is a JS string (UTF-16 code units), so
+// encode to UTF-8 — the encoding this models — for the byte count:
+// ASCII is 1, `é` is 2, an emoji is 4. Plain `.length` returns code
+// units, which undercounts multibyte text and disagrees with coreutils.
+function utf8ByteLength(s) {
+  let bytes = 0
+  for (const ch of s) {
+    const cp = ch.codePointAt(0)
+    bytes += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4
+  }
+  return bytes
 }
 
 function formatWc(counts, name, which) {
