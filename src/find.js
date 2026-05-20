@@ -2,17 +2,17 @@
 // feature set (POSIX-style `-name` / `-type` / `-path` primaries,
 // GNU long forms, `-not` / `!` negation, `-a` / `-o` boolean
 // combinators with precedence, `-mindepth` / `-maxdepth` depth
-// bounds, the per-path glob matcher, the depth-aware walker)
-// doesn't fit nav-commands.js's 300-line cap.
+// bounds, the per-path glob matcher) doesn't fit nav-commands.js's
+// 300-line cap. The tree traversal itself is fs.js's `walkTree`.
 //
 // Predicate model: a list of OR-groups; each group is a list of
 // AND-ed predicates. `-a` is the implicit default; `-o` starts a
 // new group; `-not` / `!` flips the next predicate. `-mindepth` /
 // `-maxdepth` aren't predicates — they're global walker options
-// extracted up front: `-maxdepth` prunes the descent, while
+// extracted up front: `-maxdepth` caps walkTree's descent, while
 // `-mindepth` filters which visited entries are reported.
 
-import { basename, joinPath, relativeTo, resolve } from './fs.js'
+import { basename, relativeTo, resolve, walkTree } from './fs.js'
 import { compileGlob } from './glob.js'
 import { err, ok, parseNonNegativeInt } from './util.js'
 
@@ -28,7 +28,7 @@ export function find(_stdin, tokens, ctx) {
     if (!ctx.fs.isDir(startAbs) && !ctx.fs.isFile(startAbs)) {
       return err(`find: ${start}: no such file or directory`)
     }
-    for (const entry of walk(ctx.fs, startAbs, maxDepth)) {
+    for (const entry of walkTree(ctx.fs, startAbs, maxDepth)) {
       if (entry.depth < minDepth) continue
       const display = toDisplayPath(start, startAbs, entry.path)
       if (matchGroups(groups, { kind: entry.kind, path: display })) out.push(display)
@@ -193,28 +193,4 @@ function toDisplayPath(userPath, absRoot, absPath) {
   // codebase drops the `./` instead; the two commands intentionally
   // diverge here, each following its own GNU convention.
   return userPath.endsWith('/') ? userPath + rel : userPath + '/' + rel
-}
-
-// Yields `{ path, kind }`. Tracks depth internally so `maxDepth`
-// can cap recursion: depth 0 is the start path, depth 1 is its
-// direct children, and so on. Matches POSIX `find -maxdepth N`.
-function* walk(fs, root, maxDepth = Number.POSITIVE_INFINITY) {
-  if (fs.isFile(root)) { yield { path: root, kind: 'file', depth: 0 }; return }
-  yield { path: root, kind: 'dir', depth: 0 }
-  // Index pointer instead of Array.shift() — shift() is O(n) per
-  // call because it reindexes the rest of the array, making BFS
-  // O(n²) on large trees.
-  const queue = [{ path: root, depth: 0 }]
-  for (let qi = 0; qi < queue.length; qi++) {
-    const cur = queue[qi]
-    if (cur.depth >= maxDepth) continue
-    const { dirs, files } = fs.listDir(cur.path)
-    const depth = cur.depth + 1
-    for (const d of dirs) {
-      const path = joinPath(cur.path, d)
-      yield { path, kind: 'dir', depth }
-      queue.push({ path, depth })
-    }
-    for (const f of files) yield { path: joinPath(cur.path, f), kind: 'file', depth }
-  }
 }
