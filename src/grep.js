@@ -1,6 +1,6 @@
 // grep — the auditor's main read tool. Own file because the
 // feature set (-A/-B/-C context, -l/-L/-c output modes, -o,
-// -w, -F/-G/-E dialect, -h/-H name forcing, -r recursive,
+// -w, -F/-G/-E dialect, -h/-H name forcing, -r/-R recursive,
 // -i/-v/-n composable, -e PATTERN multi) outgrew text-commands.js.
 //
 // Pattern dialects (mutually exclusive, default is BRE):
@@ -22,10 +22,14 @@ import { breToEs } from './bre.js'
 // both makes the conditional explicit — bare `[PATTERN]` would read
 // as if `grep [PATH...]` (no pattern at all) were valid, which it
 // isn't.
-const FLAGS = '[-i] [-v] [-n] [-r] [-w] [-o] [-E|-F|-G] [-l] [-L] [-c] [-h] [-H] [-A N] [-B N] [-C N]'
+const FLAGS = '[-i] [-v] [-n] [-r|-R] [-w] [-o] [-E|-F|-G] [-l] [-L] [-c] [-h] [-H] [-A N] [-B N] [-C N]'
 const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} -e PATTERN ... [PATH...]`
 
-const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'l', 'L', 'c', 'w', 'h', 'H', 'o', 'E', 'F', 'G']
+// -R is GNU's "dereference-recursive" — distinct from -r because it
+// follows symlinks. The virtual FS has no symlink concept, so the two
+// degenerate to the same traversal here; -R is accepted as an alias
+// so muscle-memory invocations don't trip over an "unknown option".
+const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'h', 'H', 'o', 'E', 'F', 'G']
 const VALUE_SHORTS = ['A', 'B', 'C']
 
 export function grep(stdin, tokens, ctx) {
@@ -51,7 +55,7 @@ export function grep(stdin, tokens, ctx) {
   if (re.error) return re.error
   const ctxLines = parseContext(values)
   if (ctxLines.error) return ctxLines.error
-  const recursive = flags.has('r')
+  const recursive = flags.has('r') || flags.has('R')
   const r = grepInputs(recursive, stdin, rest, ctx)
   const showName = pickShowName(flags, recursive, rest.length)
   const invert = flags.has('v')
