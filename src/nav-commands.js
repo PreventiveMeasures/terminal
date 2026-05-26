@@ -34,9 +34,14 @@ function ls(_stdin, tokens, ctx) {
   // working) treats `-1` and `-1a` as positionals, so peel the
   // `1` out of the token list before parsing — `-1`, `-1a`, `-a1`,
   // and `-la1` all reach the schema cleanly that way.
-  const { flags, positional } = parseArgs(stripDashOne(tokens), { short: ['l', 'a'] })
-  const opts = { long: flags.has('l'), all: flags.has('a') }
-  const targets = positional.length > 0 ? positional : ['.']
+  const { flags, positional } = parseArgs(stripDashOne(tokens), { short: ['l', 'a', 'R'] })
+  const opts = { long: flags.has('l'), all: flags.has('a'), recursive: flags.has('R') }
+  const initialTargets = positional.length > 0 ? positional : ['.']
+  // -R expands each directory target into a DFS pre-order walk of
+  // itself + every subdir (matching GNU's listing order: list a dir,
+  // then descend in sorted order). File targets pass through unchanged
+  // — GNU's -R doesn't dereference files, just directories.
+  const targets = opts.recursive ? expandRecursive(initialTargets, opts.all, ctx) : initialTargets
   const out = []
   const errs = []
   let exitCode = 0
@@ -55,6 +60,40 @@ function ls(_stdin, tokens, ctx) {
     stderr: errs.length === 0 ? '' : errs.join('\n') + '\n',
     exitCode,
   }
+}
+
+// DFS pre-order expansion of directory targets for `-R`. Iterative
+// (explicit stack) rather than recursive, matching treeWalk below —
+// a pathologically deep bundle would otherwise risk a stack overflow.
+// `dirs` from listDir is already sorted, so push-in-reverse / pop
+// yields sorted DFS order. The fs has no symlinks, so no cycle guard
+// is needed. Hidden-dir skipping mirrors lsTarget so descent into
+// `.git` (etc.) is gated by -a, just like the flat listing.
+function expandRecursive(targets, all, ctx) {
+  const out = []
+  for (const t of targets) {
+    const abs = resolve(ctx.cwd, t)
+    if (!ctx.fs.isDir(abs)) { out.push(t); continue }
+    const stack = [{ display: t, abs }]
+    while (stack.length > 0) {
+      const { display, abs: cur } = stack.pop()
+      out.push(display)
+      const { dirs } = ctx.fs.listDir(cur)
+      for (let i = dirs.length - 1; i >= 0; i--) {
+        const d = dirs[i]
+        if (!all && d.startsWith('.')) continue
+        stack.push({ display: appendChild(display, d), abs: joinPath(cur, d) })
+      }
+    }
+  }
+  return out
+}
+
+// Mirror grep's displayName trailing-slash handling so `ls -R foo/`
+// produces `foo/sub` (not `foo//sub`) without normalizing away the
+// user-typed prefix in unrelated cases.
+function appendChild(path, name) {
+  return path.endsWith('/') ? path + name : path + '/' + name
 }
 
 // Drop the POSIX `-1` flag from a token list before parseArgs sees
@@ -89,7 +128,10 @@ function lsTarget(target, multiple, opts, ctx) {
     return { lines: [formatLsRow(target, ctx.fs.readFile(abs).length, false, opts.long)] }
   }
   if (!ctx.fs.isDir(abs)) return { error: `ls: ${target}: no such file or directory` }
-  const lines = multiple ? [`${target}:`] : []
+  // -R always labels each directory in the walk — even a single root
+  // with no subdirs (GNU does the same). Files keep their header-free
+  // treatment above; only the dir branch forces the prefix.
+  const lines = (multiple || opts.recursive) ? [`${target}:`] : []
   const { dirs, files } = ctx.fs.listDir(abs)
   for (const name of dirs) {
     if (!opts.all && name.startsWith('.')) continue
