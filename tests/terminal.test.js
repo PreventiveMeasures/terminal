@@ -255,6 +255,15 @@ describe('createTerminal — text commands', () => {
     assert.match(r.stdout, /^src\/bar\.js:2:\/\/ TODO: doc this$/mu)
   })
 
+  it('grep -R behaves like -r (GNU dereference-recursive alias)', () => {
+    const t = createTerminal(SOURCES)
+    const lower = t.run('grep -r TODO src')
+    const upper = t.run('grep -R TODO src')
+    assert.equal(upper.exitCode, lower.exitCode)
+    assert.equal(upper.stdout, lower.stdout)
+    assert.equal(upper.stderr, lower.stderr)
+  })
+
   it('grep usage line documents PATTERN and [PATH...] (covers -r dirs and -e form)', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('grep')
