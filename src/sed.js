@@ -1,11 +1,13 @@
 // Narrow, hidden command. Implements only the line-range slice
 // form that auditors reach for when they want to read a specific
-// chunk of a long file: `sed -n 'X,Yp' FILE` or
-// `cat FILE | sed -n 'X,Yp'`. Anything else (substitution,
-// regex addresses, multiple scripts, in-place edits, etc.) errors
-// with a one-line message — we don't pretend to be a real sed.
-// Kept out of the user-facing command list in index.js for the
-// same reason: surface it on demand, don't advertise it.
+// chunk of a long file: `sed -n 'X,Yp' FILE` (single range), or
+// `sed -n 'X1,Y1p;X2,Y2p;…' FILE` (semicolon-separated multi-range,
+// useful for extracting non-contiguous slices in one pass).
+// Anything else (substitution, regex addresses, multiple scripts,
+// in-place edits, etc.) errors with a one-line message — we don't
+// pretend to be a real sed. Kept out of the user-facing command
+// list in index.js for the same reason: surface it on demand,
+// don't advertise it.
 
 import { parseArgs } from './parse.js'
 import { err, okWith, readInputs, splitLines } from './util.js'
@@ -21,24 +23,54 @@ export function sed(stdin, tokens, ctx) {
   try { parsed = parseArgs(tokens, { short: ['n'] }) } catch { return unsupported() }
   const { flags, positional } = parsed
   if (!flags.has('n') || positional.length === 0) return unsupported()
-  const m = SCRIPT.exec(positional[0])
-  if (!m) return unsupported()
-  const start = Number(m[1])
-  const end = m[2] === undefined ? start : Number(m[2])
-  if (start < 1 || end < 1) return err('sed: line numbers must be >= 1')
-  if (end < start) return err(`sed: reversed range: ${start},${end}`)
+  const parsedScript = parseScript(positional[0])
+  if (parsedScript.error) return parsedScript.error
+  const { ranges } = parsedScript
+  if (ranges.length === 0) return unsupported()
   const files = positional.slice(1)
   if (files.length > 1) return err('sed: at most one input file is supported')
   const r = readInputs('sed', files, stdin, ctx)
   const content = r.inputs[0]?.content ?? ''
   const lines = splitLines(content)
-  // `slice(start-1, end)`: inclusive on both ends in 1-indexed
-  // terms (matching sed). Out-of-range starts/ends just clamp —
-  // sed prints nothing past EOF without complaining.
-  const sliced = lines.slice(start - 1, end)
-  return okWith(sliced.length > 0 ? sliced.join('\n') + '\n' : '', r)
+  // sed semantics: for each input line in order, for each command
+  // in script order, run it. So with `-n '1,3p;2,4p'` on lines 1-4,
+  // lines 2 and 3 print TWICE — matched by both ranges. Matches GNU.
+  // Out-of-range starts/ends just don't fire (sed prints nothing
+  // past EOF without complaining).
+  const out = []
+  for (let i = 0; i < lines.length; i++) {
+    const lineNum = i + 1
+    for (const { start, end } of ranges) {
+      if (lineNum >= start && lineNum <= end) out.push(lines[i])
+    }
+  }
+  return okWith(out.length > 0 ? out.join('\n') + '\n' : '', r)
+}
+
+// Split the script on `;` and parse each segment as an `X,Yp` (or
+// `Xp`) command. Empty segments are silently skipped so leading,
+// trailing, or doubled `;` don't blow up — GNU is lenient here and
+// callers occasionally template the separator (e.g. joining a
+// dynamic list of ranges).
+function parseScript(script) {
+  const ranges = []
+  for (const seg of script.split(';')) {
+    if (seg === '') continue
+    const m = SCRIPT.exec(seg)
+    if (!m) return { error: unsupported() }
+    const start = Number(m[1])
+    const end = m[2] === undefined ? start : Number(m[2])
+    // `\d+` matches "0", so the start-must-be-positive check is
+    // explicit rather than regex-implicit. Once start >= 1 and end
+    // >= start, end >= 1 falls out. GNU treats `5,3p` as a no-op;
+    // we surface the error instead to catch obvious typos.
+    if (start < 1) return { error: err('sed: line numbers must be >= 1') }
+    if (end < start) return { error: err(`sed: reversed range: ${start},${end}`) }
+    ranges.push({ start, end })
+  }
+  return { ranges }
 }
 
 function unsupported() {
-  return err("sed: only `-n 'X[,Y]p'` (line range print) is supported")
+  return err("sed: only `-n 'X[,Y]p'` (optionally `;`-joined into multi-range scripts) is supported")
 }

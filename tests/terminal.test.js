@@ -2427,6 +2427,52 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     assert.equal(r.stdout, '')
   })
 
+  it("-n 'X1,Y1p;X2,Y2p;…' prints multiple non-contiguous ranges in input order", () => {
+    const t = createTerminal(SRC)
+    // The originally-attempted invocation: three non-contiguous
+    // slices of a long file in one pass.
+    const r = t.run("sed -n '1,80p;220,265p;285,345p' big.txt")
+    assert.equal(r.exitCode, 0)
+    const lines = r.stdout.split('\n').filter(Boolean)
+    // 80 + 46 (220..265) + 16 (285..300 — clamped at EOF=300) = 142.
+    assert.equal(lines.length, 80 + 46 + 16)
+    assert.equal(lines[0], 'line 1')
+    assert.equal(lines[79], 'line 80')
+    assert.equal(lines[80], 'line 220')
+    assert.equal(lines[125], 'line 265')
+    assert.equal(lines[126], 'line 285')
+    assert.equal(lines.at(-1), 'line 300')
+  })
+
+  it('overlapping ranges produce duplicates (matches GNU sed per-command processing)', () => {
+    const t = createTerminal(SRC)
+    // For each input line in order, each matching range fires —
+    // so `1,3p;2,4p` prints lines 2 and 3 TWICE.
+    const r = t.run("sed -n '1,3p;2,4p' big.txt")
+    assert.equal(r.exitCode, 0)
+    assert.deepEqual(r.stdout.split('\n').filter(Boolean), [
+      'line 1', 'line 2', 'line 2', 'line 3', 'line 3', 'line 4',
+    ])
+  })
+
+  it("multi-range tolerates empty segments (leading/trailing/doubled ';')", () => {
+    const t = createTerminal(SRC)
+    // GNU is lenient; templated callers may emit `;` separators
+    // unconditionally. `;1,2p;;5p;` should behave like `1,2p;5p`.
+    const r = t.run("sed -n ';1,2p;;5p;' big.txt")
+    assert.equal(r.exitCode, 0)
+    assert.deepEqual(r.stdout.split('\n').filter(Boolean), ['line 1', 'line 2', 'line 5'])
+  })
+
+  it('multi-range surfaces a specific reversed-range error naming the offender', () => {
+    // Validation runs per segment, so a bad range in the middle of
+    // a script still surfaces with its offender named.
+    const t = createTerminal(SRC)
+    const r = t.run("sed -n '1,5p;50,20p;80,90p' big.txt")
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /reversed range: 50,20/u)
+  })
+
   it('rejects anything outside the narrow subset (single canonical message)', () => {
     const t = createTerminal(SRC)
     // Everything in this group should hit the same "only -n 'X[,Y]p'"
@@ -2437,7 +2483,7 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
       "sed '1,5p' big.txt",                 // missing -n
       "sed -n 's/foo/bar/g' big.txt",       // substitution
       "sed -n '/foo/p' big.txt",            // regex address
-      "sed -n '1,5p;10,15p' big.txt",       // multiple scripts
+      "sed -n '1,5p;s/a/b/' big.txt",       // mixing range with non-range
       "sed -i -n '1,2p' big.txt",           // unsupported flag
       "sed -e '1p' big.txt",                // unsupported flag
     ]
