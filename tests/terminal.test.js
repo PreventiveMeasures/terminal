@@ -119,6 +119,61 @@ describe('createTerminal — basics', () => {
     assert.doesNotMatch(r.stdout, /no such file/u)
     assert.match(r.stdout, /foo\.js/u)
   })
+
+  it('ls -R walks a tree in DFS pre-order with per-directory headers', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('ls -R src')
+    assert.equal(r.exitCode, 0)
+    // GNU's order: list a dir, then descend before moving to siblings.
+    // src has util/ (only subdir), so the expected blocks are
+    //   src:        util/ bar.js foo.js
+    //   src/util:   log.js
+    assert.equal(r.stdout, 'src:\nutil/\nbar.js\nfoo.js\n\nsrc/util:\nlog.js\n')
+  })
+
+  it('ls -R defaults to . and shows the root header even with no subdirs', () => {
+    // Single-target case where the dir HAS subdirs (.) still labels
+    // the root explicitly — GNU's -R always identifies each dir.
+    const t = createTerminal(SOURCES)
+    const r = t.run('ls -R')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stdout, /^\.:\n/u)
+    assert.match(r.stdout, /^\.\/src:\n/mu)
+    assert.match(r.stdout, /^\.\/src\/util:\n/mu)
+  })
+
+  it('ls -R skips hidden dirs by default; -Ra descends into them', () => {
+    // Build a fixture with a hidden directory so we can confirm
+    // recursion respects the same dotfile rule as the flat listing.
+    const sources = {
+      'a.txt': 'a\n',
+      '.secret/b.txt': 'b\n',
+    }
+    const t = createTerminal(sources)
+    const r = t.run('ls -R')
+    assert.doesNotMatch(r.stdout, /secret/u)
+    const ra = t.run('ls -Ra')
+    assert.match(ra.stdout, /^\.\/\.secret:$/mu)
+    assert.match(ra.stdout, /b\.txt/u)
+  })
+
+  it('ls -R on a single file target passes the file through (no header, no recursion)', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('ls -R README.md')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'README.md\n')
+  })
+
+  it('ls -R composes with -l (long format applies to every listed dir)', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('ls -lR src')
+    assert.equal(r.exitCode, 0)
+    // Headers still appear; rows in each block carry the long-format prefix.
+    assert.match(r.stdout, /^src:$/mu)
+    assert.match(r.stdout, /^src\/util:$/mu)
+    assert.match(r.stdout, /^d\s+0\s+util\/$/mu)
+    assert.match(r.stdout, /^-\s+\d+\s+log\.js$/mu)
+  })
 })
 
 describe('createTerminal — text commands', () => {
