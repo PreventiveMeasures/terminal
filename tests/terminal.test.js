@@ -1380,6 +1380,126 @@ describe('createTerminal — find / tree / path', () => {
     assert.equal(r.stdout, '')
   })
 
+  it('find -exec ... ; dispatches once per match with `{}` replaced by the path', () => {
+    const t = createTerminal(SOURCES)
+    // `echo {}` via -exec produces one line per match. Use -type f to
+    // get a deterministic set, and sort the output since walk order
+    // depends on listDir ordering.
+    const r = t.run('find src -type f -exec echo {} ";"')
+    assert.equal(r.exitCode, 0)
+    const lines = r.stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(lines, ['src/bar.js', 'src/foo.js', 'src/util/log.js'])
+  })
+
+  it('find -exec ... ; suppresses the default -print (no double output)', () => {
+    // POSIX: any -exec / -print action suppresses the implicit -print.
+    // Without this rule, every match would print AND echo, doubling
+    // the output.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find src -type f -name "*.js" -exec echo {} ";"')
+    const lines = r.stdout.split('\n').filter(Boolean)
+    assert.equal(lines.length, 3)
+    assert.ok(lines.every((l) => !l.startsWith('src/') || l.endsWith('.js')))
+  })
+
+  it('find -exec ... ; acts as a predicate (exit code filters the match)', () => {
+    // `false` exits 1 → predicate is false → entry doesn't print under
+    // a subsequent -print. We don't have explicit -print, but the
+    // predicate's exitCode still propagates to find's exit code.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find src -type f -exec false ";"')
+    assert.notEqual(r.exitCode, 0, 'failing -exec must bubble to find exit code')
+    // `true` exits 0 → keeps matches, no output (true is silent).
+    const r2 = t.run('find src -type f -exec true ";"')
+    assert.equal(r2.exitCode, 0)
+    assert.equal(r2.stdout, '')
+  })
+
+  it('find -exec ... + batches every collected path into a single dispatch', () => {
+    const t = createTerminal(SOURCES)
+    // echo all paths on one line; `+` joins them with spaces.
+    const r = t.run('find src -type f -exec echo {} +')
+    assert.equal(r.exitCode, 0)
+    const line = r.stdout.replace(/\n$/u, '')
+    // One line, three paths, space-separated. Sort the tokens so the
+    // assertion doesn't depend on walk order.
+    assert.deepEqual(line.split(' ').sort(), ['src/bar.js', 'src/foo.js', 'src/util/log.js'])
+  })
+
+  it('find src -type f -name "*.txt" -exec wc -l {} + (the originally attempted invocation)', () => {
+    // The flag combination that prompted this feature. With a fixture
+    // that has .txt files, `+` collects every match and runs wc -l
+    // once with the full list — output includes a `total` row, which
+    // is wc's per-batch summary.
+    const t = createTerminal({
+      'src/a.txt': 'one\ntwo\nthree\n',
+      'src/b.txt': 'only-one\n',
+      'src/skip.md': 'ignored\n',
+    })
+    const r = t.run('find src -type f -name "*.txt" -exec wc -l {} +')
+    assert.equal(r.exitCode, 0)
+    // Both .txt files appear, the .md does not, and wc adds a `total`
+    // row for the multi-file batch.
+    assert.match(r.stdout, /^\s*3\s+src\/a\.txt$/mu)
+    assert.match(r.stdout, /^\s*1\s+src\/b\.txt$/mu)
+    assert.match(r.stdout, /^\s*4\s+total$/mu)
+    assert.doesNotMatch(r.stdout, /skip\.md/u)
+  })
+
+  it('find -exec ... + with zero matches skips the dispatch (xargs -r convention)', () => {
+    const t = createTerminal(SOURCES)
+    // `*.zzz` matches nothing; the batched echo must NOT run with an
+    // empty path list (otherwise we\'d get a spurious blank line).
+    const r = t.run('find src -type f -name "*.zzz" -exec echo {} +')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '')
+  })
+
+  it('find -exec validation: missing terminator, missing command, and `+` without `{}`', () => {
+    const t = createTerminal(SOURCES)
+    // No `;` or `+` ever appears.
+    const noTerm = t.run('find src -type f -exec echo {}')
+    assert.notEqual(noTerm.exitCode, 0)
+    assert.match(noTerm.stderr, /missing terminator/u)
+    // `;` immediately after -exec — no command at all.
+    const noCmd = t.run('find src -type f -exec ";"')
+    assert.notEqual(noCmd.exitCode, 0)
+    assert.match(noCmd.stderr, /requires a command/u)
+    // `+` form must end in `{}`.
+    const badPlus = t.run('find src -type f -exec echo +')
+    assert.notEqual(badPlus.exitCode, 0)
+    assert.match(badPlus.stderr, /`\{\}` must be the last argument/u)
+  })
+
+  it('find -exec composes with -type / -name and runs only on the filtered set', () => {
+    const t = createTerminal(SOURCES)
+    // -name '*.md' constrains the set; -exec echo runs only for matches.
+    const r = t.run('find / -type f -name "*.md" -exec echo {} ";"')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout.split('\n').filter(Boolean).sort().join(','), '/README.md')
+  })
+
+  it('find -exec ... + rejects multiple `{}` instances (POSIX/GNU)', () => {
+    // The leading `{}` would otherwise pass through literally because
+    // only the trailing arg is checked / replaced — confusing and
+    // inconsistent with GNU.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find src -exec echo {} {} +')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /only one instance of `\{\}`/u)
+  })
+
+  it('find rejects `-not -exec ... +` (incoherent under always-true batching)', () => {
+    // The `+` form is treated as always-true during the walk because
+    // it can't filter before the post-walk dispatch. Negating that
+    // would either silently drop every match or still run the batched
+    // command anyway — pick neither, surface the error.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find src -not -exec echo {} +')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /no meaningful negation/u)
+  })
+
   it('basename / dirname operate on path strings', () => {
     const t = createTerminal(SOURCES)
     assert.equal(t.run('basename /src/foo.js').stdout, 'foo.js\n')
