@@ -37,14 +37,19 @@ export function find(_stdin, tokens, ctx) {
   const out = []
   let stdout = ''
   let stderr = ''
-  // GNU semantic (verified against /usr/bin/find 4.9): find's exit
-  // code reflects find's OWN success (could it traverse?), not the
-  // exit codes of any -exec'd commands. `find . -exec false ;` exits
-  // 0; so does `find . -exec nosuchcommand ;` (which still prints the
-  // dispatch error to stderr). Bubbling exec exit codes would also
-  // make `-not -exec false ;` exit non-zero, contradicting the user's
-  // explicit "I expect this to fail" inversion. So stdout/stderr from
-  // execs propagate, but exitCode does not.
+  // GNU semantic (verified against /usr/bin/find 4.9): for the `;`
+  // form, find's exit code is unaffected by exec failures — the per-
+  // match exit code only drives the predicate boolean, not find's
+  // overall exit. `find . -exec false ;` exits 0; so does
+  // `find . -exec nosuchcommand ;` (the dispatch error still prints
+  // to stderr, but find itself reports success).
+  //
+  // The `+` form is different (also verified): a failing batched
+  // command DOES bubble. `find . -exec false {} +` exits 1, because
+  // the batch is the actual command run on the collected list, not
+  // a per-entry predicate input. Stdout/stderr propagate from both
+  // forms regardless.
+  let batchExitCode = 0
   for (const start of starts) {
     const startAbs = resolve(ctx.cwd, start)
     if (!ctx.fs.isDir(startAbs) && !ctx.fs.isFile(startAbs)) {
@@ -61,16 +66,21 @@ export function find(_stdin, tokens, ctx) {
   }
   // Batched `-exec ... +` runs after the walk with all collected
   // paths. Empty collector = no dispatch — matches GNU's "don't run
-  // on empty arglist" rule, which mirrors xargs -r.
+  // on empty arglist" rule, which mirrors xargs -r. A non-zero batch
+  // exit DOES bubble (see the header comment); we take any failing
+  // batch's code as find's exit (multiple batches with different
+  // failures collapse to the last seen — same as GNU's last-write-
+  // wins behavior here).
   for (const pred of batches) {
     if (pred.collected.length === 0) continue
     const finalArgs = pred.args.slice(0, -1).concat(pred.collected)
     const r = ctx.dispatch(pred.cmd, finalArgs, '')
     stdout += r.stdout
     stderr += r.stderr
+    if (r.exitCode !== 0) batchExitCode = r.exitCode
   }
   const printed = out.length === 0 ? '' : out.join('\n') + '\n'
-  return { stdout: printed + stdout, stderr, exitCode: 0 }
+  return { stdout: printed + stdout, stderr, exitCode: batchExitCode }
 }
 
 function parseFindArgs(tokens) {
