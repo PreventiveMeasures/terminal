@@ -1439,6 +1439,39 @@ describe('createTerminal — find / tree / path', () => {
     assert.match(r.stderr, /definitelynotacmd/u)
   })
 
+  it('find -exec ... + DOES bubble its exit code (unlike the `;` form)', () => {
+    // Verified against /usr/bin/find 4.9:
+    //   `find . -exec false ;` exits 0
+    //   `find . -exec false {} +` exits 1
+    // The `+` form runs an actual batched command on the collected
+    // list — its exit code is the command's result, not a predicate
+    // input, so it bubbles to find's exit. The `;` form's exit code
+    // is a per-match predicate signal and stays bottled.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find src -type f -exec false {} +')
+    assert.equal(r.exitCode, 1)
+    // Success in the `+` form keeps find at 0.
+    const r2 = t.run('find src -type f -exec true {} +')
+    assert.equal(r2.exitCode, 0)
+    // Empty batch: collector is empty, no dispatch, exit 0 (matches
+    // xargs -r behavior — verified separately below).
+    const r3 = t.run('find src -type f -name "*.zzz" -exec false {} +')
+    assert.equal(r3.exitCode, 0)
+  })
+
+  it("find -exec `{}` in-arg substitution: prefix / suffix / multiple / no-op edge cases", () => {
+    // Verified against /usr/bin/find 4.9: every literal `{}` in each
+    // argument is replaced (not just standalone `{}`).
+    const t = createTerminal({ 'a.txt': 'x\n' })
+    assert.equal(t.run("find a.txt -exec echo '{}-suffix' ';'").stdout, 'a.txt-suffix\n')
+    assert.equal(t.run("find a.txt -exec echo 'prefix-{}' ';'").stdout, 'prefix-a.txt\n')
+    assert.equal(t.run("find a.txt -exec echo '{}{}' ';'").stdout, 'a.txta.txt\n')
+    // {{}} → {a.txt}: outer braces are literal, inner {} substitutes.
+    assert.equal(t.run("find a.txt -exec echo '{{}}' ';'").stdout, '{a.txt}\n')
+    // { } (with space) is NOT a placeholder — no substitution.
+    assert.equal(t.run("find a.txt -exec echo '{ }' ';'").stdout, '{ }\n')
+  })
+
   it('find -exec ... + batches every collected path into a single dispatch', () => {
     const t = createTerminal(SOURCES)
     // echo all paths on one line; `+` joins them with spaces.
