@@ -1174,10 +1174,12 @@ describe('createTerminal — pipelines', () => {
     assert.equal(r2.stdout, 'const x = 1\nconst y = 2\n')
   })
 
-  it('wc -l counts lines from a pipe', () => {
+  it('wc -l counts lines from a pipe (adaptive width = `3`, no leading pad)', () => {
+    // GNU prints just the count with no leading whitespace when it
+    // fits its own digit-count — verified against `/usr/bin/wc -l`.
     const t = createTerminal(SOURCES)
     const r = t.run('cat src/foo.js | wc -l')
-    assert.match(r.stdout, /^\s+3\s*$/u)
+    assert.equal(r.stdout, '3\n')
   })
 })
 
@@ -2717,10 +2719,11 @@ describe('createTerminal — shell-style glob expansion', () => {
     const r = t.run('wc -l dir/*.js')
     assert.equal(r.exitCode, 0)
     // bar.js (2 lines) + foo.js (3 lines), in lexicographic order,
-    // plus the total. Each line has a 7-wide right-aligned count.
-    assert.match(r.stdout, /\b2\b.*dir\/bar\.js/u)
-    assert.match(r.stdout, /\b3\b.*dir\/foo\.js/u)
-    assert.match(r.stdout, /\b5\b.*total/u)
+    // plus the total. Width is adaptive — all counts here are
+    // 1-digit (max width 1), so no leading padding.
+    assert.match(r.stdout, /^2 dir\/bar\.js$/mu)
+    assert.match(r.stdout, /^3 dir\/foo\.js$/mu)
+    assert.match(r.stdout, /^5 total$/mu)
   })
 
   it('wc -c counts bytes (UTF-8), not UTF-16 code units', () => {
@@ -4195,15 +4198,33 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     )
   })
 
-  it.todo('find -name glob accepts backslash-escapes (`\\-foo` matches literal `-foo`)', () => {
+  it('find -name glob accepts backslash-escapes (`\\-foo` matches literal `-foo`)', () => {
     // GNU find escapes the next char as literal: `\-` matches `-`,
-    // useful for filenames starting with `-`. Our `compileGlob`
-    // (src/glob.js) doesn't recognize `\<x>` — the backslash gets
-    // escaped into the regex and the produced pattern looks for a
-    // literal `\-foo` which never matches.
+    // useful for filenames starting with `-`. Verified against
+    // /usr/bin/find 4.9. `compileGlob` consumes the backslash and
+    // emits the next char as a literal regex token.
     const t = createTerminal({ '-foo': '' })
     const r = t.run("find . -name '\\-foo'")
     assert.equal(r.stdout.split('\n').filter(Boolean).join(','), './-foo')
+  })
+
+  it('find -name glob escapes regex metachars cleanly (`\\*` / `\\?` match literal `*` / `?`)', () => {
+    // Regression: an early refactor of compileGlob escaped `\<x>` for
+    // ordinary chars but forgot `*` / `?` — patterns like `\*` produced
+    // the invalid regex `^*$` and threw. Now they match the literal
+    // glob metachar in a filename, matching bash convention.
+    const t = createTerminal({ '*': 'x', '?': 'y', 'plain': 'z' })
+    assert.equal(
+      t.run("find . -name '\\*'").stdout.split('\n').filter(Boolean).join(','),
+      './*',
+    )
+    assert.equal(
+      t.run("find . -name '\\?'").stdout.split('\n').filter(Boolean).join(','),
+      './?',
+    )
+    // Unescaped `*` still matches everything (sanity check that the
+    // escape branch didn't swallow the wildcard semantics).
+    assert.ok(t.run("find . -name '*'").stdout.includes('plain'))
   })
 
   it.todo('find -name glob supports character classes (`[fb]oo.js` matches `foo.js`)', () => {
@@ -4226,26 +4247,32 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     assert.match(r.stdout, /^\.\/src\/a\.js:/u)
   })
 
-  it.todo('ls -a includes `.` and `..` entries (matches GNU)', () => {
-    // GNU `ls -a` lists `.` and `..` alongside dotfiles. Ours skips
-    // them because the virtual FS\'s listDir doesn\'t include them.
-    // Affects scripts that grep ls output for parent-dir markers.
+  it('ls -a includes `.` and `..` entries (matches GNU)', () => {
+    // GNU `ls -a` lists `.` and `..` alongside dotfiles, printed
+    // bare (no trailing `/` despite being dirs — they're navigation
+    // handles, not browsable subtrees).
     const t = createTerminal({ '.hidden': '', 'visible': '' })
     const r = t.run('ls -a')
     const entries = r.stdout.split('\n').filter(Boolean)
     assert.ok(entries.includes('.'), `expected '.' in ${JSON.stringify(entries)}`)
     assert.ok(entries.includes('..'))
+    // `.` and `..` lead the listing, before any other entries.
+    assert.equal(entries[0], '.')
+    assert.equal(entries[1], '..')
   })
 
-  it.todo('wc adapts column width to the largest count (GNU); ours always pads to 8', () => {
-    // GNU `wc -l` on a 3-line file emits `3 file.txt` (1-digit
-    // column). Ours always pads to 8 chars regardless of count
-    // magnitude. Visible difference under `find … -exec wc -l {} +`.
+  it('wc adapts column width to the widest count (GNU)', () => {
+    // Verified against /usr/bin/wc 9.x:
+    //   `wc -l a.txt` (3-line file) → `3 a.txt` (no leading pad)
+    //   `wc -l small big` (3 vs 100 lines) → `  3 small\n100 big\n103 total`
     const t = createTerminal({ 'a.txt': 'x\ny\nz\n' })
-    const r = t.run('wc -l a.txt')
-    // GNU's width matches the widest count in the listing; for a single
-    // 3-line file that's 1 char, so the assertion is leading-space-free.
-    assert.equal(r.stdout, '3 a.txt\n')
+    assert.equal(t.run('wc -l a.txt').stdout, '3 a.txt\n')
+    // Multi-file padding tracks the widest count (including the
+    // total row): 3 vs 10 yields width-2 padding.
+    const big = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join('\n') + '\n'
+    const t2 = createTerminal({ 'small': 'a\nb\nc\n', 'big': big })
+    // 3 + 10 = 13, three rows.
+    assert.equal(t2.run('wc -l big small').stdout, '10 big\n 3 small\n13 total\n')
   })
 
   it.todo('ls / sed exit 2 on missing files (matching GNU), not 1', () => {

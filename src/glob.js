@@ -23,15 +23,35 @@ import { joinPath, resolve } from './fs.js'
 const META = /[*?]/u
 
 // Compile a glob pattern to a RegExp. `*` → `.*` (no `/` exemption:
-// `*/foo/*` is the standard exclusion idiom), `?` → `.`, other regex
-// metacharacters escaped. Callers on hot paths (per-directory scans,
-// find's per-entry evaluation) should compile once and reuse rather
-// than calling `globMatch` repeatedly.
+// `*/foo/*` is the standard exclusion idiom), `?` → `.`, `\<x>` → `x`
+// taken literally (so `\-foo` matches `-foo`, `\*` matches `*`),
+// other regex metacharacters escaped. Callers on hot paths (per-
+// directory scans, find's per-entry evaluation) should compile once
+// and reuse rather than calling `globMatch` repeatedly.
+//
+// `REGEX_META` includes `*` and `?` so the `\<x>` branch escapes them
+// when emitting a literal. The unescaped `*` / `?` branches come
+// first in the loop, so the `REGEX_META.test(c)` arm only sees other
+// metachars — the redundancy doesn't fire there.
+const REGEX_META = /[.+*?^${}()|[\]\\]/u
 export function compileGlob(pattern) {
-  return new RegExp('^' + pattern
-    .replace(/[.+^${}()|[\]\\]/gu, '\\$&')
-    .replace(/\*/gu, '.*')
-    .replace(/\?/gu, '.') + '$', 'u')
+  let re = '^'
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]
+    // `\<x>` consumes the backslash and emits `x` as a literal char.
+    // Matches bash's shell-glob convention: `\*` matches `*`, `\-foo`
+    // matches `-foo` (handy for filenames that start with `-`). A
+    // trailing backslash with no follower stays literal.
+    if (c === '\\' && i + 1 < pattern.length) {
+      const next = pattern[i + 1]
+      re += REGEX_META.test(next) ? '\\' + next : next
+      i++
+    } else if (c === '*') re += '.*'
+    else if (c === '?') re += '.'
+    else if (REGEX_META.test(c)) re += '\\' + c
+    else re += c
+  }
+  return new RegExp(re + '$', 'u')
 }
 
 export function globMatch(name, pattern) {

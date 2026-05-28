@@ -132,6 +132,18 @@ function lsTarget(target, multiple, opts, ctx) {
   // with no subdirs (GNU does the same). Files keep their header-free
   // treatment above; only the dir branch forces the prefix.
   const lines = (multiple || opts.recursive) ? [`${target}:`] : []
+  // `-a` prepends `.` and `..` (matching GNU). Emitted first rather
+  // than slot-and-resort because every realistic filename in this
+  // virtual FS — repo source paths — sorts after `.` (0x2E) anyway.
+  // (A truly GNU-faithful sort would put `+foo`/`!foo`-style names
+  // before the dots; we don't see those in code repos.) The trailing
+  // `/` that formatLsRow appends to real dirs is suppressed for
+  // these — GNU prints them bare, and they're navigation handles
+  // rather than browsable subtrees.
+  if (opts.all) {
+    lines.push(formatDotEntry('.', opts.long))
+    lines.push(formatDotEntry('..', opts.long))
+  }
   const { dirs, files } = ctx.fs.listDir(abs)
   for (const name of dirs) {
     if (!opts.all && name.startsWith('.')) continue
@@ -143,6 +155,14 @@ function lsTarget(target, multiple, opts, ctx) {
     lines.push(formatLsRow(name, ctx.fs.readFile(childAbs).length, false, opts.long))
   }
   return { lines }
+}
+
+// `.` / `..` rows under -a: marked as directories in long form (so
+// the leading `d` is right), but printed bare in the name column —
+// no trailing `/`, matching GNU's `-a` output.
+function formatDotEntry(name, long) {
+  if (!long) return name
+  return `d ${String(0).padStart(8)}  ${name}`
 }
 
 function formatLsRow(name, size, isDir, long) {

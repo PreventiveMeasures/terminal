@@ -71,15 +71,31 @@ function wc(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c'] })
   const which = pickWcFlags(flags)
   const r = readInputs('wc', positional, stdin, ctx)
-  const lines = []
+  // Collect rows first so we can compute the adaptive column width
+  // — GNU pads each count to the widest across ALL rows (including
+  // the `total` row). `wc -l b` on a 3-line file emits `3 b`; the
+  // same on a 1234-line file emits `1234 b`; `wc -l small big`
+  // pads to the max: `   3 small\n1234 big\n1237 total`.
+  const rows = []
   const total = { l: 0, w: 0, c: 0 }
   for (const { name, content } of r.inputs) {
     const counts = wcCounts(content)
-    lines.push(formatWc(counts, name, which))
+    rows.push({ counts, name })
     total.l += counts.l; total.w += counts.w; total.c += counts.c
   }
-  if (r.inputs.length > 1) lines.push(formatWc(total, 'total', which))
-  return okWith(joinLines(lines), r)
+  if (r.inputs.length > 1) rows.push({ counts: total, name: 'total' })
+  const width = wcColumnWidth(rows, which)
+  return okWith(joinLines(rows.map((row) => formatWc(row.counts, row.name, which, width))), r)
+}
+
+function wcColumnWidth(rows, which) {
+  let max = 0
+  for (const { counts } of rows) {
+    if (which.l) max = Math.max(max, String(counts.l).length)
+    if (which.w) max = Math.max(max, String(counts.w).length)
+    if (which.c) max = Math.max(max, String(counts.c).length)
+  }
+  return max
 }
 
 function pickWcFlags(flags) {
@@ -103,11 +119,11 @@ function wcCounts(content) {
   }
 }
 
-function formatWc(counts, name, which) {
+function formatWc(counts, name, which, width) {
   const parts = []
-  if (which.l) parts.push(String(counts.l).padStart(7))
-  if (which.w) parts.push(String(counts.w).padStart(7))
-  if (which.c) parts.push(String(counts.c).padStart(7))
+  if (which.l) parts.push(String(counts.l).padStart(width))
+  if (which.w) parts.push(String(counts.w).padStart(width))
+  if (which.c) parts.push(String(counts.c).padStart(width))
   return parts.join(' ') + (name ? ' ' + name : '')
 }
 
