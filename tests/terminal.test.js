@@ -295,10 +295,13 @@ describe('createTerminal — text commands', () => {
     assert.equal(r.stdout, '')
   })
 
-  it('grep -r errors on a missing starting path', () => {
+  it('grep -r errors on a missing starting path (exit 2 — grep\'s canonical "error" code)', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('grep -r TODO nope')
-    assert.notEqual(r.exitCode, 0)
+    // POSIX exit 2 is grep's "an error occurred" status — distinct
+    // from 1 ("no match"). Pinning it explicitly catches a
+    // regression that collapsed both into 1.
+    assert.equal(r.exitCode, 2)
     assert.match(r.stderr, /no such file or directory/u)
   })
 
@@ -1423,10 +1426,14 @@ describe('createTerminal — find / tree / path', () => {
     // Verified against /usr/bin/find: `find . -not -exec false ;`
     // exits 0 — the user explicitly inverted the predicate, so every
     // entry "succeeds" from find's view AND find's own exit reflects
-    // only the walk.
+    // only the walk. Stdout stays empty because -exec is in the tree
+    // (default -print suppressed); a regression that re-enabled the
+    // implicit print under -not would slip through if we only checked
+    // exit code.
     const t = createTerminal(SOURCES)
     const r = t.run('find src -type f -not -exec false ";"')
     assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '', 'implicit -print should stay suppressed when -exec is in the tree')
   })
 
   it('find -exec on a non-existent command surfaces stderr but exits 0', () => {
@@ -1437,6 +1444,44 @@ describe('createTerminal — find / tree / path', () => {
     const r = t.run('find src -type f -exec definitelynotacmd ";"')
     assert.equal(r.exitCode, 0)
     assert.match(r.stderr, /definitelynotacmd/u)
+  })
+
+  it('find continues past a missing start path (does not abort the whole walk)', () => {
+    // Verified against /usr/bin/find: `find src nope` walks src,
+    // surfaces the error for `nope` on stderr, and exits 1. The
+    // pre-fix bug was an early `return err(...)` that discarded
+    // every earlier walk's output the moment any later start failed.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find src nope')
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stderr, /nope: no such file or directory/u)
+    // src's entries must still appear despite nope's failure.
+    const lines = r.stdout.split('\n').filter(Boolean).sort()
+    assert.ok(lines.includes('src/foo.js'), `expected src/foo.js in stdout, got ${JSON.stringify(lines)}`)
+    assert.ok(lines.includes('src/bar.js'))
+  })
+
+  it('find -exec ... + with a non-existent command bubbles exit 1 (clamped, not 127)', () => {
+    // Verified against /usr/bin/find 4.9: a "command not found"
+    // failure in the `+` form is reflected as find exit 1 — find
+    // doesn't pass through the dispatcher's 127. Without the clamp,
+    // ctx.dispatch's 127 would leak through unchanged.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find src -type f -exec definitelynotacmd {} +')
+    assert.equal(r.exitCode, 1, 'should be 1, not 127 (dispatcher) or 0')
+    assert.match(r.stderr, /definitelynotacmd/u)
+  })
+
+  it('find -exec without `;` or `+` terminator hints at the `\\;` quoting trap', () => {
+    // The canonical GNU idiom is `find ... -exec CMD \\;`, but our
+    // shell parser doesn't honor backslash-escapes outside quotes,
+    // so `\\;` parses as the step separator before find sees it.
+    // The error message points users at the workaround.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find src -exec echo {}')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /missing terminator/u)
+    assert.match(r.stderr, /quoted|\\\\;/u, 'should hint at the shell-escape trap')
   })
 
   it('find -exec ... + DOES bubble its exit code (unlike the `;` form)', () => {
@@ -2538,13 +2583,17 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     assert.deepEqual(r.stdout.split('\n').filter(Boolean), ['line 1', 'line 2', 'line 5'])
   })
 
-  it('multi-range surfaces a specific reversed-range error naming the offender', () => {
+  it('multi-range surfaces a specific reversed-range error naming the offender (no partial output)', () => {
     // Validation runs per segment, so a bad range in the middle of
-    // a script still surfaces with its offender named.
+    // a script still surfaces with its offender named. The earlier
+    // valid segments (`1,5p`) must NOT produce output — if they did,
+    // it would mean parseScript wrote ranges before erroring, which
+    // would leak partial results on every malformed script.
     const t = createTerminal(SRC)
     const r = t.run("sed -n '1,5p;50,20p;80,90p' big.txt")
     assert.notEqual(r.exitCode, 0)
     assert.match(r.stderr, /reversed range: 50,20/u)
+    assert.equal(r.stdout, '', 'no partial output before the error')
   })
 
   it('multiple input files concatenate with cumulative line numbering (matches GNU sed)', () => {
