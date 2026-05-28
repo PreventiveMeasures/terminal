@@ -265,4 +265,93 @@ function whichCmd(_stdin, tokens, ctx) {
   return { stdout: joinLines(out), stderr: '', exitCode }
 }
 
+// Print the configured user (`ctx.user`, default `'user'`). Hidden —
+// useful so `pwd && whoami && date` shell rituals don't trip on an
+// "unknown command", but not part of the documented audit surface.
+function whoami(_stdin, tokens, ctx) {
+  const { positional } = parseArgs(tokens)
+  if (positional.length > 0) return err(`whoami: extra operand: ${positional[0]}`)
+  return ok((ctx.user ?? 'user') + '\n')
+}
+
+// Current date/time. Bare `date` emits GNU's default C-locale shape
+// (`%a %b %e %T %Z %Y` → `Tue May 28 12:34:56 UTC 2026`); `+FORMAT`
+// overrides with a strftime-like template; `-u` switches to UTC.
+// Specifier subset (only what maps cleanly to JS Date):
+//   %Y %m %d %e %H %M %S %T %F %s %a %A %b %B %Z %z %n %t %%
+// Unknown specifiers pass through literally (matches GNU). Hidden
+// for the same reason as whoami — chain-friendly, not audit-facing.
+function date(_stdin, tokens) {
+  const { flags, positional } = parseArgs(tokens, { short: ['u'] })
+  if (positional.length > 1) return err('date: at most one +FORMAT argument is supported')
+  let fmt = '%a %b %e %T %Z %Y'
+  if (positional.length === 1) {
+    if (!positional[0].startsWith('+')) return usage('date [-u] [+FORMAT]')
+    fmt = positional[0].slice(1)
+  }
+  return ok(formatDate(new Date(), fmt, flags.has('u')) + '\n')
+}
+
+const DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const DAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+function formatDate(d, fmt, utc) {
+  // Pre-extract both calendrical components and a tz-aware padder
+  // (utc vs local). Two getters means the format loop stays a flat
+  // lookup table — no per-specifier branching on UTC.
+  const p = utc
+    ? { Y: d.getUTCFullYear(), M: d.getUTCMonth(), D: d.getUTCDate(), h: d.getUTCHours(), m: d.getUTCMinutes(), s: d.getUTCSeconds(), w: d.getUTCDay() }
+    : { Y: d.getFullYear(), M: d.getMonth(), D: d.getDate(), h: d.getHours(), m: d.getMinutes(), s: d.getSeconds(), w: d.getDay() }
+  const pad = (n, c = '0') => String(n).padStart(2, c)
+  return fmt.replace(/%./gu, (m) => {
+    switch (m[1]) {
+      case 'Y': return String(p.Y)
+      case 'm': return pad(p.M + 1)
+      case 'd': return pad(p.D)
+      case 'e': return pad(p.D, ' ')
+      case 'H': return pad(p.h)
+      case 'M': return pad(p.m)
+      case 'S': return pad(p.s)
+      case 'T': return `${pad(p.h)}:${pad(p.m)}:${pad(p.s)}`
+      case 'F': return `${p.Y}-${pad(p.M + 1)}-${pad(p.D)}`
+      case 's': return String(Math.floor(d.getTime() / 1000))
+      case 'a': return DAYS_SHORT[p.w]
+      case 'A': return DAYS_LONG[p.w]
+      case 'b': return MONTHS_SHORT[p.M]
+      case 'B': return MONTHS_LONG[p.M]
+      case 'Z': return tzName(d, utc)
+      case 'z': return tzOffset(d, utc)
+      case 'n': return '\n'
+      case 't': return '\t'
+      case '%': return '%'
+      default: return m
+    }
+  })
+}
+
+// Short tz name via Intl. `-u` short-circuits to `UTC` so we never
+// depend on the host's locale data for the common case.
+function tzName(d, utc) {
+  if (utc) return 'UTC'
+  try {
+    const formatted = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).format(d)
+    const match = formatted.match(/[A-Z]{2,5}$/u)
+    return match ? match[0] : 'Local'
+  } catch { return 'Local' }
+}
+
+function tzOffset(d, utc) {
+  if (utc) return '+0000'
+  const off = -d.getTimezoneOffset()
+  const sign = off >= 0 ? '+' : '-'
+  const abs = Math.abs(off)
+  return `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}${String(abs % 60).padStart(2, '0')}`
+}
+
 export const EXTRA_COMMANDS = { cut, tac, tr, seq, nl, which: whichCmd }
+// HIDDEN_EXTRAS land in index.js's HIDDEN registry — dispatchable
+// (so chains like `pwd && whoami && date` work, and `which whoami`
+// resolves), but excluded from the "Available: …" not-found hint.
+export const HIDDEN_EXTRAS = { whoami, date }

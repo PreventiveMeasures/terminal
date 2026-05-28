@@ -24,7 +24,7 @@
 // without changing the outer terminal's cwd.
 
 import { expandBraces } from './braces.js'
-import { EXTRA_COMMANDS } from './extra-commands.js'
+import { EXTRA_COMMANDS, HIDDEN_EXTRAS } from './extra-commands.js'
 import { createFs, resolve } from './fs.js'
 import { expandGlobs } from './glob.js'
 import { NAV_COMMANDS } from './nav-commands.js'
@@ -46,7 +46,7 @@ const COMMANDS = { __proto__: null, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_
 // `sed` is narrow/single-purpose; the TRIVIAL_COMMANDS (`true` /
 // `false` / `:`) are dispatchable for pipeline-testing but too
 // uninteresting to mention.
-const HIDDEN = { __proto__: null, sed, ...TRIVIAL_COMMANDS }
+const HIDDEN = { __proto__: null, sed, ...HIDDEN_EXTRAS, ...TRIVIAL_COMMANDS }
 
 // Command priority for tab completion and the "not found" hint —
 // ordered for a code auditor: list & navigate, read, search, then
@@ -96,7 +96,11 @@ export function createTerminal(sources, opts = {}) {
   // on the trailing slash / missing leading slash even when the
   // directory exists.
   const cwd = opts.cwd === undefined ? '/' : resolve('/', opts.cwd)
-  const ctx = { cwd, fs }
+  // `user` is whoami's source of truth; default mirrors the home-dir
+  // convention (`/home/user/...`). Surfacing as a plain ctx property
+  // (not a getter) keeps the value snapshotted at terminal creation
+  // — runtime swaps would need a new createTerminal call anyway.
+  const ctx = { cwd, fs, user: opts.user ?? 'user' }
   // Commands like `xargs` need to invoke other commands. Exposing
   // `dispatch` on ctx (rather than importing COMMANDS at the
   // command site) keeps the registry as the only place that knows
