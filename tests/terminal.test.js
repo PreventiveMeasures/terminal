@@ -1402,17 +1402,41 @@ describe('createTerminal — find / tree / path', () => {
     assert.ok(lines.every((l) => !l.startsWith('src/') || l.endsWith('.js')))
   })
 
-  it('find -exec ... ; acts as a predicate (exit code filters the match)', () => {
-    // `false` exits 1 → predicate is false → entry doesn't print under
-    // a subsequent -print. We don't have explicit -print, but the
-    // predicate's exitCode still propagates to find's exit code.
+  it('find -exec ... ; acts as a predicate (exit code filters the match, but does NOT bubble to find\'s exit)', () => {
+    // GNU semantic (verified against /usr/bin/find 4.9):
+    // `find . -exec false ;` exits 0. find's exit code reflects find's
+    // OWN success (traversal), not the exec'd commands' exit codes.
+    // The exit code DOES still drive the predicate boolean — `false`
+    // makes the entry not match — but the predicate's exit code is
+    // not bubbled.
     const t = createTerminal(SOURCES)
     const r = t.run('find src -type f -exec false ";"')
-    assert.notEqual(r.exitCode, 0, 'failing -exec must bubble to find exit code')
+    assert.equal(r.exitCode, 0, 'failing -exec must NOT bubble to find exit code')
+    assert.equal(r.stdout, '', 'no matches reach -print since exec returned false')
     // `true` exits 0 → keeps matches, no output (true is silent).
     const r2 = t.run('find src -type f -exec true ";"')
     assert.equal(r2.exitCode, 0)
     assert.equal(r2.stdout, '')
+  })
+
+  it('find -not -exec false ; exits 0 (negation flips the boolean; exec exit still does not bubble)', () => {
+    // Verified against /usr/bin/find: `find . -not -exec false ;`
+    // exits 0 — the user explicitly inverted the predicate, so every
+    // entry "succeeds" from find's view AND find's own exit reflects
+    // only the walk.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find src -type f -not -exec false ";"')
+    assert.equal(r.exitCode, 0)
+  })
+
+  it('find -exec on a non-existent command surfaces stderr but exits 0', () => {
+    // Verified against /usr/bin/find: the "command not found" error
+    // goes to stderr but find itself still exits 0 — the dispatch
+    // failure is exec output, not a find error.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find src -type f -exec definitelynotacmd ";"')
+    assert.equal(r.exitCode, 0)
+    assert.match(r.stderr, /definitelynotacmd/u)
   })
 
   it('find -exec ... + batches every collected path into a single dispatch', () => {
@@ -1444,6 +1468,23 @@ describe('createTerminal — find / tree / path', () => {
     assert.match(r.stdout, /^\s*1\s+src\/b\.txt$/mu)
     assert.match(r.stdout, /^\s*4\s+total$/mu)
     assert.doesNotMatch(r.stdout, /skip\.md/u)
+  })
+
+  it('find -exec sed -n {} + uses cumulative line numbering (post-PR #24 seam guard)', () => {
+    // Cross-command regression guard: now that sed accepts multiple
+    // files, `find ... -exec sed ... +` runs sed once with every
+    // match. Sed concatenates them with cumulative numbering — so
+    // `-n '1,2p'` returns the first 2 lines of the FIRST file only,
+    // NOT the first 2 lines of each file. Faithful to GNU; pin it
+    // so a future "per-file" reinterpretation can't slip in silently.
+    const t = createTerminal({
+      'dir/a.txt': 'A1\nA2\nA3\n',
+      'dir/b.txt': 'B1\nB2\nB3\n',
+    })
+    const r = t.run("find dir -type f -name '*.txt' -exec sed -n '1,2p' {} +")
+    assert.equal(r.exitCode, 0)
+    // Cumulative numbering: lines 1-2 of (a.txt + b.txt) = A1, A2.
+    assert.equal(r.stdout, 'A1\nA2\n')
   })
 
   it('find -exec ... + with zero matches skips the dispatch (xargs -r convention)', () => {

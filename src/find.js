@@ -37,7 +37,14 @@ export function find(_stdin, tokens, ctx) {
   const out = []
   let stdout = ''
   let stderr = ''
-  let exitCode = 0
+  // GNU semantic (verified against /usr/bin/find 4.9): find's exit
+  // code reflects find's OWN success (could it traverse?), not the
+  // exit codes of any -exec'd commands. `find . -exec false ;` exits
+  // 0; so does `find . -exec nosuchcommand ;` (which still prints the
+  // dispatch error to stderr). Bubbling exec exit codes would also
+  // make `-not -exec false ;` exit non-zero, contradicting the user's
+  // explicit "I expect this to fail" inversion. So stdout/stderr from
+  // execs propagate, but exitCode does not.
   for (const start of starts) {
     const startAbs = resolve(ctx.cwd, start)
     if (!ctx.fs.isDir(startAbs) && !ctx.fs.isFile(startAbs)) {
@@ -49,7 +56,6 @@ export function find(_stdin, tokens, ctx) {
       const r = runPredicates(groups, { kind: entry.kind, path: display }, ctx)
       stdout += r.stdout
       stderr += r.stderr
-      if (r.exitCode !== 0) exitCode = r.exitCode
       if (r.matched && !hasExec) out.push(display)
     }
   }
@@ -62,10 +68,9 @@ export function find(_stdin, tokens, ctx) {
     const r = ctx.dispatch(pred.cmd, finalArgs, '')
     stdout += r.stdout
     stderr += r.stderr
-    if (r.exitCode !== 0) exitCode = r.exitCode
   }
   const printed = out.length === 0 ? '' : out.join('\n') + '\n'
-  return { stdout: printed + stdout, stderr, exitCode }
+  return { stdout: printed + stdout, stderr, exitCode: 0 }
 }
 
 function parseFindArgs(tokens) {
@@ -76,6 +81,13 @@ function parseFindArgs(tokens) {
   // Pre-walk scan: any -exec in the tree suppresses the implicit
   // -print, and `+`-mode predicates need post-walk dispatching.
   // Collect both once rather than re-scanning per entry.
+  //
+  // The "any" is tree-wide — important footgun:
+  // `find . -name '*.js' -o -name '*.md' -exec echo md {} \;` prints
+  // ONLY the md echoes, never the bare .js paths. The .js group
+  // doesn't include an -exec, but the tree's implicit -print is
+  // gone, so its matches go unreported. Matches POSIX / GNU; the
+  // workaround is an explicit -print primary (which we don't model).
   const execs = []
   for (const g of r.groups) for (const p of g) if (p.kind === 'exec') execs.push(p)
   return { ...r, hasExec: execs.length > 0, batches: execs.filter((p) => p.mode === 'batch') }
@@ -252,14 +264,18 @@ function consumeExec(tokens, i, pendingNot) {
 // Top-level match: OR across groups, AND within. With no
 // predicates at all (`find /`), the single empty group matches
 // everything — `[].every(…)` is true. Returns {matched, stdout,
-// stderr, exitCode} so per-entry -exec side effects (output, exit
-// code) propagate; non-exec predicates contribute empty stdout/stderr
-// and exit 0. OR/AND short-circuit, so an -exec only runs when its
-// position in the boolean tree is reached.
+// stderr} so per-entry -exec output propagates; non-exec predicates
+// contribute empty stdout/stderr. OR/AND short-circuit, so an -exec
+// only runs when its position in the boolean tree is reached.
+//
+// Exec exit codes deliberately don't propagate to find's exit code
+// — see the comment in find() — but they DO drive the predicate's
+// boolean (0 = match, non-zero = no match), and `-not` inverts that
+// boolean. Failing to short-circuit (e.g. for OR-group dispatching
+// of -exec side effects on non-matching entries) would over-fire.
 function runPredicates(groups, entry, ctx) {
   let stdout = ''
   let stderr = ''
-  let exitCode = 0
   let matched = false
   for (const group of groups) {
     let groupMatched = true
@@ -267,12 +283,11 @@ function runPredicates(groups, entry, ctx) {
       const r = evalOne(p, entry, ctx)
       stdout += r.stdout
       stderr += r.stderr
-      if (r.exitCode !== 0) exitCode = r.exitCode
       if (!r.matched) { groupMatched = false; break }
     }
     if (groupMatched) { matched = true; break }
   }
-  return { matched, stdout, stderr, exitCode }
+  return { matched, stdout, stderr }
 }
 
 function evalOne(p, entry, ctx) {
@@ -288,7 +303,7 @@ function evalPredicate(p, entry, ctx) {
   return matchedOnly(false)
 }
 
-function matchedOnly(b) { return { matched: b, stdout: '', stderr: '', exitCode: 0 } }
+function matchedOnly(b) { return { matched: b, stdout: '', stderr: '' } }
 
 function evalExec(p, entry, ctx) {
   // `+` form treats the predicate as always-true and defers dispatch
@@ -297,10 +312,12 @@ function evalExec(p, entry, ctx) {
   // `;` form: substitute every `{}` occurrence in each argument with
   // the entry path (GNU does in-arg replacement, not just standalone-
   // `{}` replacement), dispatch, and let the exit code drive the
-  // predicate boolean.
+  // predicate boolean. The exitCode does NOT propagate to find's
+  // overall exit — find treats exec failures as predicate input only,
+  // matching GNU.
   const args = p.args.map((a) => a.replaceAll('{}', entry.path))
   const r = ctx.dispatch(p.cmd, args, '')
-  return { matched: r.exitCode === 0, stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }
+  return { matched: r.exitCode === 0, stdout: r.stdout, stderr: r.stderr }
 }
 
 function toDisplayPath(userPath, absRoot, absPath) {
