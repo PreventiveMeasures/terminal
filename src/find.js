@@ -49,11 +49,17 @@ export function find(_stdin, tokens, ctx) {
   // the batch is the actual command run on the collected list, not
   // a per-entry predicate input. Stdout/stderr propagate from both
   // forms regardless.
-  let batchExitCode = 0
+  let exitCode = 0
   for (const start of starts) {
     const startAbs = resolve(ctx.cwd, start)
     if (!ctx.fs.isDir(startAbs) && !ctx.fs.isFile(startAbs)) {
-      return err(`find: ${start}: no such file or directory`)
+      // GNU continues past a missing/unreadable start: surface the
+      // error, leave exit non-zero, but keep walking the remaining
+      // starts. Aborting early would drop earlier-walks' output —
+      // which `find src nope` did until this fix.
+      stderr += `find: ${start}: no such file or directory\n`
+      exitCode = 1
+      continue
     }
     for (const entry of walkTree(ctx.fs, startAbs, maxDepth)) {
       if (entry.depth < minDepth) continue
@@ -67,20 +73,21 @@ export function find(_stdin, tokens, ctx) {
   // Batched `-exec ... +` runs after the walk with all collected
   // paths. Empty collector = no dispatch — matches GNU's "don't run
   // on empty arglist" rule, which mirrors xargs -r. A non-zero batch
-  // exit DOES bubble (see the header comment); we take any failing
-  // batch's code as find's exit (multiple batches with different
-  // failures collapse to the last seen — same as GNU's last-write-
-  // wins behavior here).
+  // exit DOES bubble (see the header comment), but GNU verified
+  // (4.9): the bubbled code is always `1`, regardless of the inner
+  // command's actual exit. `find . -exec sh -c 'exit 5' {} +` exits
+  // `1`, not `5`. And a "command not found" (dispatch 127) becomes
+  // `1` too — find owns its own non-zero convention.
   for (const pred of batches) {
     if (pred.collected.length === 0) continue
     const finalArgs = pred.args.slice(0, -1).concat(pred.collected)
     const r = ctx.dispatch(pred.cmd, finalArgs, '')
     stdout += r.stdout
     stderr += r.stderr
-    if (r.exitCode !== 0) batchExitCode = r.exitCode
+    if (r.exitCode !== 0) exitCode = 1
   }
   const printed = out.length === 0 ? '' : out.join('\n') + '\n'
-  return { stdout: printed + stdout, stderr, exitCode: batchExitCode }
+  return { stdout: printed + stdout, stderr, exitCode }
 }
 
 function parseFindArgs(tokens) {
@@ -241,7 +248,13 @@ function checkPrimary(kind, value) {
 function consumeExec(tokens, i, pendingNot) {
   let j = i + 1
   while (j < tokens.length && tokens[j] !== ';' && tokens[j] !== '+') j++
-  if (j >= tokens.length) return { error: err('find: -exec: missing terminator (`;` or `+`)') }
+  // The canonical GNU form `find ... -exec CMD \;` doesn't work in
+  // our shell: backslash-escaping outside quotes isn't honored, so
+  // `\;` parses as the sequential-step separator before find ever
+  // sees it. Quote the `;` literally — `';'` or `";"` — instead.
+  // The hint is folded into the missing-terminator error because
+  // that's the symptom users hit.
+  if (j >= tokens.length) return { error: err("find: -exec: missing terminator (`;` or `+`); use `';'` (quoted) — bare `\\;` is consumed by the shell as a step separator") }
   if (j === i + 1) return { error: err('find: -exec: requires a command') }
   const execTokens = tokens.slice(i + 1, j)
   const mode = tokens[j] === ';' ? 'each' : 'batch'
@@ -306,11 +319,14 @@ function evalOne(p, entry, ctx) {
 }
 
 function evalPredicate(p, entry, ctx) {
+  // `kind` is one of `type` / `name` / `path` / `exec` — parser
+  // emits no other shapes. No fall-through; an unknown kind would
+  // crash the caller's destructure, which IS the right failure mode
+  // for a contract violation that can only come from a code bug.
   if (p.kind === 'type') return matchedOnly(p.value === 'f' ? entry.kind === 'file' : entry.kind === 'dir')
   if (p.kind === 'name') return matchedOnly(p.re.test(basename(entry.path)))
   if (p.kind === 'path') return matchedOnly(p.re.test(entry.path))
-  if (p.kind === 'exec') return evalExec(p, entry, ctx)
-  return matchedOnly(false)
+  return evalExec(p, entry, ctx)
 }
 
 function matchedOnly(b) { return { matched: b, stdout: '', stderr: '' } }
