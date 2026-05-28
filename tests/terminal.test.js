@@ -4240,6 +4240,88 @@ describe('createTerminal — GNU-match regression guards', () => {
     const t = createTerminal({ 'nl.txt': 'foo' })   // no trailing newline
     assert.equal(t.run('cat -n nl.txt').stdout, '     1\tfoo')
   })
+
+  it('pipeline exit code is the LAST stage\'s exit (matches default sh, not pipefail)', () => {
+    // `grep zzz | wc -l` — grep exits 1 (no match) but the pipeline
+    // exits 0 (wc succeeded). Pin this so a future change toward
+    // pipefail-by-default doesn\'t silently shift the semantic and
+    // break scripts that rely on `cmd | tee` etc. exiting 0.
+    const t = createTerminal({ 'f.txt': 'apple\nbanana\n' })
+    const noMatch = t.run('grep zzz f.txt | wc -l')
+    assert.equal(noMatch.exitCode, 0)
+    assert.equal(noMatch.stdout, '0\n')
+    // The reverse: successful grep through failing tail (tail -n 0
+    // exits 0 silently, so no failure to test cleanly here) — use
+    // an explicit `false` stage instead.
+    const tailFails = t.run('cat f.txt | false')
+    assert.equal(tailFails.exitCode, 1)
+  })
+
+  it('empty input handling across cat/grep/wc/sort/uniq matches GNU', () => {
+    // Canonical edge case — empty input is the source of half of
+    // off-by-one bugs in stream-processing code. Pin the exit codes
+    // and (empty) stdout for each affected command in one place.
+    const t = createTerminal({ 'e.txt': '' })
+    // cat: empty stdout, exit 0.
+    assert.deepEqual(
+      { stdout: t.run('cat e.txt').stdout, exitCode: t.run('cat e.txt').exitCode },
+      { stdout: '', exitCode: 0 },
+    )
+    // grep: no match → exit 1, no output. POSIX's "an error didn't
+    // occur but nothing matched" status.
+    const g = t.run('grep X e.txt')
+    assert.equal(g.exitCode, 1)
+    assert.equal(g.stdout, '')
+    // wc: three zeros, single-char width.
+    assert.equal(t.run('wc e.txt').stdout, '0 0 0 e.txt\n')
+    // sort / uniq: no input → no output, exit 0.
+    assert.equal(t.run('sort e.txt').stdout, '')
+    assert.equal(t.run('sort e.txt').exitCode, 0)
+    assert.equal(t.run('uniq e.txt').stdout, '')
+    assert.equal(t.run('uniq e.txt').exitCode, 0)
+  })
+
+  it('echo -e interprets `\\t`, `\\n`, `\\\\`, and `\\0` escapes', () => {
+    // The escape table in echo's parser is small and easy to break.
+    // Pin each supported escape so a refactor that drops one fails
+    // loudly. Bare echo (no -e) keeps the backslashes literal.
+    const t = createTerminal({})
+    assert.equal(t.run('echo -e a\\tb').stdout, 'a\tb\n')
+    assert.equal(t.run('echo -e a\\nb').stdout, 'a\nb\n')
+    assert.equal(t.run('echo -e a\\\\b').stdout, 'a\\b\n')
+    assert.equal(t.run('echo -e a\\0b').stdout, 'a b\n')
+    // -E (or no flag) is the inverse: backslashes pass through.
+    assert.equal(t.run('echo -E a\\tb').stdout, 'a\\tb\n')
+  })
+
+  it('find -name matches hidden files by default (no special-case skip)', () => {
+    // GNU find does NOT skip dotfiles in `-name` matching (only the
+    // shell\'s glob expansion does, for argv tokens). `find . -name
+    // '.hidden'` matches; `*` matches everything including hidden;
+    // pattern starting with `*` matches hidden. Pin all three.
+    const t = createTerminal({ '.hidden': '', 'visible': '', 'sub/.deep': '' })
+    assert.equal(
+      t.run('find . -name .hidden').stdout.split('\n').filter(Boolean).join(','),
+      './.hidden',
+    )
+    // `*hidden` matches `.hidden` because find\'s glob doesn\'t apply
+    // the bash dotfile rule.
+    assert.equal(
+      t.run("find . -name '*hidden'").stdout.split('\n').filter(Boolean).join(','),
+      './.hidden',
+    )
+    // The descendant `.deep` is reached by `-name '.deep'`, confirming
+    // hidden-file matching works inside subdirs too.
+    assert.match(t.run("find . -name '.deep'").stdout, /\.\/sub\/\.deep/u)
+  })
+
+  it('sort -n handles negative numbers and zero correctly', () => {
+    // Numeric sort should order `-5 < -1 < 0 < 10 < 100`. A naive
+    // string compare would give `-1 -5 0 10 100` (wrong) or
+    // `0 10 100 -1 -5` (wrong). Pin the numeric ordering.
+    const t = createTerminal({ 'n.txt': '10\n-5\n0\n-1\n100\n' })
+    assert.equal(t.run('sort -n n.txt').stdout, '-5\n-1\n0\n10\n100\n')
+  })
 })
 
 // Known divergences from GNU/POSIX surfaced by the audit pass. Each
