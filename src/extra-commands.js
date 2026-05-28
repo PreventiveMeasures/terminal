@@ -283,7 +283,7 @@ function whoami(_stdin, tokens, ctx) {
 // for the same reason as whoami — chain-friendly, not audit-facing.
 function date(_stdin, tokens) {
   const { flags, positional } = parseArgs(tokens, { short: ['u'] })
-  if (positional.length > 1) return err('date: at most one +FORMAT argument is supported')
+  if (positional.length > 1) return err(`date: at most one +FORMAT argument is supported (got: ${positional[1]})`)
   let fmt = '%a %b %e %T %Z %Y'
   if (positional.length === 1) {
     if (!positional[0].startsWith('+')) return usage('date [-u] [+FORMAT]')
@@ -332,13 +332,18 @@ function formatDate(d, fmt, utc) {
 }
 
 // Short tz name via Intl. `-u` short-circuits to `UTC` so we never
-// depend on the host's locale data for the common case.
+// depend on the host's locale data for the common case. Use
+// formatToParts so half-hour zones (Kolkata `GMT+5:30`, Newfoundland
+// `GMT-3:30`, Adelaide, Chatham, …) — which a `/[A-Z]{2,5}$/` regex
+// against the formatted string would miss — still surface their
+// name. Falls back to `Local` if Intl is unavailable (defensive
+// against ancient runtimes; never fires on modern Node).
 function tzName(d, utc) {
   if (utc) return 'UTC'
   try {
-    const formatted = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).format(d)
-    const match = formatted.match(/[A-Z]{2,5}$/u)
-    return match ? match[0] : 'Local'
+    const parts = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(d)
+    const part = parts.find((p) => p.type === 'timeZoneName')
+    return part?.value ?? 'Local'
   } catch { return 'Local' }
 }
 

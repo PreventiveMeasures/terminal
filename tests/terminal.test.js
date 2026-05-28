@@ -3337,9 +3337,12 @@ describe('createTerminal — whoami / date (hidden, chain-friendly)', () => {
     assert.equal(t.run('whoami').exitCode, 0)
   })
 
-  it('opts.user overrides the default; empty/missing falls back to "user"', () => {
+  it('opts.user overrides the default; omitted opts fall back to "user"', () => {
     assert.equal(createTerminal({}, { user: 'alice' }).run('whoami').stdout, 'alice\n')
     assert.equal(createTerminal({}, {}).run('whoami').stdout, 'user\n')
+    // Explicitly passing an empty string is honored — only `undefined`
+    // triggers the default (same convention as opts.cwd handling).
+    assert.equal(createTerminal({}, { user: '' }).run('whoami').stdout, '\n')
   })
 
   it('whoami rejects extra operands', () => {
@@ -4165,19 +4168,31 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     assert.equal(r.stdout.split('\n').filter(Boolean).sort().join(','), 'src/bar.js,src/foo.js')
   })
 
-  it.todo('find walk order matches GNU DFS readdir-order (not BFS-with-sort)', () => {
-    // GNU walks each directory depth-first in readdir order — so a
-    // top-level file appears AFTER the subtree it sits next to in
-    // the dir listing. Our walkTree is BFS-with-sort, so top-level
-    // files always trail every immediate subdir entry. Knock-on
-    // effects: `find … -exec sed -n '1p' {} +` first-line behavior
-    // depends on which file leads the batch.
-    const t = createTerminal({ 'top.txt': '', 'sub/inner.txt': '' })
-    // GNU order for `find .`: `.`, `./top.txt`, `./sub`, `./sub/inner.txt`.
-    // Ours produces: `.`, `./sub`, `./top.txt`, `./sub/inner.txt`.
-    const r = t.run('find .')
-    const lines = r.stdout.split('\n').filter(Boolean)
-    assert.deepEqual(lines, ['.', './top.txt', './sub', './sub/inner.txt'])
+  it.todo('find walks DFS so a directory and its subtree are contiguous (matching GNU)', () => {
+    // GNU find walks DFS pre-order: a directory's full subtree
+    // appears before its next sibling. Our walkTree is BFS-with-
+    // sort, so siblings interleave — every immediate child of `/`
+    // prints before any grandchild. Knock-on effects: `find … -exec
+    // sed -n '1p' {} +` first-file behavior depends on which file
+    // leads the batch.
+    //
+    // Test the property (DFS contiguity), not byte-exact order —
+    // GNU's specific tmpfs ordering depends on readdir() return,
+    // which varies by FS. Our virtual FS sorts, so post-fix the
+    // order would be sorted DFS; either way the contiguity holds.
+    const t = createTerminal({
+      'a/x.txt': '',
+      'a/sub/y.txt': '',
+      'b/z.txt': '',
+    })
+    const lines = t.run('find .').stdout.split('\n').filter(Boolean)
+    const aIdx = lines.indexOf('./a')
+    const aGrandchild = lines.indexOf('./a/sub/y.txt')
+    const bIdx = lines.indexOf('./b')
+    assert.ok(
+      aIdx < aGrandchild && aGrandchild < bIdx,
+      `a's subtree should sit between ./a and ./b under DFS: ${JSON.stringify(lines)}`,
+    )
   })
 
   it.todo('find -name glob accepts backslash-escapes (`\\-foo` matches literal `-foo`)', () => {
@@ -4228,7 +4243,8 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     // magnitude. Visible difference under `find … -exec wc -l {} +`.
     const t = createTerminal({ 'a.txt': 'x\ny\nz\n' })
     const r = t.run('wc -l a.txt')
-    // GNU emits a single space before the count when it fits in 1 char.
+    // GNU's width matches the widest count in the listing; for a single
+    // 3-line file that's 1 char, so the assertion is leading-space-free.
     assert.equal(r.stdout, '3 a.txt\n')
   })
 
