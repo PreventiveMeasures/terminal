@@ -3,11 +3,13 @@
 // chunk of a long file: `sed -n 'X,Yp' FILE` (single range), or
 // `sed -n 'X1,Y1p;X2,Y2p;…' FILE` (semicolon-separated multi-range,
 // useful for extracting non-contiguous slices in one pass).
-// Anything else (substitution, regex addresses, multiple scripts,
-// in-place edits, etc.) errors with a one-line message — we don't
-// pretend to be a real sed. Kept out of the user-facing command
-// list in index.js for the same reason: surface it on demand,
-// don't advertise it.
+// Multiple FILE arguments concatenate with cumulative line
+// numbering — `sed -n '5p' a.txt b.txt` selects from the joined
+// stream, matching GNU. Anything else (substitution, regex
+// addresses, multiple scripts, in-place edits, etc.) errors with
+// a one-line message — we don't pretend to be a real sed. Kept
+// out of the user-facing command list in index.js for the same
+// reason: surface it on demand, don't advertise it.
 
 import { parseArgs } from './parse.js'
 import { err, okWith, readInputs, splitLines } from './util.js'
@@ -28,10 +30,17 @@ export function sed(stdin, tokens, ctx) {
   const { ranges } = parsedScript
   if (ranges.length === 0) return unsupported()
   const files = positional.slice(1)
-  if (files.length > 1) return err('sed: at most one input file is supported')
   const r = readInputs('sed', files, stdin, ctx)
-  const content = r.inputs[0]?.content ?? ''
-  const lines = splitLines(content)
+  // Multi-file: GNU concatenates the inputs into one virtual stream
+  // with CUMULATIVE line numbering (`sed -n '5p' a.txt b.txt` prints
+  // the 5th line of `a.txt` if a.txt has >= 5 lines, otherwise the
+  // line that falls at position 5 of the concatenation). Crucially,
+  // GNU doesn't merge bytes across the file boundary: a file with
+  // no trailing newline still ends a line at EOF, so the next file's
+  // first line starts cleanly. splitLines per input + flatMap mirrors
+  // that — joining raw `content` would merge unterminated last lines
+  // into the next file's first.
+  const lines = r.inputs.flatMap((input) => splitLines(input.content))
   // sed semantics: for each input line in order, for each command
   // in script order, run it. So with `-n '1,3p;2,4p'` on lines 1-4,
   // lines 2 and 3 print TWICE — matched by both ranges. Matches GNU.

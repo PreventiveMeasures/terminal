@@ -2473,6 +2473,70 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     assert.match(r.stderr, /reversed range: 50,20/u)
   })
 
+  it('multiple input files concatenate with cumulative line numbering (matches GNU sed)', () => {
+    // Verified against `/usr/bin/sed`: `sed -n '5p' a b c` with each
+    // file 3 lines long prints the 5th line of the concatenation,
+    // which is the 2nd line of `b.txt`. Line numbers do NOT reset
+    // per file — confirmed by experiment before implementing.
+    const t = createTerminal({
+      'a.txt': 'A1\nA2\nA3\n',
+      'b.txt': 'B1\nB2\nB3\n',
+      'c.txt': 'C1\nC2\nC3\n',
+    })
+    assert.equal(t.run("sed -n '5p' a.txt b.txt c.txt").stdout, 'B2\n')
+    // Range spanning a file boundary: lines 3-7 = A3, B1, B2, B3, C1.
+    assert.equal(t.run("sed -n '3,7p' a.txt b.txt c.txt").stdout, 'A3\nB1\nB2\nB3\nC1\n')
+    // Range entirely past the first file: lines 8-9 = C2, C3.
+    assert.equal(t.run("sed -n '8,9p' a.txt b.txt c.txt").stdout, 'C2\nC3\n')
+  })
+
+  it('multi-file composes with multi-range (the originally-attempted `dir/*.txt` shape)', () => {
+    // `sed -n '1,2p;7,9p' a b c` — verified against GNU sed:
+    // prints A1, A2 (lines 1-2) then C1, C2, C3 (lines 7-9 of the
+    // 9-line concatenation).
+    const t = createTerminal({
+      'dir/a.txt': 'A1\nA2\nA3\n',
+      'dir/b.txt': 'B1\nB2\nB3\n',
+      'dir/c.txt': 'C1\nC2\nC3\n',
+    })
+    const r = t.run("sed -n '1,2p;7,9p' dir/a.txt dir/b.txt dir/c.txt")
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'A1\nA2\nC1\nC2\nC3\n')
+  })
+
+  it('multi-file: a file with no trailing newline still ends its last line cleanly', () => {
+    // GNU sed verified: `printf 'A1\\nA2\\nA3'` (no trailing \\n)
+    // followed by `B1\\nB2\\n` numbers as 5 lines (A1..A3, B1, B2),
+    // NOT as 4 lines with A3B1 merged. Implementation honors this
+    // by splitLines-per-input + flatMap, rather than joining raw
+    // content and splitting once.
+    const t = createTerminal({
+      'a.txt': 'A1\nA2\nA3',   // no trailing newline
+      'b.txt': 'B1\nB2\n',
+    })
+    assert.equal(t.run("sed -n '3,4p' a.txt b.txt").stdout, 'A3\nB1\n')
+    assert.equal(t.run("sed -n '5p' a.txt b.txt").stdout, 'B2\n')
+  })
+
+  it('multi-file: a missing file mid-list surfaces an error and keeps reading the rest', () => {
+    // Matches GNU sed: stderr gets the per-file error, the surviving
+    // files contribute their lines in their listed order, and exit
+    // code reflects the partial failure (1 in this codebase\'s
+    // convention; GNU uses 2 — diverging deliberately to match the
+    // existing partial-read pattern for cat/grep/head/tail/wc).
+    const t = createTerminal({
+      'a.txt': 'A1\nA2\nA3\n',
+      'c.txt': 'C1\nC2\nC3\n',
+    })
+    const r = t.run("sed -n '1,5p' a.txt nope.txt c.txt")
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stderr, /nope\.txt: no such file/u)
+    // Surviving files\' lines are still in cumulative-numbering order:
+    // a.txt = lines 1-3, c.txt = lines 4-6 (skipped file contributes
+    // nothing). `1,5p` therefore prints lines 1-5 = A1, A2, A3, C1, C2.
+    assert.equal(r.stdout, 'A1\nA2\nA3\nC1\nC2\n')
+  })
+
   it('rejects anything outside the narrow subset (single canonical message)', () => {
     const t = createTerminal(SRC)
     // Everything in this group should hit the same "only -n 'X[,Y]p'"
@@ -2497,7 +2561,6 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     const specific = [
       ["sed -n '0,5p' big.txt", /line numbers must be >= 1/u],
       ["sed -n '200,100p' big.txt", /reversed range: 200,100/u],
-      ["sed -n '1,2p' big.txt other.txt", /at most one input file/u],
     ]
     for (const [cmd, re] of specific) {
       const r = t.run(cmd)
