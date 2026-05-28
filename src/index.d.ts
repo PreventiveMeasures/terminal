@@ -5,6 +5,8 @@ export type Sources = Record<string, string> | Map<string, string>
 export interface CreateTerminalOptions {
   /** Initial working directory. Normalized to an absolute path; defaults to `/`. */
   cwd?: string
+  /** User name reported by `whoami`. Defaults to `'user'`. */
+  user?: string
 }
 
 /** Result of running a command line through {@link Terminal.run}. */
