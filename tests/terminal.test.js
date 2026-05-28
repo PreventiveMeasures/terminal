@@ -4123,6 +4123,125 @@ describe('createTerminal — complete: corner cases', () => {
   })
 })
 
+// GNU-match regression guards. Each test pins a behavior our impl
+// already shares with GNU but no other test exercised — so a future
+// "small refactor" of the affected code path can't silently shift
+// the semantic. Expectations verified against `/usr/bin/{grep,head,
+// tail,wc,sort,cut,cat}` byte-for-byte before adding.
+describe('createTerminal — GNU-match regression guards', () => {
+  it('grep -v inverts the match (entire flag was previously untested)', () => {
+    // `-v` is listed in SHORT_FLAGS and threaded through grepRun,
+    // grepCount, grepListFiles — but no test exercised it. Trivial
+    // to break in a future refactor that drops the invert flag.
+    const t = createTerminal({ 'f.txt': 'apple\nbanana\ncherry\n' })
+    assert.equal(t.run('grep -v banana f.txt').stdout, 'apple\ncherry\n')
+    // -v with no match: invert empty = everything.
+    assert.equal(t.run('grep -v zzz f.txt').stdout, 'apple\nbanana\ncherry\n')
+    // -v that matches everything: invert all = nothing → exit 1.
+    const r = t.run('grep -v "" f.txt')
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stdout, '')
+  })
+
+  it('grep -cv counts non-matching lines (count + invert composition)', () => {
+    const t = createTerminal({ 'f.txt': 'apple\nbanana\ncherry\n' })
+    assert.equal(t.run('grep -cv banana f.txt').stdout, '2\n')
+    // -c without -v counts matches; the inversion flips it.
+    assert.equal(t.run('grep -c banana f.txt').stdout, '1\n')
+  })
+
+  it('grep -A 0 emits the match and no following context', () => {
+    // Boundary: zero context is distinct from "no -A" — both produce
+    // the same output, but the code path differs (-A 0 still hits
+    // the context-printing branch). GNU verified.
+    const t = createTerminal({ 'f.txt': 'one\nbanana\nthree\nfour\n' })
+    assert.equal(t.run('grep -A 0 banana f.txt').stdout, 'banana\n')
+  })
+
+  it("grep -A N inserts `--` between non-adjacent context groups (single-file, no -n)", () => {
+    // The existing test at the `-n`/multi-flag combination didn't
+    // exercise the plain single-file separator path. GNU verified:
+    // `grep -A1 M f` on a file with two M lines separated by gaps
+    // produces `M1\nx\n--\nM2\nx\n` exactly.
+    const t = createTerminal({ 'sep.txt': 'M1\nx\ny\nz\nM2\nx\n' })
+    assert.equal(t.run('grep -A1 M sep.txt').stdout, 'M1\nx\n--\nM2\nx\n')
+  })
+
+  it('head / tail with -n 0 produce empty output and exit 0', () => {
+    // Boundary: `-n 0` requests zero lines. GNU exits 0 with no
+    // output (not 1, not an error). The tail branch had a guard
+    // against `slice(-0)` returning the whole array — confirm
+    // the guard is still there.
+    const t = createTerminal({ 'f.txt': 'a\nb\nc\n' })
+    const h = t.run('head -n 0 f.txt')
+    assert.equal(h.exitCode, 0)
+    assert.equal(h.stdout, '')
+    const tn = t.run('tail -n 0 f.txt')
+    assert.equal(tn.exitCode, 0)
+    assert.equal(tn.stdout, '')
+  })
+
+  it('head / tail default to 10 lines when -n is omitted', () => {
+    // The `10` default is GNU's, hardcoded in our impl as the
+    // parseNonNegativeInt fallback. Pin it.
+    const lines = Array.from({ length: 15 }, (_, i) => String(i + 1)).join('\n') + '\n'
+    const t = createTerminal({ 'f.txt': lines })
+    assert.equal(t.run('head f.txt').stdout, '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n')
+    assert.equal(t.run('tail f.txt').stdout, '6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n')
+  })
+
+  it('wc with no flags emits all three columns + total (default behavior)', () => {
+    // No test currently exercises the bare `wc` invocation — the
+    // default (all three columns) and the multi-file `total` row
+    // are both common GNU behaviors that should stay stable.
+    // Verified against /usr/bin/wc byte-for-byte: the total row's
+    // 16 bytes is the widest count, so adaptive width is 2.
+    const t = createTerminal({
+      'a.txt': 'a a a\nb\nc\n',    // 3 lines, 5 words, 10 bytes
+      'b.txt': 'x\ny\nz\n',         // 3 lines, 3 words,  6 bytes
+    })
+    assert.equal(
+      t.run('wc a.txt b.txt').stdout,
+      ' 3  5 10 a.txt\n 3  3  6 b.txt\n 6  8 16 total\n',
+    )
+  })
+
+  it('sort -ru produces the deduped set in descending order', () => {
+    // Combined-flag composition: -u removes duplicates, -r reverses.
+    // GNU runs them in that order so the output is the unique values
+    // sorted descending. Verified against /usr/bin/sort.
+    const t = createTerminal({ 'f.txt': '3\n1\n3\n2\n1\n' })
+    assert.equal(t.run('sort -ru f.txt').stdout, '3\n2\n1\n')
+  })
+
+  it('cut -c N past the end of a line emits an empty line for that row', () => {
+    // Fixed character position past EOL is distinct from open-ended
+    // ranges (which the existing test covers): each short line
+    // contributes a bare newline. GNU verified.
+    const t = createTerminal({ 's.txt': 'ab\ncd\n' })
+    assert.equal(t.run('cut -c5 s.txt').stdout, '\n\n')
+  })
+
+  it('cut -d X -f N passes through lines that lack the delimiter (matches GNU default)', () => {
+    // GNU's default behavior (without `-s`): lines without the
+    // delimiter print verbatim. The existing impl comment claims
+    // this match; pin it so a future `-s` ("suppress") implementation
+    // doesn't accidentally suppress no-delim lines under the default.
+    const t = createTerminal({ 'csv.txt': 'a:b:c\nzzz\n' })
+    assert.equal(t.run('cut -d: -f3 csv.txt').stdout, 'c\nzzz\n')
+  })
+
+  it('cat -n preserves a missing trailing newline (numberLines tracks it explicitly)', () => {
+    // Counterpoint to the head/tail/sed `it.todo` items: cat -n
+    // explicitly tracks the source's trailing-newline status via the
+    // `trailing` local in numberLines, so it doesn't have the bug.
+    // Pin this — a refactor that switches to the splitLines/joinLines
+    // pattern would silently break it.
+    const t = createTerminal({ 'nl.txt': 'foo' })   // no trailing newline
+    assert.equal(t.run('cat -n nl.txt').stdout, '     1\tfoo')
+  })
+})
+
 // Known divergences from GNU/POSIX surfaced by the audit pass. Each
 // `it.todo` carries a concrete spec body that fails on current
 // behavior — when someone fixes the underlying issue, the todo
