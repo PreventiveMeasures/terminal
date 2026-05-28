@@ -4026,3 +4026,129 @@ describe('createTerminal — complete: corner cases', () => {
     assert.ok(g.includes('grep PATT README.md'))
   })
 })
+
+// Known divergences from GNU/POSIX surfaced by the audit pass. Each
+// `it.todo` carries a concrete spec body that fails on current
+// behavior — when someone fixes the underlying issue, the todo
+// starts passing and they flip `it.todo` → `it`. GNU expectations
+// pinned by side-by-side runs against `/usr/bin/{find,sed,grep,ls,
+// head,tail,wc}` (coreutils 9.x, find 4.9, sed 4.9).
+//
+// Deferred because each requires changes beyond the file(s) where
+// the symptom appears: trailing-newline tracking needs splitLines/
+// readInputs to carry the source's terminator status, the `\;`
+// idiom needs the shell parser to honor backslash-escapes outside
+// quotes, walkTree order is shared by find/grep/ls, etc.
+describe('createTerminal — known divergences from GNU (tracked)', () => {
+  it.todo('sed preserves the last-line no-trailing-newline (no spurious `\\n` appended)', () => {
+    // GNU: `printf 'Y' | sed -n '1p'` → `Y` (1 byte, no newline).
+    // Ours always appends `\n` via `out.join('\n') + '\n'`. Same
+    // pattern in head/tail/sed/etc. — see the two `it.todo` below.
+    const t = createTerminal({ 'b.txt': 'Y' })   // no trailing newline
+    assert.equal(t.run("sed -n '1p' b.txt").stdout, 'Y')
+  })
+
+  it.todo('head preserves the last-line no-trailing-newline', () => {
+    // GNU: `head -n 1` on a single-line file with no trailing nl
+    // emits the line as-is. Ours adds `\n`.
+    const t = createTerminal({ 'noNl.txt': 'foo' })
+    assert.equal(t.run('head -n 1 noNl.txt').stdout, 'foo')
+  })
+
+  it.todo('tail preserves the last-line no-trailing-newline', () => {
+    // Same as head; same root cause (`splitLines` drops the
+    // terminator info, the okWith pipeline re-adds `\n` blindly).
+    const t = createTerminal({ 'noNl.txt': 'foo' })
+    assert.equal(t.run('tail -n 1 noNl.txt').stdout, 'foo')
+  })
+
+  it.todo('find ... -exec CMD \\; works (canonical GNU idiom)', () => {
+    // GNU's documented form uses bare `\;` for the terminator. Our
+    // shell parser doesn't honor backslash-escapes outside quotes,
+    // so `\;` becomes the step separator before find sees it.
+    // Workaround `';'` / `";"` works today; this would fail under
+    // the same shell parser. Fixing requires honoring `\<char>`
+    // escapes in parse.js (project-wide impact on every command).
+    const t = createTerminal({ 'src/foo.js': '', 'src/bar.js': '' })
+    const r = t.run('find src -type f -exec echo {} \\;')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout.split('\n').filter(Boolean).sort().join(','), 'src/bar.js,src/foo.js')
+  })
+
+  it.todo('find walk order matches GNU DFS readdir-order (not BFS-with-sort)', () => {
+    // GNU walks each directory depth-first in readdir order — so a
+    // top-level file appears AFTER the subtree it sits next to in
+    // the dir listing. Our walkTree is BFS-with-sort, so top-level
+    // files always trail every immediate subdir entry. Knock-on
+    // effects: `find … -exec sed -n '1p' {} +` first-line behavior
+    // depends on which file leads the batch.
+    const t = createTerminal({ 'top.txt': '', 'sub/inner.txt': '' })
+    // GNU order for `find .`: `.`, `./top.txt`, `./sub`, `./sub/inner.txt`.
+    // Ours produces: `.`, `./sub`, `./top.txt`, `./sub/inner.txt`.
+    const r = t.run('find .')
+    const lines = r.stdout.split('\n').filter(Boolean)
+    assert.deepEqual(lines, ['.', './top.txt', './sub', './sub/inner.txt'])
+  })
+
+  it.todo('find -name glob accepts backslash-escapes (`\\-foo` matches literal `-foo`)', () => {
+    // GNU find escapes the next char as literal: `\-` matches `-`,
+    // useful for filenames starting with `-`. Our `compileGlob`
+    // (src/glob.js) doesn't recognize `\<x>` — the backslash gets
+    // escaped into the regex and the produced pattern looks for a
+    // literal `\-foo` which never matches.
+    const t = createTerminal({ '-foo': '' })
+    const r = t.run("find . -name '\\-foo'")
+    assert.equal(r.stdout.split('\n').filter(Boolean).join(','), './-foo')
+  })
+
+  it.todo('find -name glob supports character classes (`[fb]oo.js` matches `foo.js`)', () => {
+    // GNU shell-style glob accepts `[...]` (POSIX too). Our impl
+    // only models `*` and `?` (the glob.js header documents this).
+    // Silent miss — would benefit from either implementation or
+    // explicit rejection so users see "unsupported pattern".
+    const t = createTerminal({ 'src/foo.js': '', 'src/boo.js': '', 'src/bar.js': '' })
+    const lines = new Set(t.run("find src -name '[fb]oo.js'").stdout.split('\n').filter(Boolean))
+    assert.deepEqual(lines, new Set(['src/foo.js', 'src/boo.js']))
+  })
+
+  it.todo('grep -r/-R prefixes paths with the user-typed `.` (matches GNU)', () => {
+    // GNU: `grep -r foo .` produces `./src/x.js:foo`. Ours strips
+    // the leading `./`, producing `src/x.js:foo`. The current code
+    // has an explicit comment about this divergence (grep vs find)
+    // — flagging here so a future audit can decide whether to align.
+    const t = createTerminal({ 'src/a.js': 'foo\n' })
+    const r = t.run('grep -r foo .')
+    assert.match(r.stdout, /^\.\/src\/a\.js:/u)
+  })
+
+  it.todo('ls -a includes `.` and `..` entries (matches GNU)', () => {
+    // GNU `ls -a` lists `.` and `..` alongside dotfiles. Ours skips
+    // them because the virtual FS\'s listDir doesn\'t include them.
+    // Affects scripts that grep ls output for parent-dir markers.
+    const t = createTerminal({ '.hidden': '', 'visible': '' })
+    const r = t.run('ls -a')
+    const entries = r.stdout.split('\n').filter(Boolean)
+    assert.ok(entries.includes('.'), `expected '.' in ${JSON.stringify(entries)}`)
+    assert.ok(entries.includes('..'))
+  })
+
+  it.todo('wc adapts column width to the largest count (GNU); ours always pads to 8', () => {
+    // GNU `wc -l` on a 3-line file emits `3 file.txt` (1-digit
+    // column). Ours always pads to 8 chars regardless of count
+    // magnitude. Visible difference under `find … -exec wc -l {} +`.
+    const t = createTerminal({ 'a.txt': 'x\ny\nz\n' })
+    const r = t.run('wc -l a.txt')
+    // GNU emits a single space before the count when it fits in 1 char.
+    assert.equal(r.stdout, '3 a.txt\n')
+  })
+
+  it.todo('ls / sed exit 2 on missing files (matching GNU), not 1', () => {
+    // Our okWith / partial-failure convention uses exit 1 across
+    // cat/grep/head/tail/wc/ls/sed. GNU coreutils use 2 for
+    // ls / sed and 1 for cat. Aligning would let scripts that check
+    // `$?` against GNU coreutils behave the same way.
+    const t = createTerminal({ 'a.txt': 'x\n' })
+    assert.equal(t.run('ls nope').exitCode, 2)
+    assert.equal(t.run("sed -n '1p' nope").exitCode, 2)
+  })
+})
