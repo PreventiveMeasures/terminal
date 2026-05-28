@@ -3330,6 +3330,96 @@ describe('createTerminal — which', () => {
   })
 })
 
+describe('createTerminal — whoami / date (hidden, chain-friendly)', () => {
+  it('whoami prints the configured user (default "user")', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('whoami').stdout, 'user\n')
+    assert.equal(t.run('whoami').exitCode, 0)
+  })
+
+  it('opts.user overrides the default; empty/missing falls back to "user"', () => {
+    assert.equal(createTerminal({}, { user: 'alice' }).run('whoami').stdout, 'alice\n')
+    assert.equal(createTerminal({}, {}).run('whoami').stdout, 'user\n')
+  })
+
+  it('whoami rejects extra operands', () => {
+    const t = createTerminal({})
+    const r = t.run('whoami foo')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /extra operand: foo/u)
+  })
+
+  it('date with no args emits the GNU default shape', () => {
+    // GNU C-locale default: `%a %b %e %T %Z %Y`, e.g.
+    // `Tue May 28 12:34:56 UTC 2026`. Match shape, not value —
+    // the test runs at wall-clock time so the year/etc. shift.
+    const t = createTerminal({})
+    const r = t.run('date')
+    assert.equal(r.exitCode, 0)
+    // weekday + month + day (space- OR digit-padded) + HH:MM:SS + tz + year + \n
+    assert.match(r.stdout, /^[A-Z][a-z]{2} [A-Z][a-z]{2} [ \d]\d \d\d:\d\d:\d\d \S+ \d{4}\n$/u)
+  })
+
+  it('date +FORMAT applies a strftime-like template', () => {
+    const t = createTerminal({})
+    assert.match(t.run('date +%Y-%m-%d').stdout, /^\d{4}-\d{2}-\d{2}\n$/u)
+    assert.match(t.run('date +%T').stdout, /^\d{2}:\d{2}:\d{2}\n$/u)
+    assert.match(t.run('date +%F').stdout, /^\d{4}-\d{2}-\d{2}\n$/u)
+    assert.match(t.run('date +%s').stdout, /^\d+\n$/u)
+    // Named components: weekday + month abbreviations.
+    assert.match(t.run('date "+%a %b"').stdout, /^[A-Z][a-z]{2} [A-Z][a-z]{2}\n$/u)
+  })
+
+  it('date -u forces UTC for tz-sensitive specifiers (%Z, %z)', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('date -u +%Z').stdout, 'UTC\n')
+    assert.equal(t.run('date -u +%z').stdout, '+0000\n')
+  })
+
+  it('date escape specifiers: %% / %n / %t / unknown pass-through', () => {
+    const t = createTerminal({})
+    assert.equal(t.run('date +%%').stdout, '%\n')
+    assert.equal(t.run('date +%n').stdout, '\n\n')   // %n is a literal newline + always-appended trailing newline
+    assert.equal(t.run('date +%t').stdout, '\t\n')
+    // Unknown specifiers pass through (matching GNU's lenient behavior).
+    assert.equal(t.run('date +%Q').stdout, '%Q\n')
+  })
+
+  it('date errors on bare (non-`+`) positional and on multiple +FORMAT args', () => {
+    const t = createTerminal({})
+    const bare = t.run('date xxx')
+    assert.notEqual(bare.exitCode, 0)
+    assert.match(bare.stderr, /usage: date/u)
+    const dupe = t.run('date +a +b')
+    assert.notEqual(dupe.exitCode, 0)
+    assert.match(dupe.stderr, /at most one \+FORMAT/u)
+  })
+
+  it('`pwd && whoami && date` chains cleanly (the originally-requested ritual)', () => {
+    const t = createTerminal({}, { user: 'auditor' })
+    const r = t.run('pwd && whoami && date')
+    assert.equal(r.exitCode, 0)
+    const lines = r.stdout.split('\n')
+    assert.equal(lines[0], '/')                              // pwd
+    assert.equal(lines[1], 'auditor')                        // whoami
+    assert.match(lines[2], /^[A-Z][a-z]{2} [A-Z][a-z]{2} [ \d]\d /u)  // date default
+  })
+
+  it('whoami / date are hidden — not in the unknown-command "Available" hint', () => {
+    // Both commands are dispatchable (the chain test above proves it),
+    // but they shouldn\'t appear in the not-found hint — they\'re
+    // chain-friendly utilities, not part of the documented audit
+    // surface. `which whoami` / `which date` still resolve, since
+    // ctx.hasCommand checks the HIDDEN registry.
+    const t = createTerminal({})
+    const stderr = t.run('nosuchcmd').stderr
+    assert.doesNotMatch(stderr, /\bwhoami\b/u)
+    assert.doesNotMatch(stderr, /\bdate\b/u)
+    assert.equal(t.run('which whoami').stdout, '/usr/bin/whoami\n')
+    assert.equal(t.run('which date').stdout, '/usr/bin/date\n')
+  })
+})
+
 describe('createTerminal — complete', () => {
   it('empty input lists every public command', () => {
     const t = createTerminal(SOURCES)
