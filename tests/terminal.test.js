@@ -1801,8 +1801,18 @@ describe('createTerminal — strict option parsing', () => {
     assert.equal(t.run('echo "-- foo"').stdout, '-- foo\n')
     assert.equal(t.run('echo "-n hi"').stdout, '-n hi\n')
     assert.equal(t.run('echo "---"').stdout, '---\n')
+    // Quoting ALONE isn't enough (bash agrees): a dash token with no
+    // whitespace is still a flag — `"-n"` drops the newline — and an
+    // empty token is just an empty positional.
+    assert.equal(t.run('echo "-n"').stdout, '')
+    assert.equal(t.run('echo ""').stdout, '\n')
     // Unquoted single-token flags are still parsed strictly.
     assert.match(t.run('echo -z hi').stderr, /unknown option/u)
+    // The rule lives in the shared parser, so it reaches every command:
+    // `grep "-- foo"` searches for the literal pattern rather than
+    // erroring on a malformed option.
+    const g = createTerminal({ 'f.txt': '-- foo\nbar\n' })
+    assert.equal(g.run('grep "-- foo" f.txt').stdout, '-- foo\n')
   })
 })
 
