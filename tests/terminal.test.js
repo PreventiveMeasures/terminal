@@ -1791,6 +1791,19 @@ describe('createTerminal — strict option parsing', () => {
     const t = createTerminal(SOURCES)
     assert.equal(t.run('echo -5').stdout, '-5\n')
   })
+
+  it('quoted args carrying whitespace are positional, not options', () => {
+    const t = createTerminal(SOURCES)
+    // A token with an embedded space can only be a quoted string, so it
+    // is data even when it starts like a flag — the whitespace sibling
+    // of the pure-dash `echo "---"` rule. Matches bash echo.
+    assert.equal(t.run('echo "---- foo ----"').stdout, '---- foo ----\n')
+    assert.equal(t.run('echo "-- foo"').stdout, '-- foo\n')
+    assert.equal(t.run('echo "-n hi"').stdout, '-n hi\n')
+    assert.equal(t.run('echo "---"').stdout, '---\n')
+    // Unquoted single-token flags are still parsed strictly.
+    assert.match(t.run('echo -z hi').stderr, /unknown option/u)
+  })
 })
 
 describe('createTerminal — xargs', () => {
