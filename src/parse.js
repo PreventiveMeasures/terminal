@@ -303,6 +303,16 @@ export function parseArgs(tokens, schema = {}) {
     // `unknown option: --` because the `--` long-flag branch (or
     // the short-flag bundle below) would try to interpret it.
     if (/^-+$/u.test(t)) { positional.push(t); continue }
+    // A token carrying whitespace can only have come from a quoted
+    // string — the tokenizer splits unquoted input on whitespace — so
+    // it is data, never an option: `echo "---- foo ----"`, `echo "-n x"`,
+    // `grep "-- foo"`. Real getopt rejects these only because the shell
+    // strips the quotes before exec; here the quoting survives as the
+    // embedded space, so (like the pure-dash sibling above) treat the
+    // token as positional. A rare inline value with embedded whitespace
+    // (`head -n"3 "`) lands here too rather than as `-n`'s value — an
+    // exotic form that errored either way, so the simpler rule wins.
+    if (/\s/u.test(t)) { positional.push(t); continue }
     if (t.startsWith('--') && t.length > 2) {
       const name = t.slice(2)
       if (valueLong.has(name) || repeatable.has(name)) addValue(values, repeatable, name, takeNext(tokens, ++i, `--${name}`))

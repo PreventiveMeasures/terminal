@@ -1791,6 +1791,29 @@ describe('createTerminal — strict option parsing', () => {
     const t = createTerminal(SOURCES)
     assert.equal(t.run('echo -5').stdout, '-5\n')
   })
+
+  it('quoted args carrying whitespace are positional, not options', () => {
+    const t = createTerminal(SOURCES)
+    // A token with an embedded space can only be a quoted string, so it
+    // is data even when it starts like a flag — the whitespace sibling
+    // of the pure-dash `echo "---"` rule. Matches bash echo.
+    assert.equal(t.run('echo "---- foo ----"').stdout, '---- foo ----\n')
+    assert.equal(t.run('echo "-- foo"').stdout, '-- foo\n')
+    assert.equal(t.run('echo "-n hi"').stdout, '-n hi\n')
+    assert.equal(t.run('echo "---"').stdout, '---\n')
+    // Quoting ALONE isn't enough (bash agrees): a dash token with no
+    // whitespace is still a flag — `"-n"` drops the newline — and an
+    // empty token is just an empty positional.
+    assert.equal(t.run('echo "-n"').stdout, '')
+    assert.equal(t.run('echo ""').stdout, '\n')
+    // Unquoted single-token flags are still parsed strictly.
+    assert.match(t.run('echo -z hi').stderr, /unknown option/u)
+    // The rule lives in the shared parser, so it reaches every command:
+    // `grep "-- foo"` searches for the literal pattern rather than
+    // erroring on a malformed option.
+    const g = createTerminal({ 'f.txt': '-- foo\nbar\n' })
+    assert.equal(g.run('grep "-- foo" f.txt').stdout, '-- foo\n')
+  })
 })
 
 describe('createTerminal — xargs', () => {
