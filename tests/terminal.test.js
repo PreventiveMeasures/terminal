@@ -2170,6 +2170,95 @@ describe('createTerminal — `;` sequential separator', () => {
   })
 })
 
+describe('createTerminal — newline command separator', () => {
+  it('reported failure: a pasted `ls` / `echo` / `pwd` block runs line by line', () => {
+    // Was: the three lines collapsed into one `ls echo "---" pwd`
+    // invocation, so `ls` reported `echo` / `---` / `pwd` as missing
+    // files. An unquoted newline now ends each command like `;`.
+    const t = createTerminal(SOURCES)
+    const r = t.run('ls\necho "---"\npwd')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stderr, '')
+    assert.equal(r.stdout, 'src/\nREADME.md\n---\n/\n')
+  })
+
+  it('a newline separates commands like `;` (exit is the last command\'s)', () => {
+    const t = createTerminal(SOURCES)
+    // First command fails; second still runs and sets the final exit.
+    const r = t.run('cat /nope 2>/dev/null\necho after')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'after\n')
+    const r2 = t.run('echo ok\ncat /nope 2>/dev/null')
+    assert.equal(r2.exitCode, 1)
+    assert.equal(r2.stdout, 'ok\n')
+  })
+
+  it('blank lines and leading/trailing newlines are no-ops', () => {
+    const t = createTerminal(SOURCES)
+    // Interior blank lines are the tokenizer's job (a newline after a
+    // `;`/newline is absorbed); the leading/trailing pair is handled
+    // upstream by safeRun's `line.trim()` before parsing.
+    assert.equal(t.run('echo a\n\n\necho b').stdout, 'a\nb\n')
+    assert.equal(t.run('\n\necho hi\n\n').stdout, 'hi\n')
+    assert.equal(t.run('\n\n').exitCode, 0)
+  })
+
+  it('a newline after `&&` / `||` / `|` / `(` continues the command', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('echo a &&\necho b').stdout, 'a\nb\n')
+    assert.equal(t.run('false ||\necho fallback').stdout, 'fallback\n')
+    assert.equal(t.run('echo hi |\ncat').stdout, 'hi\n')
+    assert.equal(t.run('(\necho grouped\n)').stdout, 'grouped\n')
+  })
+
+  it('a newline inside quotes (single or double) stays a literal character', () => {
+    const t = createTerminal(SOURCES)
+    // The break is data here, not a separator: one `echo` prints a
+    // two-line argument. Single and double quotes take different
+    // tokenizer branches, so pin both.
+    assert.equal(t.run('echo "a\nb"').stdout, 'a\nb\n')
+    assert.equal(t.run("echo 'a\nb'").stdout, 'a\nb\n')
+  })
+
+  it('only `\\n` separates: `\\r\\n` splits cleanly, a lone `\\r` does not', () => {
+    const t = createTerminal(SOURCES)
+    // `\r\n` (Windows paste): the `\r` ends the word as whitespace,
+    // then the `\n` separates — two clean commands, no stray CR.
+    assert.equal(t.run('echo a\r\necho b').stdout, 'a\nb\n')
+    // A lone `\r` is NOT a separator (only `\n` is); it falls through
+    // to the whitespace branch, so this stays a single `echo` — exit
+    // 0, never a `b: command not found` split.
+    const lone = t.run('echo a\recho b')
+    assert.equal(lone.exitCode, 0)
+    assert.equal(lone.stdout, 'a echo b\n')
+  })
+
+  it('a newline separates whole pipelines, and cwd persists across lines', () => {
+    const t = createTerminal(SOURCES)
+    // Each line is its own step in the same terminal: the `cd` on line
+    // 1 is visible to `pwd` on line 3, and the middle line is a full
+    // `cat | grep` pipeline terminated by the newline (not a bare cmd).
+    const r = t.run('cd src\ncat foo.js | grep TODO\npwd')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '// TODO: fix\n/src\n')
+  })
+
+  it('newlines and `;` interleave freely', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('echo a; echo b\necho c').stdout, 'a\nb\nc\n')
+  })
+
+  it('a gate left dangling at end-of-input still errors (newline does not satisfy it)', () => {
+    // A newline right after `&&` is absorbed as a continuation, so with
+    // nothing following, the `&&` has no right-hand step — the same
+    // error as a bare trailing `&&`. (Bash would prompt for more.)
+    const t = createTerminal(SOURCES)
+    const r = t.run('echo a &&\n')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /empty pipeline/u)
+  })
+})
+
 describe('createTerminal — `(...)` subshell grouping', () => {
   it('`(cmd)` runs the inner pipeline and surfaces its output / exit', () => {
     const t = createTerminal(SOURCES)

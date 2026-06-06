@@ -9,6 +9,13 @@
 //   `;`       — sequential run; next step runs regardless of the
 //               previous step's exit code (the unconditional sibling
 //               of `&&` / `||`)
+//   newline   — an unquoted newline (`\n`) ends the current command
+//               and separates it from the next, exactly like `;` (a
+//               pasted multi-line block runs line by line). Blank
+//               lines and leading/trailing breaks are no-ops; a
+//               newline right after `|` / `&&` / `||` / `(` is absorbed
+//               so the command continues on the next line. A newline
+//               inside quotes stays literal.
 //   `&&`      — run next step only if current step exited 0
 //   `||`      — run next step only if current step exited non-zero
 //   `(` `)`   — subshell grouping. The contents parse as their own
@@ -166,6 +173,15 @@ function applyRedir(stage, raw, i) {
   return i + 1
 }
 
+// A newline after one of these boundary tokens contributes nothing:
+// the separator already exists (`;`) or the operator still needs its
+// right-hand operand, so the command continues on the next line
+// (`|` / `&&` / `||`, and an open `(`). After any other token — a
+// word, a `)`, or a redirect — an unquoted newline ends the command,
+// exactly like `;`. A leading newline (no token yet) is likewise a
+// no-op, so blank lines never produce an empty stage.
+const NEWLINE_ABSORB = new Set(['semi', 'and', 'or', 'pipe', 'paren_open'])
+
 function tokenize(line) {
   const tokens = []
   let cur = ''
@@ -243,6 +259,22 @@ function tokenize(line) {
     // and `echo a;(echo b)` doesn't need whitespace around `(`.
     if (c === '(') { flush(); tokens.push({ kind: 'paren_open' }); continue }
     if (c === ')') { flush(); tokens.push({ kind: 'paren_close' }); continue }
+    // An unquoted line feed terminates the current command. Emit a
+    // `semi` so it parses identically to `;` downstream — but only
+    // where it actually separates two commands: `NEWLINE_ABSORB`
+    // swallows breaks that are leading, doubled (blank lines), or
+    // follow a `|` / `&&` / `||` / `(` continuation. Only `\n` is a
+    // separator; a `\r` falls through to the whitespace branch below,
+    // so a `\r\n` pair ends the word and then the `\n` separates — one
+    // clean break for Windows pastes. (Bash keeps a lone `\r` literal;
+    // treating it as whitespace is a pre-existing quirk left as-is, so
+    // a stray `\r` never silently splits a command.)
+    if (c === '\n') {
+      flush()
+      const prev = tokens.at(-1)
+      if (prev && !NEWLINE_ABSORB.has(prev.kind)) tokens.push({ kind: 'semi' })
+      continue
+    }
     if (/\s/u.test(c)) { flush(); continue }
     cur += c; inToken = true
   }
