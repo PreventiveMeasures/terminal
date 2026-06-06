@@ -1,7 +1,8 @@
 // grep — the auditor's main read tool. Own file because the
 // feature set (-A/-B/-C context, -l/-L/-c output modes, -o,
 // -w, -F/-G/-E dialect, -h/-H name forcing, -r/-R recursive,
-// -i/-v/-n composable, -e PATTERN multi) outgrew text-commands.js.
+// -i/-v/-n composable, -e PATTERN multi, --include/--exclude/
+// --exclude-dir recursive globs) outgrew text-commands.js.
 //
 // Pattern dialects (mutually exclusive, default is BRE):
 //   -G  POSIX BRE — `(`, `)`, `{`, `}`, `+`, `?`, `|` are LITERAL;
@@ -13,16 +14,17 @@
 //       common shapes (`(`, `|`, `+`, `?`, `{n,m}`).
 //   -F  fixed string — every metachar literal via `RegExp.escape`.
 
-import { relativeTo, resolve } from './fs.js'
+import { basename, relativeTo, resolve } from './fs.js'
 import { parseArgs } from './parse.js'
 import { err, joinLines, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
 import { breToEs } from './bre.js'
+import { compileGlob } from './glob.js'
 
 // Two forms because PATTERN is required UNLESS -e is given. Listing
 // both makes the conditional explicit — bare `[PATTERN]` would read
 // as if `grep [PATH...]` (no pattern at all) were valid, which it
 // isn't.
-const FLAGS = '[-i] [-v] [-n] [-r|-R] [-w] [-o] [-E|-F|-G] [-l] [-L] [-c] [-h] [-H] [-A N] [-B N] [-C N]'
+const FLAGS = '[-i] [-v] [-n] [-r|-R] [-w] [-o] [-E|-F|-G] [-l] [-L] [-c] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
 const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} -e PATTERN ... [PATH...]`
 
 // -R is GNU's "dereference-recursive" — distinct from -r because it
@@ -36,10 +38,13 @@ export function grep(stdin, tokens, ctx) {
   // `-e` is a repeatable value flag, so `-e a -e b` (and the bundled
   // `-ie foo` / inline `-efoo` forms) collect every pattern into an
   // array — they're OR'd together, and a pattern may start with `-`.
+  // `--include` / `--exclude` / `--exclude-dir` are likewise repeatable
+  // (GNU lets you stack globs); include/exclude filter every file input,
+  // exclude-dir prunes directories during the recursive walk.
   // parseArgs throws on a bad flag / stranded `-e`; grep's usage
   // errors exit 2 (GNU), distinct from dispatch's generic exit 1.
   let parsed
-  try { parsed = parseArgs(tokens, { short: SHORT_FLAGS, valueShort: VALUE_SHORTS, repeatable: ['e'] }) }
+  try { parsed = parseArgs(tokens, { short: SHORT_FLAGS, valueShort: VALUE_SHORTS, repeatable: ['e', 'include', 'exclude', 'exclude-dir'] }) }
   catch (e) { return err(`grep: ${e.message}`, 2) }
   const { flags, values, positional } = parsed
   const ePatterns = values.get('e') ?? []
@@ -56,14 +61,19 @@ export function grep(stdin, tokens, ctx) {
   const ctxLines = parseContext(values)
   if (ctxLines.error) return ctxLines.error
   const recursive = flags.has('r') || flags.has('R')
-  const r = grepInputs(recursive, stdin, rest, ctx)
+  const filters = compileFilters(parsed)
+  const r = grepInputs(recursive, stdin, rest, ctx, filters)
+  // include/exclude apply to every file input — named operands AND
+  // recursively-discovered files — matching GNU; stdin (name===null) is
+  // exempt. exclude-dir already pruned directories inside grepInputs.
+  const inputs = r.inputs.filter((inp) => inp.name === null || includedByName(basename(inp.name), filters.name))
   const showName = pickShowName(flags, recursive, rest.length)
   const invert = flags.has('v')
   const opts = { showName, invert, showLine: flags.has('n'), only: flags.has('o'), after: ctxLines.after, before: ctxLines.before }
-  const result = flags.has('l') ? grepListFiles(r.inputs, re.res, invert, false)
-    : flags.has('L') ? grepListFiles(r.inputs, re.res, invert, true)
-    : flags.has('c') ? grepCount(r.inputs, re.res, invert, showName)
-    : grepRun(r.inputs, re.res, opts)
+  const result = flags.has('l') ? grepListFiles(inputs, re.res, invert, false)
+    : flags.has('L') ? grepListFiles(inputs, re.res, invert, true)
+    : flags.has('c') ? grepCount(inputs, re.res, invert, showName)
+    : grepRun(inputs, re.res, opts)
   // Unreadable file/dir operands don't abort the search: scan what we
   // can, then prepend their errors and force grep's exit-2 ("an error
   // occurred"), which outranks the 0/1 match status.
@@ -165,8 +175,8 @@ function pickShowName(flags, recursive, nFiles) {
   return recursive || nFiles > 1
 }
 
-function grepInputs(recursive, stdin, rest, ctx) {
-  if (recursive) return readFilesRecursive('grep', rest.length > 0 ? rest : ['.'], ctx)
+function grepInputs(recursive, stdin, rest, ctx, filters) {
+  if (recursive) return readFilesRecursive('grep', rest.length > 0 ? rest : ['.'], ctx, filters.dir)
   if (rest.length > 0) return readFilesFor('grep', rest, ctx)
   return { inputs: [{ name: null, content: stdin }], stderr: '', failed: false }
 }
@@ -178,19 +188,69 @@ function grepInputs(recursive, stdin, rest, ctx) {
 // user sees a consistent message. Displayed file names preserve
 // the user-typed prefix (`grep -r foo src` produces `src/bar.js:…`,
 // not `/src/bar.js:…`), matching GNU grep's output convention.
-function readFilesRecursive(cmd, paths, ctx) {
+function readFilesRecursive(cmd, paths, ctx, dirRes) {
   const inputs = []
   let stderr = ''
   let failed = false
   for (const p of paths) {
     const abs = resolve(ctx.cwd, p)
+    // A named file operand is read as-is; include/exclude filtering of
+    // both named and discovered files happens once, after collection.
     if (ctx.fs.isFile(abs)) { inputs.push({ name: p, content: ctx.fs.readFile(abs) }); continue }
     if (!ctx.fs.isDir(abs)) { stderr += `${cmd}: ${p}: no such file or directory\n`; failed = true; continue }
+    if (excludedStartDir(p, dirRes)) continue
     for (const filePath of ctx.fs.walkFiles(abs)) {
+      if (excludedByDir(filePath, abs, dirRes)) continue
       inputs.push({ name: displayName(p, abs, filePath), content: ctx.fs.readFile(filePath) })
     }
   }
   return { inputs, stderr, failed }
+}
+
+// Compile the filter globs once (glob.js's note: reuse the RegExp on hot
+// paths) and match against base names — GNU's rule for these options, so
+// `*` never needs to span `/`. include/exclude share one ORDERED list so
+// the last matching option can win (an --exclude before an --include is
+// honored); exclude-dir has no "include" counterpart, so order doesn't
+// matter and a plain list suffices.
+function compileFilters(parsed) {
+  const name = parsed.order
+    .filter((o) => o.name === 'include' || o.name === 'exclude')
+    .map((o) => ({ include: o.name === 'include', re: compileGlob(o.value) }))
+  const dir = (parsed.values.get('exclude-dir') ?? []).map(compileGlob)
+  return { name, dir }
+}
+
+function someMatch(res, name) { return res.some((re) => re.test(name)) }
+
+// GNU include/exclude precedence: the LAST option whose glob matches the
+// base name decides it (include→keep, exclude→drop). With no match the
+// name is kept UNLESS the first option was an --include — an --include
+// with nothing matching excludes everything else by default.
+function includedByName(name, nameFilters) {
+  if (nameFilters.length === 0) return true
+  let last = null
+  for (const f of nameFilters) if (f.re.test(name)) last = f
+  return last ? last.include : !nameFilters[0].include
+}
+
+// --exclude-dir skips a file when ANY directory component below the
+// search root matches (GNU prunes mid-descent; post-filtering the walked
+// paths is equivalent for this in-memory FS — there are no empty dirs to
+// make the difference observable).
+function excludedByDir(filePath, absRoot, dirRes) {
+  if (dirRes.length === 0) return false
+  const parts = relativeTo(absRoot, filePath).split('/')
+  parts.pop() // drop the file's own base name; keep the dir components
+  return parts.some((d) => someMatch(dirRes, d))
+}
+
+// GNU also prunes a NAMED start directory by its own trailing component,
+// matched as typed — `--exclude-dir=foo` drops a `foo` operand but not a
+// `foo/` one (the trailing slash defeats the base-name match).
+function excludedStartDir(operand, dirRes) {
+  if (dirRes.length === 0 || operand.endsWith('/')) return false
+  return someMatch(dirRes, operand.slice(operand.lastIndexOf('/') + 1))
 }
 
 function displayName(userPath, absRoot, absFile) {

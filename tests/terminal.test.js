@@ -1814,6 +1814,117 @@ describe('createTerminal — strict option parsing', () => {
     const g = createTerminal({ 'f.txt': '-- foo\nbar\n' })
     assert.equal(g.run('grep "-- foo" f.txt').stdout, '-- foo\n')
   })
+
+  it('long options accept the GNU `--name=value` form (and name the bare option when unknown)', () => {
+    const t = createTerminal({ 'keep.js': 'hit\n', 'skip.txt': 'hit\n' })
+    // `=value` binds to the option without consuming the next token —
+    // here grep's repeatable --include glob (quoted so the shell leaves
+    // `*.js` alone). Only keep.js is searched.
+    const r = t.run('grep -rl hit --include="*.js"')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'keep.js\n')
+    // An unknown long names just the option, not the `=value` tail.
+    const bad = t.run('grep --bogus=x PAT')
+    assert.equal(bad.exitCode, 2)
+    assert.match(bad.stderr, /unknown option: --bogus\b/u)
+    assert.doesNotMatch(bad.stderr, /=x/u)
+  })
+})
+
+describe('createTerminal — grep --include / --exclude / --exclude-dir', () => {
+  // A tree with a node_modules to prune, mixed extensions, and a nested
+  // dir so the dir-component scan is exercised below the top level.
+  const TREE = {
+    'src/app.js': 'needle in app\n',
+    'src/app.css': 'needle in css\n',
+    'src/util/helpers.js': 'needle in helpers\n',
+    'docs/readme.md': 'needle in docs\n',
+    'node_modules/dep/index.js': 'needle in dep\n',
+  }
+  const listed = (r) => r.stdout.split('\n').filter(Boolean).sort()
+
+  it('reported failure: `grep -rn … --include=*.js --exclude-dir=node_modules` runs', () => {
+    // Was: `grep: unknown option: --include=*.js` — parseArgs had no
+    // long-value option and never split the `--name=value` form.
+    const t = createTerminal(TREE)
+    const r = t.run('grep -rn "nee\\|XYZ" --include="*.js" --exclude-dir=node_modules')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stderr, '')
+    // Only .js files, and nothing under node_modules.
+    assert.deepEqual(listed(r), ['src/app.js:1:needle in app', 'src/util/helpers.js:1:needle in helpers'])
+  })
+
+  it('--include limits the recursive walk to matching base names', () => {
+    const t = createTerminal(TREE)
+    assert.deepEqual(listed(t.run('grep -rl needle --include="*.js"')),
+      ['node_modules/dep/index.js', 'src/app.js', 'src/util/helpers.js'])
+  })
+
+  it('a later --exclude removes names an earlier --include kept', () => {
+    const t = createTerminal(TREE)
+    // app.js matches both; --exclude is last here, so it wins. Precedence
+    // is order-dependent — see the dedicated last-match-wins test below.
+    assert.deepEqual(listed(t.run('grep -rl needle --include="*.js" --exclude="app.*"')),
+      ['node_modules/dep/index.js', 'src/util/helpers.js'])
+  })
+
+  it('--exclude-dir prunes a directory anywhere in the descent', () => {
+    const t = createTerminal(TREE)
+    assert.deepEqual(listed(t.run('grep -rl needle --exclude-dir=node_modules')),
+      ['docs/readme.md', 'src/app.css', 'src/app.js', 'src/util/helpers.js'])
+  })
+
+  it('repeated --include globs OR together', () => {
+    const t = createTerminal(TREE)
+    assert.deepEqual(listed(t.run('grep -rl needle --include="*.js" --include="*.css" --exclude-dir=node_modules')),
+      ['src/app.css', 'src/app.js', 'src/util/helpers.js'])
+  })
+
+  it('the `=value` and space-separated forms are equivalent', () => {
+    const t = createTerminal(TREE)
+    const eq = t.run('grep -rl needle --include="*.js"')
+    const sp = t.run('grep -rl needle --include "*.js"')
+    assert.equal(sp.stdout, eq.stdout)
+    assert.equal(sp.exitCode, eq.exitCode)
+  })
+
+  it('--include/--exclude DO filter named file operands (GNU), but never stdin', () => {
+    // GNU applies the globs to explicitly-named files too — with OR
+    // without -r — dropping a non-matching operand (exit 1). Only stdin
+    // is exempt. (My first cut wrongly exempted named operands.)
+    const t = createTerminal(TREE)
+    // Named file that fails the include glob → dropped, under -r …
+    assert.equal(t.run('grep -rl needle src/app.css --include="*.js"').exitCode, 1)
+    // … and without -r (the filter still applies to the operand).
+    assert.equal(t.run('grep -l needle src/app.css --include="*.js"').exitCode, 1)
+    // A matching operand is searched.
+    assert.equal(t.run('grep -l needle src/app.js --include="*.js"').stdout, 'src/app.js\n')
+    // An operand matching --exclude is dropped.
+    assert.equal(t.run('grep -l needle src/app.css --exclude="app.*"').exitCode, 1)
+    // stdin is never filtered.
+    assert.equal(t.run('echo needle | grep -l needle --include="*.js"').stdout, '(standard input)\n')
+  })
+
+  it('include/exclude precedence is order-dependent (the LAST matching option wins)', () => {
+    const t = createTerminal(TREE)
+    // include THEN exclude: app.js matches both, exclude is last → dropped.
+    assert.deepEqual(listed(t.run('grep -rl needle --include="*.js" --exclude="app.*" --exclude-dir=node_modules')),
+      ['src/util/helpers.js'])
+    // exclude THEN include: for app.js, include is last → kept. And
+    // readme.md (matching NEITHER glob) is kept because the FIRST option
+    // was --exclude — an --include-first default would have dropped it.
+    assert.deepEqual(listed(t.run('grep -rl needle --exclude="app.*" --include="*.js" --exclude-dir=node_modules')),
+      ['docs/readme.md', 'src/app.js', 'src/util/helpers.js'])
+  })
+
+  it('--exclude-dir prunes a NAMED start directory (but a trailing slash spares it)', () => {
+    const t = createTerminal(TREE)
+    // Naming `src` and excluding `src` prunes the whole walk → exit 1.
+    assert.equal(t.run('grep -rl needle src --exclude-dir=src').exitCode, 1)
+    // `src/` (trailing slash) defeats the base-name match → not pruned.
+    assert.deepEqual(listed(t.run('grep -rl needle src/ --exclude-dir=src')),
+      ['src/app.css', 'src/app.js', 'src/util/helpers.js'])
+  })
 })
 
 describe('createTerminal — xargs', () => {

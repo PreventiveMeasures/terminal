@@ -297,7 +297,9 @@ function tokenize(line) {
 //   valueShort — short flags that consume the next token as value
 //                (e.g. `n` for `head -n 5`); inline `-n5` also works
 //   valueLong  — long flags that consume the next token as value
-//                (e.g. `name` for `find --name foo`)
+//                (e.g. `name` for `find --name foo`). The GNU
+//                `--name=value` form is also accepted (the inline
+//                value wins and the next token is left untouched).
 //   repeatable — value flags (short or long) that may appear more than
 //                once; their values collect into an ARRAY in `values`
 //                (e.g. `e` for `grep -e a -e b` → `['a', 'b']`) instead
@@ -311,6 +313,11 @@ function tokenize(line) {
 // Bundled short flags split across chars (`-an` → `-a` + `-n`); a
 // value-taking short inside a bundle takes the rest of the bundle
 // as its value (`-n5`).
+//
+// The result also carries `order`: every LONG value-option in the
+// sequence it appeared, as `[{ name, value }]`. grep uses it to resolve
+// `--include` / `--exclude` by GNU's last-match-wins rule, which the
+// per-name `values` map (order lost across names) can't express.
 
 export function parseArgs(tokens, schema = {}) {
   const short = asSet(schema.short)
@@ -322,6 +329,7 @@ export function parseArgs(tokens, schema = {}) {
   const flags = new Set()
   const values = new Map()
   const positional = []
+  const order = []
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
     // `--` ends flag processing here, not at the top of the function:
@@ -346,10 +354,24 @@ export function parseArgs(tokens, schema = {}) {
     // exotic form that errored either way, so the simpler rule wins.
     if (/\s/u.test(t)) { positional.push(t); continue }
     if (t.startsWith('--') && t.length > 2) {
-      const name = t.slice(2)
-      if (valueLong.has(name) || repeatable.has(name)) addValue(values, repeatable, name, takeNext(tokens, ++i, `--${name}`))
-      else if (long.has(name)) flags.add(name)
-      else throw new Error(`unknown option: --${name}`)
+      // GNU long options accept both `--name value` and `--name=value`.
+      // Split on the first `=`: everything after it is the inline value,
+      // so the next token is left alone. `??` (not `||`) picks the next
+      // token only when there is no `=` at all, so `--name=` passes an
+      // empty string rather than swallowing the following token. A
+      // boolean long handed an inline value (`--verbose=x`) is a user
+      // error, surfaced as such instead of silently ignored.
+      const eq = t.indexOf('=')
+      const name = eq === -1 ? t.slice(2) : t.slice(2, eq)
+      const inlineVal = eq === -1 ? null : t.slice(eq + 1)
+      if (valueLong.has(name) || repeatable.has(name)) {
+        const value = inlineVal ?? takeNext(tokens, ++i, `--${name}`)
+        addValue(values, repeatable, name, value)
+        order.push({ name, value })
+      } else if (long.has(name)) {
+        if (inlineVal !== null) throw new Error(`option --${name} doesn't allow an argument`)
+        flags.add(name)
+      } else throw new Error(`unknown option: --${name}`)
       continue
     }
     if (t.startsWith('-') && t.length > 1 && !/^-\d/u.test(t)) {
@@ -359,7 +381,7 @@ export function parseArgs(tokens, schema = {}) {
     if (stopEarly) { positional.push(...tokens.slice(i)); break }
     positional.push(t)
   }
-  return { flags, values, positional }
+  return { flags, values, positional, order }
 }
 
 function asSet(v) {
