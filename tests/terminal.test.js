@@ -908,6 +908,40 @@ describe('createTerminal — text commands', () => {
     assert.ok(!without.has('src/foo.js'))
   })
 
+  it('grep -l / -L exit status tracks matches, not the listing (GNU)', () => {
+    const t = createTerminal({ 'a.txt': 'needle\n', 'b.txt': 'plain\n' })
+    // -L lists b.txt (no needle) but exits 0 because a.txt matched.
+    const some = t.run('grep -rL needle')
+    assert.equal(some.exitCode, 0)
+    assert.deepEqual(some.stdout.split('\n').filter(Boolean), ['b.txt'])
+    // `zzz` matches nothing: -L lists BOTH files yet exits 1 (no line was
+    // selected anywhere). The bug returned 0 just because it listed files.
+    const none = t.run('grep -rL zzz')
+    assert.equal(none.exitCode, 1)
+    assert.deepEqual(none.stdout.split('\n').filter(Boolean).sort(), ['a.txt', 'b.txt'])
+    // -l is unchanged: exit 1 / empty when nothing matches; exit 0 listing
+    // the matching file otherwise.
+    assert.equal(t.run('grep -rl zzz').exitCode, 1)
+    assert.equal(t.run('grep -rl zzz').stdout, '')
+    const lhit = t.run('grep -rl needle')
+    assert.equal(lhit.exitCode, 0)
+    assert.deepEqual(lhit.stdout.split('\n').filter(Boolean), ['a.txt'])
+  })
+
+  it('grep -l / -L honor -v in BOTH the listing and the exit code', () => {
+    // Under -v a "selected" line is a NON-matching one, so an all-needle
+    // file has no selected line. -Lv lists files with no non-needle line.
+    const t = createTerminal({ 'both.txt': 'needle\nplain\n', 'pure.txt': 'needle\nneedle\n' })
+    const lv = t.run('grep -rLv needle')
+    assert.equal(lv.exitCode, 0) // both.txt has a non-needle line → selected
+    assert.deepEqual(lv.stdout.split('\n').filter(Boolean), ['pure.txt'])
+    // With ONLY the all-needle file, -Lv still lists it yet exits 1 — the
+    // exit follows the inverted selection, not the listing.
+    const only = createTerminal({ 'pure.txt': 'needle\nneedle\n' }).run('grep -rLv needle')
+    assert.equal(only.exitCode, 1)
+    assert.deepEqual(only.stdout.split('\n').filter(Boolean), ['pure.txt'])
+  })
+
   it('grep -c counts matching lines per file', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('grep -rc TODO')

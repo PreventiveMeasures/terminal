@@ -344,13 +344,20 @@ function formatLine(text, name, lineNum, isMatch, opts) {
 // -l prints filenames that have at least one matching line; -L
 // inverts to filenames with zero matches. Stdin contributes as
 // `(standard input)`, matching the convention formatLine and
-// grepCount use under -H. Exit 0 if anything was listed, 1
-// otherwise.
+// grepCount use under -H.
+//
+// Exit status follows GNU and is NOT tied to the listing: 0 iff some
+// input had a selected line, 1 otherwise. So `grep -L` can print the
+// un-matched files yet still exit 1 when nothing matched anywhere (a
+// pattern absent from every file). For -l the two coincide — a listed
+// file is, by definition, one that matched.
 function grepListFiles(inputs, res, invert, listNonMatching) {
   const out = []
+  let anySelected = false
   for (const { name, content } of inputs) {
     const lines = splitLines(content)
     const hasMatch = lines.some((l) => anyMatch(res, l) !== invert)
+    if (hasMatch) anySelected = true
     if (listNonMatching ? !hasMatch : hasMatch) {
       // Match the (standard input) convention from formatLine /
       // grepCount so `echo … | grep -l PATTERN` produces something
@@ -358,7 +365,7 @@ function grepListFiles(inputs, res, invert, listNonMatching) {
       out.push(name ?? '(standard input)')
     }
   }
-  return out.length > 0 ? ok(joinLines(out)) : noMatch()
+  return { stdout: joinLines(out), stderr: '', exitCode: anySelected ? 0 : 1 }
 }
 
 // -c prints per-file match counts. With showName, each line is
