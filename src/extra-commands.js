@@ -8,6 +8,7 @@
 
 import { parseArgs } from './parse.js'
 import { err, joinLines, ok, okWith, readInputs, splitLines, usage } from './util.js'
+import { hexdump, od, xxd } from './dump.js'
 
 // Reverse line order: read stdin (or each file in order, reversed
 // individually) and emit. Matches GNU `tac`'s per-file behavior —
@@ -355,8 +356,11 @@ function tzOffset(d, utc) {
   return `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}${String(abs % 60).padStart(2, '0')}`
 }
 
-export const EXTRA_COMMANDS = { cut, tac, tr, seq, nl, which: whichCmd }
+export const EXTRA_COMMANDS = { cut, tac, tr, seq, nl, which: whichCmd, hexdump }
 // HIDDEN_EXTRAS land in index.js's HIDDEN registry — dispatchable
 // (so chains like `pwd && whoami && date` work, and `which whoami`
 // resolves), but excluded from the "Available: …" not-found hint.
-export const HIDDEN_EXTRAS = { whoami, date }
+// `od` / `xxd` ride the same dump engine as the surfaced `hexdump`;
+// they stay hidden so the documented command surface reads as just
+// one byte-dump tool, while `cat x | od` and `which xxd` still work.
+export const HIDDEN_EXTRAS = { whoami, date, od, xxd }

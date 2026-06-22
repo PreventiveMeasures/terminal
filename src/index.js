@@ -59,7 +59,7 @@ const HIDDEN = { __proto__: null, sed, ...HIDDEN_EXTRAS, ...TRIVIAL_COMMANDS }
 const COMMAND_ORDER = [
   'ls', 'cd', 'cat', 'grep', 'find',
   'head', 'tail', 'wc', 'tree',
-  'sort', 'uniq', 'cut', 'tr', 'nl', 'tac',
+  'sort', 'uniq', 'cut', 'tr', 'nl', 'tac', 'hexdump',
   'xargs', 'echo',
   'pwd', 'seq', 'which', 'basename', 'dirname',
 ]
@@ -76,7 +76,7 @@ const KNOWN = COMMAND_NAMES.join(', ')
 const PIPE_NAMES = [
   'grep', 'head', 'tail', 'wc',
   'sort', 'uniq', 'cut', 'xargs',
-  'tr', 'nl', 'tac', 'cat',
+  'tr', 'nl', 'tac', 'hexdump', 'cat',
 ]
 
 function orderedCommandNames() {
