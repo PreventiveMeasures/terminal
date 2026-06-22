@@ -3317,6 +3317,116 @@ describe('createTerminal — tac', () => {
   })
 })
 
+describe('createTerminal — hexdump', () => {
+  it('dumps a short file in the canonical (-C) layout with a trailing offset line', () => {
+    const t = createTerminal({ 'hello.txt': 'hello\n' })
+    // 68 65 6c 6c 6f 0a, padded to the 16-byte column width, ASCII
+    // gutter showing the newline as `.`, then the end offset alone.
+    assert.equal(
+      t.run('hexdump hello.txt').stdout,
+      '00000000  68 65 6c 6c 6f 0a' + ' '.repeat(33) + '|hello.|\n00000006\n',
+    )
+  })
+
+  it('a full 16-byte line splits into two 8-byte groups', () => {
+    const t = createTerminal({ 'x.txt': '0123456789abcdef' })
+    assert.equal(
+      t.run('hexdump x.txt').stdout,
+      '00000000  30 31 32 33 34 35 36 37  38 39 61 62 63 64 65 66  |0123456789abcdef|\n00000010\n',
+    )
+  })
+
+  it('reads stdin when no file operand is given', () => {
+    const t = createTerminal({})
+    assert.equal(
+      t.run('echo hi | hexdump').stdout,
+      '00000000  68 69 0a' + ' '.repeat(42) + '|hi.|\n00000003\n',
+    )
+  })
+
+  it('-C selects the format that is already the default, so output is identical', () => {
+    const t = createTerminal({ 'hello.txt': 'hello\n' })
+    assert.equal(t.run('hexdump -C hello.txt').stdout, t.run('hexdump hello.txt').stdout)
+  })
+
+  it('empty input produces no output at all (not even an offset line)', () => {
+    const t = createTerminal({ 'empty.txt': '' })
+    const fromFile = t.run('hexdump empty.txt')
+    assert.equal(fromFile.exitCode, 0)
+    assert.equal(fromFile.stdout, '')
+    // Same for an empty stdin stream.
+    assert.equal(t.run('true | hexdump').stdout, '')
+  })
+
+  it('collapses repeated 16-byte lines to a single `*`; -v prints them all', () => {
+    const t = createTerminal({ 'rep.txt': 'A'.repeat(48) })
+    const row = (off) => `${off}  41 41 41 41 41 41 41 41  41 41 41 41 41 41 41 41  |AAAAAAAAAAAAAAAA|`
+    // Three identical lines → first shown, the rest fold into `*`.
+    assert.equal(t.run('hexdump rep.txt').stdout, row('00000000') + '\n*\n00000030\n')
+    // -v defeats the folding: every line is printed verbatim.
+    assert.equal(
+      t.run('hexdump -v rep.txt').stdout,
+      row('00000000') + '\n' + row('00000010') + '\n' + row('00000020') + '\n00000030\n',
+    )
+  })
+
+  it('-n caps the byte count; -s skips leading bytes and shifts the offset column', () => {
+    const t = createTerminal({ 'hello.txt': 'hello\n' })
+    assert.equal(
+      t.run('hexdump -n 3 hello.txt').stdout,
+      '00000000  68 65 6c' + ' '.repeat(42) + '|hel|\n00000003\n',
+    )
+    // -s 2 drops `he`; the offset column starts at 2 and the end
+    // offset is skip + remaining bytes.
+    assert.equal(
+      t.run('hexdump -s 2 hello.txt').stdout,
+      '00000002  6c 6c 6f 0a' + ' '.repeat(39) + '|llo.|\n00000006\n',
+    )
+    // Skipping past EOF (and -n 0) both read zero bytes → no output.
+    assert.equal(t.run('hexdump -s 100 hello.txt').stdout, '')
+    assert.equal(t.run('hexdump -n 0 hello.txt').stdout, '')
+  })
+
+  it('operates on UTF-8 bytes (like wc -c); non-printable bytes show as `.`', () => {
+    // `é` is two UTF-8 bytes (c3 a9), both outside printable ASCII.
+    const t = createTerminal({ 'u.txt': 'é' })
+    assert.equal(
+      t.run('hexdump u.txt').stdout,
+      '00000000  c3 a9' + ' '.repeat(45) + '|..|\n00000002\n',
+    )
+  })
+
+  it('concatenates multiple files into one continuous stream', () => {
+    const t = createTerminal({ 'a.txt': 'ab', 'b.txt': 'c' })
+    assert.equal(
+      t.run('hexdump a.txt b.txt').stdout,
+      '00000000  61 62 63' + ' '.repeat(42) + '|abc|\n00000003\n',
+    )
+  })
+
+  it('reports unreadable operands on stderr but still dumps the readable ones', () => {
+    const t = createTerminal({ 'a.txt': 'x' })
+    const r = t.run('hexdump a.txt missing.txt')
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stderr, /missing\.txt: no such file or directory/u)
+    assert.equal(r.stdout, '00000000  78' + ' '.repeat(48) + '|x|\n00000001\n')
+  })
+
+  it('rejects a non-numeric -n / -s count', () => {
+    const t = createTerminal({ 'hello.txt': 'hello\n' })
+    assert.match(t.run('hexdump -n abc hello.txt').stderr, /invalid count/u)
+    assert.match(t.run('hexdump -s x hello.txt').stderr, /invalid count/u)
+  })
+
+  it('is a registered command: which resolves it and completion offers it', () => {
+    const t = createTerminal({ 'hello.txt': 'hello\n' })
+    assert.equal(t.run('which hexdump').stdout, '/usr/bin/hexdump\n')
+    assert.deepEqual(t.complete('hex'), ['hexdump'])
+    // Reads stdin, so it surfaces as a pipe target too.
+    assert.deepEqual(t.complete('cat | hex'), ['cat | hexdump'])
+  })
+})
+
 describe('createTerminal — seq', () => {
   it('one-arg form counts 1..LAST', () => {
     const t = createTerminal({})
@@ -3981,11 +4091,11 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat | l'), [])
     // Pipeable: every PIPE_NAMES entry surfaces for the empty trailing word.
     const c = t.complete('cat | ')
-    for (const name of ['grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'xargs', 'tr', 'nl', 'tac', 'cat']) {
+    for (const name of ['grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'xargs', 'tr', 'nl', 'tac', 'hexdump', 'cat']) {
       assert.ok(c.includes('cat | ' + name), `${name} should be a pipe target`)
     }
-    // Empty completion straight after `|` has length 12 — full pipe set.
-    assert.equal(c.length, 12)
+    // Empty completion straight after `|` has length 13 — full pipe set.
+    assert.equal(c.length, 13)
   })
 
   it('pipe-target priority lists grep first', () => {
@@ -4016,7 +4126,7 @@ describe('createTerminal — complete: corner cases', () => {
     const t = createTerminal(SOURCES)
     // grep IS pipeable — bin-prefix path resolves.
     assert.deepEqual(t.complete('cat | /usr/bin/gre'), ['cat | /usr/bin/grep'])
-    assert.deepEqual(t.complete('cat | /bin/he'), ['cat | /bin/head'])
+    assert.deepEqual(t.complete('cat | /bin/he'), ['cat | /bin/head', 'cat | /bin/hexdump'])
     // ls / find / pwd are NOT pipeable — even with the bin prefix.
     assert.deepEqual(t.complete('cat | /usr/bin/l'), [])
     assert.deepEqual(t.complete('cat | /usr/bin/ls'), [])
@@ -4051,7 +4161,7 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat|l'), [])
     // Empty trailing word: full pipe set, each glued to `cat| ` with a space.
     const c = t.complete('cat|')
-    assert.equal(c.length, 12)
+    assert.equal(c.length, 13)
     assert.equal(c[0], 'cat| grep')
     // Every variant has the inserted space — no `cat|grep` leaks through.
     for (const variant of c) assert.ok(variant.startsWith('cat| '), `expected "cat| " prefix on ${variant}`)
@@ -4059,7 +4169,7 @@ describe('createTerminal — complete: corner cases', () => {
 
   it('multi-pipe pipelines filter on the most recent `|`', () => {
     const t = createTerminal(SOURCES)
-    assert.deepEqual(t.complete('cat | grep TODO | he'), ['cat | grep TODO | head'])
+    assert.deepEqual(t.complete('cat | grep TODO | he'), ['cat | grep TODO | head', 'cat | grep TODO | hexdump'])
     // ls is non-pipeable — still rejected several pipes in.
     assert.deepEqual(t.complete('cat | grep TODO | ls'), [])
     assert.deepEqual(t.complete('cat | grep TODO | l'), [])
@@ -4097,7 +4207,7 @@ describe('createTerminal — complete: corner cases', () => {
     // `/usr/bin/grep` is parsed as a command alias, not a file path,
     // so bin-prefix completion still resolves against PIPE_NAMES.
     assert.deepEqual(t.complete('cat | /usr/bin/gre'), ['cat | /usr/bin/grep'])
-    assert.deepEqual(t.complete('cat | /bin/he'), ['cat | /bin/head'])
+    assert.deepEqual(t.complete('cat | /bin/he'), ['cat | /bin/head', 'cat | /bin/hexdump'])
     // Non-pipeable bin-prefixed commands still return [] — same as before.
     assert.deepEqual(t.complete('cat | /usr/bin/l'), [])
   })
@@ -4152,12 +4262,12 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat 1 |'), [
       'cat 1 | grep', 'cat 1 | head', 'cat 1 | tail', 'cat 1 | wc',
       'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs',
-      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | cat',
+      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | hexdump', 'cat 1 | cat',
     ])
     assert.deepEqual(t.complete('cat 1 | '), [
       'cat 1 | grep', 'cat 1 | head', 'cat 1 | tail', 'cat 1 | wc',
       'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs',
-      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | cat',
+      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | hexdump', 'cat 1 | cat',
     ])
     // Partial pipe-target word: space goes between `|` and the word.
     assert.deepEqual(t.complete('cat |gre'), ['cat | grep'])
@@ -4186,7 +4296,7 @@ describe('createTerminal — complete: corner cases', () => {
     // upstream of the trailing word; it just completes `gre`.
     const t = createTerminal({})
     assert.deepEqual(t.complete('echo | gre'), ['echo | grep'])
-    assert.deepEqual(t.complete('pwd | he'), ['pwd | head'])
+    assert.deepEqual(t.complete('pwd | he'), ['pwd | head', 'pwd | hexdump'])
   })
 
   it('bin-prefix completion fires only in command position', () => {
