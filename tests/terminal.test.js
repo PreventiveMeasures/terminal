@@ -3451,6 +3451,19 @@ describe('createTerminal — od (hidden hexdump variant)', () => {
     const t = createTerminal({})
     assert.equal(t.run('true | od').stdout, '0000000\n')
   })
+
+  it('-j strictly past EOF errors (unlike hexdump/xxd, which clamp)', () => {
+    const t = createTerminal({ 'hello.txt': 'hello\n' }) // 6 bytes
+    const r = t.run('od -j 7 hello.txt')
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stderr, /cannot skip past end/u)
+    assert.equal(r.stdout, '')
+    // A skip landing exactly at EOF is valid — just the offset line.
+    assert.equal(t.run('od -j 6 hello.txt').stdout, '0000006\n')
+    // hexdump / xxd clamp the same skip instead of erroring.
+    assert.equal(t.run('hexdump -s 100 hello.txt').stdout, '0000006\n')
+    assert.equal(t.run('xxd -s 100 hello.txt').stdout, '')
+  })
 })
 
 describe('createTerminal — xxd (hidden hexdump variant)', () => {

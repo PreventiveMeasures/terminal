@@ -17,20 +17,25 @@
 // ASCII gutter since they fall outside the printable 0x20–0x7e range.
 
 import { parseArgs } from './parse.js'
-import { okWith, parseNonNegativeInt, readContent } from './util.js'
+import { err, okWith, parseNonNegativeInt, readContent } from './util.js'
 
 const enc = new TextEncoder()
 const BYTES_PER_LINE = 16
+// Full-line widths the partial last row pads out to. hexdump: 7-digit
+// offset + space + eight 2-byte words (`XXXX` ×8 + 7 gaps = 39). xxd:
+// the hex column is eight raw 2-byte groups (`XXXX` ×8 + 7 gaps = 39).
+const HEXDUMP_ROW_WIDTH = 47
+const XXD_HEX_WIDTH = 39
 
 // hexdump's bare default. Two-byte little-endian hex words (`he` →
 // `6568`), a 7-digit hex offset, and every data row padded to the
-// full-line width (47) — exactly what util-linux prints. `-C` opts
-// into the canonical layout; `-v` defeats `*` folding; `-n`/`-s` cap
-// and skip bytes (real hexdump rejects `-s` on a pipe, but our stdin
-// is in-memory so it works uniformly).
+// full-line width — exactly what util-linux prints. `-C` opts into the
+// canonical layout; `-v` defeats `*` folding; `-n`/`-s` cap and skip
+// bytes (real hexdump rejects `-s` on a pipe, but our stdin is
+// in-memory so it works uniformly).
 export function hexdump(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, { short: ['C', 'v'], valueShort: ['n', 's'] })
-  const sl = slice('hexdump', positional, stdin, ctx, values.get('s'), values.get('n'), '-s', '-n')
+  const sl = slice('hexdump', positional, stdin, ctx, { skip: values.get('s'), len: values.get('n'), skipFlag: '-s', lenFlag: '-n' })
   if (sl.error) return sl.error
   return okWith(dump(sl.bytes, sl.start, flags.has('v'), flags.has('C') ? HEXDUMP_C : HEXDUMP), sl.r)
 }
@@ -38,9 +43,10 @@ export function hexdump(stdin, tokens, ctx) {
 // od's default: two-byte little-endian OCTAL words, an octal offset,
 // and — unlike hexdump — a trailing offset line even for empty input
 // and no per-row padding. `-v` defeats folding; `-j`/`-N` skip/limit.
+// od also rejects a skip past EOF instead of clamping (skipPastEofErrors).
 export function od(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, { short: ['v'], valueShort: ['j', 'N'] })
-  const sl = slice('od', positional, stdin, ctx, values.get('j'), values.get('N'), '-j', '-N')
+  const sl = slice('od', positional, stdin, ctx, { skip: values.get('j'), len: values.get('N'), skipFlag: '-j', lenFlag: '-N', skipPastEofErrors: true })
   if (sl.error) return sl.error
   return okWith(dump(sl.bytes, sl.start, flags.has('v'), OD), sl.r)
 }
@@ -51,27 +57,34 @@ export function od(stdin, tokens, ctx) {
 // skip/limit.
 export function xxd(stdin, tokens, ctx) {
   const { values, positional } = parseArgs(tokens, { valueShort: ['s', 'l'] })
-  const sl = slice('xxd', positional, stdin, ctx, values.get('s'), values.get('l'), '-s', '-l')
+  const sl = slice('xxd', positional, stdin, ctx, { skip: values.get('s'), len: values.get('l'), skipFlag: '-s', lenFlag: '-l' })
   if (sl.error) return sl.error
   return okWith(dump(sl.bytes, sl.start, false, XXD), sl.r)
 }
 
-// Read the inputs, encode to bytes, then skip/limit. Skip clamps to the
-// content length so `-s` past EOF reads zero bytes while the offset
-// column still lands at the clamped position (matching hexdump). The
-// `r` carries readContent's partial-failure stderr/exit for okWith.
-function slice(cmd, files, stdin, ctx, skipStr, lenStr, skipFlag, lenFlag) {
+// Read the inputs, encode to bytes, then skip/limit. Skip normally
+// clamps to the content length so `-s` past EOF reads zero bytes while
+// the offset column still lands at the clamped position (matching
+// hexdump and xxd). od instead errors on a skip STRICTLY past EOF
+// (`opt.skipPastEofErrors`) — a skip landing exactly at EOF is still
+// valid. Counts are decimal, the same convention head/tail/grep use;
+// hex (`0x10`) and size-suffix forms aren't modeled. `r` carries
+// readContent's partial-failure stderr/exit for okWith.
+function slice(cmd, files, stdin, ctx, opt) {
   const r = readContent(cmd, files, stdin, ctx)
   const all = enc.encode(r.content)
   let start = 0
-  if (skipStr !== undefined) {
-    const s = parseNonNegativeInt(skipStr, `${cmd}: ${skipFlag}`)
+  if (opt.skip !== undefined) {
+    const s = parseNonNegativeInt(opt.skip, `${cmd}: ${opt.skipFlag}`)
     if (s.error) return { error: s.error }
+    if (opt.skipPastEofErrors && s.value > all.length) {
+      return { error: err(`${cmd}: cannot skip past end of combined input`) }
+    }
     start = Math.min(s.value, all.length)
   }
   let bytes = all.subarray(start)
-  if (lenStr !== undefined) {
-    const n = parseNonNegativeInt(lenStr, `${cmd}: ${lenFlag}`)
+  if (opt.len !== undefined) {
+    const n = parseNonNegativeInt(opt.len, `${cmd}: ${opt.lenFlag}`)
     if (n.error) return { error: n.error }
     bytes = bytes.subarray(0, n.value)
   }
@@ -108,30 +121,38 @@ function dump(bytes, start, verbose, spec) {
 const HEXDUMP = {
   compress: true,
   trailer: 'nonzero',
-  addr: (n) => n.toString(16).padStart(7, '0'),
-  row: (off, b) => (HEXDUMP.addr(off) + ' ' + leWords(b).map(hex4).join(' ')).padEnd(47),
+  addr: hexAddr7,
+  row: (off, b) => (hexAddr7(off) + ' ' + leWords(b).map(hex4).join(' ')).padEnd(HEXDUMP_ROW_WIDTH),
 }
 
 const HEXDUMP_C = {
   compress: true,
   trailer: 'nonzero',
-  addr: (n) => n.toString(16).padStart(8, '0'),
-  row: (off, b) => canonicalRow(off, b),
+  addr: hexAddr8,
+  row: canonicalRow,
 }
 
 const OD = {
   compress: true,
   trailer: 'always',
-  addr: (n) => n.toString(8).padStart(7, '0'),
-  row: (off, b) => OD.addr(off) + ' ' + leWords(b).map(oct6).join(' '),
+  addr: octAddr7,
+  row: (off, b) => octAddr7(off) + ' ' + leWords(b).map(oct6).join(' '),
 }
 
 const XXD = {
   compress: false,
   trailer: 'never',
-  addr: (n) => n.toString(16).padStart(8, '0'),
-  row: (off, b) => `${XXD.addr(off)}: ${xxdGroups(b).join(' ').padEnd(39)}  ${gutter(b)}`,
+  addr: hexAddr8,
+  row: (off, b) => `${hexAddr8(off)}: ${xxdGroups(b).join(' ').padEnd(XXD_HEX_WIDTH)}  ${gutter(b)}`,
 }
+
+// Offset formatters: hexdump uses a 7-digit hex address, -C and xxd an
+// 8-digit one, od a 7-digit octal one. Standalone (not spec methods) so
+// each spec's `row` and trailer share one formatter without the object
+// having to refer back to its own binding name.
+function hexAddr7(n) { return n.toString(16).padStart(7, '0') }
+function hexAddr8(n) { return n.toString(16).padStart(8, '0') }
+function octAddr7(n) { return n.toString(8).padStart(7, '0') }
 
 // Canonical (`hexdump -C`) row: 8-digit offset, two padded groups of
 // eight 2-digit bytes, then a `|`-delimited ASCII gutter. Missing
@@ -141,7 +162,7 @@ function canonicalRow(off, row) {
   for (let i = 0; i < BYTES_PER_LINE; i++) cells.push(i < row.length ? hex2(row[i]) : '  ')
   const left = cells.slice(0, 8).join(' ')
   const right = cells.slice(8).join(' ')
-  return `${HEXDUMP_C.addr(off)}  ${left}  ${right}  |${gutter(row)}|`
+  return `${hexAddr8(off)}  ${left}  ${right}  |${gutter(row)}|`
 }
 
 // Little-endian 2-byte words (hexdump/od grouping): bytes b0,b1 read as
