@@ -1441,6 +1441,79 @@ describe('createTerminal — find / tree / path', () => {
     assert.ok(lines.every((l) => !l.startsWith('src/') || l.endsWith('.js')))
   })
 
+  it('find -print (explicit) matches the implicit default output exactly', () => {
+    // `-print` is the explicit spelling of find's default action, so
+    // `find /` and `find / -print` must produce identical output. Also
+    // covers the `--print` long form for parity with the other primaries.
+    const t = createTerminal(SOURCES)
+    const implicit = t.run('find /').stdout
+    assert.equal(t.run('find / -print').stdout, implicit)
+    assert.equal(t.run('find / --print').stdout, implicit)
+    // exit 0, non-empty, and the start itself is included.
+    const r = t.run('find / -print')
+    assert.equal(r.exitCode, 0)
+    assert.ok(r.stdout.split('\n').filter(Boolean).includes('/'))
+  })
+
+  it('find -print composes with filters like the implicit action', () => {
+    // `-name '*.js' -print` is `-name '*.js' -a -print`: print fires
+    // only for entries the earlier predicate kept (AND short-circuits),
+    // so the output equals the implicitly-printed filtered set.
+    const t = createTerminal(SOURCES)
+    const explicit = new Set(t.run('find / -type f -name "*.js" -print').stdout.split('\n').filter(Boolean))
+    const implicit = new Set(t.run('find / -type f -name "*.js"').stdout.split('\n').filter(Boolean))
+    assert.deepEqual([...explicit].sort(), [...implicit].sort())
+    assert.ok(explicit.has('/src/foo.js'))
+    assert.ok(explicit.has('/src/util/log.js'))
+    assert.ok(![...explicit].some((l) => l.endsWith('.md')))
+  })
+
+  it('find -print suppresses the implicit -print (each match appears once, not twice)', () => {
+    // Like -exec, an explicit -print is an action that replaces the
+    // implicit one. A regression that kept the implicit collector alive
+    // alongside an explicit -print would double every matching line.
+    const t = createTerminal(SOURCES)
+    const lines = t.run('find src -type f -name "*.js" -print').stdout.split('\n').filter(Boolean)
+    const uniq = new Set(lines)
+    assert.equal(lines.length, uniq.size, `no line should repeat, got ${JSON.stringify(lines)}`)
+    assert.deepEqual([...uniq].sort(), ['src/bar.js', 'src/foo.js', 'src/util/log.js'])
+  })
+
+  it('find -print un-suppresses a group that -exec left silent (per-group action)', () => {
+    // The tree-wide footgun: `-name '*.js' -o -name '*.md' -exec ...`
+    // prints only the md echoes, because the implicit -print is gone and
+    // the .js group has no action of its own. Adding an explicit -print
+    // to the .js group brings its matches back — verified against GNU.
+    const t = createTerminal(SOURCES)
+    const r = t.run('find / -name "*.js" -print -o -name "*.md" -exec echo md {} ";"')
+    assert.equal(r.exitCode, 0)
+    const lines = new Set(r.stdout.split('\n').filter(Boolean))
+    // .js paths reported by -print...
+    assert.ok(lines.has('/src/foo.js'))
+    assert.ok(lines.has('/src/bar.js'))
+    // ...and the .md branch still echoes via -exec.
+    assert.ok(lines.has('md /README.md'))
+    // The bare README path is NOT printed — that group's action is the
+    // echo, not a -print.
+    assert.ok(!lines.has('/README.md'))
+  })
+
+  it('find -not -print inverts the boolean but still prints as a side effect', () => {
+    // GNU: -print always evaluates true, so `-not -print` matches
+    // nothing, yet the print side effect fires for every visited entry.
+    // Because -print is an action, the implicit -print stays suppressed,
+    // so the ONLY output is the side effect. (An -a -type f after it
+    // would then filter to zero matches, but on its own -not -print
+    // still lists the whole tree.)
+    const t = createTerminal(SOURCES)
+    const r = t.run('find / -not -print')
+    assert.equal(r.exitCode, 0)
+    assert.deepEqual(
+      new Set(r.stdout.split('\n').filter(Boolean)),
+      new Set(t.run('find /').stdout.split('\n').filter(Boolean)),
+    )
+  })
+
   it('find -exec ... ; acts as a predicate (exit code filters the match, but does NOT bubble to find\'s exit)', () => {
     // GNU semantic (verified against /usr/bin/find 4.9):
     // `find . -exec false ;` exits 0. find's exit code reflects find's
