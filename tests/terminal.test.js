@@ -1419,6 +1419,105 @@ describe('createTerminal — find / tree / path', () => {
     assert.equal(r.stdout, '')
   })
 
+  it('find -print emits the same paths as the implicit default print', () => {
+    // The explicit action is a no-op when it lands where the implicit
+    // one already was — `find X` and `find X -print` agree, and the
+    // long form matches too.
+    const t = createTerminal(SOURCES)
+    const implicit = t.run('find /').stdout
+    assert.equal(t.run('find / -print').stdout, implicit)
+    assert.equal(t.run('find / --print').stdout, implicit)
+    // And it composes with filters exactly like the implicit print.
+    const named = t.run('find / -name "*.js" -print').stdout.split('\n').filter(Boolean).sort()
+    assert.deepEqual(named, ['/src/bar.js', '/src/foo.js', '/src/util/log.js'])
+    assert.equal(t.run('find / -name "*.zzz" -print').exitCode, 0, 'no match is not an error')
+  })
+
+  it('find -print repeats per occurrence and fires in evaluation order', () => {
+    // Verified against /usr/bin/find 4.9: `-print` is an action, not a
+    // flag — each occurrence emits, so `-print -print` doubles the
+    // output. A "seen it, print once" implementation would silently
+    // halve this.
+    const t = createTerminal(SOURCES)
+    const once = t.run('find / -type f -print').stdout.split('\n').filter(Boolean)
+    const twice = t.run('find / -type f -print -print').stdout.split('\n').filter(Boolean)
+    assert.equal(twice.length, once.length * 2)
+    assert.deepEqual([...new Set(twice)].sort(), [...once].sort())
+  })
+
+  it('find -print suppresses the implicit print tree-wide (the -o footgun, and its fix)', () => {
+    // Verified against /usr/bin/find 4.9. `-print` binds to its own
+    // group, but suppressing the default is expression-wide: the .js
+    // group below names no action, so its matches go unreported even
+    // though they satisfy the expression.
+    const t = createTerminal(SOURCES)
+    const footgun = t.run('find / -name "*.js" -o -name "*.md" -print').stdout.split('\n').filter(Boolean)
+    assert.deepEqual(footgun.sort(), ['/README.md'], 'the .js matches must stay silent')
+    // The fix — and the reason -print is worth having at all: spell
+    // the action out on the other group too.
+    const fixed = t.run('find / -name "*.js" -print -o -name "*.md" -print').stdout.split('\n').filter(Boolean)
+    assert.deepEqual(fixed.sort(), ['/README.md', '/src/bar.js', '/src/foo.js', '/src/util/log.js'])
+  })
+
+  it('find -print -o -print emits each path once (first matching group short-circuits)', () => {
+    // -print is always true, so the left group always wins and the
+    // right one never runs. Verified against /usr/bin/find 4.9.
+    const t = createTerminal(SOURCES)
+    const lines = t.run('find / -print -o -print').stdout.split('\n').filter(Boolean)
+    assert.equal(lines.length, new Set(lines).size, `expected no duplicates, got ${JSON.stringify(lines)}`)
+    assert.deepEqual(lines.sort(), t.run('find /').stdout.split('\n').filter(Boolean).sort())
+  })
+
+  it('find -not -print still prints (negation flips the boolean, not the side effect)', () => {
+    // Verified against /usr/bin/find 4.9: `find . ! -print` prints
+    // everything while matching nothing — the action runs, and only
+    // its return value is inverted. Both spellings of negation agree.
+    const t = createTerminal(SOURCES)
+    const all = t.run('find /').stdout.split('\n').filter(Boolean).sort()
+    for (const cmd of ['find / -not -print', 'find / ! -print']) {
+      const r = t.run(cmd)
+      assert.equal(r.exitCode, 0)
+      assert.deepEqual(r.stdout.split('\n').filter(Boolean).sort(), all, cmd)
+    }
+  })
+
+  it('find -print interleaves with -exec per entry, in expression order', () => {
+    // Verified against /usr/bin/find 4.9: output is emitted as each
+    // action is reached, so a path/echo pair appears per entry rather
+    // than one batched block of paths followed by one of echoes.
+    // Buffering the prints separately (as the pre--print code did)
+    // would produce the batched shape instead.
+    const t = createTerminal({ 'a.txt': 'x\n' })
+    assert.equal(t.run("find a.txt -print -exec echo EXEC {} ';'").stdout, 'a.txt\nEXEC a.txt\n')
+    assert.equal(t.run("find a.txt -exec echo EXEC {} ';' -print").stdout, 'EXEC a.txt\na.txt\n')
+    // `+` is the exception: it dispatches once after the walk, so its
+    // output trails every printed path regardless of position.
+    assert.equal(t.run('find a.txt -print -exec echo B {} +').stdout, 'a.txt\nB a.txt\n')
+  })
+
+  it('find -print after a failing -exec never runs (AND short-circuits)', () => {
+    // Verified against /usr/bin/find 4.9: the leading -print fires,
+    // `false` breaks the AND chain, and the trailing -print is never
+    // reached — one line out, not two.
+    const t = createTerminal({ 'a.txt': 'x\n' })
+    const r = t.run("find a.txt -print -exec false ';' -print")
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'a.txt\n')
+  })
+
+  it('find still rejects -print0 / -printf (only bare -print is modeled)', () => {
+    // The unknown-option guard must keep catching the -print* family
+    // we do not implement, rather than prefix-matching them to -print
+    // and silently ignoring the difference (-print0 is NUL-separated).
+    const t = createTerminal(SOURCES)
+    for (const cmd of ['find / -print0', 'find / -printf "%p"']) {
+      const r = t.run(cmd)
+      assert.notEqual(r.exitCode, 0, cmd)
+      assert.match(r.stderr, /unknown option/u, cmd)
+      assert.equal(r.stdout, '', cmd)
+    }
+  })
+
   it('find -exec ... ; dispatches once per match with `{}` replaced by the path', () => {
     const t = createTerminal(SOURCES)
     // `echo {}` via -exec produces one line per match. Use -type f to

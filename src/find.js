@@ -2,8 +2,8 @@
 // feature set (POSIX-style `-name` / `-type` / `-path` primaries,
 // GNU long forms, `-not` / `!` negation, `-a` / `-o` boolean
 // combinators with precedence, `-mindepth` / `-maxdepth` depth
-// bounds, `-exec CMD ... ;` and `-exec CMD ... {} +` action /
-// predicate, the per-path glob matcher) doesn't fit
+// bounds, `-print` and `-exec CMD ... ;` / `-exec CMD ... {} +`
+// actions, the per-path glob matcher) doesn't fit
 // nav-commands.js's 300-line cap. The tree traversal itself is
 // fs.js's `walkTree`.
 //
@@ -14,27 +14,40 @@
 // extracted up front: `-maxdepth` caps walkTree's descent, while
 // `-mindepth` filters which visited entries are reported.
 //
-// `-exec` is variadic (token list up to `;` or `+`), so it's
-// parsed inline in walkExprTokens rather than going through
-// primaryFor. The `;` form dispatches per match and the exit code
-// drives the predicate's boolean. The `+` form collects paths
-// during the walk and dispatches once after, treating the
-// predicate as always-true for filtering (matching GNU — a real
-// filter would need to know the outcome before all paths are in).
-// Either form suppresses the default print (which is otherwise
-// the implicit action), matching POSIX.
+// Actions (`-print`, `-exec`) are predicates like any other — they
+// just have output as a side effect. That's what makes GNU's
+// evaluation order observable: an action fires when, and only
+// when, short-circuit evaluation reaches its slot in the boolean
+// tree, so `-print -exec echo {} ';'` interleaves path/echo per
+// entry rather than emitting two batched blocks.
+//
+// `-print` is always-true and emits the path. `-exec` is variadic
+// (token list up to `;` or `+`), so it's parsed inline in
+// walkExprTokens rather than going through primaryFor. The `;`
+// form dispatches per match and the exit code drives the
+// predicate's boolean. The `+` form collects paths during the walk
+// and dispatches once after, treating the predicate as always-true
+// for filtering (matching GNU — a real filter would need to know
+// the outcome before all paths are in).
+//
+// The default print is modeled as an implicit `-print` appended to
+// each group when the expression names no action of its own —
+// POSIX's rule, and the reason `-exec` alone produces no paths.
 
 import { basename, relativeTo, resolve, walkTree } from './fs.js'
 import { compileGlob } from './glob.js'
 import { err, parseNonNegativeInt } from './util.js'
 
+// Value-taking primaries only — `primaryFor` consumes the next
+// token as the value for anything in here. The valueless actions
+// (`-print`, `-exec`) are matched by token in walkExprTokens
+// instead, so they must stay out of this set.
 const PRIMARIES = new Set(['name', 'type', 'path', 'mindepth', 'maxdepth'])
 
 export function find(_stdin, tokens, ctx) {
   const parsed = parseFindArgs(tokens)
   if (parsed.error) return parsed.error
-  const { starts, minDepth, maxDepth, groups, hasExec, batches } = parsed
-  const out = []
+  const { starts, minDepth, maxDepth, groups, batches } = parsed
   let stdout = ''
   let stderr = ''
   // GNU semantic (verified against /usr/bin/find 4.9): for the `;`
@@ -64,10 +77,12 @@ export function find(_stdin, tokens, ctx) {
     for (const entry of walkTree(ctx.fs, startAbs, maxDepth)) {
       if (entry.depth < minDepth) continue
       const display = toDisplayPath(start, startAbs, entry.path)
+      // Everything this entry emits — printed paths and per-match
+      // exec output alike — comes back in evaluation order, so the
+      // two interleave the way GNU's do.
       const r = runPredicates(groups, { kind: entry.kind, path: display }, ctx)
       stdout += r.stdout
       stderr += r.stderr
-      if (r.matched && !hasExec) out.push(display)
     }
   }
   // Batched `-exec ... +` runs after the walk with all collected
@@ -86,8 +101,7 @@ export function find(_stdin, tokens, ctx) {
     stderr += r.stderr
     if (r.exitCode !== 0) exitCode = 1
   }
-  const printed = out.length === 0 ? '' : out.join('\n') + '\n'
-  return { stdout: printed + stdout, stderr, exitCode }
+  return { stdout, stderr, exitCode }
 }
 
 function parseFindArgs(tokens) {
@@ -95,19 +109,32 @@ function parseFindArgs(tokens) {
   if (filtered.error) return filtered
   const r = walkExprTokens(filtered.tokens, filtered.minDepth, filtered.maxDepth)
   if (r.error) return r
-  // Pre-walk scan: any -exec in the tree suppresses the implicit
+  // Pre-walk scan: any action in the tree suppresses the implicit
   // -print, and `+`-mode predicates need post-walk dispatching.
   // Collect both once rather than re-scanning per entry.
   //
   // The "any" is tree-wide — important footgun:
-  // `find . -name '*.js' -o -name '*.md' -exec echo md {} \;` prints
+  // `find . -name '*.js' -o -name '*.md' -exec echo md {} ';'` prints
   // ONLY the md echoes, never the bare .js paths. The .js group
-  // doesn't include an -exec, but the tree's implicit -print is
-  // gone, so its matches go unreported. Matches POSIX / GNU; the
-  // workaround is an explicit -print primary (which we don't model).
+  // doesn't include an action, but the tree's implicit -print is
+  // gone, so its matches go unreported. Matches POSIX / GNU (verified
+  // against /usr/bin/find 4.9); the fix is to spell the action out on
+  // the other group: `... -name '*.js' -print -o -name '*.md' -exec …`.
   const execs = []
-  for (const g of r.groups) for (const p of g) if (p.kind === 'exec') execs.push(p)
-  return { ...r, hasExec: execs.length > 0, batches: execs.filter((p) => p.mode === 'batch') }
+  let hasAction = false
+  for (const g of r.groups) {
+    for (const p of g) {
+      if (p.kind === 'exec') execs.push(p)
+      if (p.kind === 'exec' || p.kind === 'print') hasAction = true
+    }
+  }
+  // No action named → POSIX appends `-print` to the whole expression.
+  // GNU wraps it (`( expr ) -print`); appending per-group is
+  // equivalent under short-circuit AND — a group only reaches its
+  // trailing print when the group matched, and the first matching
+  // group short-circuits the rest, so each entry still prints once.
+  if (!hasAction) for (const g of r.groups) g.push({ kind: 'print', negate: false })
+  return { ...r, batches: execs.filter((p) => p.mode === 'batch') }
 }
 
 // Extract `-mindepth N` / `-maxdepth N` (and `--` long forms) first.
@@ -184,6 +211,16 @@ function walkExprTokens(tokens, minDepth, maxDepth) {
       if (expectingRhs) return { error: err(`find: \`${expectingRhs}\` with no right-hand expression`) }
       if (groups.at(-1).length === 0) return { error: err('find: `-o` with no left-hand expression') }
       groups.push([]); expectingRhs = '-o'; seenExpr = true; continue
+    }
+    // Valueless action: always true, emits the path. `-not -print`
+    // is legal and useful-ish — GNU still runs the side effect and
+    // only inverts the boolean, so `find . ! -print` prints
+    // everything while matching nothing (verified against 4.9).
+    // That falls out of evalOne's negate handling for free.
+    if (t === '-print' || t === '--print') {
+      groups.at(-1).push({ kind: 'print', negate: pendingNot })
+      pendingNot = false; expectingRhs = null; seenExpr = true
+      continue
     }
     if (t === '-exec' || t === '--exec') {
       const parsed = consumeExec(tokens, i, pendingNot)
@@ -284,12 +321,14 @@ function consumeExec(tokens, i, pendingNot) {
   return { pred, nextI: j }
 }
 
-// Top-level match: OR across groups, AND within. With no
-// predicates at all (`find /`), the single empty group matches
-// everything — `[].every(…)` is true. Returns {matched, stdout,
-// stderr} so per-entry -exec output propagates; non-exec predicates
-// contribute empty stdout/stderr. OR/AND short-circuit, so an -exec
-// only runs when its position in the boolean tree is reached.
+// Top-level evaluation: OR across groups, AND within. With no
+// predicates at all (`find /`), the group holds just the implicit
+// -print, so everything is reported. Returns only {stdout, stderr}:
+// the expression's boolean is purely internal now that printing is
+// itself an action, since find's exit code never reflects whether
+// anything matched. OR/AND short-circuit, so an action only runs
+// when its position in the boolean tree is reached — that is what
+// makes `-print -exec false ';' -print` emit one line, not two.
 //
 // Exec exit codes deliberately don't propagate to find's exit code
 // — see the comment in find() — but they DO drive the predicate's
@@ -299,7 +338,6 @@ function consumeExec(tokens, i, pendingNot) {
 function runPredicates(groups, entry, ctx) {
   let stdout = ''
   let stderr = ''
-  let matched = false
   for (const group of groups) {
     let groupMatched = true
     for (const p of group) {
@@ -308,9 +346,11 @@ function runPredicates(groups, entry, ctx) {
       stderr += r.stderr
       if (!r.matched) { groupMatched = false; break }
     }
-    if (groupMatched) { matched = true; break }
+    // First matching group wins — the remaining groups' actions must
+    // not fire, which is why `-print -o -print` emits one line, not two.
+    if (groupMatched) break
   }
-  return { matched, stdout, stderr }
+  return { stdout, stderr }
 }
 
 function evalOne(p, entry, ctx) {
@@ -319,13 +359,16 @@ function evalOne(p, entry, ctx) {
 }
 
 function evalPredicate(p, entry, ctx) {
-  // `kind` is one of `type` / `name` / `path` / `exec` — parser
-  // emits no other shapes. No fall-through; an unknown kind would
-  // crash the caller's destructure, which IS the right failure mode
-  // for a contract violation that can only come from a code bug.
+  // `kind` is one of `type` / `name` / `path` / `print` / `exec` —
+  // parser emits no other shapes. No fall-through; an unknown kind
+  // would crash the caller's destructure, which IS the right failure
+  // mode for a contract violation that can only come from a code bug.
   if (p.kind === 'type') return matchedOnly(p.value === 'f' ? entry.kind === 'file' : entry.kind === 'dir')
   if (p.kind === 'name') return matchedOnly(p.re.test(basename(entry.path)))
   if (p.kind === 'path') return matchedOnly(p.re.test(entry.path))
+  // Always true, output as the side effect. `-not -print` inverts
+  // only the boolean (in evalOne) — the line is emitted either way.
+  if (p.kind === 'print') return { matched: true, stdout: entry.path + '\n', stderr: '' }
   return evalExec(p, entry, ctx)
 }
 
