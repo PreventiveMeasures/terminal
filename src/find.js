@@ -358,7 +358,12 @@ function runPredicates(groups, entry, ctx) {
 
 function evalOne(p, entry, ctx) {
   const r = evalPredicate(p, entry, ctx)
-  return { ...r, matched: p.negate ? !r.matched : r.matched }
+  // Pass un-negated results through rather than re-wrapping them to
+  // copy `matched` onto itself: this runs per predicate per entry, and
+  // the spread costs ~15-20% of a whole `find /` (20k entries, min of
+  // 100 reps: 2.6ms vs 3.3ms for `-type f`). Negation is rare enough
+  // to keep paying for it.
+  return p.negate ? { ...r, matched: !r.matched } : r
 }
 
 function evalPredicate(p, entry, ctx) {
