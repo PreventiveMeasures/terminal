@@ -1493,8 +1493,8 @@ describe('createTerminal — find / tree / path', () => {
   it('find -print interleaves with -exec per entry, in expression order', () => {
     // Verified against /usr/bin/find 4.9: output is emitted as each
     // action is reached, so a path/echo pair appears per entry rather
-    // than one batched block of paths followed by one of echoes.
-    // Buffering the prints separately (as the pre--print code did)
+    // than one batched block of paths followed by one of echoes. An
+    // implementation that buffered prints separately from exec output
     // would produce the batched shape instead.
     const t = createTerminal({ 'a.txt': 'x\n' })
     assert.equal(t.run("find a.txt -print -exec echo EXEC {} ';'").stdout, 'a.txt\nEXEC a.txt\n')

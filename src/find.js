@@ -45,11 +45,17 @@ import { basename, relativeTo, resolve, walkTree } from './fs.js'
 import { compileGlob } from './glob.js'
 import { err, parseNonNegativeInt } from './util.js'
 
-// Value-taking primaries only — `primaryFor` consumes the next
-// token as the value for anything in here. The valueless actions
-// (`-print`, `-exec`) are matched by token in walkExprTokens
-// instead, so they must stay out of this set.
-const PRIMARIES = new Set(['name', 'type', 'path', 'mindepth', 'maxdepth'])
+// `primaryFor` consumes the next token as the value for anything in
+// here — hence the name, matching grep.js's SHORT_FLAGS/VALUE_SHORTS
+// split. Valueless tokens must stay out: adding `empty` here would
+// make `find / -empty -type f` swallow `-type` as its value.
+const VALUE_PRIMARIES = new Set(['name', 'type', 'path', 'mindepth', 'maxdepth'])
+
+// The single spelling test for the double-dash aliases described
+// above. One helper rather than a hand-written pair per token, so the
+// aliases can't drift apart as tokens are added — `-a` / `-o` are the
+// deliberate exceptions, spelled out at their call sites.
+const isTok = (t, name) => t === '-' + name || t === '--' + name
 
 export function find(_stdin, tokens, ctx) {
   const parsed = parseFindArgs(tokens)
@@ -84,9 +90,6 @@ export function find(_stdin, tokens, ctx) {
     for (const entry of walkTree(ctx.fs, startAbs, maxDepth)) {
       if (entry.depth < minDepth) continue
       const display = toDisplayPath(start, startAbs, entry.path)
-      // Everything this entry emits — printed paths and per-match
-      // exec output alike — comes back in evaluation order, so the
-      // two interleave the way GNU's do.
       const r = runPredicates(groups, { kind: entry.kind, path: display }, ctx)
       stdout += r.stdout
       stderr += r.stderr
@@ -147,9 +150,7 @@ function stripDepthOpts(tokens) {
   let maxDepth = Number.POSITIVE_INFINITY
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
-    const opt = t === '-mindepth' || t === '--mindepth' ? 'mindepth'
-      : t === '-maxdepth' || t === '--maxdepth' ? 'maxdepth'
-      : null
+    const opt = isTok(t, 'mindepth') ? 'mindepth' : isTok(t, 'maxdepth') ? 'maxdepth' : null
     if (opt) {
       if (i + 1 >= tokens.length) return { error: err(`find: -${opt} requires a value`) }
       const r = parseNonNegativeInt(tokens[i + 1], `find: -${opt}`)
@@ -203,30 +204,26 @@ function walkExprTokens(tokens, minDepth, maxDepth) {
       if (pendingNot) return { error: err('find: `-not` cannot precede another `-not`') }
       pendingNot = true; seenExpr = true; continue
     }
-    if (t === '-a' || t === '-and' || t === '--and') {
+    if (t === '-a' || isTok(t, 'and')) {
       if (pendingNot) return { error: err('find: `-not` must be followed by a primary') }
       if (expectingRhs) return { error: err(`find: \`${expectingRhs}\` with no right-hand expression`) }
       if (groups.at(-1).length === 0) return { error: err('find: `-a` with no left-hand expression') }
       expectingRhs = '-a'; seenExpr = true; continue
     }
-    if (t === '-o' || t === '-or' || t === '--or') {
+    if (t === '-o' || isTok(t, 'or')) {
       if (pendingNot) return { error: err('find: `-not` must be followed by a primary') }
       if (expectingRhs) return { error: err(`find: \`${expectingRhs}\` with no right-hand expression`) }
       if (groups.at(-1).length === 0) return { error: err('find: `-o` with no left-hand expression') }
       groups.push([]); expectingRhs = '-o'; seenExpr = true; continue
     }
-    // Valueless action: always true, emits the path. `-not -print`
-    // is legal and useful-ish — GNU still runs the side effect and
-    // only inverts the boolean, so `find . ! -print` prints
-    // everything while matching nothing (verified against 4.9).
-    // That falls out of evalOne's negate handling for free.
-    if (t === '-print' || t === '--print') {
+    // Valueless action: always true, emits the path (see evalPredicate).
+    if (isTok(t, 'print')) {
       groups.at(-1).push({ kind: 'print', negate: pendingNot })
       hasAction = true
       pendingNot = false; expectingRhs = null; seenExpr = true
       continue
     }
-    if (t === '-exec' || t === '--exec') {
+    if (isTok(t, 'exec')) {
       const parsed = consumeExec(tokens, i, pendingNot)
       if (parsed.error) return parsed
       groups.at(-1).push(parsed.pred)
@@ -270,8 +267,8 @@ function primaryFor(token) {
   // -mindepth / -maxdepth are stripped before we get here; never treat
   // them as primaries even if one slips through.
   if (/^--?(?:min|max)depth$/u.test(token)) return null
-  if (token.startsWith('--') && PRIMARIES.has(token.slice(2))) return token.slice(2)
-  if (token.startsWith('-') && PRIMARIES.has(token.slice(1))) return token.slice(1)
+  if (token.startsWith('--') && VALUE_PRIMARIES.has(token.slice(2))) return token.slice(2)
+  if (token.startsWith('-') && VALUE_PRIMARIES.has(token.slice(1))) return token.slice(1)
   return null
 }
 
@@ -330,9 +327,9 @@ function consumeExec(tokens, i, pendingNot) {
 // Top-level evaluation: OR across groups, AND within. With no
 // predicates at all (`find /`), the group holds just the implicit
 // -print, so everything is reported. Returns only {stdout, stderr}:
-// the expression's boolean is purely internal now that printing is
-// itself an action, since find's exit code never reflects whether
-// anything matched. OR/AND short-circuit, so an action only runs
+// the expression's boolean is purely internal, since printing is an
+// action and find's exit code never reflects whether anything
+// matched. OR/AND short-circuit, so an action only runs
 // when its position in the boolean tree is reached — that is what
 // makes `-print -exec false ';' -print` emit one line, not two.
 //
@@ -361,24 +358,23 @@ function runPredicates(groups, entry, ctx) {
 
 function evalOne(p, entry, ctx) {
   const r = evalPredicate(p, entry, ctx)
-  // Un-negated is the overwhelmingly common case and every entry pays
-  // this per predicate, so pass the result straight through rather
-  // than re-wrapping it just to copy `matched` onto itself.
-  return p.negate ? { ...r, matched: !r.matched } : r
+  return { ...r, matched: p.negate ? !r.matched : r.matched }
 }
 
 function evalPredicate(p, entry, ctx) {
   // `kind` is one of `type` / `name` / `path` / `print` / `exec` —
-  // parser emits no other shapes. No fall-through; an unknown kind
-  // would crash the caller's destructure, which IS the right failure
-  // mode for a contract violation that can only come from a code bug.
+  // parser emits no other shapes. Every arm is named, so a new kind
+  // appended at the bottom is reachable rather than dead; falling off
+  // the end returns undefined and crashes the caller's destructure,
+  // which IS the right failure mode for a contract violation that can
+  // only come from a code bug.
   if (p.kind === 'type') return matchedOnly(p.value === 'f' ? entry.kind === 'file' : entry.kind === 'dir')
   if (p.kind === 'name') return matchedOnly(p.re.test(basename(entry.path)))
   if (p.kind === 'path') return matchedOnly(p.re.test(entry.path))
   // Always true, output as the side effect. `-not -print` inverts
   // only the boolean (in evalOne) — the line is emitted either way.
   if (p.kind === 'print') return { matched: true, stdout: entry.path + '\n', stderr: '' }
-  return evalExec(p, entry, ctx)
+  if (p.kind === 'exec') return evalExec(p, entry, ctx)
 }
 
 function matchedOnly(b) { return { matched: b, stdout: '', stderr: '' } }
