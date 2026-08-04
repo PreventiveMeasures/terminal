@@ -1,6 +1,6 @@
 // find — auditor's tree-walker, in its own file because the
 // feature set (POSIX-style `-name` / `-type` / `-path` primaries,
-// GNU long forms, `-not` / `!` negation, `-a` / `-o` boolean
+// double-dash aliases, `-not` / `!` negation, `-a` / `-o` boolean
 // combinators with precedence, `-mindepth` / `-maxdepth` depth
 // bounds, `-print` and `-exec CMD ... ;` / `-exec CMD ... {} +`
 // actions, the per-path glob matcher) doesn't fit
@@ -33,6 +33,13 @@
 // The default print is modeled as an implicit `-print` appended to
 // each group when the expression names no action of its own —
 // POSIX's rule, and the reason `-exec` alone produces no paths.
+//
+// One deliberate divergence, easy to misread as GNU compatibility:
+// the double-dash spellings (`--name`, `--print`, `--exec`, `--and`,
+// …) are a local convenience. Real find has no double-dash predicates
+// at all — GNU 4.9 answers every one of them with "unknown predicate"
+// — so only the single-dash forms are portable. Everything else in
+// this file is checked against 4.9 and matches.
 
 import { basename, relativeTo, resolve, walkTree } from './fs.js'
 import { compileGlob } from './glob.js'
@@ -109,32 +116,21 @@ function parseFindArgs(tokens) {
   if (filtered.error) return filtered
   const r = walkExprTokens(filtered.tokens, filtered.minDepth, filtered.maxDepth)
   if (r.error) return r
-  // Pre-walk scan: any action in the tree suppresses the implicit
-  // -print, and `+`-mode predicates need post-walk dispatching.
-  // Collect both once rather than re-scanning per entry.
+  // No action named → POSIX appends `-print` to the whole expression.
+  // GNU wraps it (`( expr ) -print`); appending per-group is
+  // equivalent under short-circuit AND — a group only reaches its
+  // trailing print when the group matched, and the first matching
+  // group short-circuits the rest, so each entry still prints once.
   //
-  // The "any" is tree-wide — important footgun:
+  // Suppression is tree-wide, which is an important footgun:
   // `find . -name '*.js' -o -name '*.md' -exec echo md {} ';'` prints
   // ONLY the md echoes, never the bare .js paths. The .js group
   // doesn't include an action, but the tree's implicit -print is
   // gone, so its matches go unreported. Matches POSIX / GNU (verified
   // against /usr/bin/find 4.9); the fix is to spell the action out on
   // the other group: `... -name '*.js' -print -o -name '*.md' -exec …`.
-  const execs = []
-  let hasAction = false
-  for (const g of r.groups) {
-    for (const p of g) {
-      if (p.kind === 'exec') execs.push(p)
-      if (p.kind === 'exec' || p.kind === 'print') hasAction = true
-    }
-  }
-  // No action named → POSIX appends `-print` to the whole expression.
-  // GNU wraps it (`( expr ) -print`); appending per-group is
-  // equivalent under short-circuit AND — a group only reaches its
-  // trailing print when the group matched, and the first matching
-  // group short-circuits the rest, so each entry still prints once.
-  if (!hasAction) for (const g of r.groups) g.push({ kind: 'print', negate: false })
-  return { ...r, batches: execs.filter((p) => p.mode === 'batch') }
+  if (!r.hasAction) for (const g of r.groups) g.push({ kind: 'print', negate: false })
+  return r
 }
 
 // Extract `-mindepth N` / `-maxdepth N` (and `--` long forms) first.
@@ -193,6 +189,13 @@ function walkExprTokens(tokens, minDepth, maxDepth) {
   // yet been balanced by a primary. Holds the operator string so
   // the error can name it; cleared when a primary is consumed.
   let expectingRhs = null
+  // Both are maintained at the push sites below rather than by a
+  // second pass over `groups`, so the invariant stays next to the
+  // code that can break it: a new action kind has to declare itself
+  // here, or the implicit -print silently comes back. `batches`
+  // holds the `+`-mode predicates find() dispatches after the walk.
+  let hasAction = false
+  const batches = []
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
     if (afterTerminator) { starts.push(t); continue }
@@ -219,6 +222,7 @@ function walkExprTokens(tokens, minDepth, maxDepth) {
     // That falls out of evalOne's negate handling for free.
     if (t === '-print' || t === '--print') {
       groups.at(-1).push({ kind: 'print', negate: pendingNot })
+      hasAction = true
       pendingNot = false; expectingRhs = null; seenExpr = true
       continue
     }
@@ -226,6 +230,8 @@ function walkExprTokens(tokens, minDepth, maxDepth) {
       const parsed = consumeExec(tokens, i, pendingNot)
       if (parsed.error) return parsed
       groups.at(-1).push(parsed.pred)
+      hasAction = true
+      if (parsed.pred.mode === 'batch') batches.push(parsed.pred)
       pendingNot = false; expectingRhs = null; seenExpr = true; i = parsed.nextI
       continue
     }
@@ -257,7 +263,7 @@ function walkExprTokens(tokens, minDepth, maxDepth) {
   }
   if (pendingNot) return { error: err('find: trailing `-not` with no primary') }
   if (expectingRhs) return { error: err(`find: \`${expectingRhs}\` with no right-hand expression`) }
-  return { starts: starts.length > 0 ? starts : ['.'], minDepth, maxDepth, groups }
+  return { starts: starts.length > 0 ? starts : ['.'], minDepth, maxDepth, groups, hasAction, batches }
 }
 
 function primaryFor(token) {
@@ -355,7 +361,10 @@ function runPredicates(groups, entry, ctx) {
 
 function evalOne(p, entry, ctx) {
   const r = evalPredicate(p, entry, ctx)
-  return { ...r, matched: p.negate ? !r.matched : r.matched }
+  // Un-negated is the overwhelmingly common case and every entry pays
+  // this per predicate, so pass the result straight through rather
+  // than re-wrapping it just to copy `matched` onto itself.
+  return p.negate ? { ...r, matched: !r.matched } : r
 }
 
 function evalPredicate(p, entry, ctx) {

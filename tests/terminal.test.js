@@ -1426,6 +1426,10 @@ describe('createTerminal — find / tree / path', () => {
     const t = createTerminal(SOURCES)
     const implicit = t.run('find /').stdout
     assert.equal(t.run('find / -print').stdout, implicit)
+    // `--print` is a local alias, NOT a GNU form — 4.9 answers every
+    // double-dash predicate with "unknown predicate", including the
+    // pre-existing `--name` / `--type` / `--exec`. Asserted here as
+    // our own extension, not as GNU-matching behavior.
     assert.equal(t.run('find / --print').stdout, implicit)
     // And it composes with filters exactly like the implicit print.
     const named = t.run('find / -name "*.js" -print').stdout.split('\n').filter(Boolean).sort()
@@ -1443,6 +1447,11 @@ describe('createTerminal — find / tree / path', () => {
     const twice = t.run('find / -type f -print -print').stdout.split('\n').filter(Boolean)
     assert.equal(twice.length, once.length * 2)
     assert.deepEqual([...new Set(twice)].sort(), [...once].sort())
+    // Adjacency is the ordering half, and it is the part a batched
+    // implementation would get wrong: both prints for an entry fire
+    // before the walk moves on, so the duplicates are neighbors
+    // rather than two blocks of the full list.
+    for (let i = 0; i < twice.length; i += 2) assert.equal(twice[i], twice[i + 1])
   })
 
   it('find -print suppresses the implicit print tree-wide (the -o footgun, and its fix)', () => {
@@ -1503,6 +1512,26 @@ describe('createTerminal — find / tree / path', () => {
     const r = t.run("find a.txt -print -exec false ';' -print")
     assert.equal(r.exitCode, 0)
     assert.equal(r.stdout, 'a.txt\n')
+  })
+
+  it('find -print inside an -exec argument list stays a literal argument', () => {
+    // -exec consumes its token slice wholesale, so an inner `-print`
+    // belongs to the exec'd command and must never register as our
+    // action. Today that holds because consumeExec takes the slice
+    // before the loop can see the token, and because the action flag
+    // is set at the push sites rather than by scanning raw tokens —
+    // a future refactor to a token-level scan would swallow the
+    // argument and silently change the dispatched command. The suite
+    // guards `{}` / `;` / `+` the same way.
+    //
+    // The `--` is for our `echo`, not for find: unlike GNU echo, ours
+    // scans every argument position for flags, so a bare `-print`
+    // argument would trip its own option parser before it could prove
+    // anything about find.
+    const t = createTerminal({ 'a.txt': 'x\n' })
+    const r = t.run("find a.txt -exec echo -- -print {} ';'")
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '-print a.txt\n', 'the inner -print must reach echo as a literal argument')
   })
 
   it('find still rejects -print0 / -printf (only bare -print is modeled)', () => {
