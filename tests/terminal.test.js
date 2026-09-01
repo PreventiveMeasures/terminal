@@ -2514,6 +2514,9 @@ describe('createTerminal — newline command separator', () => {
     const r = t.run('cd src\ncat foo.js | grep TODO\npwd')
     assert.equal(r.exitCode, 0)
     assert.equal(r.stdout, '// TODO: fix\n/src\n')
+    // ...but the block as a whole is one compound line, so the move
+    // is scoped to it (see the `cd` scoping suite below).
+    assert.equal(t.cwd(), '/')
   })
 
   it('newlines and `;` interleave freely', () => {
@@ -2529,6 +2532,94 @@ describe('createTerminal — newline command separator', () => {
     const r = t.run('echo a &&\n')
     assert.notEqual(r.exitCode, 0)
     assert.match(r.stderr, /empty pipeline/u)
+  })
+})
+
+describe('createTerminal — `cd` inside a compound line is scoped to that line', () => {
+  // The agent-tool reading of `cd DIR && cmd` is "run cmd in DIR":
+  // the next call starts from where the terminal was, not from DIR.
+  // Bash would keep the cd; here only a bare `cd DIR` line does.
+  const TREE = { 'a/1.txt': 'one\n', 'b/2.txt': 'two\n' }
+
+  it('reported failure: `cd a && cat 1.txt` then `cd b && ls` both resolve from the start', () => {
+    // Was: the first line parked the terminal in /a, so `cd b` on
+    // the next line looked for /a/b and failed.
+    const t = createTerminal(TREE)
+    const first = t.run('cd a && cat 1.txt')
+    assert.equal(first.exitCode, 0)
+    assert.equal(first.stdout, 'one\n')
+    assert.equal(first.cwd, '/')
+    assert.equal(t.cwd(), '/')
+    const second = t.run('cd b && ls')
+    assert.equal(second.exitCode, 0)
+    assert.equal(second.stdout, '2.txt\n')
+    assert.equal(second.stderr, '')
+    assert.equal(t.cwd(), '/')
+  })
+
+  it('the rest of the line still sees the moved cwd', () => {
+    const t = createTerminal(SOURCES)
+    // The glob expands against the moved cwd, not the outer one.
+    const r = t.run('cd src && pwd && echo *.js')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '/src\nbar.js foo.js\n')
+    assert.equal(t.cwd(), '/')
+  })
+
+  it('a bare `cd DIR` line still moves the terminal', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('cd src').cwd, '/src')
+    assert.equal(t.cwd(), '/src')
+    // Redirects, a trailing `;`, and a bin prefix don't make it
+    // compound — the line is still one `cd`.
+    t.run('cd util 2>/dev/null')
+    assert.equal(t.cwd(), '/src/util')
+    t.run('cd .. ;')
+    assert.equal(t.cwd(), '/src')
+    t.run('/bin/cd /')
+    assert.equal(t.cwd(), '/')
+  })
+
+  it('`;`, newline, `||`, and `|` forms are compound too', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('cd src; pwd').stdout, '/src\n')
+    assert.equal(t.cwd(), '/')
+    assert.equal(t.run('cd src\npwd').stdout, '/src\n')
+    assert.equal(t.cwd(), '/')
+    assert.equal(t.run('cd nope 2>/dev/null || cd src').exitCode, 0)
+    assert.equal(t.cwd(), '/')
+    // Bash agrees on this one: a cd inside a pipeline never sticks.
+    assert.equal(t.run('cd src | cat').exitCode, 0)
+    assert.equal(t.cwd(), '/')
+  })
+
+  it('a compound line ENDING in cd is scoped as well (the rule is bare line, not last command)', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('ls >/dev/null && cd src')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.cwd, '/')
+    assert.equal(t.cwd(), '/')
+    t.run('cd src && cd util')
+    assert.equal(t.cwd(), '/')
+  })
+
+  it('restores to the OUTER cwd, not `/`', () => {
+    const t = createTerminal(SOURCES, { cwd: '/src' })
+    assert.equal(t.run('cd util && pwd').stdout, '/src/util\n')
+    assert.equal(t.cwd(), '/src')
+    assert.equal(t.run('cd / && pwd').stdout, '/\n')
+    assert.equal(t.cwd(), '/src')
+  })
+
+  it('restores when a later command on the line fails', () => {
+    // `cat1.txt` (the reported typo) is command-not-found; the cd
+    // before it still has to be undone.
+    const t = createTerminal(TREE)
+    const r = t.run('cd a && cat1.txt')
+    assert.equal(r.exitCode, 127)
+    assert.match(r.stderr, /command not found/u)
+    assert.equal(r.cwd, '/')
+    assert.equal(t.cwd(), '/')
   })
 })
 

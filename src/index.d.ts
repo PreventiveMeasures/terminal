@@ -17,11 +17,23 @@ export interface RunResult {
   stderr: string
   /** Exit code of the last step that ran (0 if none did). */
   exitCode: number
-  /** Working directory after the line completed. */
+  /**
+   * The terminal's working directory once the line completed. Only a bare
+   * `cd DIR` line moves it; a `cd` inside a compound line is scoped to that
+   * line, so this reports the starting cwd again.
+   */
   cwd: string
 }
 
-/** A virtual terminal instance with a mutable cwd carried across {@link Terminal.run} calls. */
+/**
+ * A virtual terminal instance with a mutable cwd carried across {@link Terminal.run} calls.
+ *
+ * A line that is exactly `cd DIR` moves the terminal for later calls. A `cd`
+ * inside a compound line (`cd src && ls`, `cd src; ls`, a multi-line block)
+ * applies to the rest of that line only — the terminal is back where it
+ * started once `run` returns, so `cd other && ls` on the next call resolves
+ * from the same place.
+ */
 export interface Terminal {
   /** Parse and execute one command line (pipelines, `&&` / `||` / `;` gates, `(...)` subshells, redirects). */
   run(line: string): RunResult

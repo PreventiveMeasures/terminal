@@ -1,5 +1,7 @@
 // Commands that navigate or query the virtual filesystem. `cd`
-// is the only one that mutates `ctx.cwd`. Each command runs its
+// is the only one that mutates `ctx.cwd` (whether that move outlives
+// the current line is index.js's call — a `cd` inside a compound
+// line is undone once the line completes). Each command runs its
 // tokens through parseArgs with a strict schema so unknown flags
 // fail fast instead of being silently dropped.
 

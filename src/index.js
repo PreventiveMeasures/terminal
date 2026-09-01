@@ -12,6 +12,15 @@
 //   term.run('ls /missing 2>/dev/null && echo ok || echo failed')
 //   // → { stdout, stderr, exitCode, cwd }
 //
+// `cd` moves the terminal only when it is the whole line (`cd src`
+// above). Inside a compound line — `cd src && grep -rn TODO .`,
+// `cd src; ls`, a pasted multi-line block — the move is scoped to
+// that `run` call: the rest of the line sees the new cwd, and the
+// terminal is back where it started once the line completes. That
+// is the agent-tool reading of `cd DIR && cmd` ("run cmd in DIR"),
+// not bash's (where the cd would stick), and it keeps a follow-up
+// `cd other && ls` resolving from the same place as the first.
+//
 // `run` parses the line into a sequence of steps separated by
 // `&&` / `||` gates. Each step is a pipeline of stages (split on
 // `|`) that may suppress stdout/stderr via `>/dev/null` and
@@ -148,16 +157,36 @@ function dispatch(name, tokens, stdin, ctx) {
   }
 }
 
+// The line runs against the live ctx (so a `cd` early in the line is
+// visible to everything after it), and the cwd is put back afterwards
+// unless the line was a bare `cd` — see the header comment. The catch
+// branch restores too: parse errors throw before anything runs, but a
+// command that threw raw mid-line would otherwise leak a partial move.
 function safeRun(line, ctx) {
+  const savedCwd = ctx.cwd
   try {
     const trimmed = line.trim()
     if (trimmed === '') return { stdout: '', stderr: '', exitCode: 0, cwd: ctx.cwd }
     const steps = parseLine(trimmed)
     const r = runSteps(steps, ctx, '')
+    if (!isBareCd(steps)) ctx.cwd = savedCwd
     return { ...r, cwd: ctx.cwd }
   } catch (e) {
+    ctx.cwd = savedCwd
     return { ...err(`error: ${e.message}`), cwd: ctx.cwd }
   }
+}
+
+// A line that is exactly one `cd` invocation: a single step with a
+// single non-group stage — no `|`, no `&&` / `||` / `;`, no newline,
+// no `(...)`. Redirects don't change the shape (`cd src 2>/dev/null`
+// still moves), and a trailing `;` was already dropped by parseLine.
+// Decided on the parsed argv (through resolveCommand, so `/bin/cd`
+// counts) rather than on the raw text, so it agrees with dispatch.
+function isBareCd(steps) {
+  if (steps.length !== 1 || steps[0].stages.length !== 1) return false
+  const stage = steps[0].stages[0]
+  return !stage.group && resolveCommand(stage.argv[0]) === 'cd'
 }
 
 // Loop the gated steps. The previous step's exit code controls
