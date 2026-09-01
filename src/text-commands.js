@@ -39,7 +39,7 @@ const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true })
 // `-n` counts lines, `-c` counts bytes; both default to 10 lines.
 function head(stdin, tokens, ctx) {
   const { values, positional, order } = parseArgs(tokens, { valueShort: ['c', 'n'] })
-  applyDashNumberShorthand(values, positional)
+  applyDashNumberShorthand(tokens, values, positional)
   const unit = lastCountUnit(order)
   const count = parseNonNegativeInt(values.get(unit) ?? '10', `head: -${unit}`)
   if (count.error) return count.error
@@ -61,25 +61,36 @@ function lastCountUnit(order) {
 
 function tail(stdin, tokens, ctx) {
   const { values, positional } = parseArgs(tokens, { valueShort: ['n'] })
-  applyDashNumberShorthand(values, positional)
+  applyDashNumberShorthand(tokens, values, positional)
   const n = parseNonNegativeInt(values.get('n') ?? '10', 'tail: -n')
   if (n.error) return n.error
   // `slice(-0)` is `slice(0)` — the whole array — so guard explicitly.
   return takeLines('tail', stdin, positional, ctx, (lines) => n.value === 0 ? [] : lines.slice(-n.value))
 }
 
-// GNU shorthand: `head -200 file` is equivalent to `head -n 200 file`.
-// parseArgs leaves `-200` in `positional` (the `^-\d/` guard keeps
-// numeric-prefixed tokens out of the flag stream), so promote it
-// here. Only honored when no explicit count option was given: GNU
-// rejects a `-NUM` trailing another option outright ("invalid trailing
-// option"), and leaving it a positional lands close enough — it becomes
-// a file operand and fails as a missing path.
-function applyDashNumberShorthand(values, positional) {
-  if (values.has('n') || values.has('c')) return
-  if (positional[0] && /^-\d+$/u.test(positional[0])) {
-    values.set('n', positional.shift().slice(1))
-  }
+// GNU's obsolete shorthand: `head -200 file` means `head -n 200 file`.
+// POSITION is the whole rule. GNU rewrites `-NUM` to `-n NUM` only when
+// it is the FIRST argument, so it then loses to any later count the
+// same way one `-n` loses to the next (`head -1 -c 3` prints 3 bytes,
+// `head -2 -n 1` prints 1 line); a `-NUM` anywhere else is rejected
+// outright as an "invalid trailing option". Hence the check against
+// `tokens[0]` rather than the first positional — the two forms leave
+// `positional` looking identical.
+//
+// A trailing `-NUM` is where we diverge: it stays positional and fails
+// as a missing file operand, so unlike GNU (which rejects the line
+// before opening anything) the other operands are still read and still
+// print. An error either way, but not the same error, and not the same
+// stdout.
+function applyDashNumberShorthand(tokens, values, positional) {
+  const first = tokens[0] ?? ''
+  if (!/^-\d+$/u.test(first)) return
+  // parseArgs's `^-\d/` guard routes such a token straight to
+  // `positional`, and this one led the line, so it heads that list too.
+  positional.shift()
+  // Deliberately does NOT clobber an explicit `-n`: `head -1 -n 2` is
+  // the later option's count, exactly as `lastCountUnit` resolves `-c`.
+  if (!values.has('n')) values.set('n', first.slice(1))
 }
 
 function takeLines(cmd, stdin, files, ctx, picker) {
@@ -99,10 +110,13 @@ function takeBytes(cmd, stdin, files, ctx, n) {
 }
 
 // A cut can land mid-character: `head -c 1` of `é` keeps only the
-// leading byte of a two-byte sequence. Real head emits that lone byte
-// (garbage on a terminal); the decoder turns it into U+FFFD, which is
-// as close as a string-based model gets. Content short enough to
-// survive whole skips the round-trip entirely.
+// leading byte of a two-byte sequence. No JS string can hold that lone
+// byte, so the decoder yields U+FFFD — which is also what a real
+// terminal renders for it, making this the closest a string-based model
+// gets. The cost is that a severed character comes back OUT as 3 bytes:
+// `head -c 2` of `héllo` pipes 4 bytes into `wc -c`, where GNU pipes
+// exactly 2. Only a cut mid-character is affected. Content short enough
+// to survive whole skips the round-trip entirely.
 function firstBytes(content, n) {
   const bytes = utf8.encode(content)
   if (n >= bytes.length) return content

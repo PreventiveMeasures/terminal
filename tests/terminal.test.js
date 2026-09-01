@@ -3432,8 +3432,9 @@ describe('createTerminal — head -c (byte counts)', () => {
 
   it('`-c 0` prints nothing; a count past EOF prints the whole input', () => {
     const t = createTerminal(BYTES)
-    assert.equal(t.run('head -c 0 h.txt').stdout, '')
-    assert.equal(t.run('head -c 0 h.txt').exitCode, 0)
+    const zero = t.run('head -c 0 h.txt')
+    assert.equal(zero.stdout, '')
+    assert.equal(zero.exitCode, 0)
     assert.equal(t.run('head -c 100 h.txt').stdout, 'hello\nworld\n')
   })
 
@@ -3451,6 +3452,15 @@ describe('createTerminal — head -c (byte counts)', () => {
     // it back into a JS string surfaces the replacement character.
     const t = createTerminal(BYTES)
     assert.equal(t.run('head -c 2 uni.txt').stdout, 'h\uFFFD')
+  })
+
+  it('a leading BOM is bytes like any other, not stripped', () => {
+    // U+FEFF is 3 bytes (ef bb bf), so `-c 3` is the BOM alone and
+    // `-c 4` is the BOM plus one more. A decoder built without
+    // `ignoreBOM` would swallow it and shift everything left.
+    const t = createTerminal({ 'bom.txt': '\uFEFFhi\n' })
+    assert.equal(t.run('head -c 3 bom.txt').stdout, '\uFEFF')
+    assert.equal(t.run('head -c 4 bom.txt').stdout, '\uFEFFh')
   })
 
   it('multiple inputs keep the `==>` banners, separated by the newline before each', () => {
@@ -3492,15 +3502,31 @@ describe('createTerminal — head -c (byte counts)', () => {
     assert.match(r.stderr, /head: -c: invalid count: abc/u)
   })
 
-  it('`-NUM` shorthand is not promoted once `-c` is present', () => {
-    // Same rule the `-n` + shorthand case follows: an explicit count
-    // option suppresses the promotion, so `-1` stays positional and
-    // head reports it as a missing file. (GNU rejects a trailing `-1`
-    // outright — a divergence in the message, not in the outcome.)
+  it('a leading `-NUM` still counts, and a later `-c` still overrides it', () => {
+    // GNU rewrites a FIRST-argument `-NUM` to `-n NUM`, which then loses
+    // to any later count option — so this is 3 bytes, not 1 line, and
+    // `-1` never reaches the file operands.
+    const t = createTerminal(BYTES)
+    const r = t.run('head -1 -c 3 h.txt')
+    assert.equal(r.stdout, 'hel')
+    assert.equal(r.stderr, '')
+    assert.equal(r.exitCode, 0)
+    // The same rule the other way round: a later `-n` beats the
+    // shorthand that opened the line.
+    assert.equal(t.run('head -1 -n 2 h.txt').stdout, 'hello\nworld\n')
+  })
+
+  it('a trailing `-NUM` is not promoted, and diverges from GNU in stdout too', () => {
+    // Position is the rule: `-1` arriving after another option is not
+    // the shorthand, so it stays positional and head reports it as a
+    // missing file — while still reading h.txt. GNU rejects the line
+    // during argument parsing ("invalid trailing option"), so it writes
+    // NOTHING to stdout. Both exit non-zero, but the outputs differ.
     const t = createTerminal(BYTES)
     const r = t.run('head -c 3 -1 h.txt')
     assert.equal(r.exitCode, 1)
     assert.match(r.stderr, /-1: no such file/u)
+    assert.equal(r.stdout, 'hel')
   })
 })
 
