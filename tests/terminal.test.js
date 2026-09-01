@@ -1911,6 +1911,7 @@ describe('createTerminal — strict option parsing', () => {
     'head --bogus',
     'tail -z',
     'tail --bogus',
+    'tail -c 5',
     'wc -z',
     'wc -lz',
     'sort -z',
@@ -3408,6 +3409,98 @@ describe('createTerminal — head/tail -N shorthand', () => {
     // stderr redirects keep the explicit fd:
     const stderrErr = t.run('cat foo 2> log').stderr
     assert.match(stderrErr, /`2>/u)
+  })
+})
+
+describe('createTerminal — head -c (byte counts)', () => {
+  // Every expectation below was checked against GNU coreutils 9.4 head.
+  const BYTES = {
+    'h.txt': 'hello\nworld\n',
+    'a.txt': 'abc',
+    'b.txt': 'def',
+    'uni.txt': 'héllo\n',
+  }
+
+  it('`-c N` prints the first N bytes and adds no trailing newline', () => {
+    const t = createTerminal(BYTES)
+    assert.equal(t.run('head -c 5 h.txt').stdout, 'hello')
+    // The 6th byte IS the newline, so it comes through as data.
+    assert.equal(t.run('head -c 6 h.txt').stdout, 'hello\n')
+    // Inline value works the same as `-n5`.
+    assert.equal(t.run('head -c5 h.txt').stdout, 'hello')
+  })
+
+  it('`-c 0` prints nothing; a count past EOF prints the whole input', () => {
+    const t = createTerminal(BYTES)
+    assert.equal(t.run('head -c 0 h.txt').stdout, '')
+    assert.equal(t.run('head -c 0 h.txt').exitCode, 0)
+    assert.equal(t.run('head -c 100 h.txt').stdout, 'hello\nworld\n')
+  })
+
+  it('counts bytes, not characters: a multibyte char costs its UTF-8 length', () => {
+    // `é` is two bytes (c3 a9), so 3 bytes reaches `hé` where three
+    // *characters* would have reached `hél`.
+    const t = createTerminal(BYTES)
+    assert.equal(t.run('head -c 3 uni.txt').stdout, 'hé')
+    assert.equal(t.run('head -c 4 uni.txt').stdout, 'hél')
+  })
+
+  it('a cut landing mid-character yields U+FFFD (real head emits the lone byte)', () => {
+    // `-c 2` keeps `h` plus the first byte of `é`'s two-byte sequence.
+    // A real terminal renders that dangling byte as garbage; decoding
+    // it back into a JS string surfaces the replacement character.
+    const t = createTerminal(BYTES)
+    assert.equal(t.run('head -c 2 uni.txt').stdout, 'h\uFFFD')
+  })
+
+  it('multiple inputs keep the `==>` banners, separated by the newline before each', () => {
+    // GNU prints "\n" before every banner but the first — which is also
+    // what ends the preceding block, since `-c` output carries no
+    // trailing newline of its own.
+    const t = createTerminal(BYTES)
+    assert.equal(t.run('head -c 2 a.txt b.txt').stdout, '==> a.txt <==\nab\n==> b.txt <==\nde')
+    // `-c 0` empties every block but keeps the banners.
+    assert.equal(t.run('head -c 0 a.txt b.txt').stdout, '==> a.txt <==\n\n==> b.txt <==\n')
+  })
+
+  it('reads stdin when no file operands are given', () => {
+    const t = createTerminal(BYTES)
+    assert.equal(t.run('cat h.txt | head -c 4').stdout, 'hell')
+  })
+
+  it('unreadable operands still exit 1 while the readable ones print', () => {
+    const t = createTerminal(BYTES)
+    const r = t.run('head -c 2 a.txt missing.txt b.txt')
+    assert.match(r.stdout, /==> a\.txt <==\nab/u)
+    assert.match(r.stdout, /==> b\.txt <==\nde/u)
+    assert.match(r.stderr, /missing\.txt: no such file/u)
+    assert.equal(r.exitCode, 1)
+  })
+
+  it('the last of `-n` / `-c` wins, as in GNU', () => {
+    // Both name the same count, so GNU resolves the clash positionally
+    // instead of erroring: `-n 1 -c 3` is 3 bytes, the reverse 1 line.
+    const t = createTerminal(BYTES)
+    assert.equal(t.run('head -n 1 -c 3 h.txt').stdout, 'hel')
+    assert.equal(t.run('head -c 3 -n 1 h.txt').stdout, 'hello\n')
+  })
+
+  it('`-c` counts run through the same validation as `-n`, labelled `-c`', () => {
+    const t = createTerminal(BYTES)
+    const r = t.run('head -c abc h.txt')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /head: -c: invalid count: abc/u)
+  })
+
+  it('`-NUM` shorthand is not promoted once `-c` is present', () => {
+    // Same rule the `-n` + shorthand case follows: an explicit count
+    // option suppresses the promotion, so `-1` stays positional and
+    // head reports it as a missing file. (GNU rejects a trailing `-1`
+    // outright — a divergence in the message, not in the outcome.)
+    const t = createTerminal(BYTES)
+    const r = t.run('head -c 3 -1 h.txt')
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stderr, /-1: no such file/u)
   })
 })
 
