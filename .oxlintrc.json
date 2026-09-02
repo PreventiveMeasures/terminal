@@ -50,6 +50,10 @@
       }
     ],
     "no-var": "error",
+    "no-eval": "error",
+    "no-new-func": "error",
+    "no-implied-eval": "error",
+    "no-script-url": "error",
     "default-case": "error",
     "no-undef": "error",
     "unicorn/consistent-function-scoping": "off",
