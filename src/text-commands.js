@@ -6,7 +6,7 @@
 // `${name}: ${message}` and returns an exit-1 stderr result.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines } from './util.js'
+import { err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
 import { grep } from './grep.js'
 
 function cat(stdin, tokens, ctx) {
@@ -25,16 +25,6 @@ function numberLines(content) {
   const lines = trailing ? content.slice(0, -1).split('\n') : content.split('\n')
   return lines.map((l, i) => `${String(i + 1).padStart(6)}\t${l}`).join('\n') + trailing
 }
-
-// `head -c` and `wc -c` work in BYTES, but content is a JS string
-// (UTF-16 code units), so both go through UTF-8 — the encoding this
-// models — before measuring or slicing: `é` is 2 bytes, an emoji 4.
-// Plain `.length` would count code units and disagree with coreutils on
-// multibyte text. `ignoreBOM` keeps a leading U+FEFF in the decoded
-// output rather than swallowing it: these are raw bytes being sliced,
-// not a document being loaded.
-const utf8 = new TextEncoder()
-const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true })
 
 // `-n` counts lines, `-c` counts bytes; both default to 10 lines. A
 // LEADING MINUS flips the count into "all but the last N" — `head -n -1`
@@ -187,11 +177,17 @@ function wc(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c'] })
   const which = pickWcFlags(flags)
   const r = readInputs('wc', positional, stdin, ctx)
-  // Collect rows first so we can compute the adaptive column width
-  // — GNU pads each count to the widest across ALL rows (including
-  // the `total` row). `wc -l b` on a 3-line file emits `3 b`; the
-  // same on a 1234-line file emits `1234 b`; `wc -l small big`
-  // pads to the max: `   3 small\n1234 big\n1237 total`.
+  // Collect rows first so we can compute the adaptive column width:
+  // every count is padded to the widest across ALL rows, the `total`
+  // included. `wc -l b` on a 3-line file emits `3 b`; the same on a
+  // 1234-line file emits `1234 b`; `wc -l small big` pads to the max:
+  // `   3 small\n1234 big\n1237 total`.
+  //
+  // GNU derives that width differently — from the largest count the
+  // inputs COULD produce, i.e. their byte size — so it pads `wc -l` of
+  // a 27-byte 4-line file to width 2 where this pads to 1. Widening on
+  // bytes nobody counted reads as a bug rather than alignment, so the
+  // divergence is deliberate; both keep the columns aligned.
   const rows = []
   const total = { l: 0, w: 0, c: 0 }
   for (const { name, content } of r.inputs) {

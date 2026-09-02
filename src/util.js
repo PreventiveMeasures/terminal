@@ -5,6 +5,16 @@
 
 import { resolve } from './fs.js'
 
+// The byte model every `-c`-style option shares. Content is a JS string
+// (UTF-16 code units), so anything counting or slicing BYTES — `wc -c`,
+// `head -c`, `cut -c`, the dump commands — encodes to UTF-8 first: `é`
+// is 2 bytes, an emoji 4. Plain `.length` would count code units and
+// disagree with coreutils on multibyte text. `ignoreBOM` keeps a
+// leading U+FEFF in decoded output instead of swallowing it, since
+// these are raw bytes being sliced, not a document being loaded.
+export const utf8 = new TextEncoder()
+export const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+
 export const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0 })
 
 // Most stderr lines should end with a newline so consecutive

@@ -17,9 +17,8 @@
 // ASCII gutter since they fall outside the printable 0x20–0x7e range.
 
 import { parseArgs } from './parse.js'
-import { err, okWith, parseNonNegativeInt, readContent } from './util.js'
+import { err, okWith, parseNonNegativeInt, readContent, utf8 } from './util.js'
 
-const enc = new TextEncoder()
 const BYTES_PER_LINE = 16
 // Full-line widths the partial last row pads out to. hexdump: 7-digit
 // offset + space + eight 2-byte words (`XXXX` ×8 + 7 gaps = 39). xxd:
@@ -72,7 +71,7 @@ export function xxd(stdin, tokens, ctx) {
 // readContent's partial-failure stderr/exit for okWith.
 function slice(cmd, files, stdin, ctx, opt) {
   const r = readContent(cmd, files, stdin, ctx)
-  const all = enc.encode(r.content)
+  const all = utf8.encode(r.content)
   let start = 0
   if (opt.skip !== undefined) {
     const s = parseNonNegativeInt(opt.skip, `${cmd}: ${opt.skipFlag}`)

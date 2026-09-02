@@ -7,7 +7,7 @@
 // originals.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, ok, okWith, readInputs, splitLines, usage } from './util.js'
+import { err, joinLines, ok, okWith, readInputs, splitLines, usage, utf8, utf8Decoder } from './util.js'
 import { hexdump, od, xxd } from './dump.js'
 
 // Reverse line order: read stdin (or each file in order, reversed
@@ -74,24 +74,35 @@ function seq(_stdin, tokens) {
 }
 
 // Number lines with `cat -n`-style formatting (6-wide right-aligned
-// number, tab separator). `-b a` numbers every line; `-b t` (the
-// default, matching GNU) skips empty lines — they pass through
-// unprefixed instead. Other GNU `-b` styles (`n`, `pREGEX`) are
-// out of scope; the error message names the supported set.
+// number, tab separator). `-b a` numbers every line, `-b t` (the
+// default) skips empty ones, `-b n` numbers none. `pREGEX` is out of
+// scope; the error message names the supported set.
+//
+// An unnumbered line still gets the number COLUMN, blanked — GNU pads
+// it to the number width plus the separator, so the text of numbered
+// and unnumbered lines stays in one column. Emitting the bare line
+// instead (as this did) left `nl` output ragged wherever a blank line
+// appeared.
+const NL_WIDTH = 6
+const NL_SEP = '\t'
+const NL_BLANK = ' '.repeat(NL_WIDTH + NL_SEP.length)
+
 function nl(stdin, tokens, ctx) {
   const { values, positional } = parseArgs(tokens, { valueShort: ['b'] })
   const style = values.get('b') ?? 't'
-  if (style !== 'a' && style !== 't') return err(`nl: -b: only \`a\` and \`t\` are supported (got \`${style}\`)`)
+  if (!['a', 't', 'n'].includes(style)) {
+    return err(`nl: -b: only \`a\`, \`t\` and \`n\` are supported (got \`${style}\`)`)
+  }
   const r = readInputs('nl', positional, stdin, ctx)
   const out = []
   let n = 0
   for (const { content } of r.inputs) {
     for (const line of splitLines(content)) {
-      if (style === 'a' || line !== '') {
+      if (style === 'a' || (style === 't' && line !== '')) {
         n++
-        out.push(`${String(n).padStart(6)}\t${line}`)
+        out.push(`${String(n).padStart(NL_WIDTH)}${NL_SEP}${line}`)
       } else {
-        out.push(line)
+        out.push(NL_BLANK + line)
       }
     }
   }
@@ -117,10 +128,21 @@ function cut(stdin, tokens, ctx) {
   const out = []
   for (const { content } of r.inputs) {
     for (const line of splitLines(content)) {
-      out.push(hasF ? cutFields(line, delim, list.ranges) : pickByPositions([...line], list.ranges).join(''))
+      out.push(hasF ? cutFields(line, delim, list.ranges) : cutBytes(line, list.ranges))
     }
   }
   return okWith(joinLines(out), r)
+}
+
+// GNU's `-c` selects BYTES — its own docs note `-c` is currently
+// identical to `-b`, and it behaves that way in a UTF-8 locale too, so
+// `cut -c1-3` of `héllo` is `hé` (h plus é's two bytes) rather than
+// three characters. Slicing code points instead silently disagreed with
+// coreutils on any multibyte line. A range boundary landing mid
+// character yields U+FFFD, the same modelling `head -c` uses.
+function cutBytes(line, ranges) {
+  const bytes = utf8.encode(line)
+  return utf8Decoder.decode(Uint8Array.from(pickByPositions([...bytes], ranges)))
 }
 
 function parseCutList(spec) {

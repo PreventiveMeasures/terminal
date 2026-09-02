@@ -4056,12 +4056,14 @@ describe('createTerminal — seq', () => {
 })
 
 describe('createTerminal — nl', () => {
-  it('default (-b t) numbers non-empty lines; empties pass through unprefixed', () => {
+  it('default (-b t) numbers non-empty lines; empties keep a blanked column', () => {
     const t = createTerminal({ 'f.txt': 'a\n\nb\n\nc\n' })
     const r = t.run('nl f.txt')
-    // Empties stay as the bare empty line — no number, no tab.
-    // Numbered lines keep cat-n's 6-wide right-aligned format.
-    assert.equal(r.stdout, '     1\ta\n\n     2\tb\n\n     3\tc\n')
+    // An unnumbered line still occupies the number column, blanked to
+    // the number width plus the separator (6 + 1), so body text stays
+    // in one column. GNU emits exactly these seven spaces; dropping
+    // them left the output ragged around every blank line.
+    assert.equal(r.stdout, '     1\ta\n       \n     2\tb\n       \n     3\tc\n')
   })
 
   it('-b a numbers EVERY line, including blanks', () => {
@@ -4077,13 +4079,18 @@ describe('createTerminal — nl', () => {
     assert.equal(t.run('nl a.txt b.txt').stdout, '     1\tx\n     2\ty\n     3\tz\n')
   })
 
+  it('-b n numbers nothing, but every line keeps the blanked column', () => {
+    const t = createTerminal({ 'f.txt': 'a\n\nb\n' })
+    assert.equal(t.run('nl -b n f.txt').stdout, '       a\n       \n       b\n')
+  })
+
   it('rejects unsupported -b styles with a message naming the valid options', () => {
-    // Real nl supports `-b n` (no numbering) and `-b pREGEX` too,
-    // but those are out of scope. The error should make that clear.
+    // Real nl also supports `-b pREGEX`, which is out of scope. The
+    // error should make the supported set clear.
     const t = createTerminal({ 'f.txt': 'a\n' })
-    const r = t.run('nl -b n f.txt')
+    const r = t.run('nl -b z f.txt')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /only `a` and `t`/u)
+    assert.match(r.stderr, /only `a`, `t` and `n`/u)
   })
 
   it('reads from stdin when no file is given', () => {
@@ -4121,14 +4128,28 @@ describe('createTerminal — cut', () => {
     assert.equal(t.run('cut -c 2- f.txt').stdout, '\nello\n')
   })
 
-  it('-c is codepoint-aware: a single emoji counts as one position', () => {
-    // `[...line]` splits by code-point, so an astral char like a
-    // family emoji is one position, not a surrogate pair. Without
-    // this, `cut -c 1` on `😀abc` would emit half a surrogate and
-    // downstream commands would see mojibake.
+  it('-c counts BYTES, as GNU does', () => {
+    // GNU's own docs note `-c` is currently identical to `-b`, and it
+    // behaves that way in a UTF-8 locale too. An emoji is four bytes,
+    // so it takes positions 1-4 and `abc` starts at 5. Counting code
+    // points instead silently disagreed with coreutils on any
+    // multibyte line.
     const t = createTerminal({ 'f.txt': '😀abc\n' })
-    assert.equal(t.run('cut -c 1 f.txt').stdout, '😀\n')
-    assert.equal(t.run('cut -c 2-3 f.txt').stdout, 'ab\n')
+    assert.equal(t.run('cut -c 1-4 f.txt').stdout, '😀\n')
+    assert.equal(t.run('cut -c 5-6 f.txt').stdout, 'ab\n')
+    // é is two bytes, so three byte positions reach `hé`.
+    const u = createTerminal({ 'u.txt': 'héllo\n' })
+    assert.equal(u.run('cut -c 1-3 u.txt').stdout, 'hé\n')
+  })
+
+  it('a -c range splitting a character yields U+FFFD', () => {
+    // Real cut emits the lone byte, which a terminal renders as
+    // garbage; no JS string can hold it, so the decoder substitutes
+    // the replacement character — the same modelling `head -c` uses.
+    const t = createTerminal({ 'f.txt': '😀abc\n' })
+    assert.equal(t.run('cut -c 1 f.txt').stdout, '\uFFFD\n')
+    const u = createTerminal({ 'u.txt': 'héllo\n' })
+    assert.equal(u.run('cut -c 2 u.txt').stdout, '\uFFFD\n')
   })
 
   it('lines without the delimiter pass through verbatim (no -s)', () => {
