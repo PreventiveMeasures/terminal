@@ -91,11 +91,26 @@ export const okWith = (stdout, r) => ({ stdout, stderr: r.stderr, exitCode: r.fa
 // 2^53 - 1 where round-trip parsing stops being exact. Callers
 // that need a strictly positive count (e.g. xargs -n) check
 // `value === 0` themselves.
-export function parseNonNegativeInt(str, label) {
+export function parseNonNegativeInt(str, label, shown = str) {
   if (typeof str !== 'string' || !/^\d+$/u.test(str)) {
-    return { error: err(`${label}: invalid count: ${str}`) }
+    return { error: err(`${label}: invalid count: ${shown}`) }
   }
   const n = Number(str)
-  if (!Number.isSafeInteger(n)) return { error: err(`${label}: out of range: ${str}`) }
+  if (!Number.isSafeInteger(n)) return { error: err(`${label}: out of range: ${shown}`) }
   return { value: n }
+}
+
+// A count that may carry a sign, as head's and tail's `-n` / `-c` do.
+// The digits are validated exactly as above; the SIGN is handed back
+// rather than interpreted, because the two commands read it in mirror
+// image: `head -n -5` drops the last 5 lines, `tail -n +5` starts at
+// line 5, and an unsigned count means "first 5" to head and "last 5"
+// to tail. `+` is the explicit form of each command's own default, so
+// `head -n +5` is `head -n 5`. Errors quote the operand as typed —
+// `-n +x` complains about `+x`, not `x`.
+export function parseSignedCount(str, label) {
+  if (typeof str !== 'string') return { error: err(`${label}: invalid count: ${str}`) }
+  const sign = str[0] === '+' || str[0] === '-' ? str[0] : ''
+  const r = parseNonNegativeInt(sign ? str.slice(1) : str, label, str)
+  return r.error ? r : { value: r.value, sign }
 }

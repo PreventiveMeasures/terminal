@@ -6,7 +6,7 @@
 // `${name}: ${message}` and returns an exit-1 stderr result.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, ok, okWith, parseNonNegativeInt, readContent, readInputs, splitLines } from './util.js'
+import { err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines } from './util.js'
 import { grep } from './grep.js'
 
 function cat(stdin, tokens, ctx) {
@@ -36,15 +36,21 @@ function numberLines(content) {
 const utf8 = new TextEncoder()
 const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true })
 
-// `-n` counts lines, `-c` counts bytes; both default to 10 lines.
+// `-n` counts lines, `-c` counts bytes; both default to 10 lines. A
+// LEADING MINUS flips the count into "all but the last N" — `head -n -1`
+// prints every line but the last, `head -c -3` every byte but the last
+// three. `+N` is just the explicit form of the plain count. An
+// over-large minus count leaves nothing rather than going negative,
+// which is why the remainder is clamped at 0.
 function head(stdin, tokens, ctx) {
   const { values, positional, order } = parseArgs(tokens, { valueShort: ['c', 'n'] })
   applyDashNumberShorthand(tokens, values, positional)
   const unit = lastCountUnit(order)
-  const count = parseNonNegativeInt(values.get(unit) ?? '10', `head: -${unit}`)
+  const count = parseSignedCount(values.get(unit) ?? '10', `head: -${unit}`)
   if (count.error) return count.error
-  if (unit === 'c') return takeBytes('head', stdin, positional, ctx, count.value)
-  return takeLines('head', stdin, positional, ctx, (lines) => lines.slice(0, count.value))
+  const keep = (total) => count.sign === '-' ? Math.max(0, total - count.value) : count.value
+  if (unit === 'c') return takeBytes('head', stdin, positional, ctx, keep)
+  return takeLines('head', stdin, positional, ctx, (lines) => lines.slice(0, keep(lines.length)))
 }
 
 // `-n` and `-c` set the same "how much" knob, so a line asking for both
@@ -59,16 +65,25 @@ function lastCountUnit(order) {
   return last ? last.name : 'n'
 }
 
+// Mirror image of head's rule: a LEADING PLUS counts from the START,
+// so `tail -n +2` prints everything from line 2 on — the idiom for
+// dropping a header row. The line number is 1-based, and `+0` is
+// treated as `+1` (the whole file) rather than as an empty request.
+// An unsigned count, or `-N`, is the familiar last-N.
 function tail(stdin, tokens, ctx) {
   const { values, positional } = parseArgs(tokens, { valueShort: ['n'] })
   applyDashNumberShorthand(tokens, values, positional)
-  const n = parseNonNegativeInt(values.get('n') ?? '10', 'tail: -n')
+  const n = parseSignedCount(values.get('n') ?? '10', 'tail: -n')
   if (n.error) return n.error
+  if (n.sign === '+') {
+    return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(Math.max(0, n.value - 1)))
+  }
   // A zero count short-circuits the whole command: GNU tail returns
   // success before opening anything, so there are no banners, no
   // per-operand errors, and exit 0 even when an operand doesn't exist.
-  // head deliberately does NOT share this — `head -n 0 a b` still
-  // banners both operands and still fails on a missing one. Returning
+  // Only the last-N form does this — `+0` above is the whole file, and
+  // head deliberately does NOT share it either (`head -n 0 a b` still
+  // banners both operands and still fails on a missing one). Returning
   // here also means `slice(-n)` below never sees 0, where `slice(-0)`
   // would be `slice(0)` and hand back every line.
   if (n.value === 0) return ok('')
@@ -114,8 +129,8 @@ function takeLines(cmd, stdin, files, ctx, picker) {
 // bytes verbatim, so `head -c 3` of `hello\n` is `hel` with nothing
 // after it, and in the multi-input form it's the `\n` before the next
 // banner that ends the block.
-function takeBytes(cmd, stdin, files, ctx, n) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => firstBytes(content, n))
+function takeBytes(cmd, stdin, files, ctx, keep) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => firstBytes(content, keep))
 }
 
 // A cut can land mid-character: `head -c 1` of `é` keeps only the
@@ -126,8 +141,11 @@ function takeBytes(cmd, stdin, files, ctx, n) {
 // `head -c 2` of `héllo` pipes 4 bytes into `wc -c`, where GNU pipes
 // exactly 2. Only a cut mid-character is affected. Content short enough
 // to survive whole skips the round-trip entirely.
-function firstBytes(content, n) {
+function firstBytes(content, keep) {
   const bytes = utf8.encode(content)
+  // `keep` resolves against THIS input's byte length, so `-c -3` drops
+  // the last three bytes of each input separately, as GNU does.
+  const n = keep(bytes.length)
   if (n >= bytes.length) return content
   return utf8Decoder.decode(bytes.subarray(0, n))
 }

@@ -2873,11 +2873,23 @@ describe('createTerminal — count validation', () => {
   })
 
   it('non-decimal counts (whitespace, hex, scientific) are rejected', () => {
+    // `+5` / `-5` are NOT in this list: a sign is meaningful on a
+    // head/tail count (see the signed-count suite), so only the digits
+    // after it have to be decimal.
     const t = createTerminal(SOURCES)
-    for (const bad of ['" "', '0x10', '1e3', '+5', '-5', '1.5']) {
+    for (const bad of ['" "', '0x10', '1e3', '1.5', '+x', '-', '+', '++1']) {
       const r = t.run(`head -n ${bad} src/foo.js`)
       assert.notEqual(r.exitCode, 0, `expected ${bad} to be rejected`)
     }
+  })
+
+  it('a rejected signed count is quoted as typed, sign included', () => {
+    // The digits are validated after the sign is peeled off, but the
+    // message must still show what the user actually wrote.
+    const t = createTerminal(SOURCES)
+    assert.match(t.run('head -n +x src/foo.js').stderr, /invalid count: \+x/u)
+    assert.match(t.run('tail -n -x src/foo.js').stderr, /invalid count: -x/u)
+    assert.match(t.run('head -n +9007199254740992 src/foo.js').stderr, /out of range: \+9007199254740992/u)
   })
 
   it('out-of-safe-range counts are rejected', () => {
@@ -3630,6 +3642,97 @@ describe('createTerminal — head/tail blank-line selections', () => {
     const t = createTerminal(SRC)
     assert.equal(t.run('head -n 1 blank.txt o.txt').stdout,
       '==> blank.txt <==\n\n\n==> o.txt <==\nother\n')
+  })
+})
+
+describe('createTerminal — head/tail signed counts', () => {
+  // Every expectation checked against GNU coreutils 9.4.
+  const SRC = { 'a.txt': 'banana\ncherry\napple\nbanana\n', 'n.txt': '10\n9\n', 'nonl.txt': 'no trailing newline', 'blank.txt': '\n\n\n' }
+
+  it('`head -n -N` keeps everything but the last N lines', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -n -1 a.txt').stdout, 'banana\ncherry\napple\n')
+    assert.equal(t.run('head -n -3 a.txt').stdout, 'banana\n')
+    // More than the file holds leaves nothing, rather than going
+    // negative and wrapping into a slice from the end.
+    assert.equal(t.run('head -n -9 a.txt').stdout, '')
+    // `-0` drops nothing, so it is the whole file — unlike a plain `0`.
+    assert.equal(t.run('head -n -0 a.txt').stdout, 'banana\ncherry\napple\nbanana\n')
+    assert.equal(t.run('head -n 0 a.txt').stdout, '')
+  })
+
+  it('`head -c -N` drops the last N BYTES, per input', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -c -3 nonl.txt').stdout, 'no trailing newl')
+    assert.equal(t.run('head -c -99 nonl.txt').stdout, '')
+  })
+
+  it('`tail -n +N` starts at line N, 1-based', () => {
+    // The header-skipping idiom. `+1` and `+0` are both the whole file.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('tail -n +2 a.txt').stdout, 'cherry\napple\nbanana\n')
+    assert.equal(t.run('tail -n +1 a.txt').stdout, 'banana\ncherry\napple\nbanana\n')
+    assert.equal(t.run('tail -n +0 a.txt').stdout, 'banana\ncherry\napple\nbanana\n')
+    assert.equal(t.run('tail -n +9 a.txt').stdout, '')
+    assert.equal(t.run('tail -n +2 blank.txt').stdout, '\n\n')
+  })
+
+  it('`+N` on head and `-N` on tail are just the plain count', () => {
+    // Each command's own default direction, stated explicitly.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -n +2 a.txt').stdout, t.run('head -n 2 a.txt').stdout)
+    assert.equal(t.run('tail -n -2 a.txt').stdout, t.run('tail -n 2 a.txt').stdout)
+    assert.equal(t.run('head -c +4 a.txt').stdout, 'bana')
+  })
+
+  it('`tail -n +0` is the whole file, but `tail -n 0` and `-0` short-circuit', () => {
+    // The zero short-circuit belongs to the last-N form only; a `+0`
+    // reaching it would silently swallow the file.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('tail -n 0 a.txt').stdout, '')
+    assert.equal(t.run('tail -n -0 a.txt').stdout, '')
+    const zero = t.run('tail -n 0 a.txt missing')
+    assert.equal(zero.stderr, '')
+    assert.equal(zero.exitCode, 0)
+  })
+
+  it('signed counts compose with multi-file banners', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -n -1 a.txt n.txt').stdout,
+      '==> a.txt <==\nbanana\ncherry\napple\n\n==> n.txt <==\n10\n')
+    assert.equal(t.run('tail -n +2 a.txt n.txt').stdout,
+      '==> a.txt <==\ncherry\napple\nbanana\n\n==> n.txt <==\n9\n')
+  })
+
+  it('the `-NUM` shorthand stays unsigned — `head -2` is the first 2', () => {
+    // The shorthand strips its own leading `-`, so it must not be read
+    // as the all-but-last form.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -2 a.txt').stdout, 'banana\ncherry\n')
+    assert.equal(t.run('tail -2 a.txt').stdout, 'apple\nbanana\n')
+  })
+})
+
+describe('createTerminal — basename SUFFIX', () => {
+  it('strips a trailing SUFFIX when given one', () => {
+    const t = createTerminal({ 'x': '' })
+    assert.equal(t.run('basename /a/b/c.js .js').stdout, 'c\n')
+    assert.equal(t.run('basename x.tar.gz .gz').stdout, 'x.tar\n')
+  })
+
+  it('leaves the name alone when the suffix does not match', () => {
+    const t = createTerminal({ 'x': '' })
+    assert.equal(t.run('basename /a/b/c.js .xx').stdout, 'c.js\n')
+    assert.equal(t.run('basename /a/b/c.js').stdout, 'c.js\n')
+  })
+
+  it('never strips the whole name away', () => {
+    // GNU keeps the name rather than emitting an empty line, so
+    // `basename .js .js` is `.js` — the guard the endsWith test alone
+    // would miss.
+    const t = createTerminal({ 'x': '' })
+    assert.equal(t.run('basename c.js c.js').stdout, 'c.js\n')
+    assert.equal(t.run('basename /a/b/.js .js').stdout, '.js\n')
   })
 })
 
