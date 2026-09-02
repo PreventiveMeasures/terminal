@@ -115,11 +115,12 @@ function nl(stdin, tokens, ctx) {
 // (open-ended low). Output is ordered by position, not by the
 // order listed — matching GNU cut.
 function cut(stdin, tokens, ctx) {
-  const { values, positional } = parseArgs(tokens, { valueShort: ['d', 'f', 'c'] })
+  const { flags, values, positional } = parseArgs(tokens, { short: ['s'], valueShort: ['d', 'f', 'c'] })
   const hasF = values.has('f')
   const hasC = values.has('c')
-  if (hasF === hasC) return usage('cut -f LIST [-d DELIM] [file...]  |  cut -c LIST [file...]')
+  if (hasF === hasC) return usage('cut -f LIST [-d DELIM] [-s] [file...]  |  cut -c LIST [file...]')
   if (hasC && values.has('d')) return err('cut: -d is only valid with -f')
+  if (hasC && flags.has('s')) return err('cut: -s is only valid with -f')
   const list = parseCutList(hasF ? values.get('f') : values.get('c'))
   if (list.error) return list.error
   const delim = values.get('d') ?? '\t'
@@ -128,6 +129,13 @@ function cut(stdin, tokens, ctx) {
   const out = []
   for (const { content } of r.inputs) {
     for (const line of splitLines(content)) {
+      // A line with no delimiter is passed through whole by default;
+      // `-s` drops it instead. Only meaningful in field mode, since
+      // byte mode has no delimiter to miss.
+      if (hasF && !line.includes(delim)) {
+        if (!flags.has('s')) out.push(line)
+        continue
+      }
       out.push(hasF ? cutFields(line, delim, list.ranges) : cutBytes(line, list.ranges))
     }
   }
@@ -202,22 +210,32 @@ function cutFields(line, delim, ranges) {
 // SET supports `a-z` ranges and `\n` / `\t` / `\\` / `\0` escapes.
 // GNU's `-c` (complement) and combined `-ds` aren't modeled.
 function tr(stdin, tokens) {
-  const { flags, positional } = parseArgs(tokens, { short: ['d', 's'] })
+  const { flags, positional } = parseArgs(tokens, { short: ['c', 'd', 's'] })
   const del = flags.has('d')
   const squeeze = flags.has('s')
+  const complement = flags.has('c')
   if (del && squeeze) return err('tr: -d combined with -s is not supported')
   const want = (del || squeeze) ? 1 : 2
-  if (positional.length !== want) return usage('tr SET1 SET2  |  tr -d SET  |  tr -s SET')
+  if (positional.length !== want) return usage('tr [-c] SET1 SET2  |  tr [-c] -d SET  |  tr [-c] -s SET')
   const set1 = expandTrSet(positional[0])
   if (set1.error) return set1.error
-  if (del) {
-    const remove = new Set(set1.chars)
-    return ok([...stdin].filter((c) => !remove.has(c)).join(''))
-  }
-  if (squeeze) return ok(squeezeChars(stdin, new Set(set1.chars)))
+  const members = new Set(set1.chars)
+  // `-c` inverts membership rather than materialising the complement,
+  // which would be every code point NOT in SET1.
+  const selected = (ch) => complement !== members.has(ch)
+  if (del) return ok([...stdin].filter((c) => !selected(c)).join(''))
+  if (squeeze) return ok(squeezeChars(stdin, selected))
   const set2 = expandTrSet(positional[1])
   if (set2.error) return set2.error
   if (set2.chars.length === 0) return err('tr: SET2 must not be empty')
+  if (complement) {
+    // GNU walks the complement in code-point order and pads SET2 with
+    // its last character; the complement always outruns SET2, so every
+    // selected character lands on that last one — `tr -c a-z XY` turns
+    // each non-letter into `Y`, not into `X`.
+    const to = set2.chars.at(-1)
+    return ok([...stdin].map((c) => selected(c) ? to : c).join(''))
+  }
   const map = new Map()
   // GNU pads SET2 by repeating its last char to SET1's length. The
   // truncate alternative (POSIX `-t`) isn't modeled.
@@ -259,11 +277,11 @@ function expandTrSet(spec) {
   return { chars }
 }
 
-function squeezeChars(s, set) {
+function squeezeChars(s, selected) {
   let out = ''
   let prev = null
   for (const c of s) {
-    if (set.has(c) && c === prev) continue
+    if (selected(c) && c === prev) continue
     out += c
     prev = c
   }

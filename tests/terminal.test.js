@@ -3805,6 +3805,70 @@ describe('createTerminal — head/tail -q/-v, tail -c, wc -m', () => {
   })
 })
 
+describe('createTerminal — grep -q/-m, cut -s, tr -c', () => {
+  // Checked against GNU grep 3.11 / coreutils 9.4.
+  const SRC = {
+    'log.txt': 'INFO start\nERROR boom\nWARN hmm\nERROR again\n',
+    'f.txt': 'bob:30\nann:25\n',
+    'mixed.txt': 'a,b\nNOCOMMA\nc,d\n',
+    'src/foo.js': '// TODO: fix\n// TODO: again\n',
+  }
+
+  it('grep -q prints nothing and reports the match in the exit code', () => {
+    const t = createTerminal(SRC)
+    const hit = t.run('grep -q ERROR log.txt')
+    assert.equal(hit.stdout, '')
+    assert.equal(hit.exitCode, 0)
+    assert.equal(t.run('grep -q NOPE log.txt').exitCode, 1)
+    // An unreadable operand still outranks the match status with 2.
+    assert.equal(t.run('grep -q ERROR missing.txt').exitCode, 2)
+    // -q wins over any output mode it is combined with.
+    assert.equal(t.run('grep -q -c ERROR log.txt').stdout, '')
+  })
+
+  it('grep -m N stops after N selected lines, per input', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('grep -m1 ERROR log.txt').stdout, 'ERROR boom\n')
+    assert.equal(t.run('grep -m2 ERROR log.txt').stdout, 'ERROR boom\nERROR again\n')
+    // Asking for more than exist is not an error.
+    assert.equal(t.run('grep -m5 ERROR log.txt').stdout, 'ERROR boom\nERROR again\n')
+    assert.equal(t.run('grep -m0 ERROR log.txt').stdout, '')
+    // Per input, not across the run.
+    assert.equal(t.run('grep -m1 TODO src/foo.js').stdout, '// TODO: fix\n')
+  })
+
+  it('grep -m composes with the other output modes', () => {
+    // The cap truncates the input, so -c reports the capped count and
+    // -n still numbers against the original line positions.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('grep -m1 -c ERROR log.txt').stdout, '1\n')
+    assert.equal(t.run('grep -m1 -n ERROR log.txt').stdout, '2:ERROR boom\n')
+    assert.equal(t.run('grep -m1 -v ERROR log.txt').stdout, 'INFO start\n')
+  })
+
+  it('cut -s drops lines with no delimiter instead of passing them through', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cut -d, -f1 mixed.txt').stdout, 'a\nNOCOMMA\nc\n')
+    assert.equal(t.run('cut -d, -f1 -s mixed.txt').stdout, 'a\nc\n')
+    // Byte mode has no delimiter to miss, so -s there is an error.
+    assert.match(t.run('cut -c1 -s f.txt').stderr, /-s is only valid with -f/u)
+  })
+
+  it('tr -c acts on everything OUTSIDE the set', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat f.txt | tr -cd a-z').stdout, 'bobann')
+    // The newline is outside a-z too, so it is replaced along with the
+    // punctuation and digits — the output is one unbroken run.
+    assert.equal(t.run('cat f.txt | tr -c a-z .').stdout, 'bob....ann....')
+    // The complement always outruns SET2, so every selected character
+    // lands on SET2's LAST member — `Y`, not `X`.
+    assert.equal(t.run('cat f.txt | tr -c a-z XY').stdout, 'bobYYYYannYYYY')
+    // Squeeze reads the same inversion: the doubled `M` is outside
+    // a-z, so it collapses, while the letters around it are untouched.
+    assert.equal(t.run('cat mixed.txt | tr -cs a-z').stdout, 'a,b\nNOCOMA\nc,d\n')
+  })
+})
+
 describe('createTerminal — tac', () => {
   it('reverses line order from stdin and from a file', () => {
     const t = createTerminal({ 'lines.txt': 'a\nb\nc\n' })
