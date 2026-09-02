@@ -64,8 +64,15 @@ function tail(stdin, tokens, ctx) {
   applyDashNumberShorthand(tokens, values, positional)
   const n = parseNonNegativeInt(values.get('n') ?? '10', 'tail: -n')
   if (n.error) return n.error
-  // `slice(-0)` is `slice(0)` — the whole array — so guard explicitly.
-  return takeLines('tail', stdin, positional, ctx, (lines) => n.value === 0 ? [] : lines.slice(-n.value))
+  // A zero count short-circuits the whole command: GNU tail returns
+  // success before opening anything, so there are no banners, no
+  // per-operand errors, and exit 0 even when an operand doesn't exist.
+  // head deliberately does NOT share this — `head -n 0 a b` still
+  // banners both operands and still fails on a missing one. Returning
+  // here also means `slice(-n)` below never sees 0, where `slice(-0)`
+  // would be `slice(0)` and hand back every line.
+  if (n.value === 0) return ok('')
+  return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(-n.value))
 }
 
 // GNU's obsolete shorthand: `head -200 file` means `head -n 200 file`.
@@ -126,13 +133,29 @@ function firstBytes(content, n) {
 }
 
 // The head/tail output shape: each input's chunk, prefixed with GNU's
-// `==> name <==` banner once more than one input was read. The blank
-// line between blocks is the `\n` that precedes every banner but the
-// first — the same `\n` that terminates the preceding block when its
-// chunk doesn't end in one.
+// `==> name <==` banner once more than one file was NAMED. Operands, not
+// successful reads — GNU fixes this before opening anything, so a run
+// whose other operands all turn out to be missing still banners the one
+// that survived, rather than looking like a plain single-file read.
+// No operands at all is stdin, which never banners.
+//
+// The operand count governs the THRESHOLD only; which operands get a
+// banner is still whatever `readInputs` could read. GNU is subtler
+// there: it banners anything it managed to OPEN, so a directory operand
+// (open succeeds, read fails with EISDIR) gets a banner from GNU and
+// none from us, since `readFilesFor` drops directories before we see
+// them. Teaching that distinction to the shared reader would change
+// cat/grep/wc too, so it stays a divergence for now.
+//
+// Only readable inputs are iterated, so an unreadable operand
+// contributes its stderr line and no block — and the `\n` that precedes
+// every banner but the first still keys off the block index, matching
+// GNU, whose own "first file" flag flips on the first banner WRITTEN,
+// not on the first operand tried. That same `\n` is what terminates the
+// preceding block when its chunk doesn't end in one.
 function takeFrom(cmd, stdin, files, ctx, pick) {
   const r = readInputs(cmd, files, stdin, ctx)
-  const showHeader = r.inputs.length > 1
+  const showHeader = files.length > 1
   const blocks = []
   for (let i = 0; i < r.inputs.length; i++) {
     const { name, content } = r.inputs[i]
