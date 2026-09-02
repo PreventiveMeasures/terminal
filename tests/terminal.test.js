@@ -3519,14 +3519,56 @@ describe('createTerminal — head -c (byte counts)', () => {
   it('a trailing `-NUM` is not promoted, and diverges from GNU in stdout too', () => {
     // Position is the rule: `-1` arriving after another option is not
     // the shorthand, so it stays positional and head reports it as a
-    // missing file — while still reading h.txt. GNU rejects the line
-    // during argument parsing ("invalid trailing option"), so it writes
-    // NOTHING to stdout. Both exit non-zero, but the outputs differ.
+    // missing file — while still reading h.txt. Two operands, so the
+    // survivor is bannered. GNU rejects the line during argument
+    // parsing ("invalid trailing option") and writes NOTHING to stdout.
+    // Both exit non-zero, but the outputs differ.
     const t = createTerminal(BYTES)
     const r = t.run('head -c 3 -1 h.txt')
     assert.equal(r.exitCode, 1)
     assert.match(r.stderr, /-1: no such file/u)
-    assert.equal(r.stdout, 'hel')
+    assert.equal(r.stdout, '==> h.txt <==\nhel')
+  })
+})
+
+describe('createTerminal — head/tail operand-count banners', () => {
+  // Checked against GNU coreutils 9.4.
+  const SRC = { 'h.txt': 'hello\nworld\n', 'o.txt': 'other\n', 'a.txt': 'abc' }
+
+  it('a lone survivor among several operands is still bannered', () => {
+    // Two operands were named, so GNU banners — even though only one of
+    // them could be opened. Without this the output is
+    // indistinguishable from a plain single-file read.
+    const t = createTerminal(SRC)
+    const r = t.run('head -n 1 h.txt missing')
+    assert.equal(r.stdout, '==> h.txt <==\nhello\n')
+    assert.match(r.stderr, /missing: no such file/u)
+    assert.equal(r.exitCode, 1)
+    assert.equal(t.run('tail -n 1 h.txt missing').stdout, '==> h.txt <==\nworld\n')
+    // Byte mode shares the same block writer, banners included.
+    assert.equal(t.run('head -c 2 h.txt missing').stdout, '==> h.txt <==\nhe')
+    assert.equal(t.run('head -c 2 a.txt missing').stdout, '==> a.txt <==\nab')
+  })
+
+  it('an unreadable FIRST operand leaves no blank line above the next banner', () => {
+    // GNU's "first file" flag flips on the first banner it WRITES, not
+    // on the first operand it tries, so the surviving file leads the
+    // output with no separator above it.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -n 1 missing h.txt').stdout, '==> h.txt <==\nhello\n')
+    assert.equal(t.run('head -n 1 missing h.txt o.txt').stdout,
+      '==> h.txt <==\nhello\n\n==> o.txt <==\nother\n')
+    assert.equal(t.run('head -n 1 h.txt missing o.txt').stdout,
+      '==> h.txt <==\nhello\n\n==> o.txt <==\nother\n')
+  })
+
+  it('one operand and stdin stay bannerless; all-unreadable prints nothing', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -n 1 h.txt').stdout, 'hello\n')
+    assert.equal(t.run('cat h.txt | head -n 1').stdout, 'hello\n')
+    const r = t.run('head -n 1 missing1 missing2')
+    assert.equal(r.stdout, '')
+    assert.equal(r.exitCode, 1)
   })
 })
 

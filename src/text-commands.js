@@ -124,13 +124,21 @@ function firstBytes(content, n) {
 }
 
 // The head/tail output shape: each input's chunk, prefixed with GNU's
-// `==> name <==` banner once more than one input was read. The blank
-// line between blocks is the `\n` that precedes every banner but the
-// first — the same `\n` that terminates the preceding block when its
-// chunk doesn't end in one.
+// `==> name <==` banner once more than one file was NAMED. Operands, not
+// successful reads — GNU fixes this before opening anything, so a run
+// whose other operands all turn out to be unreadable still banners the
+// one that survived, rather than looking like a plain single-file read.
+// No operands at all is stdin, which never banners.
+//
+// Only readable inputs are iterated, so an unreadable operand
+// contributes its stderr line and no block — and the `\n` that precedes
+// every banner but the first still keys off the block index, matching
+// GNU, whose own "first file" flag flips on the first banner WRITTEN,
+// not on the first operand tried. That same `\n` is what terminates the
+// preceding block when its chunk doesn't end in one.
 function takeFrom(cmd, stdin, files, ctx, pick) {
   const r = readInputs(cmd, files, stdin, ctx)
-  const showHeader = r.inputs.length > 1
+  const showHeader = files.length > 1
   const blocks = []
   for (let i = 0; i < r.inputs.length; i++) {
     const { name, content } = r.inputs[i]
