@@ -3556,10 +3556,37 @@ describe('createTerminal — head/tail operand-count banners', () => {
     // output with no separator above it.
     const t = createTerminal(SRC)
     assert.equal(t.run('head -n 1 missing h.txt').stdout, '==> h.txt <==\nhello\n')
-    assert.equal(t.run('head -n 1 missing h.txt o.txt').stdout,
-      '==> h.txt <==\nhello\n\n==> o.txt <==\nother\n')
+    const r = t.run('head -n 1 missing h.txt o.txt')
+    assert.equal(r.stdout, '==> h.txt <==\nhello\n\n==> o.txt <==\nother\n')
+    assert.match(r.stderr, /missing: no such file/u)
+    assert.equal(r.exitCode, 1)
     assert.equal(t.run('head -n 1 h.txt missing o.txt').stdout,
       '==> h.txt <==\nhello\n\n==> o.txt <==\nother\n')
+    // tail takes the same separator path, and byte mode the same again
+    // with a LEADING unreadable operand.
+    assert.equal(t.run('tail -n 1 missing h.txt o.txt').stdout,
+      '==> h.txt <==\nworld\n\n==> o.txt <==\nother\n')
+    assert.equal(t.run('head -c 2 missing h.txt o.txt').stdout,
+      '==> h.txt <==\nhe\n==> o.txt <==\not')
+  })
+
+  it('`tail -n 0` short-circuits before opening anything; `head -n 0` does not', () => {
+    // GNU tail returns success on a zero count without touching the
+    // operands: no banners, no per-operand error, exit 0 even for a
+    // path that doesn't exist. head makes no such exit — it opens,
+    // banners, and still fails on the missing operand.
+    const t = createTerminal(SRC)
+    const zero = t.run('tail -n 0 h.txt missing')
+    assert.equal(zero.stdout, '')
+    assert.equal(zero.stderr, '')
+    assert.equal(zero.exitCode, 0)
+    assert.equal(t.run('tail -n 0 h.txt o.txt').stdout, '')
+    assert.equal(t.run('cat h.txt | tail -n 0').stdout, '')
+    const h = t.run('head -n 0 h.txt missing')
+    assert.equal(h.stdout, '==> h.txt <==\n')
+    assert.match(h.stderr, /missing: no such file/u)
+    assert.equal(h.exitCode, 1)
+    assert.equal(t.run('head -n 0 h.txt o.txt').stdout, '==> h.txt <==\n\n==> o.txt <==\n')
   })
 
   it('one operand and stdin stay bannerless; all-unreadable prints nothing', () => {
