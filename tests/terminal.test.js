@@ -1911,7 +1911,6 @@ describe('createTerminal — strict option parsing', () => {
     'head --bogus',
     'tail -z',
     'tail --bogus',
-    'tail -c 5',
     'wc -z',
     'wc -lz',
     'sort -z',
@@ -3733,6 +3732,76 @@ describe('createTerminal — basename SUFFIX', () => {
     const t = createTerminal({ 'x': '' })
     assert.equal(t.run('basename c.js c.js').stdout, 'c.js\n')
     assert.equal(t.run('basename /a/b/.js .js').stdout, '.js\n')
+  })
+})
+
+describe('createTerminal — head/tail -q/-v, tail -c, wc -m', () => {
+  // Checked against GNU coreutils 9.4 (C.utf8 for the char/byte cases).
+  const SRC = {
+    'a.txt': 'banana\ncherry\napple\nbanana\n',
+    'n.txt': '10\n9\n',
+    'uni.txt': 'héllo wörld\n',
+    'emo.txt': '😀x\n',
+  }
+
+  it('-q suppresses banners, -v forces them', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -q -n1 a.txt n.txt').stdout, 'banana\n10\n')
+    assert.equal(t.run('tail -q -n1 a.txt n.txt').stdout, 'banana\n9\n')
+    assert.equal(t.run('head -v -n1 a.txt').stdout, '==> a.txt <==\nbanana\n')
+    assert.equal(t.run('tail -v -n1 a.txt').stdout, '==> a.txt <==\nbanana\n')
+    // -v applies to byte mode too.
+    assert.equal(t.run('head -v -c2 a.txt').stdout, '==> a.txt <==\nba')
+  })
+
+  it('-q and -v together are rejected rather than silently guessed', () => {
+    // parseArgs collapses booleans into a Set, so the order the user
+    // typed them is gone; erroring follows grep's -h/-H precedent.
+    const t = createTerminal(SRC)
+    const r = t.run('head -q -v a.txt')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /-q and -v are mutually exclusive/u)
+    assert.match(t.run('tail -qv a.txt').stderr, /mutually exclusive/u)
+  })
+
+  it('`tail -c N` takes the last N bytes, `+N` counts from the front', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('tail -c 3 a.txt').stdout, 'na\n')
+    assert.equal(t.run('tail -c -3 a.txt').stdout, 'na\n')
+    assert.equal(t.run('tail -c +3 a.txt').stdout, 'nana\ncherry\napple\nbanana\n')
+    assert.equal(t.run('tail -c 100 a.txt').stdout, 'banana\ncherry\napple\nbanana\n')
+    assert.equal(t.run('tail -c 0 a.txt').stdout, '')
+    // Bytes, not characters: ö is two of the three taken here.
+    assert.equal(t.run('tail -c 3 uni.txt').stdout, 'ld\n')
+  })
+
+  it('`tail -c` obeys the same last-one-wins rule as head', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('tail -n 1 -c 3 a.txt').stdout, 'na\n')
+    assert.equal(t.run('tail -c 3 -n 1 a.txt').stdout, 'banana\n')
+  })
+
+  it('wc -m counts characters where -c counts bytes', () => {
+    // `héllo wörld\n` is 12 characters and 14 bytes. GNU's -m follows
+    // the locale and collapses onto -c under a C locale; this terminal
+    // models UTF-8 throughout, matching GNU under C.utf8.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('wc -m uni.txt').stdout, '12 uni.txt\n')
+    assert.equal(t.run('wc -c uni.txt').stdout, '14 uni.txt\n')
+    // An astral character is ONE character but four bytes — counting
+    // UTF-16 units would call the emoji two.
+    assert.equal(t.run('wc -m emo.txt').stdout, '3 emo.txt\n')
+    assert.equal(t.run('wc -c emo.txt').stdout, '6 emo.txt\n')
+  })
+
+  it('wc prints columns in GNU order regardless of flag order', () => {
+    // lines, words, chars, bytes — `-cm` and `-mc` are the same view.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('wc -mc uni.txt').stdout, t.run('wc -cm uni.txt').stdout)
+    assert.equal(t.run('wc -mc uni.txt').stdout, '12 14 uni.txt\n')
+    assert.equal(t.run('wc -lwm a.txt').stdout, ' 4  4 27 a.txt\n')
+    // Bare wc stays lines/words/bytes — -m is opt-in.
+    assert.equal(t.run('wc uni.txt').stdout, ' 1  2 14 uni.txt\n')
   })
 })
 
