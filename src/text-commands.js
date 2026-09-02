@@ -93,11 +93,13 @@ function applyDashNumberShorthand(tokens, values, positional) {
   if (!values.has('n')) values.set('n', first.slice(1))
 }
 
+// `joinLines`, not a check on the JOINED string: one selected blank line
+// joins to `''`, which is indistinguishable from having selected no
+// lines at all, and suppressing its terminator would print nothing where
+// GNU prints a newline. Branching on the array length keeps the two
+// apart (`head -n 1` of a file of blank lines is one `\n`).
 function takeLines(cmd, stdin, files, ctx, picker) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => {
-    const picked = picker(splitLines(content)).join('\n')
-    return picked === '' ? '' : picked + '\n'
-  })
+  return takeFrom(cmd, stdin, files, ctx, (content) => joinLines(picker(splitLines(content))))
 }
 
 // `head -c N` takes the first N BYTES of each input instead of its
