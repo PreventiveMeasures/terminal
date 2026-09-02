@@ -314,10 +314,11 @@ function tokenize(line) {
 // value-taking short inside a bundle takes the rest of the bundle
 // as its value (`-n5`).
 //
-// The result also carries `order`: every LONG value-option in the
-// sequence it appeared, as `[{ name, value }]`. grep uses it to resolve
-// `--include` / `--exclude` by GNU's last-match-wins rule, which the
-// per-name `values` map (order lost across names) can't express.
+// The result also carries `order`: every value-option — short or long
+// — in the sequence it appeared, as `[{ name, value }]`. grep uses it
+// to resolve `--include` / `--exclude` by GNU's last-match-wins rule
+// and head to resolve `-n` / `-c` the same way; neither is expressible
+// through the per-name `values` map, which loses order across names.
 
 export function parseArgs(tokens, schema = {}) {
   const short = asSet(schema.short)
@@ -375,7 +376,7 @@ export function parseArgs(tokens, schema = {}) {
       continue
     }
     if (t.startsWith('-') && t.length > 1 && !/^-\d/u.test(t)) {
-      i = consumeShorts(tokens, i, short, valueShort, repeatable, flags, values)
+      i = consumeShorts(tokens, i, short, valueShort, repeatable, flags, values, order)
       continue
     }
     if (stopEarly) { positional.push(...tokens.slice(i)); break }
@@ -403,14 +404,17 @@ function addValue(values, repeatable, name, val) {
   else values.set(name, [val])
 }
 
-function consumeShorts(tokens, i, short, valueShort, repeatable, flags, values) {
+function consumeShorts(tokens, i, short, valueShort, repeatable, flags, values, order) {
   const chars = tokens[i].slice(1)
   for (let j = 0; j < chars.length; j++) {
     const c = chars[j]
     if (valueShort.has(c) || repeatable.has(c)) {
-      // Inline value (`-n5`) wins over the next token.
-      if (j + 1 < chars.length) { addValue(values, repeatable, c, chars.slice(j + 1)); return i }
-      addValue(values, repeatable, c, takeNext(tokens, ++i, `-${c}`))
+      // Inline value (`-n5`) wins over the next token; `++i` only runs
+      // in the else branch, so a bundle that carried its own value
+      // leaves the token index where it was.
+      const value = j + 1 < chars.length ? chars.slice(j + 1) : takeNext(tokens, ++i, `-${c}`)
+      addValue(values, repeatable, c, value)
+      order.push({ name: c, value })
       return i
     }
     if (!short.has(c)) throw new Error(`unknown option: -${c}`)

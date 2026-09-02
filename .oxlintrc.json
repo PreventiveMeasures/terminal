@@ -12,6 +12,7 @@
     "unicorn"
   ],
   "globals": {
+    "TextDecoder": "readonly",
     "TextEncoder": "readonly"
   },
   "rules": {

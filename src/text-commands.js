@@ -26,43 +26,116 @@ function numberLines(content) {
   return lines.map((l, i) => `${String(i + 1).padStart(6)}\t${l}`).join('\n') + trailing
 }
 
+// `head -c` and `wc -c` work in BYTES, but content is a JS string
+// (UTF-16 code units), so both go through UTF-8 — the encoding this
+// models — before measuring or slicing: `é` is 2 bytes, an emoji 4.
+// Plain `.length` would count code units and disagree with coreutils on
+// multibyte text. `ignoreBOM` keeps a leading U+FEFF in the decoded
+// output rather than swallowing it: these are raw bytes being sliced,
+// not a document being loaded.
+const utf8 = new TextEncoder()
+const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+
+// `-n` counts lines, `-c` counts bytes; both default to 10 lines.
 function head(stdin, tokens, ctx) {
-  const { values, positional } = parseArgs(tokens, { valueShort: ['n'] })
-  applyDashNumberShorthand(values, positional)
-  const n = parseNonNegativeInt(values.get('n') ?? '10', 'head: -n')
-  if (n.error) return n.error
-  return takeLines('head', stdin, positional, ctx, (lines) => lines.slice(0, n.value))
+  const { values, positional, order } = parseArgs(tokens, { valueShort: ['c', 'n'] })
+  applyDashNumberShorthand(tokens, values, positional)
+  const unit = lastCountUnit(order)
+  const count = parseNonNegativeInt(values.get(unit) ?? '10', `head: -${unit}`)
+  if (count.error) return count.error
+  if (unit === 'c') return takeBytes('head', stdin, positional, ctx, count.value)
+  return takeLines('head', stdin, positional, ctx, (lines) => lines.slice(0, count.value))
+}
+
+// `-n` and `-c` set the same "how much" knob, so a line asking for both
+// has to pick one. GNU lets the LAST one typed win — `head -n 5 -c 3`
+// prints 3 bytes, `head -c 3 -n 5` prints 5 lines — which the per-name
+// `values` map can't express (it loses ordering across names), so read
+// the winner off parseArgs's `order`. Neither given (or only the `-NUM`
+// shorthand, which promotes to `-n` and never reaches `order`) leaves
+// head on lines, its default.
+function lastCountUnit(order) {
+  const last = order.findLast((o) => o.name === 'n' || o.name === 'c')
+  return last ? last.name : 'n'
 }
 
 function tail(stdin, tokens, ctx) {
   const { values, positional } = parseArgs(tokens, { valueShort: ['n'] })
-  applyDashNumberShorthand(values, positional)
+  applyDashNumberShorthand(tokens, values, positional)
   const n = parseNonNegativeInt(values.get('n') ?? '10', 'tail: -n')
   if (n.error) return n.error
   // `slice(-0)` is `slice(0)` — the whole array — so guard explicitly.
   return takeLines('tail', stdin, positional, ctx, (lines) => n.value === 0 ? [] : lines.slice(-n.value))
 }
 
-// GNU shorthand: `head -200 file` is equivalent to `head -n 200 file`.
-// parseArgs leaves `-200` in `positional` (the `^-\d/` guard keeps
-// numeric-prefixed tokens out of the flag stream), so promote it
-// here. Only honored when -n hasn't been set explicitly.
-function applyDashNumberShorthand(values, positional) {
-  if (values.has('n')) return
-  if (positional[0] && /^-\d+$/u.test(positional[0])) {
-    values.set('n', positional.shift().slice(1))
-  }
+// GNU's obsolete shorthand: `head -200 file` means `head -n 200 file`.
+// POSITION is the whole rule. GNU rewrites `-NUM` to `-n NUM` only when
+// it is the FIRST argument, so it then loses to any later count the
+// same way one `-n` loses to the next (`head -1 -c 3` prints 3 bytes,
+// `head -2 -n 1` prints 1 line); a `-NUM` anywhere else is rejected
+// outright as an "invalid trailing option". Hence the check against
+// `tokens[0]` rather than the first positional — the two forms leave
+// `positional` looking identical.
+//
+// A trailing `-NUM` is where we diverge: it stays positional and fails
+// as a missing file operand, so unlike GNU (which rejects the line
+// before opening anything) the other operands are still read and still
+// print. An error either way, but not the same error, and not the same
+// stdout.
+function applyDashNumberShorthand(tokens, values, positional) {
+  const first = tokens[0] ?? ''
+  if (!/^-\d+$/u.test(first)) return
+  // parseArgs's `^-\d/` guard routes such a token straight to
+  // `positional`, and this one led the line, so it heads that list too.
+  positional.shift()
+  // Deliberately does NOT clobber an explicit `-n`: `head -1 -n 2` is
+  // the later option's count, exactly as `lastCountUnit` resolves `-c`.
+  if (!values.has('n')) values.set('n', first.slice(1))
 }
 
 function takeLines(cmd, stdin, files, ctx, picker) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => {
+    const picked = picker(splitLines(content)).join('\n')
+    return picked === '' ? '' : picked + '\n'
+  })
+}
+
+// `head -c N` takes the first N BYTES of each input instead of its
+// first N lines. No newline convention applies here: GNU writes the
+// bytes verbatim, so `head -c 3` of `hello\n` is `hel` with nothing
+// after it, and in the multi-input form it's the `\n` before the next
+// banner that ends the block.
+function takeBytes(cmd, stdin, files, ctx, n) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => firstBytes(content, n))
+}
+
+// A cut can land mid-character: `head -c 1` of `é` keeps only the
+// leading byte of a two-byte sequence. No JS string can hold that lone
+// byte, so the decoder yields U+FFFD — which is also what a real
+// terminal renders for it, making this the closest a string-based model
+// gets. The cost is that a severed character comes back OUT as 3 bytes:
+// `head -c 2` of `héllo` pipes 4 bytes into `wc -c`, where GNU pipes
+// exactly 2. Only a cut mid-character is affected. Content short enough
+// to survive whole skips the round-trip entirely.
+function firstBytes(content, n) {
+  const bytes = utf8.encode(content)
+  if (n >= bytes.length) return content
+  return utf8Decoder.decode(bytes.subarray(0, n))
+}
+
+// The head/tail output shape: each input's chunk, prefixed with GNU's
+// `==> name <==` banner once more than one input was read. The blank
+// line between blocks is the `\n` that precedes every banner but the
+// first — the same `\n` that terminates the preceding block when its
+// chunk doesn't end in one.
+function takeFrom(cmd, stdin, files, ctx, pick) {
   const r = readInputs(cmd, files, stdin, ctx)
   const showHeader = r.inputs.length > 1
   const blocks = []
   for (let i = 0; i < r.inputs.length; i++) {
     const { name, content } = r.inputs[i]
-    const picked = picker(splitLines(content)).join('\n')
-    if (showHeader) blocks.push(`${i > 0 ? '\n' : ''}==> ${name} <==\n${picked}${picked ? '\n' : ''}`)
-    else if (picked.length > 0) blocks.push(picked + '\n')
+    const body = pick(content)
+    blocks.push(showHeader ? `${i > 0 ? '\n' : ''}==> ${name} <==\n${body}` : body)
   }
   return okWith(blocks.join(''), r)
 }
@@ -104,12 +177,6 @@ function pickWcFlags(flags) {
   }
   return { l: true, w: true, c: true }
 }
-
-// `wc -c` counts BYTES. content is a JS string (UTF-16 code units), so
-// measure its UTF-8 length — the encoding this models — via TextEncoder:
-// `é` is 2 bytes, an emoji 4. Plain `.length` would return code units
-// and disagree with coreutils on multibyte text.
-const utf8 = new TextEncoder()
 
 function wcCounts(content) {
   return {
