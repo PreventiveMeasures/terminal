@@ -3530,6 +3530,40 @@ describe('createTerminal — head -c (byte counts)', () => {
   })
 })
 
+describe('createTerminal — head/tail blank-line selections', () => {
+  // Checked against GNU coreutils 9.4.
+  const SRC = { 'blank.txt': '\n\n\n', 'h.txt': 'hello\nworld\n', 'o.txt': 'other\n' }
+
+  it('selecting only blank lines still prints them', () => {
+    // The selected line IS empty, which is not the same as selecting no
+    // lines: GNU emits its terminator either way. Joining first would
+    // collapse the two cases into one empty string.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -n 1 blank.txt').stdout, '\n')
+    assert.equal(t.run('tail -n 1 blank.txt').stdout, '\n')
+    // Two or more always worked — the join yields '\n' there, which is
+    // already non-empty — so pin them against regression.
+    assert.equal(t.run('head -n 2 blank.txt').stdout, '\n\n')
+    assert.equal(t.run('head -n 9 blank.txt').stdout, '\n\n\n')
+    assert.equal(t.run('tail -n 2 blank.txt').stdout, '\n\n')
+  })
+
+  it('an empty selection still prints nothing', () => {
+    // The other side of the same branch: `-n 0` selects no lines, and
+    // that must stay empty rather than gaining a stray newline.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -n 0 blank.txt').stdout, '')
+    assert.equal(t.run('tail -n 0 blank.txt').stdout, '')
+    assert.equal(t.run('head -n 0 h.txt').stdout, '')
+  })
+
+  it('blank-line blocks compose with multi-file banners', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -n 1 blank.txt o.txt').stdout,
+      '==> blank.txt <==\n\n\n==> o.txt <==\nother\n')
+  })
+})
+
 describe('createTerminal — tac', () => {
   it('reverses line order from stdin and from a file', () => {
     const t = createTerminal({ 'lines.txt': 'a\nb\nc\n' })
