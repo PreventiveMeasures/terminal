@@ -375,7 +375,7 @@ export function parseArgs(tokens, schema = {}) {
       } else throw new Error(`unknown option: --${name}`)
       continue
     }
-    if (t.startsWith('-') && t.length > 1 && !/^-\d/u.test(t)) {
+    if (t.startsWith('-') && t.length > 1 && !isNumericPositional(t, short, valueShort, repeatable)) {
       i = consumeShorts(tokens, i, short, valueShort, repeatable, flags, values, order)
       continue
     }
@@ -383,6 +383,17 @@ export function parseArgs(tokens, schema = {}) {
     positional.push(t)
   }
   return { flags, values, positional, order }
+}
+
+// A `-<digit>` token is positional by default, which is what keeps the
+// `head -5` / `ls -10` shorthands working. But a command that DECLARES
+// a digit as one of its options means it as an option: `xargs -0` is
+// the NUL-separated mode, not a command named `-0`. Consulting the
+// schema keeps both readings available without a per-command hack.
+function isNumericPositional(token, short, valueShort, repeatable) {
+  if (!/^-\d/u.test(token)) return false
+  const c = token[1]
+  return !short.has(c) && !valueShort.has(c) && !repeatable.has(c)
 }
 
 function asSet(v) {

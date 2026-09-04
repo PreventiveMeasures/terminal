@@ -230,7 +230,13 @@ describe('createTerminal — text commands', () => {
     assert.match(h.stdout, /==> a\.txt <==\nAAA/u)
     assert.match(h.stdout, /==> b\.txt <==\nBBB/u)
     assert.equal(h.exitCode, 1)
-    assert.equal(t.run('sort a.txt missing.txt b.txt').stdout, 'AAA\nBBB\nzzz\n')
+    // sort is the exception: it is ALL-OR-NOTHING, abandoning the run
+    // on an unreadable operand rather than sorting what it could read,
+    // because a partial sort would look like a complete ordering.
+    const so = t.run('sort a.txt missing.txt b.txt')
+    assert.equal(so.stdout, '')
+    assert.equal(so.exitCode, 2)
+    assert.equal(t.run('sort a.txt b.txt').stdout, 'AAA\nBBB\nzzz\n')
     assert.equal(t.run('cut -c1 a.txt missing.txt').stdout, 'A\nz\n')
     // Even with every operand unreadable, wc still prints the total —
     // GNU gates that row on how many files were NAMED, so two missing
@@ -1184,8 +1190,10 @@ describe('createTerminal — text commands', () => {
 
   it('sort / uniq report missing files instead of silently emitting nothing', () => {
     const t = createTerminal({ 'f.txt': 'a\n' })
+    // sort exits 2 on an unreadable operand, as GNU does — distinct
+    // from the exit 1 the partial-failure commands use.
     const s = t.run('sort nope.txt')
-    assert.equal(s.exitCode, 1)
+    assert.equal(s.exitCode, 2)
     assert.match(s.stderr, /sort: nope\.txt: no such file/u)
     const u = t.run('uniq nope.txt')
     assert.equal(u.exitCode, 1)
@@ -1570,17 +1578,16 @@ describe('createTerminal — find / tree / path', () => {
     assert.equal(r.stdout, '-print a.txt\n', 'the inner -print must reach echo as a literal argument')
   })
 
-  it('find still rejects -print0 / -printf (only bare -print is modeled)', () => {
-    // The unknown-option guard must keep catching the -print* family
-    // we do not implement, rather than prefix-matching them to -print
-    // and silently ignoring the difference (-print0 is NUL-separated).
+  it('find still rejects -printf (the -print* family is not prefix-matched)', () => {
+    // `-print0` is now modeled, but the unknown-option guard must keep
+    // catching the rest of the -print* family rather than
+    // prefix-matching them to -print and silently ignoring the
+    // difference.
     const t = createTerminal(SOURCES)
-    for (const cmd of ['find / -print0', 'find / -printf "%p"']) {
-      const r = t.run(cmd)
-      assert.notEqual(r.exitCode, 0, cmd)
-      assert.match(r.stderr, /unknown option/u, cmd)
-      assert.equal(r.stdout, '', cmd)
-    }
+    const r = t.run('find / -printf "%p"')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /unknown option/u)
+    assert.equal(r.stdout, '')
   })
 
   it('find -exec ... ; dispatches once per match with `{}` replaced by the path', () => {
@@ -4005,6 +4012,261 @@ describe('createTerminal — sort -k / -t', () => {
     assert.equal(t.run('sort -t: -k9 f.txt').exitCode, 0)
     // All keys empty, so the whole-line tiebreak decides.
     assert.equal(t.run('sort -t: -k9 f.txt').stdout, 'ann:25:la\nann:99:zz\nbob:30:nyc\ncid:35:sf\n')
+  })
+})
+
+describe('createTerminal — cat -s/-b/-E/-T/-A, uniq -f/-s/-w/-D, seq -w/-s', () => {
+  // Checked against GNU coreutils 9.4.
+  const SRC = {
+    'sq.txt': 'a\n\n\n\nb\n\nc\n',
+    'tab.txt': 'x\ty\n',
+    'uf.txt': 'k1 v1\nk1 v2\nk2 v3\n',
+    'dup.txt': 'x\nx\ny\nz\nz\nz\n',
+  }
+
+  it('cat -s squeezes runs of blank lines to one', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat -s sq.txt').stdout, 'a\n\nb\n\nc\n')
+  })
+
+  it('cat -b numbers only non-blank lines, leaving blanks bare', () => {
+    // Unlike `nl`, which blanks the number COLUMN, `cat -b` emits the
+    // blank line with no prefix at all — and the counter does not
+    // advance for it.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat -b sq.txt').stdout, '     1\ta\n\n\n\n     2\tb\n\n     3\tc\n')
+    // -n numbers everything, for contrast.
+    assert.equal(t.run('cat -n sq.txt').stdout.split('\n')[1], '     2\t')
+  })
+
+  it('cat -s and -b compose, squeezing before numbering', () => {
+    // The count follows the lines that survive the squeeze.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat -bs sq.txt').stdout, '     1\ta\n\n     2\tb\n\n     3\tc\n')
+  })
+
+  it('cat -E / -T / -A mark line ends and tabs', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat -E tab.txt').stdout, 'x\ty$\n')
+    assert.equal(t.run('cat -T tab.txt').stdout, 'x^Iy\n')
+    // -A is -vET, so both marks; -e is -vE.
+    assert.equal(t.run('cat -A tab.txt').stdout, 'x^Iy$\n')
+    assert.equal(t.run('cat -e tab.txt').stdout, 'x\ty$\n')
+  })
+
+  it('uniq -f skips fields and -s skips characters before comparing', () => {
+    // The key only decides equality; the whole line is still emitted.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('uniq -f1 uf.txt').stdout, 'k1 v1\nk1 v2\nk2 v3\n')
+    assert.equal(t.run('uniq -w2 uf.txt').stdout, 'k1 v1\nk2 v3\n')
+    assert.equal(t.run('uniq -s3 uf.txt').stdout, 'k1 v1\nk1 v2\nk2 v3\n')
+  })
+
+  it('uniq -D prints every line of a duplicate run', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('uniq -D dup.txt').stdout, 'x\nx\nz\nz\nz\n')
+    // GNU refuses to combine it with -c rather than picking a meaning.
+    const r = t.run('uniq -cD dup.txt')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /meaningless/u)
+  })
+
+  it('seq -w zero-pads to the widest value produced', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('seq -w 8 11').stdout, '08\n09\n10\n11\n')
+    // No padding needed when every value is already the same width.
+    assert.equal(t.run('seq -w 1 3').stdout, '1\n2\n3\n')
+    assert.equal(t.run('seq -w 98 101').stdout, '098\n099\n100\n101\n')
+    // A minus sign counts toward the width and stays ahead of the zeros.
+    assert.equal(t.run('seq -w -3 -1').stdout, '-3\n-2\n-1\n')
+  })
+
+  it('seq -s replaces the separator but keeps the trailing newline', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('seq -s, 1 3').stdout, '1,2,3\n')
+    assert.equal(t.run('seq -w -s, 8 11').stdout, '08,09,10,11\n')
+  })
+})
+
+describe('createTerminal — ls -d/-r/-A/-F, find -iname/-print0/-empty', () => {
+  const SRC = { 'src/foo.js': 'a\n', 'src/deep/b.js': 'x', 'README.md': '# hi\n', '.hidden': 's\n' }
+  const FT = { 'ft/Foo.JS': 'x', 'ft/sub/bar.js': 'y', 'ft/empty.txt': '', 'ft/full.txt': 'z' }
+
+  it('ls -d names the operand instead of listing inside it', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('ls -d src').stdout, 'src/\n')
+    assert.equal(t.run('ls -d src README.md').stdout, 'src/\n README.md\n'.replace(' ', ''))
+    // `.` and `..` print bare — the same rule -a already follows for
+    // them, since they are navigation handles, not browsable subtrees.
+    assert.equal(t.run('ls -d').stdout, '.\n')
+    assert.equal(t.run('ls -d ..').stdout, '..\n')
+    const missing = t.run('ls -d nope')
+    assert.equal(missing.exitCode, 1)
+    assert.match(missing.stderr, /no such file/u)
+  })
+
+  it('ls -r reverses the listing, grouping included', () => {
+    // Directories-before-files IS this ls's sort order, so -r reverses
+    // that too rather than reversing within each group.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('ls').stdout, 'src/\nREADME.md\n')
+    assert.equal(t.run('ls -r').stdout, 'README.md\nsrc/\n')
+    assert.equal(t.run('ls -r src').stdout, 'foo.js\ndeep/\n')
+  })
+
+  it('ls -A shows dotfiles but not . and ..', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('ls -A').stdout, 'src/\n.hidden\nREADME.md\n')
+    assert.equal(t.run('ls -a').stdout, '.\n..\nsrc/\n.hidden\nREADME.md\n')
+  })
+
+  it('ls -F is accepted as a no-op, like -1', () => {
+    // This ls already marks every directory with a trailing `/`, which
+    // is all -F can mean here — there are no executables or symlinks in
+    // the virtual FS to earn a `*` or `@`.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('ls -F src').stdout, t.run('ls src').stdout)
+  })
+
+  it('ls still rejects -t and -S, which the FS cannot support', () => {
+    // The virtual FS stores only path→content: there are no
+    // modification times to sort by, so a wrong order would be worse
+    // than an error.
+    const t = createTerminal(SRC)
+    assert.match(t.run('ls -t').stderr, /unknown option/u)
+    assert.match(t.run('ls -S').stderr, /unknown option/u)
+  })
+
+  it('find -iname matches case-insensitively', () => {
+    const t = createTerminal(FT)
+    assert.equal(t.run('find ft -iname "*.js"').stdout, 'ft/Foo.JS\nft/sub/bar.js\n')
+    assert.equal(t.run('find ft -name "*.js"').stdout, 'ft/sub/bar.js\n')
+    assert.equal(t.run('find ft -iname "FOO*"').stdout, 'ft/Foo.JS\n')
+  })
+
+  it('find -print0 terminates with NUL instead of a newline', () => {
+    const t = createTerminal(FT)
+    assert.equal(t.run('find ft -name "*.js" -print0').stdout, 'ft/sub/bar.js\0')
+  })
+
+  it('find -empty matches zero-byte files', () => {
+    // A directory can never be empty in this FS — it exists only
+    // because a file lives under it — so -empty never matches one.
+    const t = createTerminal(FT)
+    assert.equal(t.run('find ft -empty').stdout, 'ft/empty.txt\n')
+    assert.equal(t.run('find ft -type f -empty').stdout, 'ft/empty.txt\n')
+    assert.equal(t.run('find ft -not -empty -type f').stdout, 'ft/Foo.JS\nft/full.txt\nft/sub/bar.js\n')
+  })
+})
+
+describe('createTerminal — xargs -0/-I, sort aborts on unreadable input', () => {
+  const SRC = { 'x.txt': 'a b\nc d\n', 'ft/a b.txt': 'q', 'ft/c.txt': 'r', 'ok.txt': 'z\ny\n' }
+
+  it('xargs -I takes whole LINES as items, one run each', () => {
+    // Unlike the default whitespace split, `-I` keeps `a b` as one
+    // argument — which is the point of it.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat x.txt | xargs -I{} echo "[{}]"').stdout, '[a b]\n[c d]\n')
+    // The placeholder is replaced everywhere it appears, including
+    // inside a larger word.
+    assert.equal(t.run('cat x.txt | xargs -I% echo "pre% post%"').stdout,
+      'prea b posta b\nprec d postc d\n')
+  })
+
+  it('xargs -I with no input runs the command zero times', () => {
+    // Not once with an unsubstituted placeholder, which is what the
+    // run-anyway fallback would otherwise do.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('echo "" | xargs -I{} echo "[{}]"').stdout, '')
+  })
+
+  it('xargs -0 splits on NUL, pairing with find -print0', () => {
+    // The whole point: a path with a space survives as one item.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('find ft -type f -print0 | xargs -0 echo').stdout, 'ft/a b.txt ft/c.txt\n')
+    assert.equal(t.run('find ft -type f -print0 | xargs -0 -n1 echo').stdout, 'ft/a b.txt\nft/c.txt\n')
+  })
+
+  it('a declared digit option beats the numeric-shorthand rule', () => {
+    // `-0` matches the `^-\d` guard that keeps `head -5` and `ls -10`
+    // positional, so without consulting the schema it became a command
+    // NAME and died with "command not found". Both readings survive.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -1 ok.txt').stdout, 'z\n')
+    const ls10 = t.run('ls -10')
+    assert.equal(ls10.exitCode, 1)
+    assert.match(ls10.stderr, /-10: no such file/u)
+  })
+
+  it('sort abandons the run on an unreadable operand', () => {
+    // All-or-nothing, as GNU is: a partial sort would look like a
+    // complete ordering of the input. Exit 2, not the 1 the
+    // partial-failure commands use.
+    const t = createTerminal(SRC)
+    const r = t.run('sort ok.txt missing.txt')
+    assert.equal(r.stdout, '')
+    assert.equal(r.exitCode, 2)
+    assert.match(r.stderr, /missing\.txt: no such file/u)
+    // A directory operand aborts it the same way.
+    const d = t.run('sort ok.txt ft')
+    assert.equal(d.stdout, '')
+    assert.equal(d.exitCode, 2)
+    // Readable operands alone still sort normally.
+    assert.equal(t.run('sort ok.txt').stdout, 'y\nz\n')
+  })
+})
+
+describe('createTerminal — find -prune', () => {
+  // Checked against GNU findutils 4.9.
+  const SRC = {
+    'src/foo.js': 'a', 'src/deep/bar.js': 'b', 'README.md': 'c',
+    'node_modules/pkg/index.js': 'd', 'node_modules/pkg/lib/x.js': 'e',
+    'a/node_modules/x/y.js': 'f', 'a/keep.js': 'g',
+  }
+
+  it('the canonical skip-node_modules idiom works', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('find . -path ./node_modules -prune -o -print | sort').stdout,
+      '.\n./README.md\n./a\n./a/keep.js\n./a/node_modules\n./a/node_modules/x\n./a/node_modules/x/y.js\n./src\n./src/deep\n./src/deep/bar.js\n./src/foo.js\n')
+    // By NAME rather than path, every node_modules anywhere is pruned.
+    assert.equal(t.run('find . -name node_modules -prune -o -print | sort').stdout,
+      '.\n./README.md\n./a\n./a/keep.js\n./src\n./src/deep\n./src/deep/bar.js\n./src/foo.js\n')
+  })
+
+  it('-prune is TRUE, so it still gets the implicit -print', () => {
+    // GNU does not count -prune as an action, so an expression with
+    // nothing else still prints what matched — here, what it pruned.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('find . -name node_modules -prune | sort').stdout,
+      './a/node_modules\n./node_modules\n')
+    assert.equal(t.run('find . -name node_modules -prune -print | sort').stdout,
+      './a/node_modules\n./node_modules\n')
+  })
+
+  it('-prune on a FILE is a no-op that still reports true', () => {
+    // README.md is not a directory, so nothing is pruned — but the
+    // first branch is true for it, so `-o -print` skips it.
+    const t = createTerminal(SRC)
+    const out = t.run('find . -name README.md -prune -o -print | sort').stdout
+    assert.ok(!out.includes('./README.md\n'), out)
+    assert.ok(out.includes('./src/foo.js'), out)
+  })
+
+  it('-prune can prune the start directory itself', () => {
+    // The root never passes through the child loop, so it has to be
+    // offered to the descent check separately — without that,
+    // `find . -prune` walks everything.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('find . -prune').stdout, '.\n')
+    // Everything pruned, and `-o` short-circuits, so nothing prints.
+    assert.equal(t.run('find . -not -name node_modules -prune -o -print').stdout, '')
+  })
+
+  it('-prune composes with the other predicates', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('find . -name node_modules -prune -o -name "*.js" -print | sort').stdout,
+      './a/keep.js\n./src/deep/bar.js\n./src/foo.js\n')
+    assert.equal(t.run('find src -name deep -prune -o -print | sort').stdout, 'src\nsrc/foo.js\n')
   })
 })
 

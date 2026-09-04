@@ -248,7 +248,7 @@ function compileFilters(parsed) {
   const name = parsed.order
     .filter((o) => o.name === 'include' || o.name === 'exclude')
     .map((o) => ({ include: o.name === 'include', re: compileGlob(o.value) }))
-  const dir = (parsed.values.get('exclude-dir') ?? []).map(compileGlob)
+  const dir = (parsed.values.get('exclude-dir') ?? []).map((g) => compileGlob(g))
   return { name, dir }
 }
 
