@@ -50,6 +50,7 @@
     "src/sed.js",
     "src/sort.js",
     "src/text-commands.js",
+    "src/tokenize.js",
     "src/util.js",
     "src/xargs.js"
   ],

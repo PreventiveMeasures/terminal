@@ -11,8 +11,8 @@
 //   pipeline stage in index.js between parse and dispatch. Splits
 //   each unquoted token on `/`, walks the FS segment by segment,
 //   and replaces the pattern token with the matching paths in
-//   lexicographic order. Quoted tokens (marked by parse.js's
-//   tokenizer) and the leading argv[0] (command name) are passed
+//   lexicographic order. Quoted tokens (marked by tokenize.js) and
+//   the leading argv[0] (command name) are passed
 //   through verbatim. A pattern that matches nothing also passes
 //   through literally — bash's default, which leaves it to the
 //   receiving command to report "no such file" with the user's

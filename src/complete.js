@@ -2,7 +2,7 @@
 // registry) because it's an independent concern with a different input
 // contract: it runs on PARTIAL, possibly-unparseable input (mid-token,
 // quote state in flight), so it carries its own light boundary scanner
-// instead of reusing parse.js's tokenizer. createTerminal hands in the
+// instead of reusing tokenize.js. createTerminal hands in the
 // registry, of which only a small view is used here — { names,
 // pipeNames, binPrefixes, resolveCommand } — so completion stays
 // decoupled from how the command set is assembled.
@@ -15,7 +15,8 @@ import { resolve } from './fs.js'
 // — `cat|gre` → `cat|grep`.
 //
 // The trailing word is the run of non-whitespace at the end of the
-// current command segment (after the last `|` / `&&` / `||` / `;`).
+// current command segment (after the last `|` / `&&` / `||` / `;` /
+// newline / `(`).
 // Priority order for what fills that slot:
 //   1. Command position, bin-prefixed token (`/usr/bin/grep…`)
 //      → command list, bin prefix preserved on the way out.
@@ -46,7 +47,13 @@ export function complete(line, ctx, reg) {
   const segment = line.slice(segStart)
   const wordStart = lastWordStart(segment)
   const word = segment.slice(wordStart)
-  const before = segment.slice(0, wordStart).trim()
+  // `do` opens a `for` body, so the word after it names a command:
+  // `for f in a b; do gre` completes `grep`, not a path.
+  const before = segment.slice(0, wordStart).trim().replace(/^do(?:\s+|$)/u, '')
+  // Only an operator or a redirect may follow `done`, so there is
+  // nothing to offer there — certainly not the paths a `done` read as
+  // a command name would get.
+  if (/^done(?:\s|$)/u.test(before)) return []
   const commandPosition = before === ''
   // Resolve the leading token of the segment so per-command rules
   // can fire on bin-prefixed forms too (`/usr/bin/cd` ≡ `cd`).
@@ -109,9 +116,11 @@ function completeWord(word, commandPosition, pipe, command, ctx, reg) {
   return names.filter((n) => n.startsWith(word))
 }
 
-// Index just past the last unquoted `|`, `||`, `&&`, or `;` in
-// `line`, plus whether that last boundary was a single `|` (so the
-// caller can restrict completion to pipe-target commands).
+// Index just past the last unquoted `|`, `||`, `&&`, `;`, newline, or
+// `(` in `line`, plus whether that last boundary was a single `|` (so
+// the caller can restrict completion to pipe-target commands). A
+// newline separates commands exactly as `;` does (tokenize.js), and a
+// `(` opens a subshell whose first word is a command.
 // Two-char lookahead for `||` / `&&` is why this is an index loop
 // rather than a for-of.
 function lastCommandBoundary(line) {
@@ -129,7 +138,7 @@ function lastCommandBoundary(line) {
       i += 2
       index = i
       pipe = false
-    } else if (c === ';') {
+    } else if (c === ';' || c === '\n' || c === '(') {
       i++
       index = i
       pipe = false

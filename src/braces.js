@@ -1,6 +1,10 @@
-// Bash-style brace expansion. Runs once per pipeline stage, BEFORE
-// `expandGlobs` — so `{foo,bar}*.js` first becomes `foo*.js bar*.js`
-// and then each piece globs against the FS.
+// Bash-style brace expansion. Runs once per pipeline stage (and once
+// per `for` word list), BEFORE variable substitution and `expandGlobs`
+// — so `{foo,bar}*.js` first becomes `foo*.js bar*.js` and then each
+// piece globs against the FS, and a value bound to `$f` is never read
+// as brace syntax. The result's `origin[j]` is the input index output
+// word `j` came from, so the substitution pass can find the
+// tokenizer's record for a word this pass multiplied.
 //
 // Rules (matching bash, narrower scope):
 //   `{a,b,c}`            → 3 argv items
@@ -18,8 +22,9 @@
 //   into multiple tokens is rare and surprising.
 
 export function expandBraces(argv, quotedSet) {
-  if (argv.length === 0) return { argv: [], quoted: new Set() }
+  if (argv.length === 0) return { argv: [], quoted: new Set(), origin: [] }
   const out = [argv[0]]
+  const origin = [0]
   const newQuoted = new Set()
   if (quotedSet.has(0)) newQuoted.add(0)
   for (let i = 1; i < argv.length; i++) {
@@ -27,11 +32,15 @@ export function expandBraces(argv, quotedSet) {
     if (quotedSet.has(i)) {
       newQuoted.add(out.length)
       out.push(tok)
+      origin.push(i)
       continue
     }
-    for (const e of expandOne(tok)) out.push(e)
+    for (const e of expandOne(tok)) {
+      out.push(e)
+      origin.push(i)
+    }
   }
-  return { argv: out, quoted: newQuoted }
+  return { argv: out, quoted: newQuoted, origin }
 }
 
 // Find the leftmost balanced `{...}` with at least one top-level
