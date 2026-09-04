@@ -28,7 +28,8 @@
 // Anything else after a `$` — `$1`, `$?`, `$(`, a `${…}` that is not a
 // plain name — is ordinary text. Backslashes are not processed here at
 // all (glob.js reads `\*`, bre.js reads `\(`), so `\$f` stays those
-// three characters, unexpanded.
+// three characters, unexpanded; `\\$f` is an escaped backslash and then
+// a reference, which does expand.
 
 // A newline after one of these boundary tokens contributes nothing:
 // the separator already exists (`;`) or the operator still needs its
@@ -39,12 +40,13 @@
 // no-op, so blank lines never produce an empty stage.
 const NEWLINE_ABSORB = new Set(['semi', 'and', 'or', 'pipe', 'paren_open'])
 
-// Shell variable names: `[A-Za-z_][A-Za-z0-9_]*`. The anchored form
-// validates a whole string (the `${…}` contents here, `for`'s loop
-// variable in parse.js); the sticky form scans in place from just past
-// a `$`.
-export const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/u
-const NAME_AT = /[A-Za-z_][A-Za-z0-9_]*/uy
+// Shell variable names: `[A-Za-z_][A-Za-z0-9_]*`, written once. The
+// anchored form validates a whole string (`for`'s loop variable, in
+// parse.js); the sticky form scans in place from a given offset — just
+// past a `$`, or past a `${`.
+const NAME = '[A-Za-z_][A-Za-z0-9_]*'
+export const NAME_RE = new RegExp(`^${NAME}$`, 'u')
+const NAME_AT = new RegExp(NAME, 'uy')
 
 export function tokenize(line) {
   const tokens = []
@@ -58,7 +60,10 @@ export function tokenize(line) {
   let quoted = false
   // `parts` collects the word's literal/reference split once a
   // reference appears; `partStart` is where, in `cur`, the literal
-  // text since the last reference begins.
+  // text since the last reference begins. Both are built from the same
+  // characters, so a word's `value` is always exactly its `parts`
+  // joined — index.js relies on that to hand `value` back untouched
+  // when nothing is bound.
   let parts = null
   let partStart = 0
   const flush = () => {
@@ -81,7 +86,7 @@ export function tokenize(line) {
     if (quote && c === quote) { quote = null; continue }
     // A reference is read the same way bare and inside double quotes;
     // only single quotes (and a preceding backslash) keep `$` literal.
-    if (c === '$' && quote !== "'" && line[i - 1] !== '\\') {
+    if (c === '$' && quote !== "'" && !escaped(line, i)) {
       const ref = readRef(line, i)
       if (ref) {
         parts ??= []
@@ -174,14 +179,46 @@ function fdRedirect(line, i) {
 // The reference starting at the `$` at `line[i]`, or null when what
 // follows is not one. `raw` is the source text the reference stands
 // for, kept so an unbound name can be echoed back exactly as typed.
+// Both spellings scan with the sticky regex from a fixed offset, so a
+// `${` with no closing brace costs one failed match rather than a scan
+// to the end of the line — a line of repeated `${` stays linear.
 function readRef(line, i) {
-  if (line[i + 1] === '{') {
-    const close = line.indexOf('}', i + 2)
-    if (close === -1) return null
-    const name = line.slice(i + 2, close)
-    return NAME_RE.test(name) ? { name, raw: line.slice(i, close + 1) } : null
-  }
-  NAME_AT.lastIndex = i + 1
+  const braced = line[i + 1] === '{'
+  NAME_AT.lastIndex = braced ? i + 2 : i + 1
   const m = NAME_AT.exec(line)
-  return m ? { name: m[0], raw: '$' + m[0] } : null
+  if (!m) return null
+  const end = NAME_AT.lastIndex
+  if (!braced) return { name: m[0], raw: line.slice(i, end) }
+  return line[end] === '}' ? { name: m[0], raw: line.slice(i, end + 1) } : null
+}
+
+// Whether the character at `line[i]` sits behind an odd run of
+// backslashes — `\$` is a literal dollar, `\\$` an escaped backslash
+// followed by a live one.
+function escaped(line, i) {
+  let n = 0
+  while (line[i - 1 - n] === '\\') n++
+  return n % 2 === 1
+}
+
+// The literal/reference split of plain word text — what the tokenizer
+// records for a word it reads, recomputed for text it never saw: brace
+// expansion multiplies an unquoted word after tokenizing, and each
+// product needs its own split (`$f{a,b}` yields `$fa` and `$fb`, as in
+// bash). Only unquoted words reach here, so there is no single-quote
+// context to honor; the backslash rule is the tokenizer's.
+export function splitRefs(text) {
+  const parts = []
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '$' || escaped(text, i)) continue
+    const ref = readRef(text, i)
+    if (!ref) continue
+    if (i > start) parts.push(text.slice(start, i))
+    parts.push(ref)
+    i += ref.raw.length - 1
+    start = i + 1
+  }
+  if (text.length > start) parts.push(text.slice(start))
+  return parts
 }

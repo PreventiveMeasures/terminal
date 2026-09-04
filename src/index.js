@@ -41,7 +41,8 @@ import { createFs, resolve } from './fs.js'
 import { expandGlobs } from './glob.js'
 import { parseLine } from './parse.js'
 import { DEFAULT_REGISTRY, createRegistry } from './registry.js'
-import { err } from './util.js'
+import { splitRefs } from './tokenize.js'
+import { err, ok } from './util.js'
 import { complete } from './complete.js'
 
 export function createTerminal(sources, opts = {}) {
@@ -127,11 +128,12 @@ function safeRun(line, ctx) {
 // nothing. The overall exit code is from the LAST step that
 // actually ran.
 //
-// `initialStdin` is only meaningful for subshell groups: when a
-// `(...)` appears in a pipeline (`echo hi | (cat)`), the upstream
-// output becomes the group's stdin and is delivered to the first
-// step's pipeline. Later steps inside the group start with empty
-// stdin, same as at top level.
+// `initialStdin` is only meaningful for subshell groups and loop
+// bodies: when a `(...)` or a `for` appears in a pipeline (`echo hi |
+// (cat)`), the upstream output becomes the block's stdin and is
+// delivered to the first step's pipeline (the first iteration's, for
+// a loop). Later steps inside the block start with empty stdin, same
+// as at top level.
 function runSteps(steps, ctx, initialStdin) {
   let stdout = ''
   let stderr = ''
@@ -190,33 +192,54 @@ function runPipeline(stages, ctx, initialStdin) {
 
 function runStage(stage, ctx, stdin) {
   const expanded = expandWords(stage, ctx)
+  // Every word expanded to nothing (`$c` with an empty binding): no
+  // command at all, status 0, as in bash.
+  if (expanded.length === 0) return ok()
   return dispatch(expanded[0], expanded.slice(1), stdin, ctx)
 }
 
 // Word expansion for a stage — or a loop's word list, which parse.js
-// stores in the same shape. Variables first (`$f` → its binding, or
-// left as typed when no enclosing `for` binds it), then brace
-// expansion (`{foo,bar}*.js` → `foo*.js bar*.js`), then globs against
-// the FS. Quoted tokens and argv[0] (the command name) pass through
-// the brace and glob phases verbatim, matching bash; a reference in
-// argv[0] does substitute, so `for c in cat wc; do $c f; done` works.
-// A bound value is substituted as ONE word, never split on whitespace
-// (zsh's rule, not bash's), and it IS subject to brace expansion where
-// bash, which expands braces first, would leave a literal `{a,b}` —
-// a corner no loop over file names reaches.
+// stores in the same shape — in bash's order: brace expansion on the
+// text as typed (`{foo,bar}*.js` → `foo*.js bar*.js`), then variable
+// substitution (`$f` → its binding, or left as typed when no enclosing
+// `for` binds it), then globs against the FS. Braces first means a
+// bound VALUE is never read as brace syntax (a file named `a{1,2}.txt`
+// stays one word) while `src/$f.{h,c}` still multiplies. Quoted tokens
+// and argv[0] (the command name) pass through the brace and glob
+// phases verbatim, matching bash; a reference in argv[0] does
+// substitute, so `for c in cat wc; do $c f; done` works. A bound value
+// is substituted as ONE word, never split on whitespace (zsh's rule,
+// not bash's).
 function expandWords(stage, ctx) {
-  const argv = substituteVars(stage.argv, stage.refs, ctx.vars)
-  const braced = expandBraces(argv, stage.quoted)
-  return expandGlobs(braced.argv, braced.quoted, ctx)
+  const braced = expandBraces(stage.argv, stage.quoted)
+  const substituted = substituteVars(braced, stage, ctx.vars)
+  return expandGlobs(substituted.argv, substituted.quoted, ctx)
 }
 
-function substituteVars(argv, refs, vars) {
-  if (refs.size === 0 || vars.size === 0) return argv
-  const out = argv.slice()
-  for (const [i, parts] of refs) {
-    out[i] = parts.map((p) => typeof p === 'string' ? p : vars.get(p.name) ?? p.raw).join('')
+// Replace each `$NAME` reference with its binding. A word that brace
+// expansion left untouched still matches the tokenizer's split for it
+// (which also knows which `$` sat inside single quotes); a word it
+// multiplied is re-split — `$f{a,b}` names `fa` and `fb`, as in bash.
+// An unquoted word that comes out empty is dropped, as bash drops it:
+// `$c` with an empty binding is no command at all, while `"$c"` stays
+// an (empty) word. Dropping shifts positions, so `quoted` is rebuilt.
+function substituteVars(braced, stage, vars) {
+  if (stage.refs.size === 0 || vars.size === 0) return braced
+  const argv = []
+  const quoted = new Set()
+  for (let j = 0; j < braced.argv.length; j++) {
+    const i = braced.origin[j]
+    const isQuoted = braced.quoted.has(j)
+    let word = braced.argv[j]
+    if (stage.refs.has(i)) {
+      const parts = word === stage.argv[i] ? stage.refs.get(i) : splitRefs(word)
+      word = parts.map((p) => typeof p === 'string' ? p : vars.get(p.name) ?? p.raw).join('')
+      if (word === '' && !isQuoted) continue
+    }
+    if (isQuoted) quoted.add(argv.length)
+    argv.push(word)
   }
-  return out
+  return { argv, quoted }
 }
 
 // `for NAME in WORDS; do BODY; done`. The word list expands when the

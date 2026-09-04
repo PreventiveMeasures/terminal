@@ -43,7 +43,7 @@ export interface CommandInputs {
 export interface CommandIo {
   /** The name this command was registered under. */
   name: string
-  /** Operands after the command name, with brace and glob expansion already applied. */
+  /** Operands after the command name, with brace expansion, `for`-loop variable substitution and glob expansion already applied. */
   args: string[]
   /** Stdin from the previous pipeline stage; `''` when the command starts a pipeline. */
   stdin: string
@@ -147,8 +147,9 @@ export interface Terminal {
    * drop a result in without tokenizing the input themselves: e.g.
    * `complete('cat|gre')` returns `['cat|grep']`.
    *
-   * In command position, completes command names (including under bin
-   * prefixes like `/usr/bin/`). In argument position, walks the virtual
+   * In command position — the start of the line, or after `;`, a newline,
+   * `|`, `&&`, `||`, `(`, or a `for` loop's `do` — completes command names
+   * (including under bin prefixes like `/usr/bin/`). In argument position, walks the virtual
    * FS treating the trailing word as a path (relative to cwd unless it
    * starts with `/`); directories carry a trailing `/`. Returns `[]`
    * when nothing matches.

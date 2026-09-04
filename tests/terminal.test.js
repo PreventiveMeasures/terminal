@@ -2204,6 +2204,22 @@ describe('createTerminal — pathological inputs', () => {
     const t = createTerminal({ [path]: 'hi' })
     assert.equal(t.run(`cat /${path}`).stdout, 'hi')
   })
+
+  it('a long run of `${` tokenizes in linear time', () => {
+    // The `${…}` scan once searched to end-of-line for a closing brace
+    // at every `${`, so this 1 MB word took seconds; it now costs one
+    // failed sticky match per `${`. Double-quoted, so the word still
+    // goes through the reference scan but skips brace expansion, whose
+    // own end-of-line rescan per unmatched `{` predates this and is
+    // not what is being pinned here.
+    const t = createTerminal(SOURCES)
+    const word = '${'.repeat(500000)
+    const started = Date.now()
+    const r = t.run(`echo "${word}"`)
+    assert.ok(Date.now() - started < 2000, 'tokenizer went quadratic')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, word + '\n')
+  })
 })
 
 describe('createTerminal — read-only filesystem', () => {
@@ -2890,9 +2906,12 @@ describe('createTerminal — `for` loops', () => {
     assert.equal(pasted.exitCode, 0)
     assert.equal(pasted.stdout, '== a\n3:int foo1_bar;\n== b\n')
     assert.equal(pasted.stdout, oneLine.stdout)
-    // Extra `;` around `do` (what a `do⏎` becomes after tokenizing)
-    // and a trailing `;` after `done` are tolerated.
-    assert.equal(t.run('for f in a;; do; echo $f; done;').stdout, 'a\n')
+    // One `;` after `do` (what a `do⏎` becomes after tokenizing) and a
+    // trailing `;` after `done` are tolerated, and `in` may open its
+    // own line. Doubled separators are errors, as in bash.
+    assert.equal(t.run('for f in a; do; echo $f; done;').stdout, 'a\n')
+    assert.equal(t.run('for f\nin a b\ndo\necho $f\ndone').stdout, 'a\nb\n')
+    assert.match(t.run('for f in a;; do echo $f; done').stderr, /for: expected `do`, got `;`/u)
   })
 
   it('`$f` expands bare and inside double quotes, stays literal in single quotes', () => {
@@ -3041,6 +3060,8 @@ describe('createTerminal — `for` loops', () => {
       ['for f in a b', /for: missing `do`/u],
       ['for f in a b; echo x', /for: expected `do`, got `echo`/u],
       ['for f in a do echo; done', /for: expected `;` or newline before `do`/u],
+      ['for f in a;; do echo; done', /for: expected `do`, got `;`/u],
+      ['for f in a; "do" echo; done', /for: expected `do`, got `"do"`/u],
       ['for f in a | b; do echo; done', /for: unexpected `\|` in word list/u],
       ['for f in a >/dev/null; do echo; done', /for: unexpected `>` in word list/u],
       ['for f in a; do', /for: missing `done`/u],
@@ -3062,10 +3083,83 @@ describe('createTerminal — `for` loops', () => {
     }
   })
 
+  it('a dangling `&&` / `||` before `done` (or `)`) is an error, as at top level', () => {
+    const t = createTerminal(SOURCES)
+    for (const line of ['for f in a; do echo x && done', 'for f in a; do false || done', '(echo a &&)', '(false ||)']) {
+      const r = t.run(line)
+      assert.equal(r.exitCode, 1, line)
+      assert.equal(r.stdout, '', line)
+      assert.match(r.stderr, /empty pipeline stage/u, line)
+    }
+    // A trailing `;` before the closer stays a no-op.
+    assert.equal(t.run('for f in a; do echo x; done').stdout, 'x\n')
+    assert.equal(t.run('(echo a;)').stdout, 'a\n')
+  })
+
+  it('brace expansion runs before substitution, as in bash', () => {
+    const t = createTerminal({ ...SOURCES, 'a{1,2}.txt': 'brace\n', 'a1.txt': 'one\n' })
+    // A bound value is never read as brace syntax: a glob-produced file
+    // name with braces in it is read, a regex quantifier survives.
+    assert.equal(t.run('for f in *.txt; do cat $f; done').stdout, 'one\nbrace\n')
+    assert.equal(t.run("for p in 'x{1,3}'; do echo $p; done").stdout, 'x{1,3}\n')
+    // Braces next to a reference still multiply the word, and each
+    // product is re-split: `$f{a,b}` names `fa` and `fb` (bash does the
+    // same; `${f}{a,b}` is the spelling that appends).
+    assert.equal(t.run('for f in a b; do echo src/$f.{h,c}; done').stdout, 'src/a.h src/a.c\nsrc/b.h src/b.c\n')
+    assert.equal(t.run('for f in x; do echo $f{a,b} ${f}{a,b}; done').stdout, '$fa $fb xa xb\n')
+    // A quoted word is untouched by both phases.
+    assert.equal(t.run('for f in x; do echo "$f{a,b}"; done').stdout, 'x{a,b}\n')
+  })
+
+  it('an unquoted reference that expands to nothing is dropped; a quoted one stays', () => {
+    const t = createTerminal(SOURCES)
+    // Bash removes an empty unquoted expansion: alone in command
+    // position it is no command at all, elsewhere it is no operand.
+    const none = t.run('for c in ""; do $c; done')
+    assert.equal(none.exitCode, 0)
+    assert.equal(none.stdout, '')
+    assert.equal(none.stderr, '')
+    assert.equal(t.run('for c in "" echo; do $c hi; done').stdout, 'hi\n')
+    assert.equal(t.run('for x in ""; do echo a $x b; done').stdout, 'a b\n')
+    // Quoted, the empty word survives — and as a command name it is
+    // the same not-found bash reports.
+    assert.equal(t.run('for x in ""; do echo "[$x]"; done').stdout, '[]\n')
+    const quoted = t.run('for c in ""; do "$c"; done')
+    assert.equal(quoted.exitCode, 127)
+    assert.match(quoted.stderr, /^: command not found/u)
+    // An empty word in a list is dropped the same way, so an inner
+    // loop over an empty outer value runs zero times.
+    assert.equal(t.run('for a in ""; do for b in $a; do echo never; done; echo end; done').stdout, 'end\n')
+  })
+
+  it('an unquoted `do` in the word list is a plain word; the hint fires only when `do` is missing', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('for f in a do; do echo [$f]; done').stdout, '[a]\n[do]\n')
+    const missing = t.run('for f in a do echo $f; done')
+    assert.equal(missing.exitCode, 1)
+    assert.match(missing.stderr, /for: expected `;` or newline before `do`/u)
+  })
+
+  it('an escaped backslash before `$` does not suppress the reference', () => {
+    const t = createTerminal(SOURCES)
+    // Backslashes are not otherwise processed, so `\$f` stays as typed
+    // and `\\$f` keeps both backslashes ahead of the value.
+    assert.equal(t.run('for f in a; do echo \\$f \\\\$f "\\$f" "\\\\$f"; done').stdout, '\\$f \\\\a \\$f \\\\a\n')
+  })
+
   it('tab-completion: the word after `do` is in command position', () => {
     const t = createTerminal(SOURCES)
     assert.deepEqual(t.complete('for f in a b; do gre'), ['for f in a b; do grep'])
     assert.ok(t.complete('for f in a b; do ').includes('for f in a b; do grep'))
+    // The multi-line spelling, a `(` opening a subshell, and a plain
+    // newline are boundaries too; nothing but an operator follows
+    // `done`, so nothing is offered there.
+    assert.deepEqual(t.complete('for f in a\ndo\ngre'), ['for f in a\ndo\ngrep'])
+    assert.deepEqual(t.complete('for f in a\ndo gre'), ['for f in a\ndo grep'])
+    assert.deepEqual(t.complete('for f in a; do (gre'), ['for f in a; do (grep'])
+    assert.deepEqual(t.complete('echo a\ngre'), ['echo a\ngrep'])
+    assert.deepEqual(t.complete('for f in a; do echo $f; done sr'), [])
+    assert.deepEqual(t.complete('for f in a; do echo $f; done '), [])
     // Argument position inside the body and in the word list still
     // completes paths; a pipe after `done` still restricts to pipe
     // targets.

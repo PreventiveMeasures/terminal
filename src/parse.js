@@ -1,5 +1,5 @@
-// Tokenize a command line and split it into a sequence of pipeline
-// steps with short-circuit gates (`&&` / `||`) between them. Each
+// Split a tokenized command line (see tokenize.js) into a sequence of
+// pipeline steps with short-circuit gates (`&&` / `||`) between them. Each
 // step is a list of stages connected by `|`; each stage carries
 // its argv plus optional stdout/stderr suppression flags, OR
 // (for a subshell stage) a nested `group` of inner steps, OR (for a
@@ -174,49 +174,61 @@ function buildSteps(raw, start, end) {
 // word list up to a `;` (or newline), then `do`, then the body up to
 // `done`. Stricter than bash in one place — `for f; do …; done`, which
 // iterates the positional parameters, is rejected outright since there
-// are none to iterate — and more lenient in one: extra `;` around `do`
-// are tolerated, because the tokenizer has already turned newlines into
-// `;` and `do⏎` is the usual multi-line spelling.
+// are none to iterate — and more lenient in one: a `;` right after `do`
+// is accepted where bash allows only a newline, because the tokenizer
+// has already turned newlines into `;`. Exactly one separator is
+// skipped at each boundary, so `;;` is an error here as in bash.
 function parseFor(raw, start) {
   let i = start
   const nameTok = raw[i]
   if (nameTok === undefined || nameTok.kind !== 'word') throw new Error('for: expected a variable name')
   const name = nameTok.value
   if (nameTok.quoted || !NAME_RE.test(name)) throw new Error(`for: \`${name}\` is not a valid variable name`)
-  if (!isWord(raw[i + 1], 'in')) throw new Error(`for: expected \`in\` after \`${name}\``)
-  i += 2
+  i = skipSemi(raw, i + 1)
+  if (!isWord(raw[i], 'in')) throw new Error(`for: expected \`in\` after \`${name}\``)
+  i++
   // The word list rides in a stage-shaped record with the keyword in
   // the command slot, so the expanders' argv[0] carve-out lines up:
   // index.js drops that slot after expanding.
   const words = newStage()
   words.argv.push('for')
+  // `do` is an ordinary word here, as in bash (`for f in a do; do …`
+  // iterates over `do` too); it is only remembered so the error can
+  // name the likely cause when the real `do` turns out to be missing.
+  let sawDo = false
   for (; i < raw.length && raw[i].kind !== 'semi'; i++) {
     const t = raw[i]
     if (t.kind !== 'word') throw new Error(`for: unexpected \`${tokenLabel(t)}\` in word list`)
-    // Bash would take `do` as one more word here and trip over the
-    // missing `do` later; say what is actually missing. (Quote it to
-    // iterate over the literal word.)
-    if (isWord(t, 'do')) throw new Error('for: expected `;` or newline before `do`')
+    if (isWord(t, 'do')) sawDo = true
     pushWord(words, t)
   }
-  while (i < raw.length && raw[i].kind === 'semi') i++
-  if (i >= raw.length) throw new Error('for: missing `do`')
-  if (!isWord(raw[i], 'do')) throw new Error(`for: expected \`do\`, got \`${tokenLabel(raw[i])}\``)
-  i++
-  while (i < raw.length && raw[i].kind === 'semi') i++
+  i = skipSemi(raw, i)
+  if (!isWord(raw[i], 'do')) {
+    if (sawDo) throw new Error('for: expected `;` or newline before `do`')
+    if (i >= raw.length) throw new Error('for: missing `do`')
+    throw new Error(`for: expected \`do\`, got \`${tokenLabel(raw[i])}\``)
+  }
+  i = skipSemi(raw, i + 1)
   const body = buildSteps(raw, i, 'done')
   return { loop: { name, words, body: body.steps }, consumed: body.consumed }
 }
 
-// An unquoted word token — with exactly this `value`, when one is given.
-function isWord(t, value) {
-  return t !== undefined && t.kind === 'word' && !t.quoted && (value === undefined || t.value === value)
+// Index past one `;` at `i`, if there is one — a newline in the source.
+function skipSemi(raw, i) {
+  return raw[i]?.kind === 'semi' ? i + 1 : i
 }
 
-// The token as the user would have typed it, for error messages.
-const LABELS = { semi: ';', pipe: '|', and: '&&', or: '||', paren_open: '(', paren_close: ')' }
+// The unquoted word `value`, as opposed to a quoted spelling of it.
+function isWord(t, value) {
+  return t !== undefined && t.kind === 'word' && !t.quoted && t.value === value
+}
+
+// The token as the user would have typed it, for error messages. A
+// quoted word keeps its quotes, so a `"do"` that failed to be the
+// keyword is not reported as `do`.
+const LABELS = { semi: ';', pipe: '|', and: '&&', or: '||', amp: '&', paren_open: '(', paren_close: ')' }
 function tokenLabel(t) {
-  if (t.kind === 'word') return t.value
+  if (t.kind === 'word') return t.quoted ? `"${t.value}"` : t.value
   if (t.kind === 'redir') return (t.fd === '1' ? '' : t.fd) + '>' + (t.toFd ? '&' + t.toFd : t.append ? '>' : '')
   return LABELS[t.kind]
 }
@@ -227,19 +239,18 @@ function tokenLabel(t) {
 //     wrong.
 //   - `(echo a;)` / `echo a; done` — trailing `;` before the closer,
 //     mirroring the top-level trailing-semi tolerance. The semi already
-//     pushed an empty new step; drop it here.
+//     pushed an empty new step; drop it here. Only a `;` earns this: a
+//     dangling `&&` / `||` before the closer keeps its empty step for
+//     the validator to reject, as `cat x &&` is rejected at top level.
 // "Empty" excludes redirects: `(>/dev/null)` and `(echo a; >/dev/null)`
 // must NOT silently drop the redirect — they fall through to the
 // regular validator and surface as "empty pipeline stage".
 function finishBlock(steps, stage, consumed, emptyError) {
   const lastStep = steps.at(-1)
-  const stageEmpty = commandPosition(stage) && !hasRedirects(stage)
-  if (stageEmpty && lastStep.stages.length === 0) {
-    if (steps.length === 1) throw new Error(emptyError)
-    steps.pop()
-  } else {
-    lastStep.stages.push(stage)
-  }
+  const emptyTail = commandPosition(stage) && !hasRedirects(stage) && lastStep.stages.length === 0
+  if (emptyTail && steps.length === 1) throw new Error(emptyError)
+  if (emptyTail && lastStep.gate === 'seq') steps.pop()
+  else lastStep.stages.push(stage)
   return { steps, consumed }
 }
 
@@ -264,7 +275,7 @@ function applyRedir(stage, raw, i) {
     return i
   }
   const target = raw[i + 1]
-  const label = prefix + '>' + (op.append ? '>' : '')
+  const label = tokenLabel(op)
   if (op.append) {
     throw new Error(`filesystem is read-only — \`${label}\` append is not supported; use \`|\` to pipe or \`${prefix}>/dev/null\` to discard`)
   }
