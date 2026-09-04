@@ -31,8 +31,8 @@ const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} -e PATTERN 
 // follows symlinks. The virtual FS has no symlink concept, so the two
 // degenerate to the same traversal here; -R is accepted as an alias
 // so muscle-memory invocations don't trip over an "unknown option".
-const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'h', 'H', 'o', 'E', 'F', 'G']
-const VALUE_SHORTS = ['A', 'B', 'C']
+const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'h', 'H', 'o', 'E', 'F', 'G', 'q']
+const VALUE_SHORTS = ['A', 'B', 'C', 'm']
 
 export function grep(stdin, tokens, ctx) {
   // `-e` is a repeatable value flag, so `-e a -e b` (and the bundled
@@ -70,15 +70,46 @@ export function grep(stdin, tokens, ctx) {
   const showName = pickShowName(flags, recursive, rest.length)
   const invert = flags.has('v')
   const opts = { showName, invert, showLine: flags.has('n'), only: flags.has('o'), after: ctxLines.after, before: ctxLines.before }
-  const result = flags.has('l') ? grepListFiles(inputs, re.res, invert, false)
-    : flags.has('L') ? grepListFiles(inputs, re.res, invert, true)
-    : flags.has('c') ? grepCount(inputs, re.res, invert, showName)
-    : grepRun(inputs, re.res, opts)
+  const max = parseMaxCount(values)
+  if (max.error) return max.error
+  const capped = max.value === undefined ? inputs : inputs.map((inp) => capMatches(inp, re.res, invert, max.value))
+  const result = flags.has('l') ? grepListFiles(capped, re.res, invert, false)
+    : flags.has('L') ? grepListFiles(capped, re.res, invert, true)
+    : flags.has('c') ? grepCount(capped, re.res, invert, showName)
+    : grepRun(capped, re.res, opts)
+  // -q asks only whether anything matched: no stdout at all, and the
+  // usual 0/1 status. An unreadable operand still forces the exit-2
+  // below, matching GNU (`grep -q PAT missing` is 2, not 1).
+  if (flags.has('q')) result.stdout = ''
   // Unreadable file/dir operands don't abort the search: scan what we
   // can, then prepend their errors and force grep's exit-2 ("an error
   // occurred"), which outranks the 0/1 match status.
   if (r.failed) return { stdout: result.stdout, stderr: r.stderr + result.stderr, exitCode: 2 }
   return result
+}
+
+// `-m N` stops reading a file after N selected lines. GNU applies it
+// per input, and it composes with every output mode — `grep -m1 -c`
+// reports 1, not the true total — so rather than teaching each mode a
+// limit, truncate the input itself at the line where the Nth match was
+// selected. Everything downstream (counts, context, -l) then sees a
+// file that genuinely ends there. `-m 0` selects nothing.
+function parseMaxCount(values) {
+  if (!values.has('m')) return { value: undefined }
+  const n = parseNonNegativeInt(values.get('m'), 'grep: -m')
+  return n.error ? { error: { ...n.error, exitCode: 2 } } : n
+}
+
+function capMatches(input, res, invert, max) {
+  const lines = splitLines(input.content)
+  let seen = 0
+  for (let i = 0; i < lines.length; i++) {
+    if (anyMatch(res, lines[i]) !== invert && ++seen === max) {
+      return { ...input, content: joinLines(lines.slice(0, i + 1)) }
+    }
+  }
+  // Fewer matches than the cap (or `-m 0`, which keeps nothing).
+  return max === 0 ? { ...input, content: '' } : input
 }
 
 // parseArgs collapses flags into a Set so order is lost; with no

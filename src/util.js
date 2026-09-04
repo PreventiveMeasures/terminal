@@ -5,6 +5,16 @@
 
 import { resolve } from './fs.js'
 
+// The byte model every `-c`-style option shares. Content is a JS string
+// (UTF-16 code units), so anything counting or slicing BYTES — `wc -c`,
+// `head -c`, `cut -c`, the dump commands — encodes to UTF-8 first: `é`
+// is 2 bytes, an emoji 4. Plain `.length` would count code units and
+// disagree with coreutils on multibyte text. `ignoreBOM` keeps a
+// leading U+FEFF in decoded output instead of swallowing it, since
+// these are raw bytes being sliced, not a document being loaded.
+export const utf8 = new TextEncoder()
+export const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+
 export const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0 })
 
 // Most stderr lines should end with a newline so consecutive
@@ -91,11 +101,26 @@ export const okWith = (stdout, r) => ({ stdout, stderr: r.stderr, exitCode: r.fa
 // 2^53 - 1 where round-trip parsing stops being exact. Callers
 // that need a strictly positive count (e.g. xargs -n) check
 // `value === 0` themselves.
-export function parseNonNegativeInt(str, label) {
+export function parseNonNegativeInt(str, label, shown = str) {
   if (typeof str !== 'string' || !/^\d+$/u.test(str)) {
-    return { error: err(`${label}: invalid count: ${str}`) }
+    return { error: err(`${label}: invalid count: ${shown}`) }
   }
   const n = Number(str)
-  if (!Number.isSafeInteger(n)) return { error: err(`${label}: out of range: ${str}`) }
+  if (!Number.isSafeInteger(n)) return { error: err(`${label}: out of range: ${shown}`) }
   return { value: n }
+}
+
+// A count that may carry a sign, as head's and tail's `-n` / `-c` do.
+// The digits are validated exactly as above; the SIGN is handed back
+// rather than interpreted, because the two commands read it in mirror
+// image: `head -n -5` drops the last 5 lines, `tail -n +5` starts at
+// line 5, and an unsigned count means "first 5" to head and "last 5"
+// to tail. `+` is the explicit form of each command's own default, so
+// `head -n +5` is `head -n 5`. Errors quote the operand as typed —
+// `-n +x` complains about `+x`, not `x`.
+export function parseSignedCount(str, label) {
+  if (typeof str !== 'string') return { error: err(`${label}: invalid count: ${str}`) }
+  const sign = str[0] === '+' || str[0] === '-' ? str[0] : ''
+  const r = parseNonNegativeInt(sign ? str.slice(1) : str, label, str)
+  return r.error ? r : { value: r.value, sign }
 }

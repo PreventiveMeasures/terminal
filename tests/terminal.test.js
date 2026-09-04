@@ -1911,7 +1911,6 @@ describe('createTerminal — strict option parsing', () => {
     'head --bogus',
     'tail -z',
     'tail --bogus',
-    'tail -c 5',
     'wc -z',
     'wc -lz',
     'sort -z',
@@ -2873,11 +2872,23 @@ describe('createTerminal — count validation', () => {
   })
 
   it('non-decimal counts (whitespace, hex, scientific) are rejected', () => {
+    // `+5` / `-5` are NOT in this list: a sign is meaningful on a
+    // head/tail count (see the signed-count suite), so only the digits
+    // after it have to be decimal.
     const t = createTerminal(SOURCES)
-    for (const bad of ['" "', '0x10', '1e3', '+5', '-5', '1.5']) {
+    for (const bad of ['" "', '0x10', '1e3', '1.5', '+x', '-', '+', '++1']) {
       const r = t.run(`head -n ${bad} src/foo.js`)
       assert.notEqual(r.exitCode, 0, `expected ${bad} to be rejected`)
     }
+  })
+
+  it('a rejected signed count is quoted as typed, sign included', () => {
+    // The digits are validated after the sign is peeled off, but the
+    // message must still show what the user actually wrote.
+    const t = createTerminal(SOURCES)
+    assert.match(t.run('head -n +x src/foo.js').stderr, /invalid count: \+x/u)
+    assert.match(t.run('tail -n -x src/foo.js').stderr, /invalid count: -x/u)
+    assert.match(t.run('head -n +9007199254740992 src/foo.js').stderr, /out of range: \+9007199254740992/u)
   })
 
   it('out-of-safe-range counts are rejected', () => {
@@ -3633,6 +3644,231 @@ describe('createTerminal — head/tail blank-line selections', () => {
   })
 })
 
+describe('createTerminal — head/tail signed counts', () => {
+  // Every expectation checked against GNU coreutils 9.4.
+  const SRC = { 'a.txt': 'banana\ncherry\napple\nbanana\n', 'n.txt': '10\n9\n', 'nonl.txt': 'no trailing newline', 'blank.txt': '\n\n\n' }
+
+  it('`head -n -N` keeps everything but the last N lines', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -n -1 a.txt').stdout, 'banana\ncherry\napple\n')
+    assert.equal(t.run('head -n -3 a.txt').stdout, 'banana\n')
+    // More than the file holds leaves nothing, rather than going
+    // negative and wrapping into a slice from the end.
+    assert.equal(t.run('head -n -9 a.txt').stdout, '')
+    // `-0` drops nothing, so it is the whole file — unlike a plain `0`.
+    assert.equal(t.run('head -n -0 a.txt').stdout, 'banana\ncherry\napple\nbanana\n')
+    assert.equal(t.run('head -n 0 a.txt').stdout, '')
+  })
+
+  it('`head -c -N` drops the last N BYTES, per input', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -c -3 nonl.txt').stdout, 'no trailing newl')
+    assert.equal(t.run('head -c -99 nonl.txt').stdout, '')
+  })
+
+  it('`tail -n +N` starts at line N, 1-based', () => {
+    // The header-skipping idiom. `+1` and `+0` are both the whole file.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('tail -n +2 a.txt').stdout, 'cherry\napple\nbanana\n')
+    assert.equal(t.run('tail -n +1 a.txt').stdout, 'banana\ncherry\napple\nbanana\n')
+    assert.equal(t.run('tail -n +0 a.txt').stdout, 'banana\ncherry\napple\nbanana\n')
+    assert.equal(t.run('tail -n +9 a.txt').stdout, '')
+    assert.equal(t.run('tail -n +2 blank.txt').stdout, '\n\n')
+  })
+
+  it('`+N` on head and `-N` on tail are just the plain count', () => {
+    // Each command's own default direction, stated explicitly.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -n +2 a.txt').stdout, t.run('head -n 2 a.txt').stdout)
+    assert.equal(t.run('tail -n -2 a.txt').stdout, t.run('tail -n 2 a.txt').stdout)
+    assert.equal(t.run('head -c +4 a.txt').stdout, 'bana')
+  })
+
+  it('`tail -n +0` is the whole file, but `tail -n 0` and `-0` short-circuit', () => {
+    // The zero short-circuit belongs to the last-N form only; a `+0`
+    // reaching it would silently swallow the file.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('tail -n 0 a.txt').stdout, '')
+    assert.equal(t.run('tail -n -0 a.txt').stdout, '')
+    const zero = t.run('tail -n 0 a.txt missing')
+    assert.equal(zero.stderr, '')
+    assert.equal(zero.exitCode, 0)
+  })
+
+  it('signed counts compose with multi-file banners', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -n -1 a.txt n.txt').stdout,
+      '==> a.txt <==\nbanana\ncherry\napple\n\n==> n.txt <==\n10\n')
+    assert.equal(t.run('tail -n +2 a.txt n.txt').stdout,
+      '==> a.txt <==\ncherry\napple\nbanana\n\n==> n.txt <==\n9\n')
+  })
+
+  it('the `-NUM` shorthand stays unsigned — `head -2` is the first 2', () => {
+    // The shorthand strips its own leading `-`, so it must not be read
+    // as the all-but-last form.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -2 a.txt').stdout, 'banana\ncherry\n')
+    assert.equal(t.run('tail -2 a.txt').stdout, 'apple\nbanana\n')
+  })
+})
+
+describe('createTerminal — basename SUFFIX', () => {
+  it('strips a trailing SUFFIX when given one', () => {
+    const t = createTerminal({ 'x': '' })
+    assert.equal(t.run('basename /a/b/c.js .js').stdout, 'c\n')
+    assert.equal(t.run('basename x.tar.gz .gz').stdout, 'x.tar\n')
+  })
+
+  it('leaves the name alone when the suffix does not match', () => {
+    const t = createTerminal({ 'x': '' })
+    assert.equal(t.run('basename /a/b/c.js .xx').stdout, 'c.js\n')
+    assert.equal(t.run('basename /a/b/c.js').stdout, 'c.js\n')
+  })
+
+  it('never strips the whole name away', () => {
+    // GNU keeps the name rather than emitting an empty line, so
+    // `basename .js .js` is `.js` — the guard the endsWith test alone
+    // would miss.
+    const t = createTerminal({ 'x': '' })
+    assert.equal(t.run('basename c.js c.js').stdout, 'c.js\n')
+    assert.equal(t.run('basename /a/b/.js .js').stdout, '.js\n')
+  })
+})
+
+describe('createTerminal — head/tail -q/-v, tail -c, wc -m', () => {
+  // Checked against GNU coreutils 9.4 (C.utf8 for the char/byte cases).
+  const SRC = {
+    'a.txt': 'banana\ncherry\napple\nbanana\n',
+    'n.txt': '10\n9\n',
+    'uni.txt': 'héllo wörld\n',
+    'emo.txt': '😀x\n',
+  }
+
+  it('-q suppresses banners, -v forces them', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -q -n1 a.txt n.txt').stdout, 'banana\n10\n')
+    assert.equal(t.run('tail -q -n1 a.txt n.txt').stdout, 'banana\n9\n')
+    assert.equal(t.run('head -v -n1 a.txt').stdout, '==> a.txt <==\nbanana\n')
+    assert.equal(t.run('tail -v -n1 a.txt').stdout, '==> a.txt <==\nbanana\n')
+    // -v applies to byte mode too.
+    assert.equal(t.run('head -v -c2 a.txt').stdout, '==> a.txt <==\nba')
+  })
+
+  it('-q and -v together are rejected rather than silently guessed', () => {
+    // parseArgs collapses booleans into a Set, so the order the user
+    // typed them is gone; erroring follows grep's -h/-H precedent.
+    const t = createTerminal(SRC)
+    const r = t.run('head -q -v a.txt')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /-q and -v are mutually exclusive/u)
+    assert.match(t.run('tail -qv a.txt').stderr, /mutually exclusive/u)
+  })
+
+  it('`tail -c N` takes the last N bytes, `+N` counts from the front', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('tail -c 3 a.txt').stdout, 'na\n')
+    assert.equal(t.run('tail -c -3 a.txt').stdout, 'na\n')
+    assert.equal(t.run('tail -c +3 a.txt').stdout, 'nana\ncherry\napple\nbanana\n')
+    assert.equal(t.run('tail -c 100 a.txt').stdout, 'banana\ncherry\napple\nbanana\n')
+    assert.equal(t.run('tail -c 0 a.txt').stdout, '')
+    // Bytes, not characters: ö is two of the three taken here.
+    assert.equal(t.run('tail -c 3 uni.txt').stdout, 'ld\n')
+  })
+
+  it('`tail -c` obeys the same last-one-wins rule as head', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('tail -n 1 -c 3 a.txt').stdout, 'na\n')
+    assert.equal(t.run('tail -c 3 -n 1 a.txt').stdout, 'banana\n')
+  })
+
+  it('wc -m counts characters where -c counts bytes', () => {
+    // `héllo wörld\n` is 12 characters and 14 bytes. GNU's -m follows
+    // the locale and collapses onto -c under a C locale; this terminal
+    // models UTF-8 throughout, matching GNU under C.utf8.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('wc -m uni.txt').stdout, '12 uni.txt\n')
+    assert.equal(t.run('wc -c uni.txt').stdout, '14 uni.txt\n')
+    // An astral character is ONE character but four bytes — counting
+    // UTF-16 units would call the emoji two.
+    assert.equal(t.run('wc -m emo.txt').stdout, '3 emo.txt\n')
+    assert.equal(t.run('wc -c emo.txt').stdout, '6 emo.txt\n')
+  })
+
+  it('wc prints columns in GNU order regardless of flag order', () => {
+    // lines, words, chars, bytes — `-cm` and `-mc` are the same view.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('wc -mc uni.txt').stdout, t.run('wc -cm uni.txt').stdout)
+    assert.equal(t.run('wc -mc uni.txt').stdout, '12 14 uni.txt\n')
+    assert.equal(t.run('wc -lwm a.txt').stdout, ' 4  4 27 a.txt\n')
+    // Bare wc stays lines/words/bytes — -m is opt-in.
+    assert.equal(t.run('wc uni.txt').stdout, ' 1  2 14 uni.txt\n')
+  })
+})
+
+describe('createTerminal — grep -q/-m, cut -s, tr -c', () => {
+  // Checked against GNU grep 3.11 / coreutils 9.4.
+  const SRC = {
+    'log.txt': 'INFO start\nERROR boom\nWARN hmm\nERROR again\n',
+    'f.txt': 'bob:30\nann:25\n',
+    'mixed.txt': 'a,b\nNOCOMMA\nc,d\n',
+    'src/foo.js': '// TODO: fix\n// TODO: again\n',
+  }
+
+  it('grep -q prints nothing and reports the match in the exit code', () => {
+    const t = createTerminal(SRC)
+    const hit = t.run('grep -q ERROR log.txt')
+    assert.equal(hit.stdout, '')
+    assert.equal(hit.exitCode, 0)
+    assert.equal(t.run('grep -q NOPE log.txt').exitCode, 1)
+    // An unreadable operand still outranks the match status with 2.
+    assert.equal(t.run('grep -q ERROR missing.txt').exitCode, 2)
+    // -q wins over any output mode it is combined with.
+    assert.equal(t.run('grep -q -c ERROR log.txt').stdout, '')
+  })
+
+  it('grep -m N stops after N selected lines, per input', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('grep -m1 ERROR log.txt').stdout, 'ERROR boom\n')
+    assert.equal(t.run('grep -m2 ERROR log.txt').stdout, 'ERROR boom\nERROR again\n')
+    // Asking for more than exist is not an error.
+    assert.equal(t.run('grep -m5 ERROR log.txt').stdout, 'ERROR boom\nERROR again\n')
+    assert.equal(t.run('grep -m0 ERROR log.txt').stdout, '')
+    // Per input, not across the run.
+    assert.equal(t.run('grep -m1 TODO src/foo.js').stdout, '// TODO: fix\n')
+  })
+
+  it('grep -m composes with the other output modes', () => {
+    // The cap truncates the input, so -c reports the capped count and
+    // -n still numbers against the original line positions.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('grep -m1 -c ERROR log.txt').stdout, '1\n')
+    assert.equal(t.run('grep -m1 -n ERROR log.txt').stdout, '2:ERROR boom\n')
+    assert.equal(t.run('grep -m1 -v ERROR log.txt').stdout, 'INFO start\n')
+  })
+
+  it('cut -s drops lines with no delimiter instead of passing them through', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cut -d, -f1 mixed.txt').stdout, 'a\nNOCOMMA\nc\n')
+    assert.equal(t.run('cut -d, -f1 -s mixed.txt').stdout, 'a\nc\n')
+    // Byte mode has no delimiter to miss, so -s there is an error.
+    assert.match(t.run('cut -c1 -s f.txt').stderr, /-s is only valid with -f/u)
+  })
+
+  it('tr -c acts on everything OUTSIDE the set', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat f.txt | tr -cd a-z').stdout, 'bobann')
+    // The newline is outside a-z too, so it is replaced along with the
+    // punctuation and digits — the output is one unbroken run.
+    assert.equal(t.run('cat f.txt | tr -c a-z .').stdout, 'bob....ann....')
+    // The complement always outruns SET2, so every selected character
+    // lands on SET2's LAST member — `Y`, not `X`.
+    assert.equal(t.run('cat f.txt | tr -c a-z XY').stdout, 'bobYYYYannYYYY')
+    // Squeeze reads the same inversion: the doubled `M` is outside
+    // a-z, so it collapses, while the letters around it are untouched.
+    assert.equal(t.run('cat mixed.txt | tr -cs a-z').stdout, 'a,b\nNOCOMA\nc,d\n')
+  })
+})
+
 describe('createTerminal — tac', () => {
   it('reverses line order from stdin and from a file', () => {
     const t = createTerminal({ 'lines.txt': 'a\nb\nc\n' })
@@ -3953,12 +4189,14 @@ describe('createTerminal — seq', () => {
 })
 
 describe('createTerminal — nl', () => {
-  it('default (-b t) numbers non-empty lines; empties pass through unprefixed', () => {
+  it('default (-b t) numbers non-empty lines; empties keep a blanked column', () => {
     const t = createTerminal({ 'f.txt': 'a\n\nb\n\nc\n' })
     const r = t.run('nl f.txt')
-    // Empties stay as the bare empty line — no number, no tab.
-    // Numbered lines keep cat-n's 6-wide right-aligned format.
-    assert.equal(r.stdout, '     1\ta\n\n     2\tb\n\n     3\tc\n')
+    // An unnumbered line still occupies the number column, blanked to
+    // the number width plus the separator (6 + 1), so body text stays
+    // in one column. GNU emits exactly these seven spaces; dropping
+    // them left the output ragged around every blank line.
+    assert.equal(r.stdout, '     1\ta\n       \n     2\tb\n       \n     3\tc\n')
   })
 
   it('-b a numbers EVERY line, including blanks', () => {
@@ -3974,13 +4212,18 @@ describe('createTerminal — nl', () => {
     assert.equal(t.run('nl a.txt b.txt').stdout, '     1\tx\n     2\ty\n     3\tz\n')
   })
 
+  it('-b n numbers nothing, but every line keeps the blanked column', () => {
+    const t = createTerminal({ 'f.txt': 'a\n\nb\n' })
+    assert.equal(t.run('nl -b n f.txt').stdout, '       a\n       \n       b\n')
+  })
+
   it('rejects unsupported -b styles with a message naming the valid options', () => {
-    // Real nl supports `-b n` (no numbering) and `-b pREGEX` too,
-    // but those are out of scope. The error should make that clear.
+    // Real nl also supports `-b pREGEX`, which is out of scope. The
+    // error should make the supported set clear.
     const t = createTerminal({ 'f.txt': 'a\n' })
-    const r = t.run('nl -b n f.txt')
+    const r = t.run('nl -b z f.txt')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /only `a` and `t`/u)
+    assert.match(r.stderr, /only `a`, `t` and `n`/u)
   })
 
   it('reads from stdin when no file is given', () => {
@@ -4018,14 +4261,28 @@ describe('createTerminal — cut', () => {
     assert.equal(t.run('cut -c 2- f.txt').stdout, '\nello\n')
   })
 
-  it('-c is codepoint-aware: a single emoji counts as one position', () => {
-    // `[...line]` splits by code-point, so an astral char like a
-    // family emoji is one position, not a surrogate pair. Without
-    // this, `cut -c 1` on `😀abc` would emit half a surrogate and
-    // downstream commands would see mojibake.
+  it('-c counts BYTES, as GNU does', () => {
+    // GNU's own docs note `-c` is currently identical to `-b`, and it
+    // behaves that way in a UTF-8 locale too. An emoji is four bytes,
+    // so it takes positions 1-4 and `abc` starts at 5. Counting code
+    // points instead silently disagreed with coreutils on any
+    // multibyte line.
     const t = createTerminal({ 'f.txt': '😀abc\n' })
-    assert.equal(t.run('cut -c 1 f.txt').stdout, '😀\n')
-    assert.equal(t.run('cut -c 2-3 f.txt').stdout, 'ab\n')
+    assert.equal(t.run('cut -c 1-4 f.txt').stdout, '😀\n')
+    assert.equal(t.run('cut -c 5-6 f.txt').stdout, 'ab\n')
+    // é is two bytes, so three byte positions reach `hé`.
+    const u = createTerminal({ 'u.txt': 'héllo\n' })
+    assert.equal(u.run('cut -c 1-3 u.txt').stdout, 'hé\n')
+  })
+
+  it('a -c range splitting a character yields U+FFFD', () => {
+    // Real cut emits the lone byte, which a terminal renders as
+    // garbage; no JS string can hold it, so the decoder substitutes
+    // the replacement character — the same modelling `head -c` uses.
+    const t = createTerminal({ 'f.txt': '😀abc\n' })
+    assert.equal(t.run('cut -c 1 f.txt').stdout, '\uFFFD\n')
+    const u = createTerminal({ 'u.txt': 'héllo\n' })
+    assert.equal(u.run('cut -c 2 u.txt').stdout, '\uFFFD\n')
   })
 
   it('lines without the delimiter pass through verbatim (no -s)', () => {

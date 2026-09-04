@@ -6,7 +6,7 @@
 // `${name}: ${message}` and returns an exit-1 stderr result.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, ok, okWith, parseNonNegativeInt, readContent, readInputs, splitLines } from './util.js'
+import { err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
 import { grep } from './grep.js'
 
 function cat(stdin, tokens, ctx) {
@@ -26,25 +26,36 @@ function numberLines(content) {
   return lines.map((l, i) => `${String(i + 1).padStart(6)}\t${l}`).join('\n') + trailing
 }
 
-// `head -c` and `wc -c` work in BYTES, but content is a JS string
-// (UTF-16 code units), so both go through UTF-8 — the encoding this
-// models — before measuring or slicing: `é` is 2 bytes, an emoji 4.
-// Plain `.length` would count code units and disagree with coreutils on
-// multibyte text. `ignoreBOM` keeps a leading U+FEFF in the decoded
-// output rather than swallowing it: these are raw bytes being sliced,
-// not a document being loaded.
-const utf8 = new TextEncoder()
-const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true })
-
-// `-n` counts lines, `-c` counts bytes; both default to 10 lines.
+// `-n` counts lines, `-c` counts bytes; both default to 10 lines. A
+// LEADING MINUS flips the count into "all but the last N" — `head -n -1`
+// prints every line but the last, `head -c -3` every byte but the last
+// three. `+N` is just the explicit form of the plain count. An
+// over-large minus count leaves nothing rather than going negative,
+// which is why the remainder is clamped at 0.
 function head(stdin, tokens, ctx) {
-  const { values, positional, order } = parseArgs(tokens, { valueShort: ['c', 'n'] })
+  const { flags, values, positional, order } = parseArgs(tokens, { short: ['q', 'v'], valueShort: ['c', 'n'] })
   applyDashNumberShorthand(tokens, values, positional)
   const unit = lastCountUnit(order)
-  const count = parseNonNegativeInt(values.get(unit) ?? '10', `head: -${unit}`)
+  const count = parseSignedCount(values.get(unit) ?? '10', `head: -${unit}`)
   if (count.error) return count.error
-  if (unit === 'c') return takeBytes('head', stdin, positional, ctx, count.value)
-  return takeLines('head', stdin, positional, ctx, (lines) => lines.slice(0, count.value))
+  const banner = bannerMode(flags)
+  // head always counts from the front; the sign only decides where the
+  // slice STOPS — at N, or N short of the end.
+  const range = (total) => [0, count.sign === '-' ? Math.max(0, total - count.value) : count.value]
+  if (unit === 'c') return takeBytes('head', stdin, positional, ctx, range, banner)
+  return takeLines('head', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner)
+}
+
+// `-v` always banners, `-q` never does, and with neither the operand
+// count decides (see `takeFrom`). GNU lets the two coexist, last one
+// winning, but parseArgs collapses booleans into a Set — so, following
+// grep's precedent for -h/-H, a line asking for both is an error rather
+// than a silent guess.
+function bannerMode(flags) {
+  if (flags.has('q') && flags.has('v')) return { error: '-q and -v are mutually exclusive' }
+  if (flags.has('q')) return false
+  if (flags.has('v')) return true
+  return null
 }
 
 // `-n` and `-c` set the same "how much" knob, so a line asking for both
@@ -59,20 +70,36 @@ function lastCountUnit(order) {
   return last ? last.name : 'n'
 }
 
+// Mirror image of head's rule: a LEADING PLUS counts from the START,
+// so `tail -n +2` prints everything from line 2 on — the idiom for
+// dropping a header row. The line number is 1-based, and `+0` is
+// treated as `+1` (the whole file) rather than as an empty request.
+// An unsigned count, or `-N`, is the familiar last-N.
 function tail(stdin, tokens, ctx) {
-  const { values, positional } = parseArgs(tokens, { valueShort: ['n'] })
+  const { flags, values, positional, order } = parseArgs(tokens, { short: ['q', 'v'], valueShort: ['c', 'n'] })
   applyDashNumberShorthand(tokens, values, positional)
-  const n = parseNonNegativeInt(values.get('n') ?? '10', 'tail: -n')
+  const unit = lastCountUnit(order)
+  const n = parseSignedCount(values.get(unit) ?? '10', `tail: -${unit}`)
   if (n.error) return n.error
+  const banner = bannerMode(flags)
+  if (n.sign === '+') {
+    // From position N, 1-based, so `+1` and `+0` are the whole input.
+    const range = (total) => [Math.min(total, Math.max(0, n.value - 1)), total]
+    if (unit === 'c') return takeBytes('tail', stdin, positional, ctx, range, banner)
+    return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner)
+  }
   // A zero count short-circuits the whole command: GNU tail returns
   // success before opening anything, so there are no banners, no
   // per-operand errors, and exit 0 even when an operand doesn't exist.
-  // head deliberately does NOT share this — `head -n 0 a b` still
-  // banners both operands and still fails on a missing one. Returning
+  // Only the last-N form does this — `+0` above is the whole file, and
+  // head deliberately does NOT share it either (`head -n 0 a b` still
+  // banners both operands and still fails on a missing one). Returning
   // here also means `slice(-n)` below never sees 0, where `slice(-0)`
   // would be `slice(0)` and hand back every line.
   if (n.value === 0) return ok('')
-  return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(-n.value))
+  const range = (total) => [Math.max(0, total - n.value), total]
+  if (unit === 'c') return takeBytes('tail', stdin, positional, ctx, range, banner)
+  return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner)
 }
 
 // GNU's obsolete shorthand: `head -200 file` means `head -n 200 file`.
@@ -105,8 +132,8 @@ function applyDashNumberShorthand(tokens, values, positional) {
 // lines at all, and suppressing its terminator would print nothing where
 // GNU prints a newline. Branching on the array length keeps the two
 // apart (`head -n 1` of a file of blank lines is one `\n`).
-function takeLines(cmd, stdin, files, ctx, picker) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => joinLines(picker(splitLines(content))))
+function takeLines(cmd, stdin, files, ctx, picker, banner) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => joinLines(picker(splitLines(content))), banner)
 }
 
 // `head -c N` takes the first N BYTES of each input instead of its
@@ -114,8 +141,8 @@ function takeLines(cmd, stdin, files, ctx, picker) {
 // bytes verbatim, so `head -c 3` of `hello\n` is `hel` with nothing
 // after it, and in the multi-input form it's the `\n` before the next
 // banner that ends the block.
-function takeBytes(cmd, stdin, files, ctx, n) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => firstBytes(content, n))
+function takeBytes(cmd, stdin, files, ctx, range, banner) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => sliceBytes(content, range), banner)
 }
 
 // A cut can land mid-character: `head -c 1` of `é` keeps only the
@@ -126,10 +153,13 @@ function takeBytes(cmd, stdin, files, ctx, n) {
 // `head -c 2` of `héllo` pipes 4 bytes into `wc -c`, where GNU pipes
 // exactly 2. Only a cut mid-character is affected. Content short enough
 // to survive whole skips the round-trip entirely.
-function firstBytes(content, n) {
+function sliceBytes(content, range) {
   const bytes = utf8.encode(content)
-  if (n >= bytes.length) return content
-  return utf8Decoder.decode(bytes.subarray(0, n))
+  // `range` resolves against THIS input's byte length, so `-c -3` drops
+  // the last three bytes of each input separately, as GNU does.
+  const [start, end] = range(bytes.length)
+  if (start === 0 && end >= bytes.length) return content
+  return utf8Decoder.decode(bytes.subarray(start, end))
 }
 
 // The head/tail output shape: each input's chunk, prefixed with GNU's
@@ -153,9 +183,12 @@ function firstBytes(content, n) {
 // GNU, whose own "first file" flag flips on the first banner WRITTEN,
 // not on the first operand tried. That same `\n` is what terminates the
 // preceding block when its chunk doesn't end in one.
-function takeFrom(cmd, stdin, files, ctx, pick) {
+function takeFrom(cmd, stdin, files, ctx, pick, banner = null) {
+  if (banner?.error) return err(`${cmd}: ${banner.error}`)
   const r = readInputs(cmd, files, stdin, ctx)
-  const showHeader = files.length > 1
+  // `-q` / `-v` override the operand-count rule outright; `banner` is
+  // null when neither was given.
+  const showHeader = banner ?? files.length > 1
   const blocks = []
   for (let i = 0; i < r.inputs.length; i++) {
     const { name, content } = r.inputs[i]
@@ -166,20 +199,26 @@ function takeFrom(cmd, stdin, files, ctx, pick) {
 }
 
 function wc(stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c'] })
+  const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c', 'm'] })
   const which = pickWcFlags(flags)
   const r = readInputs('wc', positional, stdin, ctx)
-  // Collect rows first so we can compute the adaptive column width
-  // — GNU pads each count to the widest across ALL rows (including
-  // the `total` row). `wc -l b` on a 3-line file emits `3 b`; the
-  // same on a 1234-line file emits `1234 b`; `wc -l small big`
-  // pads to the max: `   3 small\n1234 big\n1237 total`.
+  // Collect rows first so we can compute the adaptive column width:
+  // every count is padded to the widest across ALL rows, the `total`
+  // included. `wc -l b` on a 3-line file emits `3 b`; the same on a
+  // 1234-line file emits `1234 b`; `wc -l small big` pads to the max:
+  // `   3 small\n1234 big\n1237 total`.
+  //
+  // GNU derives that width differently — from the largest count the
+  // inputs COULD produce, i.e. their byte size — so it pads `wc -l` of
+  // a 27-byte 4-line file to width 2 where this pads to 1. Widening on
+  // bytes nobody counted reads as a bug rather than alignment, so the
+  // divergence is deliberate; both keep the columns aligned.
   const rows = []
-  const total = { l: 0, w: 0, c: 0 }
+  const total = { l: 0, w: 0, m: 0, c: 0 }
   for (const { name, content } of r.inputs) {
     const counts = wcCounts(content)
     rows.push({ counts, name })
-    total.l += counts.l; total.w += counts.w; total.c += counts.c
+    total.l += counts.l; total.w += counts.w; total.m += counts.m; total.c += counts.c
   }
   if (r.inputs.length > 1) rows.push({ counts: total, name: 'total' })
   const width = wcColumnWidth(rows, which)
@@ -191,22 +230,32 @@ function wcColumnWidth(rows, which) {
   for (const { counts } of rows) {
     if (which.l) max = Math.max(max, String(counts.l).length)
     if (which.w) max = Math.max(max, String(counts.w).length)
+    if (which.m) max = Math.max(max, String(counts.m).length)
     if (which.c) max = Math.max(max, String(counts.c).length)
   }
   return max
 }
 
+// `-m` sits between `-l` and `-w` in GNU's fixed output order
+// (lines, words, chars, bytes), which is NOT the order the flags were
+// typed in — `wc -cm` and `wc -mc` print the same two columns.
 function pickWcFlags(flags) {
-  if (flags.has('l') || flags.has('w') || flags.has('c')) {
-    return { l: flags.has('l'), w: flags.has('w'), c: flags.has('c') }
-  }
-  return { l: true, w: true, c: true }
+  const named = ['l', 'w', 'm', 'c'].filter((f) => flags.has(f))
+  if (named.length === 0) return { l: true, w: true, m: false, c: true }
+  return { l: flags.has('l'), w: flags.has('w'), m: flags.has('m'), c: flags.has('c') }
 }
 
+// `-c` is bytes, `-m` characters. They differ only on multibyte input:
+// `héllo\n` is 7 bytes but 6 characters. GNU's `-m` follows the locale
+// and collapses onto `-c` under a C locale; this terminal models UTF-8
+// throughout (as `-c` and `head -c` already do), so `-m` counts code
+// points — spreading an astral character across two UTF-16 units would
+// count an emoji twice, hence the iterator rather than `.length`.
 function wcCounts(content) {
   return {
     l: (content.match(/\n/gu) ?? []).length,
     w: (content.match(/\S+/gu) ?? []).length,
+    m: [...content].length,
     c: utf8.encode(content).length,
   }
 }
@@ -215,6 +264,7 @@ function formatWc(counts, name, which, width) {
   const parts = []
   if (which.l) parts.push(String(counts.l).padStart(width))
   if (which.w) parts.push(String(counts.w).padStart(width))
+  if (which.m) parts.push(String(counts.m).padStart(width))
   if (which.c) parts.push(String(counts.c).padStart(width))
   return parts.join(' ') + (name ? ' ' + name : '')
 }

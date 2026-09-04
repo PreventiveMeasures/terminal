@@ -214,10 +214,20 @@ function dirItemsFor(fs, dir) {
   ]
 }
 
+// `basename PATH [SUFFIX]` strips SUFFIX from the end of the result, the
+// form behind idioms like `basename "$f" .js`. Two rules keep it from
+// eating more than it should: the suffix must actually match the tail of
+// the name, and it must not BE the whole name — GNU leaves `basename
+// c.js c.js` as `c.js` rather than yielding an empty string.
 function basenameCmd(_stdin, tokens) {
   const { positional } = parseArgs(tokens)
-  if (positional.length === 0) return usage('basename PATH')
-  return ok(baseName(positional[0]) + '\n')
+  if (positional.length === 0) return usage('basename PATH [SUFFIX]')
+  return ok(stripSuffix(baseName(positional[0]), positional[1]) + '\n')
+}
+
+function stripSuffix(name, suffix) {
+  if (!suffix || suffix === name || !name.endsWith(suffix)) return name
+  return name.slice(0, -suffix.length)
 }
 
 function dirnameCmd(_stdin, tokens) {
