@@ -80,7 +80,24 @@ function dispatch(name, tokens, stdin, ctx) {
   try {
     return cmd(stdin, tokens, ctx)
   } catch (e) {
-    return err(`${name}: ${e.message}`)
+    return err(`${name}: ${reason(e)}`)
+  }
+}
+
+// The stderr text for a thrown value. Builtins only ever throw
+// `Error`s, but `opts.commands` puts embedder code behind the same
+// catch, where anything can come out: a bare `e.message` turns
+// `throw 'oops'` into `name: undefined`, and on `throw null` the
+// catch clause ITSELF throws — unwinding past the pipeline into
+// safeRun, which discards stdout earlier steps already produced,
+// skips the `||` gate that should have caught the failure, and
+// reports an internal message with no command name in it.
+function reason(e) {
+  try {
+    const message = e?.message
+    return typeof message === 'string' && message !== '' ? message : String(e)
+  } catch {
+    return 'threw a value with no message'
   }
 }
 

@@ -75,12 +75,12 @@ function orderedCommandNames() {
 // exposing the virtual FS as a real PATH. If the stripped name
 // isn't registered, fall through with the original so the
 // not-found error reflects what was typed.
-const BIN_PREFIXES = ['/usr/local/bin/', '/usr/bin/', '/bin/', '/sbin/']
-function resolveCommand(name, reg) {
+const BIN_PREFIXES = Object.freeze(['/usr/local/bin/', '/usr/bin/', '/bin/', '/sbin/'])
+function resolveCommand(name, has) {
   for (const prefix of BIN_PREFIXES) {
     if (name.startsWith(prefix)) {
       const stripped = name.slice(prefix.length)
-      if (reg.has(stripped)) return stripped
+      if (has(stripped)) return stripped
     }
   }
   return name
@@ -98,19 +98,28 @@ function resolveCommand(name, reg) {
 // and interleaving someone's `sha256sum` into it alphabetically
 // would scramble that for no gain. Registration order is also the
 // one order the embedder actually chose.
+//
+// Frozen through and through, because index.js hangs the registry on
+// the `ctx` every command handler receives, and the no-wired-commands
+// registry is a singleton shared by every terminal built without
+// `opts.commands` — an unfrozen one would let a single write reach
+// the command set of every such terminal on the page.
 export function createRegistry(commands) {
   const custom = defineCommands(commands, isBuiltin)
-  const reg = {
-    commands: { __proto__: null, ...BUILTIN_COMMANDS, ...custom.visible },
-    hidden: { __proto__: null, ...BUILTIN_HIDDEN, ...custom.hidden },
-    names: [...BUILTIN_NAMES, ...custom.names],
-    pipeNames: [...PIPE_NAMES, ...custom.pipeNames],
+  const visible = Object.freeze({ __proto__: null, ...BUILTIN_COMMANDS, ...custom.visible })
+  const hidden = Object.freeze({ __proto__: null, ...BUILTIN_HIDDEN, ...custom.hidden })
+  const has = (name) => Boolean(visible[name] || hidden[name])
+  const names = Object.freeze([...BUILTIN_NAMES, ...custom.names])
+  return Object.freeze({
+    commands: visible,
+    hidden,
+    names,
+    pipeNames: Object.freeze([...PIPE_NAMES, ...custom.pipeNames]),
     binPrefixes: BIN_PREFIXES,
-  }
-  reg.has = (name) => Boolean(reg.commands[name] || reg.hidden[name])
-  reg.resolveCommand = (name) => resolveCommand(name, reg)
-  reg.known = reg.names.join(', ')
-  return reg
+    has,
+    resolveCommand: (name) => resolveCommand(name, has),
+    known: names.join(', '),
+  })
 }
 
 // The no-wired-commands case is the common one and its registry is

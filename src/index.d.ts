@@ -11,7 +11,7 @@ export interface CommandFs {
   isDir(path: string): boolean
   /** Contents of `path`, or `undefined` if it is not a file. */
   readFile(path: string): string | undefined
-  /** Immediate children of directory `path`, each list sorted. Throws if `path` is not a directory. */
+  /** Immediate children of directory `path`, each list sorted (copies — mutating them cannot affect the tree). Throws `<path>: not a directory` / `no such file or directory` otherwise. */
   listDir(path: string): { dirs: string[]; files: string[] }
   /** Every file path at or under `path`, absolute. Empty if `path` does not exist. */
   walkFiles(path: string): string[]
@@ -51,9 +51,16 @@ export interface CommandIo {
   readInputs(paths: readonly string[]): CommandInputs
 }
 
-/** What a {@link CommandRun} handler may return in place of a plain string. Missing fields default to `''` / `0`. */
+/**
+ * What a {@link CommandRun} handler may return in place of a plain string.
+ * Missing fields default to `''` / `0`, but at least one must be present and
+ * no other field may be — an object that is not a result (an array of lines
+ * awaiting a `join`, a binary digest, a misspelled key) is rejected rather
+ * than read as a successful command that printed nothing.
+ */
 export interface CommandResult {
   stdout?: string
+  /** Gets a trailing newline if it lacks one, so consecutive error lines stay separate. */
   stderr?: string
   /** Non-negative integer; gates `&&` / `||` like any other command's status. */
   exitCode?: number
@@ -64,12 +71,19 @@ export interface CommandResult {
  * stdout with exit 0, and returning nothing is a silent success. Must be
  * synchronous — the engine feeds one stage's stdout to the next with no await
  * point, so a returned promise is rejected rather than stringified into the
- * stream. Throwing is fine: the message surfaces as a `name: message` stderr
- * line with exit 1, exactly like a built-in command's internal error.
+ * stream. Throwing is fine, and the thrown value need not be an `Error`: its
+ * message (or the value itself) surfaces as a `name: reason` stderr line with
+ * exit 1, exactly like a built-in command's internal error, leaving the rest
+ * of the command line to run its gates normally.
  */
 export type CommandRun = (io: CommandIo) => string | CommandResult | void
 
-/** A wired command with its registry metadata. A bare {@link CommandRun} is shorthand for `{ run }`. */
+/**
+ * A wired command with its registry metadata. A bare {@link CommandRun} is
+ * shorthand for `{ run }`; `pipe` and `hidden` belong on this object, and
+ * setting them on the handler function instead is rejected rather than
+ * silently ignored.
+ */
 export interface CommandSpec {
   run: CommandRun
   /** Offer this command as a completion target after `|`. Set it when the handler reads `stdin`. Defaults to `false`. */
@@ -78,7 +92,12 @@ export interface CommandSpec {
   hidden?: boolean
 }
 
-/** Commands to wire in, keyed by the name they are typed as. */
+/**
+ * Commands to wire in, keyed by the name they are typed as: a plain object
+ * (own enumerable properties) or a `Map`. Anything else — an array, a `Set`,
+ * a class instance whose handlers live on the prototype — is rejected, since
+ * it would otherwise register nothing, or register index keys as names.
+ */
 export type Commands =
   | Record<string, CommandRun | CommandSpec>
   | Map<string, CommandRun | CommandSpec>
@@ -137,7 +156,8 @@ export interface Terminal {
  * Create an in-memory terminal over a `{ path: content }` source tree.
  *
  * @throws if `opts.cwd` does not resolve to an existing directory.
- * @throws if an entry in `opts.commands` has an unusable name, redefines a
- * built-in command, or is not a function or `{ run }` object.
+ * @throws if `opts.commands` is not a plain object or a `Map`, or if an entry
+ * in it has a non-string or unusable name, redefines a built-in command, or is
+ * not a function or `{ run }` object.
  */
 export function createTerminal(sources: Sources, opts?: CreateTerminalOptions): Terminal

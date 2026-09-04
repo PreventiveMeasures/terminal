@@ -155,6 +155,50 @@ describe('createTerminal — opts.commands: the handler contract', () => {
     assert.match(run(asyncRun, 'probe').stderr, /commands are synchronous/u)
   })
 
+  it('a handler that throws a non-Error still gets a `name: reason` line, and the line survives it', () => {
+    // Wired handlers are third-party code, so anything can come out of
+    // a throw. A bare `e.message` would report `probe: undefined` for a
+    // thrown string, and on `throw null` the catch itself would throw —
+    // unwinding past the pipeline, losing stdout the earlier step had
+    // already produced and skipping the `||` that should have caught it.
+    const thrower = (value) => () => { throw value }
+    assert.equal(run(thrower('oops'), 'probe').stderr, 'probe: oops\n')
+    const r = createTerminal(SOURCES, { commands: { probe: thrower(null) } })
+      .run('echo before && probe || echo after')
+    assert.equal(r.stdout, 'before\nafter\n')
+    assert.equal(r.stderr, 'probe: null\n')
+    assert.equal(r.exitCode, 0)
+  })
+
+  it('rejects an object carrying none of the result fields, instead of reading it as empty success', () => {
+    // The realistic slip is one `.join('')` short of the doc example:
+    // an array of output lines, or a digest still in binary form. Left
+    // to the destructure these are exit 0 with no output and nothing on
+    // stderr — the corruption-far-from-its-cause this normalizer exists
+    // to prevent.
+    assert.match(run(() => ['a\n', 'b\n'], 'probe').stderr, /invalid result: expected a string or an object, got an array/u)
+    assert.match(run(() => ({ out: 'hi' }), 'probe').stderr, /invalid result: unknown field `out` \(known: stdout, stderr, exitCode\)/u)
+    assert.match(run(() => ({}), 'probe').stderr, /invalid result: an object with none of stdout, stderr, exitCode/u)
+    assert.match(run(() => new Uint8Array([1, 2]), 'probe').stderr, /invalid result: unknown field `0`/u)
+    for (const bad of [() => ['a\n'], () => ({ out: 'hi' }), () => ({})]) {
+      assert.equal(run(bad, 'probe').exitCode, 1)
+      assert.equal(run(bad, 'probe').stdout, '')
+    }
+  })
+
+  it('terminates a wired stderr line, so consecutive errors do not fuse', () => {
+    // util.js's `err()` pins this for every builtin; a wired command's
+    // stderr goes through the same convention rather than verbatim.
+    const spec = () => ({ stderr: 'oops', exitCode: 1 })
+    const t = createTerminal(SOURCES, { commands: { probe: spec } })
+    assert.equal(t.run('probe; probe').stderr, 'oops\noops\n')
+    assert.equal(t.run('probe; cat missing').stderr, 'oops\ncat: missing: no such file or directory\n')
+    assert.equal(t.run('probe 2>&1 | wc -l').stdout, '1\n')
+    // An already-terminated line is left alone, and empty stays empty.
+    assert.equal(run(() => ({ stderr: 'done\n' }), 'probe').stderr, 'done\n')
+    assert.equal(run(() => ({ stdout: 'x' }), 'probe').stderr, '')
+  })
+
   it('rejects result fields of the wrong type rather than coercing them', () => {
     assert.match(run(() => 42, 'probe').stderr, /probe: invalid result: expected a string or an object \(got number\)/u)
     assert.match(run(() => ({ stdout: 42 }), 'probe').stderr, /invalid result: stdout must be a string \(got number\)/u)
@@ -214,6 +258,27 @@ describe('createTerminal — opts.commands: the handler contract', () => {
     assert.equal(seen.failed, true)
   })
 
+  it('io.cwd, io.fs and io.readInputs resolve against the same directory', () => {
+    // The snapshot is taken once per call, so a handler that keeps its
+    // `io` — or that re-enters run() through the terminal handle the
+    // embedder holds — can never see `io.cwd` say one directory while
+    // its operands resolve in another.
+    let io
+    const t = createTerminal({ 'a.txt': 'TOP\n', 'src/a.txt': 'NESTED\n' }, {
+      commands: { probe: (arg) => { io = arg; return '' } },
+    })
+    t.run('probe')
+    t.run('cd src')
+    assert.equal(io.cwd, '/')
+    assert.equal(io.fs.resolve('a.txt'), '/a.txt')
+    assert.equal(io.readInputs(['a.txt']).inputs[0].content, 'TOP\n')
+    // The next call sees the new cwd, consistently across all three.
+    t.run('probe')
+    assert.equal(io.cwd, '/src')
+    assert.equal(io.fs.resolve('a.txt'), '/src/a.txt')
+    assert.equal(io.readInputs(['a.txt']).inputs[0].content, 'NESTED\n')
+  })
+
   it('io.readInputs rejects a bare string instead of reading it character by character', () => {
     const t = createTerminal(SOURCES, { commands: { probe: (io) => { io.readInputs(io.args[0]); return '' } } })
     const r = t.run('probe a.txt')
@@ -260,6 +325,17 @@ describe('createTerminal — opts.commands: the io.fs view', () => {
     })
     t.run('probe')
     assert.equal(t.run('ls').stdout, 'src/\na.txt\nb.txt\n')
+  })
+
+  it('listDir fails in the shape a built-in would, naming the operand as typed', () => {
+    // createFs's own throw says "not a directory" for a path that is
+    // not there at all, and quotes the resolved absolute form of a
+    // relatively-typed operand — neither is what a handler should
+    // surface to the user.
+    const t = createTerminal(SOURCES, { commands: { probe: (io) => io.fs.listDir(io.args[0]) && '' } })
+    assert.equal(t.run('probe nope').stderr, 'probe: nope: no such file or directory\n')
+    assert.equal(t.run('probe a.txt').stderr, 'probe: a.txt: not a directory\n')
+    assert.equal(t.run('probe src').exitCode, 0)
   })
 
   it('is read-only: the source tree cannot be written through it', () => {
@@ -376,12 +452,79 @@ describe('createTerminal — opts.commands: wiring errors throw at construction'
     assert.throws(build({ probe: { run: () => '', piped: true } }), /unknown option `piped`/u)
   })
 
-  it('refuses a non-object `commands`', () => {
+  it('refuses a `commands` that is not a plain object or a Map', () => {
     assert.throws(build('sha256sum'), /opts\.commands must be an object or a Map \(got string\)/u)
     assert.throws(build(() => ''), /opts\.commands must be an object or a Map \(got function\)/u)
+    // An array's keys are indices, and `0` is a legal command name
+    // (`7z` is why a name may start with a digit) — so this would
+    // otherwise register a working command called `0`.
+    assert.throws(build([sha256sum]), /opts\.commands must be an object or a Map \(got an array\)/u)
+    // A class instance or an Object.create() keeps its handlers on the
+    // prototype, where Object.entries sees nothing: silently a terminal
+    // with no wired commands at all.
+    class Commands { probe() { return 'x\n' } }
+    assert.throws(build(new Commands()), /must be a plain object or a Map/u)
+    assert.throws(build(Object.create({ probe: () => 'x\n' })), /must be a plain object or a Map/u)
+    // A Set has `entries()` too, but its pairs are [value, value], so
+    // the name check catches it rather than the shape check.
+    assert.throws(build(new Set([sha256sum])), /command names must be strings \(got object\)/u)
     // Omitted / empty is fine and leaves the builtins alone.
     assert.doesNotThrow(build())
     assert.doesNotThrow(build({}))
     assert.equal(createTerminal(SOURCES, { commands: {} }).run('cat a.txt').stdout, 'hello\n')
+  })
+
+  it('accepts a Map-like whose `entries` is its own, as a cross-realm Map appears here', () => {
+    // A Map built in an iframe, a worker, or a second copy of the
+    // bundle fails `instanceof Map`, and `Object.entries` of a Map is
+    // empty — so an instanceof test would hand back a terminal with
+    // nothing wired and no diagnostic.
+    const foreign = { entries: () => new Map([['sha256sum', sha256sum]]).entries() }
+    const t = createTerminal(SOURCES, { commands: foreign })
+    assert.equal(t.run('sha256sum a.txt').stdout, `${HELLO_SHA}  a.txt\n`)
+  })
+
+  it('refuses a non-string command name, which completion could not handle', () => {
+    // A Map takes any key; `NAME_RE.test` would string-coerce it and
+    // let it reach `complete()`, which — unlike run() — has no error
+    // boundary and would throw into the embedder's keystroke handler.
+    assert.throws(build(new Map([[123, () => '']])), /command names must be strings \(got number\)/u)
+    assert.throws(build(new Map([[Symbol('x'), () => '']])), /command names must be strings \(got symbol\)/u)
+  })
+
+  it('reads `run` once, so an accessor cannot pass validation and store something else', () => {
+    // Reading twice would let a getter answer with a function for the
+    // check and a non-function for the store — exactly the deferred
+    // dispatch-time failure this validation exists to prevent.
+    let reads = 0
+    const t = createTerminal(SOURCES, {
+      commands: { probe: { get run() { return reads++ ? 'not a function' : () => 'ok\n' } } },
+    })
+    assert.equal(reads, 1)
+    assert.equal(t.run('probe').stdout, 'ok\n')
+  })
+
+  it('refuses descriptor options hung on a bare handler function', () => {
+    // `Object.assign(fn, { pipe: true })` is a natural spelling, and
+    // the function form has nowhere to put metadata — so it would be
+    // dropped in silence, leaving the command out of completion with
+    // nothing to explain why.
+    const f = () => 'ran\n'
+    f.pipe = true
+    assert.throws(build({ probe: f }), /probe: `pipe` belongs on a \{ run \} descriptor/u)
+    // A plain handler function, the documented shorthand, is untouched.
+    assert.doesNotThrow(build({ probe: () => 'ran\n' }))
+  })
+})
+
+describe('createTerminal — opts.commands: the io surface is the whole contract', () => {
+  it('a handler is handed exactly the documented fields — no engine internals', () => {
+    // The internal ctx carries the command registry, `dispatch`, and a
+    // live mutable cwd. None of it reaches a wired command: `io` is
+    // what the embedder builds against, so it is what stays stable.
+    let keys
+    const t = createTerminal(SOURCES, { commands: { probe: (io) => { keys = Object.keys(io); return '' } } })
+    t.run('probe')
+    assert.deepEqual(keys, ['name', 'args', 'stdin', 'cwd', 'fs', 'readInputs'])
   })
 })
