@@ -15,7 +15,10 @@
 // The generated sections re-run seeded fuzzers over expressions,
 // regexes, printf formats and field/record splitting.
 //
-// Skipped (not failed) when gawk is not installed.
+// Skipped (not failed, and saying so) when gawk is not installed or is
+// not the 5.2 series the cases were verified against: a different gawk
+// may legitimately differ on the details, and a failure here has to
+// mean the terminal is wrong. Bump REFERENCE after re-verifying.
 
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -27,7 +30,12 @@ import { describe, it } from 'node:test'
 
 import { createTerminal } from '@preventive/terminal'
 
-const GAWK = spawnSync('gawk', ['--version']).status === 0
+const REFERENCE = /^GNU Awk 5\.2\./u
+const gawkVersion = (() => {
+  const r = spawnSync('gawk', ['--version'])
+  return r.status === 0 ? r.stdout.toString().split('\n')[0] : null
+})()
+const SKIP = gawkVersion === null ? 'gawk is not installed' : REFERENCE.test(gawkVersion) ? false : `${gawkVersion} is not the verified reference (gawk 5.2)`
 
 const NUMS = '10 9 abc 0 1e2 0x10 - 3.0 +5 .5\n'
 
@@ -667,7 +675,7 @@ function fieldCases(count, seed) {
   return cases
 }
 
-describe('awk — differential against gawk', { skip: GAWK ? false : 'gawk is not installed' }, () => {
+describe('awk — differential against gawk', { skip: SKIP }, () => {
   for (const [name, cases] of Object.entries(SECTIONS)) {
     it(`${name}: ${cases.length} cases agree with gawk`, () => {
       for (const c of cases) check(c)

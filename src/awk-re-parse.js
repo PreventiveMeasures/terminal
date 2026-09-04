@@ -69,15 +69,20 @@ class EreParser {
     return nodes.length === 1 ? nodes[0] : { type: 'alt', nodes }
   }
 
-  // A `)` with no group open is a literal (GNU regex), so `depth` says
-  // whether one is.
   concatenation(depth) {
     const nodes = []
-    const closes = depth > 0
-    while (this.i < this.src.length && this.peek() !== '|' && !(this.peek() === ')' && closes)) {
+    while (!this.endsConcatenation(depth)) {
       nodes.push(this.quantified(this.atom(nodes.length === 0, depth)))
     }
     return nodes.length === 1 ? nodes[0] : { type: 'cat', nodes }
+  }
+
+  // A concatenation runs to the end of the source, a `|`, or a `)`
+  // that closes an open group; a `)` with no group open is a literal
+  // (GNU regex), so `depth` says whether one is.
+  endsConcatenation(depth) {
+    const c = this.peek()
+    return c === undefined || c === '|' || (c === ')' && depth > 0)
   }
 
   quantified(atom) {
