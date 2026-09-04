@@ -107,7 +107,12 @@ function nl(stdin, tokens, ctx) {
   const { values, positional } = parseArgs(tokens, { valueShort: ['b'] })
   const style = values.get('b') ?? 't'
   if (!['a', 't', 'n'].includes(style)) {
-    return err(`nl: -b: only \`a\`, \`t\` and \`n\` are supported (got \`${style}\`)`)
+    const message = `nl: -b: only \`a\`, \`t\` and \`n\` are supported (got \`${style}\`)`
+    // `pREGEX` — number only the lines matching a regex — is GNU's
+    // fourth style, and a working invocation there. That makes it a gap
+    // rather than a bad value, unlike a plain typo such as `-b x`.
+    if (style.startsWith('p')) return unsupported('option', 'nl', '-b p', message)
+    return err(message)
   }
   const r = readInputs('nl', positional, stdin, ctx)
   const out = []

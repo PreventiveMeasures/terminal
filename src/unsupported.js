@@ -33,20 +33,25 @@
 
 import { err } from './util.js'
 
-// The classification travels on a SYMBOL key rather than a field.
-// It rides on two kinds of object that are already contracts: the
-// `{ stdout, stderr, exitCode }` results custom.js validates field by
-// field (an unknown key there is a wiring bug it throws on), and the
-// Errors embedder code throws and catches. A symbol is invisible to
-// `Object.keys`, to `JSON.stringify`, and to a spread into a new
-// literal, so it can never be mistaken for part of either shape — and
-// the engine rebuilds the result object at every pipeline stage anyway,
-// so the note is harvested at the one choke point everything reaches.
+// The classification travels on a NON-ENUMERABLE SYMBOL key rather than
+// a field. It rides on two kinds of object that are already contracts:
+// the `{ stdout, stderr, exitCode }` results custom.js validates field
+// by field (an unknown key there is a wiring bug it throws on), and the
+// Errors embedder code throws and catches. Neither may grow a visible
+// property.
+//
+// A symbol alone is not enough. It is invisible to `Object.keys` and to
+// `JSON.stringify`, but object spread copies own ENUMERABLE symbol keys
+// — and `index.js`'s `finish` builds the RunResult with exactly such a
+// spread. Today nothing leaks only because the pipeline happens to
+// rebuild the result literal at every stage; the obvious optimization of
+// passing a lone stage's result straight through would put this symbol
+// in front of the caller. Non-enumerable closes that off for good.
 const NOTE = Symbol('unsupported')
 
 // Attach a note to an outgoing `err()` result or a thrown Error.
 const mark = (carrier, note) => {
-  carrier[NOTE] = note
+  Object.defineProperty(carrier, NOTE, { value: note, enumerable: false, configurable: true })
   return carrier
 }
 
@@ -119,8 +124,16 @@ export function createUnsupportedFeed() {
   const entries = []
   return {
     entries,
-    add(entry) {
-      const key = `${entry.kind} ${entry.command ?? ''} ${entry.detail}`
+    // `identity` is the name to deduplicate on when it differs from the
+    // one being reported: `ls -t` and `/usr/bin/ls -t` are one gap, but
+    // `command` holds the name as TYPED, which differs between them. The
+    // dispatcher passes the resolved name; a command reporting its own
+    // gap already uses its canonical name and needs no override.
+    add(entry, identity = entry.command) {
+      // NUL-joined, because the fields can contain spaces — `tr`'s
+      // detail is `-d -s` — and a space-joined key would let a
+      // different split of the same characters collide.
+      const key = `${entry.kind}\u0000${identity ?? ''}\u0000${entry.detail}`
       if (seen.has(key)) return
       seen.add(key)
       entries.push(Object.freeze(entry))

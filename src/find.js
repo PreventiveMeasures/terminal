@@ -297,9 +297,22 @@ function primaryFor(token) {
   return null
 }
 
+// The file types GNU find knows that this one cannot represent: the
+// virtual FS has only regular files and the directories implied by
+// them, so there is nothing to match a symlink, device, FIFO, or
+// socket against. They are a GAP rather than a bad value — `find . -type
+// l` is a working GNU invocation — and separating them from a genuine
+// typo like `-type q` is the difference between telling a caller "this
+// terminal cannot do that" and "you mistyped".
+const UNMODELLED_TYPES = 'lbcps'
+
 function checkPrimary(kind, value) {
   if (kind === 'type' && value !== 'f' && value !== 'd') {
-    return { error: err(`find: -type/--type expects 'f' or 'd', got: ${value}`) }
+    const message = `find: -type/--type expects 'f' or 'd', got: ${value}`
+    if (value.length === 1 && UNMODELLED_TYPES.includes(value)) {
+      return { error: unsupported('option', 'find', `-type ${value}`, message) }
+    }
+    return { error: err(message) }
   }
   return {}
 }

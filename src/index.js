@@ -77,8 +77,8 @@ export function createTerminal(sources, opts = {}) {
   // reason `registry` does — the engine's step/pipeline/stage functions
   // already thread ctx everywhere, and `dispatch` is the choke point
   // every command, wired or built-in, passes through. safeRun swaps in a
-  // fresh one per call; the initial value keeps it non-null for anything
-  // that reaches dispatch outside a run.
+  // fresh feed for the duration of each call, so this initial one is
+  // never written to; it exists so the field is never absent.
   const ctx = { cwd, fs, user: opts.user ?? 'user', registry, vars: new Map(), unsupported: createUnsupportedFeed() }
   // Commands like `xargs` need to invoke other commands. Exposing
   // `dispatch` on ctx (rather than reaching for the registry at the
@@ -101,9 +101,9 @@ function dispatch(name, tokens, stdin, ctx) {
   const reg = ctx.registry
   const resolved = reg.resolveCommand(name)
   const cmd = reg.commands[resolved] ?? reg.hidden[resolved]
-  if (!cmd) return record(ctx, unknownCommand(name, reg))
+  if (!cmd) return record(ctx, unknownCommand(name, reg), resolved)
   try {
-    return record(ctx, cmd(stdin, tokens, ctx))
+    return record(ctx, cmd(stdin, tokens, ctx), resolved)
   } catch (e) {
     const message = `${name}: ${reason(e)}`
     const note = unsupportedNote(e)
@@ -111,7 +111,7 @@ function dispatch(name, tokens, stdin, ctx) {
     // parseArgs is handed tokens, never told whose they are, so it
     // cannot name the command or predict the stderr line its throw
     // turns into. Both are known here, and only here.
-    if (note) ctx.unsupported.add({ ...note, command: note.command ?? name, message })
+    if (note) ctx.unsupported.add({ ...note, command: note.command ?? name, message }, resolved)
     return err(message)
   }
 }
@@ -122,9 +122,13 @@ function dispatch(name, tokens, stdin, ctx) {
 // command lands here, including the ones reached through `ctx.dispatch`
 // from `find -exec` and `xargs`, so a gap hit two levels down still
 // reaches the caller.
-function record(ctx, result) {
+//
+// `resolved` is the bin-prefix-stripped name, used only to deduplicate:
+// `ls -t` and `/usr/bin/ls -t` are one gap even though each entry
+// records the name as it was typed.
+function record(ctx, result, resolved) {
   const note = unsupportedNote(result)
-  if (note) ctx.unsupported.add(note)
+  if (note) ctx.unsupported.add(note, resolved)
   return result
 }
 

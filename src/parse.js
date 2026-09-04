@@ -40,9 +40,10 @@
 //               the target (the virtual FS is read-only) and means
 //               "discard"
 //   `2>`      — redirect stderr; same `/dev/null`-only restriction
-//   `2>&1`    — merge stderr into stdout (and the symmetric `1>&2`).
-//               Applied before `/dev/null` sinks, so `>/dev/null 2>&1`
-//               silences both streams.
+//   `2>&1`    — merge stderr into stdout (and the symmetric `1>&2`,
+//               plus `>&2` / `>&1` with the fd left implicit, as bash
+//               allows). Applied before `/dev/null` sinks, so
+//               `>/dev/null 2>&1` silences both streams.
 //   `>>` / `1>>` / `2>>` — append form, rejected outright
 //
 // Boundary tokens are tagged by `kind`, not by string value, so a
@@ -442,3 +443,4 @@ function consumeShorts(tokens, i, short, valueShort, repeatable, flags, values, 
   }
   return i
 }
+

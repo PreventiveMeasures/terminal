@@ -142,7 +142,12 @@ function operator(line, i) {
   switch (c) {
     case '|': return { token: { kind: doubled ? 'or' : 'pipe' }, skip: doubled ? 1 : 0 }
     case '&': return { token: { kind: doubled ? 'and' : 'amp' }, skip: doubled ? 1 : 0 }
-    case '>': return { token: { kind: 'redir', fd: '1', append: doubled }, skip: doubled ? 1 : 0 }
+    // `>&2` is `1>&2` with the fd left implicit, and bash accepts it.
+    // Without this branch the `>` became a plain redirect and the `&`
+    // reached the amp case above, so a working shell idiom died as
+    // "background processes are not supported".
+    case '>': return line[i + 1] === '&' ? fdDup(line, i + 1, '1', 2, '>&')
+      : { token: { kind: 'redir', fd: '1', append: doubled }, skip: doubled ? 1 : 0 }
     case ';': return { token: { kind: 'semi' }, skip: 0 }
     case '(': return { token: { kind: 'paren_open' }, skip: 0 }
     case ')': return { token: { kind: 'paren_close' }, skip: 0 }
@@ -158,22 +163,27 @@ function operator(line, i) {
 // silently split into a fd-dup plus a stray word.
 function fdRedirect(line, i) {
   const fd = line[i]
-  if (line[i + 2] === '&') {
-    const m = line[i + 3]
-    const after = line[i + 4]
-    if ((m === '1' || m === '2') && (after === undefined || /[\s|&>;()]/u.test(after))) {
-      return { token: { kind: 'redir', fd, toFd: m }, skip: 3 }
-    }
-    // `N>&` followed by anything else: bare (`N>&`), invalid fd
-    // (`N>&3`), or non-boundary junk (`N>&1foo`). Surface a
-    // redirect-target error up front instead of letting the
-    // bare `&` fall through to the amp / background-process
-    // branch — that error reads as "background processes are
-    // not supported" and obscures the real syntax issue.
-    throw new Error(`redirect \`${fd}>&\` requires fd 1 or 2 followed by a token boundary`)
-  }
+  if (line[i + 2] === '&') return fdDup(line, i + 2, fd, 3, `${fd}>&`)
   const append = line[i + 2] === '>'
   return { token: { kind: 'redir', fd, append }, skip: append ? 2 : 1 }
+}
+
+// The fd-to-fd duplication itself, shared by the explicit `N>&M` form
+// and the implicit-fd `>&M`. `ampAt` indexes the `&`; `skip` is how
+// many characters past the operator's first the whole form consumes,
+// which differs between the two spellings.
+function fdDup(line, ampAt, fd, skip, label) {
+  const target = line[ampAt + 1]
+  const after = line[ampAt + 2]
+  if ((target === '1' || target === '2') && (after === undefined || /[\s|&>;()]/u.test(after))) {
+    return { token: { kind: 'redir', fd, toFd: target }, skip }
+  }
+  // Anything else: bare (`>&`), invalid fd (`>&3`), or non-boundary
+  // junk (`>&1foo`). Surface a redirect-target error up front instead
+  // of letting the bare `&` fall through to the amp / background-process
+  // branch — that error reads as "background processes are not
+  // supported" and obscures the real syntax issue.
+  throw new Error(`redirect \`${label}\` requires fd 1 or 2 followed by a token boundary`)
 }
 
 // The reference starting at the `$` at `line[i]`, or null when what

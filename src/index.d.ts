@@ -140,7 +140,12 @@ export interface Unsupported {
   kind: UnsupportedKind
   /** The command that reported it, as typed; `null` for a gap in the shell itself rather than in a command. */
   command: string | null
-  /** The construct that is missing, as typed — `-prune`, `--bogus`, `frobnicate`, `>>`. */
+  /**
+   * Short identifier for the missing construct, stable enough to switch on.
+   * Usually the token as typed (`-prune`, `--bogus`, `frobnicate`, `>>`), but
+   * normalized where one gap has several spellings: `tr -sd` and `tr -d -s`
+   * both report `-d -s`, and every unsupported `sed` script reports `script`.
+   */
   detail: string
   /** Human-readable diagnostic: the same line the gap put on stderr, minus the trailing newline. Shell-level gaps omit the generic `error: ` prefix that stderr carries. */
   message: string

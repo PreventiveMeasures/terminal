@@ -91,17 +91,31 @@ const KEY_MODS = 'nrfb'
 // feed, or to treat its own typos as missing features.
 const GNU_KEY_MODS = 'bdfghiMnRrV'
 const KEY_POS = /^(\d+)([a-zA-Z]*)$/u
+// GNU's full KEYDEF grammar, `F[.C][OPTS][,F[.C][OPTS]]` — the same as
+// KEY_POS plus the `.C` character offset this sort does not model.
+// Matching against it is what separates "GNU takes this, we don't" from
+// "malformed either way": `-k1.2` parses here and nowhere else, so it is
+// a gap, while `-k1.2.3` and `-k1,2,3.4` fail both and are ordinary
+// errors. Testing for a bare `.` instead would report a caller's own
+// typo as a missing feature.
+const GNU_KEY_POS = /^\d+(?:\.\d+)?([a-zA-Z]*)$/u
+const isGnuKeySpec = (spec) => {
+  const parts = spec.split(',')
+  if (parts.length > 2) return false
+  return parts.every((part) => {
+    const m = GNU_KEY_POS.exec(part)
+    return m !== null && [...m[1]].every((c) => GNU_KEY_MODS.includes(c))
+  })
+}
 
 function parseKeySpecs(raw, globals) {
   const specs = []
   for (const spec of raw) {
     const parts = spec.split(',')
     const bad = () => {
-      // A character offset (`-k1.2`) is the one malformed-looking spec
-      // that GNU accepts, so it is classified as the gap it is.
-      if (!spec.includes('.')) return { error: err(`sort: invalid key specification: ${spec}`) }
-      const message = `sort: invalid key specification: ${spec} (character offsets are not supported)`
-      return { error: unsupported('option', 'sort', `-k${spec}`, message) }
+      const message = `sort: invalid key specification: ${spec}`
+      if (!isGnuKeySpec(spec)) return { error: err(message) }
+      return { error: unsupported('option', 'sort', `-k${spec}`, `${message} (character offsets are not supported)`) }
     }
     if (parts.length > 2) return bad()
     const [m1, m2] = parts.map((part) => KEY_POS.exec(part))

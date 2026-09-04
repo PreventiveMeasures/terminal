@@ -116,10 +116,15 @@ describe('run().unsupported — what counts as a gap', () => {
       'head -n x f.txt',      // invalid count
       'wc -l missing',
       'tr a',                 // wrong operand count
+      'sed -n',               // no script operand
       'grep -e',              // stranded value option
       'grep --include',       // stranded long value option
-      'grep -l -c f.txt',     // mutually exclusive modes
       'sort -k0 f.txt',       // field number zero
+      'sort -k1,2,3.4 f.txt', // three comma parts
+      'sort -k1.2.3 f.txt',   // stray character in the field spec
+      'find . -type q',       // not a file type GNU has either
+      'nl -b x f.txt',        // not a numbering style GNU has either
+      'echo a >&3',           // fd-dup to an fd that does not exist
       'find . -name',         // primary missing its value
       'find . -type q',       // bad primary value
       'echo a >',             // redirect with no target
@@ -156,17 +161,50 @@ describe('run().unsupported — what counts as a gap', () => {
   })
 
   it('separates "GNU has it, we do not" from "nobody has it"', () => {
-    // sort's key modifiers are the sharp case: `g` is real GNU we do not
-    // model, `Z` is malformed for GNU too. Reporting both as gaps would
-    // train a caller to read its own typos as missing features.
-    assert.deepEqual(details('sort -k2g f.txt'), ['-k2g'])
-    assert.deepEqual(gaps('sort -k2Z f.txt'), [])
-    // A character offset is valid GNU that this sort does not model.
-    assert.deepEqual(details('sort -k1.2 f.txt'), ['-k1.2'])
-    assert.deepEqual(gaps('sort -k1,2,3 f.txt'), [], 'a malformed spec is just an error')
-    // Both still fail identically on the command's own channels.
-    assert.equal(term().run('sort -k2g f.txt').exitCode, 1)
-    assert.equal(term().run('sort -k2Z f.txt').exitCode, 1)
+    // The whole boundary, pinned against the real binaries. Each pair is
+    // the same shape of input: the first is a working GNU invocation
+    // this terminal does not implement, the second is malformed for GNU
+    // too. Reporting both alike would train a caller to read its own
+    // typos as missing features.
+    for (const [gap, notGap] of [
+      ['sort -k2g f.txt', 'sort -k2Z f.txt'],           // key modifier
+      ['sort -k1.2 f.txt', 'sort -k1.2.3 f.txt'],       // character offset
+      ['sort -k1.2 f.txt', 'sort -k1,2,3.4 f.txt'],     // ...vs three parts
+      ['find . -type l', 'find . -type q'],             // file type
+      ['nl -b p1 f.txt', 'nl -b x f.txt'],              // numbering style
+    ]) {
+      assert.equal(gaps(gap).length, 1, `${gap} should be a gap`)
+      assert.deepEqual(gaps(notGap), [], `${notGap} should not be a gap`)
+      // Both still fail identically on the command's own channels — the
+      // classification changes what the caller is told, never the run.
+      assert.equal(term().run(gap).exitCode, term().run(notGap).exitCode)
+      assert.notEqual(term().run(gap).stderr, '')
+      assert.notEqual(term().run(notGap).stderr, '')
+    }
+  })
+
+  it('classifies every file type GNU has and this FS cannot represent', () => {
+    // A virtual FS of path -> content has no symlinks, devices, FIFOs,
+    // or sockets to match against, so each is a gap rather than a typo.
+    for (const ty of ['l', 'b', 'c', 'p', 's']) {
+      assert.deepEqual(details(`find . -type ${ty}`), [`-type ${ty}`], ty)
+    }
+    for (const ty of ['f', 'd']) {
+      assert.equal(term().run(`find . -type ${ty}`).exitCode, 0, ty)
+    }
+  })
+
+  it('does not mistake a fd-duplication redirect for backgrounding', () => {
+    // `>&2` is `1>&2` with the fd implicit. It used to reach the `&`
+    // branch and report a background-process gap, which is both the
+    // wrong classification and a working bash idiom refused.
+    const r = term().run('echo hi >&2')
+    assert.equal(r.stdout, '')
+    assert.equal(r.stderr, 'hi\n')
+    assert.deepEqual(r.unsupported, [])
+    assert.deepEqual(details('echo a >&1'), [])
+    // A real `&` is still reported.
+    assert.deepEqual(details('sleep 1 &'), ['&'])
   })
 })
 
@@ -195,6 +233,14 @@ describe('run().unsupported — the contract', () => {
     assert.equal(r.stderr.split('\n').filter(Boolean).length, 3, 'stderr still shows all three')
     // Distinct gaps stay distinct, in the order first hit.
     assert.deepEqual(details('ls -t; frobnicate; wc --bogus f.txt; ls -t'), ['-t', 'frobnicate', '--bogus'])
+  })
+
+  it('deduplicates across bin prefixes — one gap, not one per spelling', () => {
+    // `command` records the name as typed, so the two entries would
+    // differ there; dedup keys off the resolved name instead.
+    const r = term().run('ls -t; /usr/bin/ls -t; /bin/ls -t')
+    assert.deepEqual(r.unsupported.map((u) => [u.command, u.detail]), [['ls', '-t']])
+    assert.equal(r.stderr.split('\n').filter(Boolean).length, 3)
   })
 
   it('is per-run, not cumulative', () => {
@@ -227,12 +273,14 @@ describe('run().unsupported — the contract', () => {
 })
 
 describe('run().unsupported — wired commands', () => {
-  it('reports a wired command\'s unknown option like a built-in\'s', () => {
-    // A wired handler that throws is an ordinary failure, not a gap:
-    // only this package can say what this package fails to implement.
+  it('never classifies a wired handler\'s own throw as a gap', () => {
+    // Only this package can say what this package fails to implement.
+    // A wired handler's error is the embedder's, even when it is worded
+    // exactly like the parser's own unknown-option message.
     const t = createTerminal(SOURCES, { commands: { probe: () => { throw new Error('unknown option: -z') } } })
-    assert.deepEqual(t.run('probe -z').unsupported, [])
-    assert.equal(t.run('probe -z').stderr, 'probe: unknown option: -z\n')
+    const r = t.run('probe -z')
+    assert.deepEqual(r.unsupported, [])
+    assert.equal(r.stderr, 'probe: unknown option: -z\n')
   })
 
   it('survives a handler that throws a non-Error, including a hostile one', () => {
