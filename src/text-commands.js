@@ -9,6 +9,7 @@ import { parseArgs } from './parse.js'
 import { err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
+import { xargs } from './xargs.js'
 
 // `-n` numbers every line, `-b` only the non-blank ones (and wins when
 // both are given, as in GNU). `-s` squeezes runs of blank lines to one.
@@ -450,50 +451,6 @@ function interpretEscapes(s) {
     out += '\\' + c
   }
   return { text: out, stop: false }
-}
-
-// Read whitespace-separated tokens from stdin and append them as
-// extra args to CMD. With `-n N`, run CMD once per chunk of N
-// items (so `find ... | xargs -n 1 cat` cats each file separately).
-// With `-r`, skip the run entirely when stdin has no items (real
-// xargs runs CMD once with no extra args by default; `-r` matches
-// `--no-run-if-empty`). Defaults to `echo` when CMD is omitted.
-function xargs(stdin, tokens, ctx) {
-  // stopAtFirstPositional so flags after the inner command name
-  // (e.g. `xargs grep -n PATTERN`) belong to grep, not to xargs.
-  // Otherwise xargs greedily consumes `-n PATTERN` as its own
-  // chunk-size flag and dies on `parseNonNegativeInt('PATTERN')`.
-  const { flags, values, positional } = parseArgs(tokens, {
-    short: ['r'],
-    valueShort: ['n'],
-    stopAtFirstPositional: true,
-  })
-  const [cmd = 'echo', ...baseArgs] = positional
-  const items = stdin.split(/\s+/u).filter(Boolean)
-  if (items.length === 0) {
-    if (flags.has('r')) return ok()
-    return ctx.dispatch(cmd, baseArgs, '')
-  }
-  const n = values.has('n') ? parseNonNegativeInt(values.get('n'), 'xargs: -n') : { value: items.length }
-  if (n.error) return n.error
-  // Unlike head/tail (where -n 0 = print nothing is meaningful),
-  // xargs -n 0 has no useful interpretation: chunking by zero
-  // would either loop forever or fall back to "no chunking".
-  if (values.has('n') && n.value === 0) return err('xargs: -n: must be at least 1')
-  return xargsRun(ctx, cmd, baseArgs, items, n.value)
-}
-
-function xargsRun(ctx, cmd, baseArgs, items, chunkSize) {
-  let stdout = ''
-  let stderr = ''
-  let exitCode = 0
-  for (let i = 0; i < items.length; i += chunkSize) {
-    const r = ctx.dispatch(cmd, [...baseArgs, ...items.slice(i, i + chunkSize)], '')
-    stdout += r.stdout
-    stderr += r.stderr
-    if (r.exitCode !== 0) exitCode = r.exitCode
-  }
-  return { stdout, stderr, exitCode }
 }
 
 // POSIX shell builtins: zero-arg, deterministic, useful for testing

@@ -230,7 +230,13 @@ describe('createTerminal — text commands', () => {
     assert.match(h.stdout, /==> a\.txt <==\nAAA/u)
     assert.match(h.stdout, /==> b\.txt <==\nBBB/u)
     assert.equal(h.exitCode, 1)
-    assert.equal(t.run('sort a.txt missing.txt b.txt').stdout, 'AAA\nBBB\nzzz\n')
+    // sort is the exception: it is ALL-OR-NOTHING, abandoning the run
+    // on an unreadable operand rather than sorting what it could read,
+    // because a partial sort would look like a complete ordering.
+    const so = t.run('sort a.txt missing.txt b.txt')
+    assert.equal(so.stdout, '')
+    assert.equal(so.exitCode, 2)
+    assert.equal(t.run('sort a.txt b.txt').stdout, 'AAA\nBBB\nzzz\n')
     assert.equal(t.run('cut -c1 a.txt missing.txt').stdout, 'A\nz\n')
     // Even with every operand unreadable, wc still prints the total —
     // GNU gates that row on how many files were NAMED, so two missing
@@ -1184,8 +1190,10 @@ describe('createTerminal — text commands', () => {
 
   it('sort / uniq report missing files instead of silently emitting nothing', () => {
     const t = createTerminal({ 'f.txt': 'a\n' })
+    // sort exits 2 on an unreadable operand, as GNU does — distinct
+    // from the exit 1 the partial-failure commands use.
     const s = t.run('sort nope.txt')
-    assert.equal(s.exitCode, 1)
+    assert.equal(s.exitCode, 2)
     assert.match(s.stderr, /sort: nope\.txt: no such file/u)
     const u = t.run('uniq nope.txt')
     assert.equal(u.exitCode, 1)
@@ -4148,6 +4156,63 @@ describe('createTerminal — ls -d/-r/-A/-F, find -iname/-print0/-empty', () => 
     assert.equal(t.run('find ft -empty').stdout, 'ft/empty.txt\n')
     assert.equal(t.run('find ft -type f -empty').stdout, 'ft/empty.txt\n')
     assert.equal(t.run('find ft -not -empty -type f').stdout, 'ft/Foo.JS\nft/full.txt\nft/sub/bar.js\n')
+  })
+})
+
+describe('createTerminal — xargs -0/-I, sort aborts on unreadable input', () => {
+  const SRC = { 'x.txt': 'a b\nc d\n', 'ft/a b.txt': 'q', 'ft/c.txt': 'r', 'ok.txt': 'z\ny\n' }
+
+  it('xargs -I takes whole LINES as items, one run each', () => {
+    // Unlike the default whitespace split, `-I` keeps `a b` as one
+    // argument — which is the point of it.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat x.txt | xargs -I{} echo "[{}]"').stdout, '[a b]\n[c d]\n')
+    // The placeholder is replaced everywhere it appears, including
+    // inside a larger word.
+    assert.equal(t.run('cat x.txt | xargs -I% echo "pre% post%"').stdout,
+      'prea b posta b\nprec d postc d\n')
+  })
+
+  it('xargs -I with no input runs the command zero times', () => {
+    // Not once with an unsubstituted placeholder, which is what the
+    // run-anyway fallback would otherwise do.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('echo "" | xargs -I{} echo "[{}]"').stdout, '')
+  })
+
+  it('xargs -0 splits on NUL, pairing with find -print0', () => {
+    // The whole point: a path with a space survives as one item.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('find ft -type f -print0 | xargs -0 echo').stdout, 'ft/a b.txt ft/c.txt\n')
+    assert.equal(t.run('find ft -type f -print0 | xargs -0 -n1 echo').stdout, 'ft/a b.txt\nft/c.txt\n')
+  })
+
+  it('a declared digit option beats the numeric-shorthand rule', () => {
+    // `-0` matches the `^-\d` guard that keeps `head -5` and `ls -10`
+    // positional, so without consulting the schema it became a command
+    // NAME and died with "command not found". Both readings survive.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('head -1 ok.txt').stdout, 'z\n')
+    const ls10 = t.run('ls -10')
+    assert.equal(ls10.exitCode, 1)
+    assert.match(ls10.stderr, /-10: no such file/u)
+  })
+
+  it('sort abandons the run on an unreadable operand', () => {
+    // All-or-nothing, as GNU is: a partial sort would look like a
+    // complete ordering of the input. Exit 2, not the 1 the
+    // partial-failure commands use.
+    const t = createTerminal(SRC)
+    const r = t.run('sort ok.txt missing.txt')
+    assert.equal(r.stdout, '')
+    assert.equal(r.exitCode, 2)
+    assert.match(r.stderr, /missing\.txt: no such file/u)
+    // A directory operand aborts it the same way.
+    const d = t.run('sort ok.txt ft')
+    assert.equal(d.stdout, '')
+    assert.equal(d.exitCode, 2)
+    // Readable operands alone still sort normally.
+    assert.equal(t.run('sort ok.txt').stdout, 'y\nz\n')
   })
 })
 

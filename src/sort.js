@@ -19,6 +19,11 @@ export function sort(stdin, tokens, ctx) {
   if (keys.error) return keys.error
   // `sort a b` orders the concatenation of all inputs, matching coreutils.
   const r = readContent('sort', positional, stdin, ctx)
+  // Unlike cat/head/wc, sort is ALL-OR-NOTHING: GNU abandons the run on
+  // the first operand it cannot read and writes nothing to stdout,
+  // exiting 2. Emitting a partial sort would be worse than useless —
+  // the result would look like a complete ordering of the input.
+  if (r.failed) return { stdout: '', stderr: r.stderr, exitCode: 2 }
   let lines = splitLines(r.content)
   const numeric = flags.has('n')
   const unique = flags.has('u')
