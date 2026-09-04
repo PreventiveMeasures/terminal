@@ -34,8 +34,26 @@ function ls(_stdin, tokens, ctx) {
   // working) treats `-1` and `-1a` as positionals, so peel the
   // `1` out of the token list before parsing — `-1`, `-1a`, `-a1`,
   // and `-la1` all reach the schema cleanly that way.
-  const { flags, positional } = parseArgs(stripDashOne(tokens), { short: ['l', 'a', 'R'] })
-  const opts = { long: flags.has('l'), all: flags.has('a'), recursive: flags.has('R') }
+  // `-F` joins `-1` as an accepted no-op: this ls already appends `/`
+  // to every directory unconditionally, which is the whole of what -F
+  // can mean here (there are no executables or symlinks in the virtual
+  // FS to earn a `*` or `@`). `-t` and `-S` are deliberately NOT
+  // accepted: the FS stores only path→content, so there are no
+  // modification times to sort by at all, and a wrong order is worse
+  // than an unknown-option error.
+  const { flags, positional } = parseArgs(stripDashOne(tokens), { short: ['l', 'a', 'A', 'R', 'd', 'r', 'F'] })
+  const opts = {
+    long: flags.has('l'),
+    // `-A` is `-a` minus the `.` and `..` entries.
+    all: flags.has('a') || flags.has('A'),
+    dots: flags.has('a'),
+    recursive: flags.has('R'),
+    dirOnly: flags.has('d'),
+    reverse: flags.has('r'),
+  }
+  // `-d` lists the directory itself rather than its contents, so there
+  // is nothing to recurse into.
+  if (opts.dirOnly) return lsDirsThemselves(positional, opts, ctx)
   const initialTargets = positional.length > 0 ? positional : ['.']
   // -R expands each directory target into a DFS pre-order walk of
   // itself + every subdir (matching GNU's listing order: list a dir,
@@ -140,7 +158,7 @@ function lsTarget(target, multiple, opts, ctx) {
   // `/` that formatLsRow appends to real dirs is suppressed for
   // these — GNU prints them bare, and they're navigation handles
   // rather than browsable subtrees.
-  if (opts.all) {
+  if (opts.dots) {
     lines.push(formatDotEntry('.', opts.long))
     lines.push(formatDotEntry('..', opts.long))
   }
@@ -154,7 +172,42 @@ function lsTarget(target, multiple, opts, ctx) {
     const childAbs = joinPath(abs, name)
     lines.push(formatLsRow(name, ctx.fs.readFile(childAbs).length, false, opts.long))
   }
+  // `-r` reverses the listing this ls produced — including its
+  // dirs-before-files grouping, since that grouping IS the sort order
+  // here. The `dir:` header, when present, stays on top.
+  if (opts.reverse) {
+    const header = lines.length > 0 && (multiple || opts.recursive) ? lines.slice(0, 1) : []
+    return { lines: [...header, ...lines.slice(header.length).toReversed()] }
+  }
   return { lines }
+}
+
+// `-d`: name each operand itself instead of listing what is inside it.
+// A directory still gets its trailing `/`, and a missing path is still
+// an error, but nothing is walked.
+function lsDirsThemselves(positional, opts, ctx) {
+  const targets = positional.length > 0 ? positional : ['.']
+  const out = []
+  const errs = []
+  for (const target of targets) {
+    const abs = resolve(ctx.cwd, target)
+    // `.` and `..` print bare, the same rule `-a` already follows for
+    // them: they are navigation handles, not browsable subtrees, so
+    // they skip the trailing `/` this ls gives real directories.
+    if (ctx.fs.isDir(abs)) {
+      out.push(target === '.' || target === '..'
+        ? formatDotEntry(target, opts.long)
+        : formatLsRow(target, 0, true, opts.long))
+    }
+    else if (ctx.fs.isFile(abs)) out.push(formatLsRow(target, ctx.fs.readFile(abs).length, false, opts.long))
+    else errs.push(`ls: ${target}: no such file or directory`)
+  }
+  const rows = opts.reverse ? out.toReversed() : out
+  return {
+    stdout: rows.length === 0 ? '' : rows.join('\n') + '\n',
+    stderr: errs.length === 0 ? '' : errs.join('\n') + '\n',
+    exitCode: errs.length === 0 ? 0 : 1,
+  }
 }
 
 // `.` / `..` rows under -a: marked as directories in long form (so

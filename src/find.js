@@ -49,7 +49,7 @@ import { err, parseNonNegativeInt } from './util.js'
 // here — hence the name, matching grep.js's SHORT_FLAGS/VALUE_SHORTS
 // split. Valueless tokens must stay out: adding `empty` here would
 // make `find / -empty -type f` swallow `-type` as its value.
-const VALUE_PRIMARIES = new Set(['name', 'type', 'path', 'mindepth', 'maxdepth'])
+const VALUE_PRIMARIES = new Set(['name', 'iname', 'type', 'path', 'mindepth', 'maxdepth'])
 
 // The single spelling test for the double-dash aliases described
 // above. One helper rather than a hand-written pair per token, so the
@@ -90,7 +90,10 @@ export function find(_stdin, tokens, ctx) {
     for (const entry of walkTree(ctx.fs, startAbs, maxDepth)) {
       if (entry.depth < minDepth) continue
       const display = toDisplayPath(start, startAbs, entry.path)
-      const r = runPredicates(groups, { kind: entry.kind, path: display }, ctx)
+      // `abs` rides along for predicates that must touch the file
+      // itself (`-empty`); `path` stays the user-facing display form
+      // every action prints.
+      const r = runPredicates(groups, { kind: entry.kind, path: display, abs: entry.path }, ctx)
       stdout += r.stdout
       stderr += r.stderr
     }
@@ -217,9 +220,14 @@ function walkExprTokens(tokens, minDepth, maxDepth) {
       groups.push([]); expectingRhs = '-o'; seenExpr = true; continue
     }
     // Valueless action: always true, emits the path (see evalPredicate).
-    if (isTok(t, 'print')) {
-      groups.at(-1).push({ kind: 'print', negate: pendingNot })
+    if (isTok(t, 'print') || isTok(t, 'print0')) {
+      groups.at(-1).push({ kind: isTok(t, 'print0') ? 'print0' : 'print', negate: pendingNot })
       hasAction = true
+      pendingNot = false; expectingRhs = null; seenExpr = true
+      continue
+    }
+    if (isTok(t, 'empty')) {
+      groups.at(-1).push({ kind: 'empty', negate: pendingNot })
       pendingNot = false; expectingRhs = null; seenExpr = true
       continue
     }
@@ -242,7 +250,10 @@ function walkExprTokens(tokens, minDepth, maxDepth) {
       // doesn't recompile it for every directory entry — large
       // trees with `-name '*.js'` are the common case.
       const pred = { kind: primary, value, negate: pendingNot }
+      // `-iname` is `-name` with a case-insensitive glob; compiling it
+      // here keeps the matcher a single `re.test` either way.
       if (primary === 'name' || primary === 'path') pred.re = compileGlob(value)
+      if (primary === 'iname') pred.re = compileGlob(value, { ignoreCase: true })
       groups.at(-1).push(pred)
       pendingNot = false; expectingRhs = null; seenExpr = true; i++
       continue
@@ -367,18 +378,26 @@ function evalOne(p, entry, ctx) {
 }
 
 function evalPredicate(p, entry, ctx) {
-  // `kind` is one of `type` / `name` / `path` / `print` / `exec` —
+  // `kind` is one of `type` / `name` / `iname` / `path` / `empty` /
+  // `print` / `print0` / `exec` —
   // parser emits no other shapes. Every arm is named, so a new kind
   // appended at the bottom is reachable rather than dead; falling off
   // the end returns undefined and crashes the caller's destructure,
   // which IS the right failure mode for a contract violation that can
   // only come from a code bug.
   if (p.kind === 'type') return matchedOnly(p.value === 'f' ? entry.kind === 'file' : entry.kind === 'dir')
-  if (p.kind === 'name') return matchedOnly(p.re.test(basename(entry.path)))
+  if (p.kind === 'name' || p.kind === 'iname') return matchedOnly(p.re.test(basename(entry.path)))
+  // A file is empty when it has no content. A DIRECTORY can never be
+  // empty in this FS: it exists only because some file lives under it,
+  // so `-empty` simply never matches one.
+  if (p.kind === 'empty') return matchedOnly(entry.kind === 'file' && ctx.fs.readFile(entry.abs) === '')
   if (p.kind === 'path') return matchedOnly(p.re.test(entry.path))
   // Always true, output as the side effect. `-not -print` inverts
   // only the boolean (in evalOne) — the line is emitted either way.
   if (p.kind === 'print') return { matched: true, stdout: entry.path + '\n', stderr: '' }
+  // `-print0` terminates with NUL instead of a newline, so paths
+  // containing spaces survive a pipe into `xargs -0`.
+  if (p.kind === 'print0') return { matched: true, stdout: entry.path + '\0', stderr: '' }
   if (p.kind === 'exec') return evalExec(p, entry, ctx)
 }
 

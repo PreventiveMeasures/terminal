@@ -1570,17 +1570,16 @@ describe('createTerminal — find / tree / path', () => {
     assert.equal(r.stdout, '-print a.txt\n', 'the inner -print must reach echo as a literal argument')
   })
 
-  it('find still rejects -print0 / -printf (only bare -print is modeled)', () => {
-    // The unknown-option guard must keep catching the -print* family
-    // we do not implement, rather than prefix-matching them to -print
-    // and silently ignoring the difference (-print0 is NUL-separated).
+  it('find still rejects -printf (the -print* family is not prefix-matched)', () => {
+    // `-print0` is now modeled, but the unknown-option guard must keep
+    // catching the rest of the -print* family rather than
+    // prefix-matching them to -print and silently ignoring the
+    // difference.
     const t = createTerminal(SOURCES)
-    for (const cmd of ['find / -print0', 'find / -printf "%p"']) {
-      const r = t.run(cmd)
-      assert.notEqual(r.exitCode, 0, cmd)
-      assert.match(r.stderr, /unknown option/u, cmd)
-      assert.equal(r.stdout, '', cmd)
-    }
+    const r = t.run('find / -printf "%p"')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /unknown option/u)
+    assert.equal(r.stdout, '')
   })
 
   it('find -exec ... ; dispatches once per match with `{}` replaced by the path', () => {
@@ -4078,6 +4077,77 @@ describe('createTerminal — cat -s/-b/-E/-T/-A, uniq -f/-s/-w/-D, seq -w/-s', (
     const t = createTerminal(SRC)
     assert.equal(t.run('seq -s, 1 3').stdout, '1,2,3\n')
     assert.equal(t.run('seq -w -s, 8 11').stdout, '08,09,10,11\n')
+  })
+})
+
+describe('createTerminal — ls -d/-r/-A/-F, find -iname/-print0/-empty', () => {
+  const SRC = { 'src/foo.js': 'a\n', 'src/deep/b.js': 'x', 'README.md': '# hi\n', '.hidden': 's\n' }
+  const FT = { 'ft/Foo.JS': 'x', 'ft/sub/bar.js': 'y', 'ft/empty.txt': '', 'ft/full.txt': 'z' }
+
+  it('ls -d names the operand instead of listing inside it', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('ls -d src').stdout, 'src/\n')
+    assert.equal(t.run('ls -d src README.md').stdout, 'src/\n README.md\n'.replace(' ', ''))
+    // `.` and `..` print bare — the same rule -a already follows for
+    // them, since they are navigation handles, not browsable subtrees.
+    assert.equal(t.run('ls -d').stdout, '.\n')
+    assert.equal(t.run('ls -d ..').stdout, '..\n')
+    const missing = t.run('ls -d nope')
+    assert.equal(missing.exitCode, 1)
+    assert.match(missing.stderr, /no such file/u)
+  })
+
+  it('ls -r reverses the listing, grouping included', () => {
+    // Directories-before-files IS this ls's sort order, so -r reverses
+    // that too rather than reversing within each group.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('ls').stdout, 'src/\nREADME.md\n')
+    assert.equal(t.run('ls -r').stdout, 'README.md\nsrc/\n')
+    assert.equal(t.run('ls -r src').stdout, 'foo.js\ndeep/\n')
+  })
+
+  it('ls -A shows dotfiles but not . and ..', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('ls -A').stdout, 'src/\n.hidden\nREADME.md\n')
+    assert.equal(t.run('ls -a').stdout, '.\n..\nsrc/\n.hidden\nREADME.md\n')
+  })
+
+  it('ls -F is accepted as a no-op, like -1', () => {
+    // This ls already marks every directory with a trailing `/`, which
+    // is all -F can mean here — there are no executables or symlinks in
+    // the virtual FS to earn a `*` or `@`.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('ls -F src').stdout, t.run('ls src').stdout)
+  })
+
+  it('ls still rejects -t and -S, which the FS cannot support', () => {
+    // The virtual FS stores only path→content: there are no
+    // modification times to sort by, so a wrong order would be worse
+    // than an error.
+    const t = createTerminal(SRC)
+    assert.match(t.run('ls -t').stderr, /unknown option/u)
+    assert.match(t.run('ls -S').stderr, /unknown option/u)
+  })
+
+  it('find -iname matches case-insensitively', () => {
+    const t = createTerminal(FT)
+    assert.equal(t.run('find ft -iname "*.js"').stdout, 'ft/Foo.JS\nft/sub/bar.js\n')
+    assert.equal(t.run('find ft -name "*.js"').stdout, 'ft/sub/bar.js\n')
+    assert.equal(t.run('find ft -iname "FOO*"').stdout, 'ft/Foo.JS\n')
+  })
+
+  it('find -print0 terminates with NUL instead of a newline', () => {
+    const t = createTerminal(FT)
+    assert.equal(t.run('find ft -name "*.js" -print0').stdout, 'ft/sub/bar.js\0')
+  })
+
+  it('find -empty matches zero-byte files', () => {
+    // A directory can never be empty in this FS — it exists only
+    // because a file lives under it — so -empty never matches one.
+    const t = createTerminal(FT)
+    assert.equal(t.run('find ft -empty').stdout, 'ft/empty.txt\n')
+    assert.equal(t.run('find ft -type f -empty').stdout, 'ft/empty.txt\n')
+    assert.equal(t.run('find ft -not -empty -type f').stdout, 'ft/Foo.JS\nft/full.txt\nft/sub/bar.js\n')
   })
 })
 

@@ -34,7 +34,15 @@ const META = /[*?]/u
 // first in the loop, so the `REGEX_META.test(c)` arm only sees other
 // metachars — the redundancy doesn't fire there.
 const REGEX_META = /[.+*?^${}()|[\]\\]/u
-export function compileGlob(pattern) {
+// `opts.ignoreCase` gives a caller case-insensitive matching (`find
+// -iname`); everything else about the translation is identical, so the
+// two spellings can never drift apart. It is an OPTIONS OBJECT rather
+// than a positional flag string on purpose: this function is passed
+// straight to `Array#map` in places, which would hand a positional
+// second parameter the element INDEX — silently corrupting the regex
+// flags. A stray number reads as `{}.ignoreCase === undefined` and is
+// harmlessly ignored.
+export function compileGlob(pattern, opts = {}) {
   let re = '^'
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i]
@@ -51,7 +59,7 @@ export function compileGlob(pattern) {
     else if (REGEX_META.test(c)) re += '\\' + c
     else re += c
   }
-  return new RegExp(re + '$', 'u')
+  return new RegExp(re + '$', opts?.ignoreCase ? 'ui' : 'u')
 }
 
 export function globMatch(name, pattern) {
