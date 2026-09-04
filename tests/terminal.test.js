@@ -4216,6 +4216,60 @@ describe('createTerminal — xargs -0/-I, sort aborts on unreadable input', () =
   })
 })
 
+describe('createTerminal — find -prune', () => {
+  // Checked against GNU findutils 4.9.
+  const SRC = {
+    'src/foo.js': 'a', 'src/deep/bar.js': 'b', 'README.md': 'c',
+    'node_modules/pkg/index.js': 'd', 'node_modules/pkg/lib/x.js': 'e',
+    'a/node_modules/x/y.js': 'f', 'a/keep.js': 'g',
+  }
+
+  it('the canonical skip-node_modules idiom works', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('find . -path ./node_modules -prune -o -print | sort').stdout,
+      '.\n./README.md\n./a\n./a/keep.js\n./a/node_modules\n./a/node_modules/x\n./a/node_modules/x/y.js\n./src\n./src/deep\n./src/deep/bar.js\n./src/foo.js\n')
+    // By NAME rather than path, every node_modules anywhere is pruned.
+    assert.equal(t.run('find . -name node_modules -prune -o -print | sort').stdout,
+      '.\n./README.md\n./a\n./a/keep.js\n./src\n./src/deep\n./src/deep/bar.js\n./src/foo.js\n')
+  })
+
+  it('-prune is TRUE, so it still gets the implicit -print', () => {
+    // GNU does not count -prune as an action, so an expression with
+    // nothing else still prints what matched — here, what it pruned.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('find . -name node_modules -prune | sort').stdout,
+      './a/node_modules\n./node_modules\n')
+    assert.equal(t.run('find . -name node_modules -prune -print | sort').stdout,
+      './a/node_modules\n./node_modules\n')
+  })
+
+  it('-prune on a FILE is a no-op that still reports true', () => {
+    // README.md is not a directory, so nothing is pruned — but the
+    // first branch is true for it, so `-o -print` skips it.
+    const t = createTerminal(SRC)
+    const out = t.run('find . -name README.md -prune -o -print | sort').stdout
+    assert.ok(!out.includes('./README.md\n'), out)
+    assert.ok(out.includes('./src/foo.js'), out)
+  })
+
+  it('-prune can prune the start directory itself', () => {
+    // The root never passes through the child loop, so it has to be
+    // offered to the descent check separately — without that,
+    // `find . -prune` walks everything.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('find . -prune').stdout, '.\n')
+    // Everything pruned, and `-o` short-circuits, so nothing prints.
+    assert.equal(t.run('find . -not -name node_modules -prune -o -print').stdout, '')
+  })
+
+  it('-prune composes with the other predicates', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('find . -name node_modules -prune -o -name "*.js" -print | sort').stdout,
+      './a/keep.js\n./src/deep/bar.js\n./src/foo.js\n')
+    assert.equal(t.run('find src -name deep -prune -o -print | sort').stdout, 'src\nsrc/foo.js\n')
+  })
+})
+
 describe('createTerminal — tac', () => {
   it('reverses line order from stdin and from a file', () => {
     const t = createTerminal({ 'lines.txt': 'a\nb\nc\n' })
