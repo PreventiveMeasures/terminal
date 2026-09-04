@@ -45,9 +45,9 @@ const MAX_SEQ_ELEMENTS = 1_000_000
 // nothing (the loop just doesn't fire) — matching GNU. The earlier
 // shared auto-sign made `seq 0` emit `1\n0\n`, which is wrong.
 function seq(_stdin, tokens) {
-  const { positional } = parseArgs(tokens)
+  const { flags, values, positional } = parseArgs(tokens, { short: ['w'], valueShort: ['s'] })
   if (positional.length === 0 || positional.length > 3) {
-    return usage('seq LAST  |  seq FIRST LAST  |  seq FIRST INCR LAST')
+    return usage('seq [-w] [-s SEP] LAST  |  seq FIRST LAST  |  seq FIRST INCR LAST')
   }
   const nums = []
   for (const t of positional) {
@@ -70,7 +70,22 @@ function seq(_stdin, tokens) {
   const out = []
   if (incr > 0) for (let n = first; n <= last; n += incr) out.push(String(n))
   else for (let n = first; n >= last; n += incr) out.push(String(n))
-  return ok(joinLines(out))
+  // `-w` pads every value with leading zeros to the widest one PRODUCED,
+  // so `seq -w 8 11` is `08 09 10 11` while `seq -w 1 3` needs none. A
+  // minus sign counts toward the width and stays ahead of the padding.
+  const padded = flags.has('w') ? out.map((n) => zeroPad(n, Math.max(...out.map((v) => v.length)))) : out
+  // `-s` replaces the separator BETWEEN values; GNU still ends the
+  // whole run with a newline, so `seq -s, 1 3` is `1,2,3\n`.
+  const sep = values.get('s')
+  if (sep === undefined) return ok(joinLines(padded))
+  return ok(padded.length === 0 ? '' : padded.join(sep) + '\n')
+}
+
+function zeroPad(text, width) {
+  if (text.length >= width) return text
+  const neg = text.startsWith('-')
+  const digits = neg ? text.slice(1) : text
+  return (neg ? '-' : '') + digits.padStart(width - (neg ? 1 : 0), '0')
 }
 
 // Number lines with `cat -n`-style formatting (6-wide right-aligned

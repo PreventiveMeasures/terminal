@@ -4008,6 +4008,79 @@ describe('createTerminal — sort -k / -t', () => {
   })
 })
 
+describe('createTerminal — cat -s/-b/-E/-T/-A, uniq -f/-s/-w/-D, seq -w/-s', () => {
+  // Checked against GNU coreutils 9.4.
+  const SRC = {
+    'sq.txt': 'a\n\n\n\nb\n\nc\n',
+    'tab.txt': 'x\ty\n',
+    'uf.txt': 'k1 v1\nk1 v2\nk2 v3\n',
+    'dup.txt': 'x\nx\ny\nz\nz\nz\n',
+  }
+
+  it('cat -s squeezes runs of blank lines to one', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat -s sq.txt').stdout, 'a\n\nb\n\nc\n')
+  })
+
+  it('cat -b numbers only non-blank lines, leaving blanks bare', () => {
+    // Unlike `nl`, which blanks the number COLUMN, `cat -b` emits the
+    // blank line with no prefix at all — and the counter does not
+    // advance for it.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat -b sq.txt').stdout, '     1\ta\n\n\n\n     2\tb\n\n     3\tc\n')
+    // -n numbers everything, for contrast.
+    assert.equal(t.run('cat -n sq.txt').stdout.split('\n')[1], '     2\t')
+  })
+
+  it('cat -s and -b compose, squeezing before numbering', () => {
+    // The count follows the lines that survive the squeeze.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat -bs sq.txt').stdout, '     1\ta\n\n     2\tb\n\n     3\tc\n')
+  })
+
+  it('cat -E / -T / -A mark line ends and tabs', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('cat -E tab.txt').stdout, 'x\ty$\n')
+    assert.equal(t.run('cat -T tab.txt').stdout, 'x^Iy\n')
+    // -A is -vET, so both marks; -e is -vE.
+    assert.equal(t.run('cat -A tab.txt').stdout, 'x^Iy$\n')
+    assert.equal(t.run('cat -e tab.txt').stdout, 'x\ty$\n')
+  })
+
+  it('uniq -f skips fields and -s skips characters before comparing', () => {
+    // The key only decides equality; the whole line is still emitted.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('uniq -f1 uf.txt').stdout, 'k1 v1\nk1 v2\nk2 v3\n')
+    assert.equal(t.run('uniq -w2 uf.txt').stdout, 'k1 v1\nk2 v3\n')
+    assert.equal(t.run('uniq -s3 uf.txt').stdout, 'k1 v1\nk1 v2\nk2 v3\n')
+  })
+
+  it('uniq -D prints every line of a duplicate run', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('uniq -D dup.txt').stdout, 'x\nx\nz\nz\nz\n')
+    // GNU refuses to combine it with -c rather than picking a meaning.
+    const r = t.run('uniq -cD dup.txt')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /meaningless/u)
+  })
+
+  it('seq -w zero-pads to the widest value produced', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('seq -w 8 11').stdout, '08\n09\n10\n11\n')
+    // No padding needed when every value is already the same width.
+    assert.equal(t.run('seq -w 1 3').stdout, '1\n2\n3\n')
+    assert.equal(t.run('seq -w 98 101').stdout, '098\n099\n100\n101\n')
+    // A minus sign counts toward the width and stays ahead of the zeros.
+    assert.equal(t.run('seq -w -3 -1').stdout, '-3\n-2\n-1\n')
+  })
+
+  it('seq -s replaces the separator but keeps the trailing newline', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('seq -s, 1 3').stdout, '1,2,3\n')
+    assert.equal(t.run('seq -w -s, 8 11').stdout, '08,09,10,11\n')
+  })
+})
+
 describe('createTerminal — tac', () => {
   it('reverses line order from stdin and from a file', () => {
     const t = createTerminal({ 'lines.txt': 'a\nb\nc\n' })

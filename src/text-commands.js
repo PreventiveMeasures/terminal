@@ -10,21 +10,68 @@ import { err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, read
 import { grep } from './grep.js'
 import { sort } from './sort.js'
 
+// `-n` numbers every line, `-b` only the non-blank ones (and wins when
+// both are given, as in GNU). `-s` squeezes runs of blank lines to one.
+// The display flags mark otherwise invisible characters: `-E` ends each
+// line with `$`, `-T` shows tabs as `^I`, and `-A` is both (GNU's `-A`
+// is `-vET`, and `-e` is `-vE`; the `-v` part, escaping other
+// non-printables, has nothing to escape in this virtual FS's text).
 function cat(stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['n'] })
+  const { flags, positional } = parseArgs(tokens, { short: ['n', 'b', 's', 'E', 'T', 'A', 'e'] })
   const r = readContent('cat', positional, stdin, ctx)
-  return okWith(flags.has('n') ? numberLines(r.content) : r.content, r)
+  const showEnds = flags.has('E') || flags.has('A') || flags.has('e')
+  const showTabs = flags.has('T') || flags.has('A')
+  let content = r.content
+  // Order matters and follows GNU: squeeze first, so numbering counts
+  // the lines that actually survive, then mark, then number — a `$`
+  // belongs after the text but inside the numbered line.
+  if (flags.has('s')) content = squeezeBlankLines(content)
+  if (showEnds || showTabs) content = markInvisible(content, showEnds, showTabs)
+  if (flags.has('b')) content = numberLines(content, true)
+  else if (flags.has('n')) content = numberLines(content, false)
+  return okWith(content, r)
+}
+
+// Collapse every run of two or more blank lines into a single one.
+function squeezeBlankLines(content) {
+  if (content === '') return ''
+  const trailing = content.endsWith('\n') ? '\n' : ''
+  const lines = (trailing ? content.slice(0, -1) : content).split('\n')
+  const out = []
+  for (const line of lines) {
+    if (line === '' && out.at(-1) === '') continue
+    out.push(line)
+  }
+  return out.join('\n') + trailing
+}
+
+// `-E` appends `$` at end of line, `-T` renders a tab as the two
+// characters `^I`. Both are applied per line so the `$` lands after any
+// tab marking, matching GNU's `cat -A`.
+function markInvisible(content, showEnds, showTabs) {
+  if (content === '') return ''
+  const trailing = content.endsWith('\n') ? '\n' : ''
+  const lines = (trailing ? content.slice(0, -1) : content).split('\n')
+  const mark = (l) => (showTabs ? l.replaceAll('\t', '^I') : l) + (showEnds ? '$' : '')
+  return lines.map(mark).join('\n') + trailing
 }
 
 // GNU `cat -n` numbers lines starting from 1, right-aligned in a
 // 6-wide field with a tab separator. Trailing newlines are
 // preserved so `cat -n` of a file ending in '\n' produces output
 // that also ends in '\n' (no extra blank line at the end).
-function numberLines(content) {
+function numberLines(content, skipBlank) {
   if (content === '') return ''
   const trailing = content.endsWith('\n') ? '\n' : ''
   const lines = trailing ? content.slice(0, -1).split('\n') : content.split('\n')
-  return lines.map((l, i) => `${String(i + 1).padStart(6)}\t${l}`).join('\n') + trailing
+  let n = 0
+  // `-b` leaves a blank line completely unprefixed — no number, no
+  // padding, unlike `nl`, which blanks the column instead. The counter
+  // only advances on the lines it numbers.
+  const number = (l) => skipBlank && l === ''
+    ? l
+    : `${String(++n).padStart(6)}\t${l}`
+  return lines.map(number).join('\n') + trailing
 }
 
 // `-n` counts lines, `-c` counts bytes; both default to 10 lines. A
@@ -287,32 +334,72 @@ function formatWc(counts, name, which, width) {
 // `-d` and `-u` together produces no output (the empty intersection)
 // rather than erroring — matches what GNU does on common versions
 // and avoids surprising scripts that pass both flags.
+// Drop the first N whitespace-delimited fields, leading blanks and all,
+// the way `uniq -f` counts them: a field is a run of non-blanks, and the
+// blanks BEFORE the next field belong to it, so `-f1` of `k1 v1` leaves
+// ` v1`.
+function dropFields(line, n) {
+  let i = 0
+  for (let f = 0; f < n && i < line.length; f++) {
+    while (i < line.length && /\s/u.test(line[i])) i++
+    while (i < line.length && !/\s/u.test(line[i])) i++
+  }
+  return line.slice(i)
+}
+
 function uniq(stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['c', 'd', 'u', 'i'] })
-  const r = readContent('uniq', positional, stdin, ctx)
+  const { flags, values, positional } = parseArgs(tokens, {
+    short: ['c', 'd', 'u', 'i', 'D'],
+    valueShort: ['f', 's', 'w'],
+  })
+  const skipFields = parseNonNegativeInt(values.get('f') ?? '0', 'uniq: -f')
+  if (skipFields.error) return skipFields.error
+  const skipChars = parseNonNegativeInt(values.get('s') ?? '0', 'uniq: -s')
+  if (skipChars.error) return skipChars.error
+  const width = values.has('w') ? parseNonNegativeInt(values.get('w'), 'uniq: -w') : { value: undefined }
+  if (width.error) return width.error
+  const allDups = flags.has('D')
   const showCount = flags.has('c')
+  // GNU refuses this pair outright rather than picking a meaning:
+  // "printing all duplicated lines and repeat counts is meaningless".
+  if (allDups && showCount) return err('uniq: printing all duplicated lines and repeat counts is meaningless')
+  const r = readContent('uniq', positional, stdin, ctx)
   const onlyDups = flags.has('d')
   const onlyUniques = flags.has('u')
   const ignoreCase = flags.has('i')
-  const norm = (s) => ignoreCase ? s.toLowerCase() : s
+  // The comparison key: drop `-f` whole fields, then `-s` characters,
+  // then keep at most `-w`. GNU applies them in exactly that order, and
+  // the key only ever decides EQUALITY — the line is emitted whole.
+  const norm = (line) => {
+    let rest = skipFields.value > 0 ? dropFields(line, skipFields.value) : line
+    if (skipChars.value > 0) rest = rest.slice(skipChars.value)
+    if (width.value !== undefined) rest = rest.slice(0, width.value)
+    return ignoreCase ? rest.toLowerCase() : rest
+  }
   const lines = splitLines(r.content)
   const out = []
   let prev = null
   let prevKey = null
   let count = 0
+  let run = []
   const flush = () => {
     if (prev === null) return
     const isDup = count >= 2
     const keep = (onlyDups && onlyUniques) ? false
+      : allDups ? isDup
       : onlyDups ? isDup
       : onlyUniques ? !isDup
       : true
-    if (keep) out.push(showCount ? `${String(count).padStart(7)} ${prev}` : prev)
+    if (!keep) return
+    // `-D` prints every line of the run rather than one representative,
+    // so it is the only mode that needs the run kept around.
+    if (allDups) out.push(...run)
+    else out.push(showCount ? `${String(count).padStart(7)} ${prev}` : prev)
   }
   for (const l of lines) {
     const key = norm(l)
-    if (key === prevKey) { count++; continue }
-    flush(); prev = l; prevKey = key; count = 1
+    if (key === prevKey) { count++; run.push(l); continue }
+    flush(); prev = l; prevKey = key; count = 1; run = [l]
   }
   flush()
   return okWith(joinLines(out), r)
