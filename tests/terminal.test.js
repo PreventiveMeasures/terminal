@@ -2857,6 +2857,224 @@ describe('createTerminal — `(...)` subshell grouping', () => {
   })
 })
 
+describe('createTerminal — `for` loops', () => {
+  // Five headers with a varying number of `foo…bar` lines, so the
+  // reported request below exercises a loop body with an empty grep
+  // (b.h), a `head` that truncates (c.h), and ones it doesn't.
+  const HEADERS = {}
+  for (const [name, hits] of [['a', 2], ['b', 0], ['c', 6], ['d', 1], ['e', 3]]) {
+    const lines = ['#pragma once', 'int baz;']
+    for (let i = 1; i <= hits; i++) lines.push(`int foo${i}_bar;`)
+    lines.push('int qux;')
+    HEADERS[`path/to/${name}.h`] = lines.join('\n') + '\n'
+  }
+
+  it('reported request: `for f in a b c d e; do echo "== $f"; grep -n "foo.*bar" path/to/$f.h | head -4; done`', () => {
+    const t = createTerminal(HEADERS)
+    const r = t.run('for f in a b c d e; do echo "== $f"; grep -n "foo.*bar" path/to/$f.h | head -4; done')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stderr, '')
+    assert.equal(r.stdout, [
+      '== a', '3:int foo1_bar;', '4:int foo2_bar;',
+      '== b',
+      '== c', '3:int foo1_bar;', '4:int foo2_bar;', '5:int foo3_bar;', '6:int foo4_bar;',
+      '== d', '3:int foo1_bar;',
+      '== e', '3:int foo1_bar;', '4:int foo2_bar;', '5:int foo3_bar;',
+    ].join('\n') + '\n')
+  })
+
+  it('the multi-line spelling (`do` / `done` on their own lines) runs the same', () => {
+    const t = createTerminal(HEADERS)
+    const oneLine = t.run('for f in a b; do echo "== $f"; grep -n "foo.*bar" path/to/$f.h | head -1; done')
+    const pasted = t.run('for f in a b\ndo\n  echo "== $f"\n  grep -n "foo.*bar" path/to/$f.h | head -1\ndone')
+    assert.equal(pasted.exitCode, 0)
+    assert.equal(pasted.stdout, '== a\n3:int foo1_bar;\n== b\n')
+    assert.equal(pasted.stdout, oneLine.stdout)
+    // Extra `;` around `do` (what a `do⏎` becomes after tokenizing)
+    // and a trailing `;` after `done` are tolerated.
+    assert.equal(t.run('for f in a;; do; echo $f; done;').stdout, 'a\n')
+  })
+
+  it('`$f` expands bare and inside double quotes, stays literal in single quotes', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run("for f in a b; do echo '$f' \"$f\" $f ${f}x $fx $f.h; done")
+    assert.equal(r.exitCode, 0)
+    // `$fx` is a reference to `fx`, which nothing binds; `${f}x` is
+    // how to append to the value, and `.` ends a name on its own.
+    assert.equal(r.stdout, '$f a a ax $fx a.h\n$f b b bx $fx b.h\n')
+  })
+
+  it('`$` spellings that are not references stay as typed, inside a loop too', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('for f in a; do echo "\\$f" $1 $? ${} ${f ${f.h} ${f}; done')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, '\\$f $1 $? ${} ${f ${f.h} a\n')
+  })
+
+  it('a loop variable is scoped to its body; an unbound `$name` stays as typed', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('for f in a; do :; done; echo $f').stdout, '$f\n')
+    assert.equal(t.run('for f in a b; do echo $g; done').stdout, '$g\n$g\n')
+    // Nothing persists across `run` calls either — there is no
+    // environment, only the binding an enclosing `for` makes.
+    t.run('for f in a; do :; done')
+    assert.equal(t.run('echo $f').stdout, '$f\n')
+    // Re-binding the same name in a later loop on the same line.
+    assert.equal(t.run('for f in a; do echo $f; done; for f in b; do echo $f; done').stdout, 'a\nb\n')
+  })
+
+  it('the word list expands when the loop runs: globs against the current cwd, braces, quoting', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('for f in src/*.js; do echo $f; done').stdout, 'src/bar.js\nsrc/foo.js\n')
+    assert.equal(t.run('for f in {a,b}c; do echo $f; done').stdout, 'ac\nbc\n')
+    // The cwd in force when the loop RUNS, not some fixed root.
+    t.run('cd src')
+    assert.equal(t.run('for f in *.js; do echo $f; done').stdout, 'bar.js\nfoo.js\n')
+    // A quoted pattern is one literal word. Bare `$f` in the body is
+    // then itself subject to pathname expansion (as in bash); quoting
+    // the reference keeps the value verbatim.
+    assert.equal(t.run('for f in "*.js"; do echo "$f"; done').stdout, '*.js\n')
+    assert.equal(t.run('for f in "*.js"; do echo $f; done').stdout, 'bar.js foo.js\n')
+  })
+
+  it('a bound value is substituted as ONE word — spaces and all, or empty', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('for f in "a b" c; do echo "[$f]"; done').stdout, '[a b]\n[c]\n')
+    assert.equal(t.run('for f in ""; do echo "[$f]"; done').stdout, '[]\n')
+    // Unlike bash, no word splitting: `$f` stays a single operand.
+    assert.equal(t.run('for f in "a b"; do echo $f | wc -w; done').stdout.trim(), '2')
+    assert.equal(t.run('for f in "README.md src"; do cat $f; done').stderr, 'cat: README.md src: no such file or directory\n')
+  })
+
+  it('a reference in command position substitutes too', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('for c in basename dirname; do $c src/foo.js; done')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'foo.js\nsrc\n')
+  })
+
+  it('nested loops: the inner list and body see the outer variable; the inner binding ends at its `done`', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('for a in 1 2; do for b in x y; do echo $a$b; done; done').stdout, '1x\n1y\n2x\n2y\n')
+    const r = t.run('for a in 1; do for b in $a; do echo $b; done; echo $b; done')
+    assert.equal(r.stdout, '1\n$b\n')
+    // An inner loop over the SAME name shadows the outer binding for
+    // its body only; the outer value is back afterwards.
+    assert.equal(t.run('for f in a; do for f in b; do echo $f; done; echo $f; done').stdout, 'b\na\n')
+  })
+
+  it('exit status is the last iteration\'s (0 for an empty list) and gates `&&` / `||`', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('for f in a; do false; done').exitCode, 1)
+    assert.equal(t.run('for f in a b; do false; done && echo never || echo failed').stdout, 'failed\n')
+    assert.equal(t.run('for f in a b; do true; done && echo ok').stdout, 'ok\n')
+    // Last iteration wins: a failure earlier in the list is forgotten.
+    const recovered = t.run('for f in /nope README.md; do cat $f >/dev/null; done')
+    assert.equal(recovered.exitCode, 0)
+    assert.equal(recovered.stderr, 'cat: /nope: no such file or directory\n')
+    assert.equal(t.run('for f in README.md /nope; do cat $f >/dev/null; done').exitCode, 1)
+    // Empty list: the body never runs and the status is 0.
+    const empty = t.run('for f in; do echo never; done && echo empty-ok')
+    assert.equal(empty.exitCode, 0)
+    assert.equal(empty.stdout, 'empty-ok\n')
+    // And a loop on either side of a gate.
+    assert.equal(t.run('true && for f in a; do echo $f; done || echo no').stdout, 'a\n')
+    assert.equal(t.run('false || for f in a; do echo $f; done').stdout, 'a\n')
+    assert.equal(t.run('false && for f in a; do echo $f; done').stdout, '')
+  })
+
+  it('a loop is a pipeline stage: `done | cmd`, and `cmd | for …` feeds the first iteration only', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('for f in a b c; do echo $f; done | head -2').stdout, 'a\nb\n')
+    assert.equal(t.run('for f in b a; do echo $f; done | sort').stdout, 'a\nb\n')
+    // Same rule as a `(...)` group: the string-typed pipe has one
+    // consumer, the first step of the first iteration. Later
+    // iterations see empty stdin.
+    assert.equal(t.run('echo hi | for f in 1 2; do cat; echo $f; done').stdout, 'hi\n1\n2\n')
+    assert.equal(t.run('echo x | (for f in a b; do cat; done)').stdout, 'x\n')
+    // Pipes inside the body are ordinary per-iteration pipelines.
+    assert.equal(t.run('for f in a b; do echo $f | grep b; done').stdout, 'b\n')
+  })
+
+  it('redirects on `done` (or leading the `for`) apply to the whole loop', () => {
+    const t = createTerminal(SOURCES)
+    const quiet = t.run('for f in a; do cat /nope; done 2>/dev/null; echo after')
+    assert.equal(quiet.stdout, 'after\n')
+    assert.equal(quiet.stderr, '')
+    assert.equal(t.run('for f in a b; do echo $f; done >/dev/null').stdout, '')
+    assert.equal(t.run('for f in a; do cat /nope; done 2>&1 | grep -c nope').stdout, '1\n')
+    assert.equal(t.run('>/dev/null for f in a; do echo $f; done; echo silenced').stdout, 'silenced\n')
+  })
+
+  it('unlike a subshell, the body shares the outer cwd — `cd` inside the loop leaks out', () => {
+    const t = createTerminal(SOURCES)
+    const r = t.run('for d in src; do cd $d; done; pwd')
+    assert.equal(r.stdout, '/src\n')
+    assert.equal(t.cwd(), '/src')
+    // Per-iteration cwd is the live one: the second iteration starts
+    // where the first left off.
+    assert.equal(t.run('for d in util ..; do cd $d; pwd; done').stdout, '/src/util\n/src\n')
+    // Wrapping the loop in `(...)` restores it, as for any group.
+    assert.equal(t.run('(for d in util; do cd $d; done); pwd').stdout, '/src\n')
+    assert.equal(t.cwd(), '/src')
+  })
+
+  it('`for` / `do` / `done` are reserved in command position only, and quoting defeats them', () => {
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('echo for do done in').stdout, 'for do done in\n')
+    assert.equal(t.run('for f in in "do" for; do echo $f; done').stdout, 'in\ndo\nfor\n')
+    // A quoted `"for"` is an ordinary word, so the `do` that follows
+    // is the stray one — the same error bash reports.
+    const quoted = t.run('"for" f in a; do echo; done')
+    assert.equal(quoted.exitCode, 1)
+    assert.match(quoted.stderr, /unexpected `do`/u)
+  })
+
+  it('every malformed loop is a parse error — nothing runs', () => {
+    const t = createTerminal(SOURCES)
+    const cases = [
+      ['for', /for: expected a variable name/u],
+      ['for f', /for: expected `in` after `f`/u],
+      ['for f; do echo; done', /for: expected `in` after `f`/u],
+      ['for x-y in a; do echo; done', /for: `x-y` is not a valid variable name/u],
+      ['for "f" in a; do echo; done', /for: `f` is not a valid variable name/u],
+      ['for f in a b', /for: missing `do`/u],
+      ['for f in a b; echo x', /for: expected `do`, got `echo`/u],
+      ['for f in a do echo; done', /for: expected `;` or newline before `do`/u],
+      ['for f in a | b; do echo; done', /for: unexpected `\|` in word list/u],
+      ['for f in a >/dev/null; do echo; done', /for: unexpected `>` in word list/u],
+      ['for f in a; do', /for: missing `done`/u],
+      ['for f in a; do echo x', /for: missing `done`/u],
+      ['for f in a; do done', /for: empty loop body/u],
+      ['for f in a; do echo x; done extra', /unexpected token after `done`/u],
+      ['for f in a; do echo x | done', /empty pipeline stage/u],
+      ['for f in a; do (echo x; done)', /unexpected `done`/u],
+      ['(for f in a; do echo x)', /unexpected `\)`/u],
+      ['echo x (for f in a; do echo; done)', /unexpected `\(`/u],
+      ['done', /unexpected `done`/u],
+      ['echo a; do', /unexpected `do`/u],
+    ]
+    for (const [line, re] of cases) {
+      const r = t.run(line)
+      assert.equal(r.exitCode, 1, line)
+      assert.equal(r.stdout, '', line)
+      assert.match(r.stderr, re, line)
+    }
+  })
+
+  it('tab-completion: the word after `do` is in command position', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('for f in a b; do gre'), ['for f in a b; do grep'])
+    assert.ok(t.complete('for f in a b; do ').includes('for f in a b; do grep'))
+    // Argument position inside the body and in the word list still
+    // completes paths; a pipe after `done` still restricts to pipe
+    // targets.
+    assert.deepEqual(t.complete('for f in a; do cat sr'), ['for f in a; do cat src/'])
+    assert.deepEqual(t.complete('for f in sr'), ['for f in src/'])
+    assert.deepEqual(t.complete('for f in a; do echo $f; done | hea'), ['for f in a; do echo $f; done | head'])
+  })
+})
+
 describe('createTerminal — `true` / `false` / `:` builtins', () => {
   it('`true` exits 0 with no output (args ignored)', () => {
     const t = createTerminal(SOURCES)

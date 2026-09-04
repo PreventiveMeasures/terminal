@@ -46,7 +46,9 @@ export function complete(line, ctx, reg) {
   const segment = line.slice(segStart)
   const wordStart = lastWordStart(segment)
   const word = segment.slice(wordStart)
-  const before = segment.slice(0, wordStart).trim()
+  // `do` opens a `for` body, so the word after it names a command:
+  // `for f in a b; do gre` completes `grep`, not a path.
+  const before = segment.slice(0, wordStart).trim().replace(/^do(?:\s+|$)/u, '')
   const commandPosition = before === ''
   // Resolve the leading token of the segment so per-command rules
   // can fire on bin-prefixed forms too (`/usr/bin/cd` ≡ `cd`).

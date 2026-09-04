@@ -136,7 +136,7 @@ export interface RunResult {
 
 /** A virtual terminal instance with a mutable cwd carried across {@link Terminal.run} calls. */
 export interface Terminal {
-  /** Parse and execute one command line (pipelines, `&&` / `||` / `;` gates, `(...)` subshells, redirects). */
+  /** Parse and execute one command line (pipelines, `&&` / `||` / `;` gates, `(...)` subshells, `for … in …; do …; done` loops, redirects). */
   run(line: string): RunResult
   /** Current working directory. */
   cwd(): string

@@ -29,6 +29,12 @@
 // step list. They run with an isolated cwd (snapshot/restore
 // around the inner runSteps) so `(cd src; pwd)` reports `/src`
 // without changing the outer terminal's cwd.
+//
+// `for NAME in WORDS; do …; done` loops parse to a stage whose `loop`
+// carries the name, the unexpanded word list and the nested body.
+// The body runs once per word with `$NAME` bound — the only variables
+// this shell has; there is no environment, and a `$name` nothing
+// binds is left as typed. See runLoop.
 
 import { expandBraces } from './braces.js'
 import { createFs, resolve } from './fs.js'
@@ -54,7 +60,8 @@ export function createTerminal(sources, opts = {}) {
   // functions — which already thread ctx everywhere — reach the
   // command set without a second parameter on each of them.
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
-  const ctx = { cwd, fs, user: opts.user ?? 'user', registry }
+  // `vars` holds the `for` bindings in scope — empty outside a loop.
+  const ctx = { cwd, fs, user: opts.user ?? 'user', registry, vars: new Map() }
   // Commands like `xargs` need to invoke other commands. Exposing
   // `dispatch` on ctx (rather than reaching for the registry at the
   // command site) keeps lookup in one place, and lets command
@@ -152,7 +159,9 @@ function runPipeline(stages, ctx, initialStdin) {
   let stderr = ''
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]
-    const result = stage.group ? runGroup(stage.group, ctx, stdin) : runStage(stage, ctx, stdin)
+    const result = stage.group ? runGroup(stage.group, ctx, stdin)
+      : stage.loop ? runLoop(stage.loop, ctx, stdin)
+      : runStage(stage, ctx, stdin)
     // Apply redirects in a fixed order: fd-to-fd merges first, then
     // null sinks. This is bash's behavior for the common idioms
     // (`>/dev/null 2>&1` silences both, `2>&1 | grep` sees both
@@ -180,13 +189,66 @@ function runPipeline(stages, ctx, initialStdin) {
 }
 
 function runStage(stage, ctx, stdin) {
-  // Brace expansion FIRST (`{foo,bar}*.js` → `foo*.js bar*.js`),
-  // then glob expansion against the FS. Quoted tokens and
-  // argv[0] (the command name) pass through verbatim through
-  // both phases — matching bash.
-  const braced = expandBraces(stage.argv, stage.quoted ?? new Set())
-  const expanded = expandGlobs(braced.argv, braced.quoted, ctx)
+  const expanded = expandWords(stage, ctx)
   return dispatch(expanded[0], expanded.slice(1), stdin, ctx)
+}
+
+// Word expansion for a stage — or a loop's word list, which parse.js
+// stores in the same shape. Variables first (`$f` → its binding, or
+// left as typed when no enclosing `for` binds it), then brace
+// expansion (`{foo,bar}*.js` → `foo*.js bar*.js`), then globs against
+// the FS. Quoted tokens and argv[0] (the command name) pass through
+// the brace and glob phases verbatim, matching bash; a reference in
+// argv[0] does substitute, so `for c in cat wc; do $c f; done` works.
+// A bound value is substituted as ONE word, never split on whitespace
+// (zsh's rule, not bash's), and it IS subject to brace expansion where
+// bash, which expands braces first, would leave a literal `{a,b}` —
+// a corner no loop over file names reaches.
+function expandWords(stage, ctx) {
+  const argv = substituteVars(stage.argv, stage.refs, ctx.vars)
+  const braced = expandBraces(argv, stage.quoted)
+  return expandGlobs(braced.argv, braced.quoted, ctx)
+}
+
+function substituteVars(argv, refs, vars) {
+  if (refs.size === 0 || vars.size === 0) return argv
+  const out = argv.slice()
+  for (const [i, parts] of refs) {
+    out[i] = parts.map((p) => typeof p === 'string' ? p : vars.get(p.name) ?? p.raw).join('')
+  }
+  return out
+}
+
+// `for NAME in WORDS; do BODY; done`. The word list expands when the
+// loop runs — so `*.h` globs against the cwd at that moment, and an
+// outer loop's variable is visible in an inner list — then the body
+// runs once per word with NAME bound. Bindings are scoped to the body:
+// the name means nothing after `done`, and an inner loop's binding
+// never overwrites an outer one. Like bash, and unlike a subshell, the
+// body shares the terminal's cwd, so a `cd` inside the loop is visible
+// after it. Exit status is the last iteration's, or 0 when the list is
+// empty; stdin, as for a group, reaches only the first step of the
+// first iteration.
+function runLoop(loop, ctx, stdin) {
+  // Slot 0 is the `for` keyword parse.js parks in the command position.
+  const values = expandWords(loop.words, ctx).slice(1)
+  const saved = ctx.vars
+  ctx.vars = new Map(saved)
+  let stdout = ''
+  let stderr = ''
+  let exitCode = 0
+  try {
+    for (const [i, value] of values.entries()) {
+      ctx.vars.set(loop.name, value)
+      const r = runSteps(loop.body, ctx, i === 0 ? stdin : '')
+      stdout += r.stdout
+      stderr += r.stderr
+      exitCode = r.exitCode
+    }
+  } finally {
+    ctx.vars = saved
+  }
+  return { stdout, stderr, exitCode }
 }
 
 // Subshell: snapshot the cwd, run the nested step list, restore.
