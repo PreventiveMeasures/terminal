@@ -246,9 +246,9 @@ describe('createTerminal — opts.commands: the handler contract', () => {
     t.run('cd src')
     t.run('probe x.js ../a.txt /b.txt')
     assert.deepEqual(seen.inputs, [
-      { name: 'x.js', content: 'const x = 1\n' },
-      { name: '../a.txt', content: 'hello\n' },
-      { name: '/b.txt', content: 'world\n' },
+      { name: 'x.js', content: 'const x = 1\n', kind: 'file' },
+      { name: '../a.txt', content: 'hello\n', kind: 'file' },
+      { name: '/b.txt', content: 'world\n', kind: 'file' },
     ])
     assert.equal(seen.stderr, '')
     assert.equal(seen.failed, false)
@@ -256,6 +256,30 @@ describe('createTerminal — opts.commands: the handler contract', () => {
     t.run('probe missing.js')
     assert.equal(seen.stderr, 'probe: missing.js: no such file or directory\n')
     assert.equal(seen.failed, true)
+  })
+
+  it('io.readInputs carries every operand in `entries`, readable or not', () => {
+    // `inputs` is the readable subset a filter wants; `entries` keeps
+    // the unreadable operands in place with their kind, which is how
+    // head/tail decide to banner a directory operand but not a missing
+    // one. A wired command gets the same distinction.
+    let seen
+    const t = createTerminal(SOURCES, {
+      commands: { probe: (io) => { seen = io.readInputs(io.args); return '' } },
+    })
+    t.run('probe a.txt src nope.txt')
+    assert.deepEqual(seen.entries.map((e) => [e.name, e.kind]), [
+      ['a.txt', 'file'],
+      ['src', 'dir'],
+      ['nope.txt', 'missing'],
+    ])
+    assert.deepEqual(seen.inputs.map((i) => i.name), ['a.txt'])
+    assert.equal(seen.failed, true)
+    // With no operands the single stdin input reads as a file, and is
+    // the same object in both lists.
+    t.run('echo piped | probe')
+    assert.deepEqual(seen.entries, [{ name: null, content: 'piped\n', kind: 'file' }])
+    assert.deepEqual(seen.inputs, seen.entries)
   })
 
   it('io.cwd, io.fs and io.readInputs resolve against the same directory', () => {

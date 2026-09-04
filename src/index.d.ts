@@ -17,18 +17,22 @@ export interface CommandFs {
   walkFiles(path: string): string[]
 }
 
-/** One readable input: a named file, or stdin (`name: null`). */
+/** One operand: a named file, a directory, a missing path, or stdin (`name: null`). */
 export interface CommandInput {
   /** The operand as it was typed, or `null` for stdin. */
   name: string | null
-  /** File contents, or the piped stdin string. */
+  /** File contents, or the piped stdin string. Empty for anything unreadable. */
   content: string
+  /** Whether the operand read as a file, named a directory, or was not there at all. */
+  kind: 'file' | 'dir' | 'missing'
 }
 
 /** Result of {@link CommandIo.readInputs}: the coreutils partial-failure model. */
 export interface CommandInputs {
-  /** Inputs that could be read, in operand order. */
+  /** Inputs that could be read, in operand order — the subset a filter wants. */
   inputs: CommandInput[]
+  /** Every operand in order, readable or not, so a command can tell a directory from a missing path. */
+  entries: CommandInput[]
   /** One `cmd: path: reason` line per unreadable operand. */
   stderr: string
   /** True if any operand failed; conventionally exit 1 while still emitting what did read. */
