@@ -8,6 +8,7 @@
 import { parseArgs } from './parse.js'
 import { err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
 import { grep } from './grep.js'
+import { sort } from './sort.js'
 
 function cat(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['n'] })
@@ -169,16 +170,15 @@ function sliceBytes(content, range) {
 // that survived, rather than looking like a plain single-file read.
 // No operands at all is stdin, which never banners.
 //
-// The operand count governs the THRESHOLD only; which operands get a
-// banner is still whatever `readInputs` could read. GNU is subtler
-// there: it banners anything it managed to OPEN, so a directory operand
-// (open succeeds, read fails with EISDIR) gets a banner from GNU and
-// none from us, since `readFilesFor` drops directories before we see
-// them. Teaching that distinction to the shared reader would change
-// cat/grep/wc too, so it stays a divergence for now.
+// The operand count governs the THRESHOLD; which operands get a banner
+// follows GNU's rule that anything it managed to OPEN is bannered. A
+// directory opens fine and only fails on the read, so it gets a banner
+// with an empty body; a missing path never opens and gets none. That is
+// why this walks `entries` — every operand, with its kind — rather than
+// `inputs`, the readable subset.
 //
-// Only readable inputs are iterated, so an unreadable operand
-// contributes its stderr line and no block — and the `\n` that precedes
+// A missing operand still contributes its stderr line and no block —
+// and the `\n` that precedes
 // every banner but the first still keys off the block index, matching
 // GNU, whose own "first file" flag flips on the first banner WRITTEN,
 // not on the first operand tried. That same `\n` is what terminates the
@@ -189,10 +189,13 @@ function takeFrom(cmd, stdin, files, ctx, pick, banner = null) {
   // `-q` / `-v` override the operand-count rule outright; `banner` is
   // null when neither was given.
   const showHeader = banner ?? files.length > 1
+  const opened = r.entries.filter((e) => e.kind !== 'missing')
   const blocks = []
-  for (let i = 0; i < r.inputs.length; i++) {
-    const { name, content } = r.inputs[i]
-    const body = pick(content)
+  for (let i = 0; i < opened.length; i++) {
+    const { name, content, kind } = opened[i]
+    // A directory yields no body at all — not even the newline an empty
+    // line-pick would append — so `pick` is skipped for it entirely.
+    const body = kind === 'dir' ? '' : pick(content)
     blocks.push(showHeader ? `${i > 0 ? '\n' : ''}==> ${name} <==\n${body}` : body)
   }
   return okWith(blocks.join(''), r)
@@ -215,12 +218,19 @@ function wc(stdin, tokens, ctx) {
   // divergence is deliberate; both keep the columns aligned.
   const rows = []
   const total = { l: 0, w: 0, m: 0, c: 0 }
-  for (const { name, content } of r.inputs) {
+  // A directory is a row of zeros — GNU's `wc -l dir` prints `0 dir`
+  // beside its error, because the open succeeded. A missing path gets
+  // no row at all.
+  for (const { name, content } of r.entries.filter((e) => e.kind !== 'missing')) {
     const counts = wcCounts(content)
     rows.push({ counts, name })
     total.l += counts.l; total.w += counts.w; total.m += counts.m; total.c += counts.c
   }
-  if (r.inputs.length > 1) rows.push({ counts: total, name: 'total' })
+  // GNU gates the total on how many files were NAMED, not how many it
+  // read: `wc a missing` still totals, and `wc m1 m2` prints a lone
+  // `0 total` rather than nothing. The same operand-versus-read rule the
+  // head/tail banners and grep's name prefix already follow.
+  if (positional.length > 1) rows.push({ counts: total, name: 'total' })
   const width = wcColumnWidth(rows, which)
   return okWith(joinLines(rows.map((row) => formatWc(row.counts, row.name, which, width))), r)
 }
@@ -267,50 +277,6 @@ function formatWc(counts, name, which, width) {
   if (which.m) parts.push(String(counts.m).padStart(width))
   if (which.c) parts.push(String(counts.c).padStart(width))
   return parts.join(' ') + (name ? ' ' + name : '')
-}
-
-function sort(stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['n', 'r', 'u'] })
-  // `sort a b` orders the concatenation of all inputs, matching coreutils.
-  const r = readContent('sort', positional, stdin, ctx)
-  let lines = splitLines(r.content)
-  const numeric = flags.has('n')
-  const unique = flags.has('u')
-  if (numeric) {
-    // -n orders by each line's leading numeric value. Equal values keep
-    // input order (stable sort); without -u the whole line breaks the
-    // tie (GNU's last-resort comparison). -u drops that tiebreak so
-    // equal-value lines (e.g. `1` and `01`) dedupe in input order.
-    const decorated = lines.map((line) => ({ line, key: numericKey(line) }))
-    decorated.sort(unique
-      ? (a, b) => a.key - b.key
-      : (a, b) => (a.key - b.key) || (a.line < b.line ? -1 : a.line > b.line ? 1 : 0))
-    lines = decorated.map((d) => d.line)
-  } else {
-    lines.sort()
-  }
-  // Dedup in ascending order (keeping the first of each run) before -r
-  // reverses, so the kept representative matches GNU regardless of -r.
-  if (unique) {
-    const seen = new Set()
-    lines = lines.filter((l) => {
-      const k = numeric ? numericKey(l) : l
-      if (seen.has(k)) return false
-      seen.add(k)
-      return true
-    })
-  }
-  if (flags.has('r')) lines.reverse()
-  return okWith(joinLines(lines), r)
-}
-
-// GNU `sort -n`: a line's value is its leading numeric prefix — optional
-// blanks, an optional `-`, then digits with an optional decimal part.
-// Anything else (a `+` sign, scientific `e`, or non-digit) isn't numeric,
-// so such lines sort as 0. Thousands separators aren't recognized (C locale).
-function numericKey(line) {
-  const m = /^[ \t]*(-?(?:\d+\.?\d*|\.\d+))/u.exec(line)
-  return m ? Number(m[1]) : 0
 }
 
 // Collapse adjacent duplicate lines from stdin. Flags compose:

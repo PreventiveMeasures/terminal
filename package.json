@@ -48,6 +48,7 @@
     "src/parse.js",
     "src/registry.js",
     "src/sed.js",
+    "src/sort.js",
     "src/text-commands.js",
     "src/util.js"
   ],

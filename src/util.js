@@ -52,20 +52,35 @@ export const joinLines = (lines) => lines.length === 0 ? '' : lines.join('\n') +
 // Returns `{ inputs, stderr, failed }`: `inputs` for the readable
 // files in order, `stderr` with one error line per failure, and
 // `failed` true if any path errored. The dir-vs-missing distinction
-// matters: `cat src` pointing at a directory should say "is a
-// directory", not "no such file or directory" — the path exists, it's
-// just not readable as a file. Matches GNU cat / head / tail.
+// matters twice over. In the MESSAGE: `cat src` pointing at a directory
+// should say "is a directory", not "no such file or directory" — the
+// path exists, it's just not readable as a file. And in the OUTPUT: the
+// underlying `open()` SUCCEEDS on a directory and only the read fails,
+// so GNU head/tail still banner a directory operand while a missing one
+// gets nothing at all. `entries` carries every operand in order with
+// that distinction as `kind`; `inputs` is the readable subset, which is
+// what every other caller wants, so this changed nothing for them.
 export function readFilesFor(cmd, files, ctx) {
-  const inputs = []
+  const entries = []
   let stderr = ''
   let failed = false
   for (const f of files) {
     const abs = resolve(ctx.cwd, f)
-    if (ctx.fs.isDir(abs)) { stderr += `${cmd}: ${f}: is a directory\n`; failed = true; continue }
-    if (!ctx.fs.isFile(abs)) { stderr += `${cmd}: ${f}: no such file or directory\n`; failed = true; continue }
-    inputs.push({ name: f, content: ctx.fs.readFile(abs) })
+    if (ctx.fs.isDir(abs)) {
+      stderr += `${cmd}: ${f}: is a directory\n`
+      failed = true
+      entries.push({ name: f, content: '', kind: 'dir' })
+      continue
+    }
+    if (!ctx.fs.isFile(abs)) {
+      stderr += `${cmd}: ${f}: no such file or directory\n`
+      failed = true
+      entries.push({ name: f, content: '', kind: 'missing' })
+      continue
+    }
+    entries.push({ name: f, content: ctx.fs.readFile(abs), kind: 'file' })
   }
-  return { inputs, stderr, failed }
+  return { inputs: entries.filter((e) => e.kind === 'file'), entries, stderr, failed }
 }
 
 // File inputs with a stdin fallback: with no file operands a command
@@ -74,7 +89,10 @@ export function readFilesFor(cmd, files, ctx) {
 // This is the per-file model — callers that need file names/boundaries
 // (wc, head, grep) iterate `.inputs`.
 export function readInputs(cmd, files, stdin, ctx) {
-  if (files.length === 0) return { inputs: [{ name: null, content: stdin }], stderr: '', failed: false }
+  if (files.length === 0) {
+    const only = [{ name: null, content: stdin, kind: 'file' }]
+    return { inputs: only, entries: only, stderr: '', failed: false }
+  }
   return readFilesFor(cmd, files, ctx)
 }
 

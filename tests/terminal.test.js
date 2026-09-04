@@ -217,7 +217,7 @@ describe('createTerminal — text commands', () => {
     assert.equal(d.exitCode, 1)
   })
 
-  it('multi-file partial failure spans wc / head / sort / cut; all-missing stays empty', () => {
+  it('multi-file partial failure spans wc / head / sort / cut', () => {
     const t = createTerminal({ 'a.txt': 'AAA\nzzz\n', 'b.txt': 'BBB\n' })
     // wc still tallies the readable files (with a total) and exits 1.
     const w = t.run('wc -l a.txt missing.txt b.txt')
@@ -232,11 +232,47 @@ describe('createTerminal — text commands', () => {
     assert.equal(h.exitCode, 1)
     assert.equal(t.run('sort a.txt missing.txt b.txt').stdout, 'AAA\nBBB\nzzz\n')
     assert.equal(t.run('cut -c1 a.txt missing.txt').stdout, 'A\nz\n')
-    // When every operand is unreadable, stdout is empty (no stray
-    // newline) and exit is non-zero.
+    // Even with every operand unreadable, wc still prints the total —
+    // GNU gates that row on how many files were NAMED, so two missing
+    // operands give a lone zero row rather than nothing at all.
     const all = t.run('wc m1 m2')
-    assert.equal(all.stdout, '')
+    assert.equal(all.stdout, '0 0 0 total\n')
     assert.equal(all.exitCode, 1)
+  })
+
+  it('wc totals by operand count, and a directory is a row of zeros', () => {
+    // Checked against GNU coreutils 9.4. The total follows the operand
+    // count, not the successful-read count, so a partial failure still
+    // totals. A directory opened fine and only failed to read, so it
+    // gets a zero row; a missing path gets no row.
+    const t = createTerminal({ 'a.txt': 'abc\n', 'dir/x': 'y' })
+    assert.equal(t.run('wc a.txt missing').stdout, '1 1 4 a.txt\n1 1 4 total\n')
+    assert.equal(t.run('wc -l a.txt missing').stdout, '1 a.txt\n1 total\n')
+    // One operand, so no total row at all.
+    assert.equal(t.run('wc -l a.txt').stdout, '1 a.txt\n')
+    assert.equal(t.run('wc -l dir').stdout, '0 dir\n')
+    assert.equal(t.run('wc -l dir').exitCode, 1)
+  })
+
+  it('head/tail banner a directory operand, but not a missing one', () => {
+    // GNU's open() SUCCEEDS on a directory and only the read fails, so
+    // the directory is bannered with an empty body and the first-file
+    // flag flips — which is what puts the blank line above the next
+    // banner. A missing path never opens and contributes nothing.
+    const t = createTerminal({ 'a.txt': 'abc\n', 'dir/x': 'y' })
+    assert.equal(t.run('head -n 1 dir a.txt').stdout, '==> dir <==\n\n==> a.txt <==\nabc\n')
+    assert.equal(t.run('head -n 1 a.txt dir').stdout, '==> a.txt <==\nabc\n\n==> dir <==\n')
+    assert.equal(t.run('tail -n 1 dir a.txt').stdout, '==> dir <==\n\n==> a.txt <==\nabc\n')
+    // Byte mode reads the same rule.
+    assert.equal(t.run('head -c 2 dir a.txt').stdout, '==> dir <==\n\n==> a.txt <==\nab')
+    // A missing operand between them is skipped entirely, so `dir` and
+    // `a.txt` stay adjacent.
+    assert.equal(t.run('head -n 1 dir missing a.txt').stdout, '==> dir <==\n\n==> a.txt <==\nabc\n')
+    // One operand means no banner, so a lone directory prints nothing.
+    const solo = t.run('head -n 1 dir')
+    assert.equal(solo.stdout, '')
+    assert.match(solo.stderr, /dir: is a directory/u)
+    assert.equal(solo.exitCode, 1)
   })
 
   it('grep keeps scanning readable files past an unreadable one (exit 2)', () => {
@@ -3866,6 +3902,109 @@ describe('createTerminal — grep -q/-m, cut -s, tr -c', () => {
     // Squeeze reads the same inversion: the doubled `M` is outside
     // a-z, so it collapses, while the letters around it are untouched.
     assert.equal(t.run('cat mixed.txt | tr -cs a-z').stdout, 'a,b\nNOCOMA\nc,d\n')
+  })
+})
+
+describe('createTerminal — sort -k / -t', () => {
+  // Every expectation checked against GNU coreutils 9.4, most of them
+  // found by fuzzing random keys against it.
+  const SRC = {
+    'f.txt': 'bob:30:nyc\nann:25:la\ncid:35:sf\nann:99:zz\n',
+    'sp.txt': 'b 2\na 10\nc 1\na 2\n',
+    'blanks.txt': 'ann 2 cid\nAnn 2 a\nAnn 1 Ann\nzed 007 cid\na  ann\n',
+    'mix.txt': 'Beta\nalpha\nGamma\n',
+  }
+
+  it('a key with no end runs to the END OF LINE, not just that field', () => {
+    // The rule that makes `-u` look broken when missed: `-k1` is the
+    // whole line, so both `ann:` rows survive a dedupe on it.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('sort -t: -k2 f.txt').stdout, 'ann:25:la\nbob:30:nyc\ncid:35:sf\nann:99:zz\n')
+    assert.equal(t.run('sort -u -t: -k1 f.txt').stdout, 'ann:25:la\nann:99:zz\nbob:30:nyc\ncid:35:sf\n')
+    // Bounded to one field, the two `ann` rows ARE duplicates.
+    assert.equal(t.run('sort -u -t: -k1,1 f.txt').stdout, 'ann:25:la\nbob:30:nyc\ncid:35:sf\n')
+  })
+
+  it('per-key options override the globals entirely', () => {
+    // GNU is all-or-nothing: a key carrying ANY option of its own
+    // ignores every global one, so this sorts ASCENDING despite -r.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('sort -r -t: -k2n f.txt').stdout, t.run('sort -t: -k2n f.txt').stdout)
+    assert.equal(t.run('sort -t: -k2n f.txt').stdout, 'ann:25:la\nbob:30:nyc\ncid:35:sf\nann:99:zz\n')
+    // A bare key inherits them instead.
+    assert.equal(t.run('sort -r -t: -k2 f.txt').stdout, 'ann:99:zz\ncid:35:sf\nbob:30:nyc\nann:25:la\n')
+    // Even a lone `b` counts as an option and suppresses -r for the
+    // KEY: both orders below start `c 1`, `a 10`. But -r still reverses
+    // the whole-line tiebreak underneath, so the two `2` rows swap.
+    assert.equal(t.run('sort -k2b sp.txt').stdout, 'c 1\na 10\na 2\nb 2\n')
+    assert.equal(t.run('sort -r -k2b sp.txt').stdout, 'c 1\na 10\nb 2\na 2\n')
+  })
+
+  it('`b` attaches to the position it is written on', () => {
+    // `-k2,3b` blanks the END, so the key still starts with field 2's
+    // leading blanks and `a  ann` (key `  ann`) sorts first; `-k2b,3`
+    // strips them and it sorts last.
+    const t = createTerminal(SRC)
+    assert.equal(t.run('sort -k2,3b blanks.txt').stdout,
+      'a  ann\nzed 007 cid\nAnn 1 Ann\nAnn 2 a\nann 2 cid\n')
+    assert.equal(t.run('sort -k2b,3 blanks.txt').stdout,
+      'zed 007 cid\nAnn 1 Ann\nAnn 2 a\nann 2 cid\na  ann\n')
+  })
+
+  it('with the default separator a field carries its leading blanks', () => {
+    const t = createTerminal(SRC)
+    // Keys are ` 1`, ` 10`, ` 2`, ` 2` — blanks included, so `1` sorts
+    // before `10` before `2`, and equal keys fall back to whole lines.
+    assert.equal(t.run('sort -k2 sp.txt').stdout, 'c 1\na 10\na 2\nb 2\n')
+    assert.equal(t.run('sort -k2n sp.txt').stdout, 'c 1\na 2\nb 2\na 10\n')
+  })
+
+  it('a trailing blank run counts as a field', () => {
+    // GNU walks fields as "skip blanks, skip non-blanks", so
+    // `ann 007 ` has a third field (the trailing space) while
+    // `ann  bob` has only two. Counting runs of non-blanks merges the
+    // two cases and picks the wrong span.
+    const t = createTerminal({ 'q.txt': 'ann 007 \nann  bob\nzed 99 BOB\n' })
+    assert.equal(t.run('sort -k3,3b q.txt').stdout, 'ann  bob\nann 007 \nzed 99 BOB\n')
+  })
+
+  it('-u dedupes on what the comparator calls equal, not on key text', () => {
+    // Under a numeric key every non-numeric field reads as 0, so these
+    // lines are all duplicates of the first.
+    const t = createTerminal({ 'w.txt': 'BOB 2 x\nann 99 y\nzed 2 z\n' })
+    assert.equal(t.run('sort -u -k1n w.txt').stdout, 'BOB 2 x\n')
+    // Without -u the whole line breaks the tie instead.
+    assert.equal(t.run('sort -k1n w.txt').stdout, 'BOB 2 x\nann 99 y\nzed 2 z\n')
+  })
+
+  it('keys apply in order, each breaking the previous one\'s ties', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('sort -t: -k1,1 -k2n f.txt').stdout,
+      'ann:25:la\nann:99:zz\nbob:30:nyc\ncid:35:sf\n')
+    assert.equal(t.run('sort -t: -k1,1r -k2,2n f.txt').stdout,
+      'cid:35:sf\nbob:30:nyc\nann:25:la\nann:99:zz\n')
+  })
+
+  it('-f folds case, with or without a key', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('sort -f mix.txt').stdout, 'alpha\nBeta\nGamma\n')
+    assert.equal(t.run('sort mix.txt').stdout, 'Beta\nGamma\nalpha\n')
+  })
+
+  it('rejects the key forms it does not model, naming the reason', () => {
+    const t = createTerminal(SRC)
+    assert.match(t.run('sort -t:: -k1 f.txt').stderr, /multi-character tab/u)
+    assert.match(t.run('sort -k0 sp.txt').stderr, /field number is zero/u)
+    assert.match(t.run('sort -k2,1 sp.txt').stderr, /reversed key range/u)
+    assert.match(t.run('sort -k1.2 f.txt').stderr, /character offsets are not supported/u)
+    assert.match(t.run('sort -k1z f.txt').stderr, /unknown key option `z`/u)
+  })
+
+  it('a key past the end of the line is empty, not an error', () => {
+    const t = createTerminal(SRC)
+    assert.equal(t.run('sort -t: -k9 f.txt').exitCode, 0)
+    // All keys empty, so the whole-line tiebreak decides.
+    assert.equal(t.run('sort -t: -k9 f.txt').stdout, 'ann:25:la\nann:99:zz\nbob:30:nyc\ncid:35:sf\n')
   })
 })
 
