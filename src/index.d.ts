@@ -51,8 +51,8 @@ export interface CommandIo {
   cwd: string
   /** Read-only view of the virtual source tree. */
   fs: CommandFs
-  /** Read each path, collecting errors instead of aborting. An empty list yields one nameless input carrying {@link CommandIo.stdin}. */
-  readInputs(paths: readonly string[]): CommandInputs
+  /** Read each path, collecting errors instead of aborting. Called with no arguments (or an empty list) it yields one nameless input carrying {@link CommandIo.stdin} — the shape a pure filter wants. */
+  readInputs(paths?: readonly string[]): CommandInputs
 }
 
 /**

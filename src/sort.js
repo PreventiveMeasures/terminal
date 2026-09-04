@@ -39,23 +39,26 @@ export function sort(stdin, tokens, ctx) {
       ? (a, b) => a.key - b.key
       : (a, b) => (a.key - b.key) || (a.line < b.line ? -1 : a.line > b.line ? 1 : 0))
     lines = decorated.map((d) => d.line)
-  } else if (globals.f) {
+  } else {
     // -f folds case for the comparison only; the line is emitted as it
     // was read. GNU folds toward upper case, so `alpha` sorts with
-    // `Alpha` rather than after every capital.
+    // `Alpha` rather than after every capital. -u drops the whole-line
+    // last-resort tiebreak for the same reason the -n branch above
+    // does: with it, `sort -fu` kept `Beta` where GNU keeps the `beta`
+    // it read first.
     lines = lines
-      .map((line) => ({ line, key: line.toUpperCase() }))
-      .sort((a, b) => cmpStrings(a.key, b.key) || cmpStrings(a.line, b.line))
+      .map((line) => ({ line, key: wholeLineKey(line, globals) }))
+      .sort(unique
+        ? (a, b) => cmpStrings(a.key, b.key)
+        : (a, b) => cmpStrings(a.key, b.key) || cmpStrings(a.line, b.line))
       .map((d) => d.line)
-  } else {
-    lines.sort()
   }
   // Dedup in ascending order (keeping the first of each run) before -r
   // reverses, so the kept representative matches GNU regardless of -r.
   if (unique) {
     const seen = new Set()
     lines = lines.filter((l) => {
-      const k = numeric ? numericKey(l) : globals.f ? l.toUpperCase() : l
+      const k = numeric ? numericKey(l) : wholeLineKey(l, globals)
       if (seen.has(k)) return false
       seen.add(k)
       return true
@@ -196,6 +199,17 @@ function keyOf(line, spec, sep) {
 }
 
 const cmpStrings = (a, b) => a < b ? -1 : a > b ? 1 : 0
+
+// The comparison key for the whole-line (no `-k`) path. GNU applies -b
+// and -f to the whole line, not only to keys — `sort -b` really does
+// order `  b` after `a` — and they compose. With neither flag the key
+// IS the line, so the plain ordering is untouched. `-b` was previously
+// threaded into `globals` and then read only by parseKeySpecs, which
+// made it a silent no-op unless `-k` happened to be given too.
+function wholeLineKey(line, globals) {
+  const body = globals.b ? line.replace(/^\s+/u, '') : line
+  return globals.f ? body.toUpperCase() : body
+}
 
 function sortByKeys(lines, specs, sep, unique, globalReverse) {
   // Decorate once: recomputing the keys inside the comparator would

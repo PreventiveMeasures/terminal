@@ -415,9 +415,6 @@ function evalPredicate(p, entry, ctx) {
   // only come from a code bug.
   if (p.kind === 'type') return matchedOnly(p.value === 'f' ? entry.kind === 'file' : entry.kind === 'dir')
   if (p.kind === 'name' || p.kind === 'iname') return matchedOnly(p.re.test(basename(entry.path)))
-  // A file is empty when it has no content. A DIRECTORY can never be
-  // empty in this FS: it exists only because some file lives under it,
-  // so `-empty` simply never matches one.
   // Always true. On a directory it also records the path so walkTree
   // skips the subtree; on a file it is a no-op that still reports true,
   // which is what makes `-name X -prune -o -print` exclude X itself.
@@ -425,6 +422,9 @@ function evalPredicate(p, entry, ctx) {
     if (entry.kind === 'dir') entry.prune.add(entry.abs)
     return matchedOnly(true)
   }
+  // A file is empty when it has no content. A DIRECTORY can never be
+  // empty in this FS: it exists only because some file lives under it,
+  // so `-empty` simply never matches one.
   if (p.kind === 'empty') return matchedOnly(entry.kind === 'file' && ctx.fs.readFile(entry.abs) === '')
   if (p.kind === 'path') return matchedOnly(p.re.test(entry.path))
   // Always true, output as the side effect. `-not -print` inverts

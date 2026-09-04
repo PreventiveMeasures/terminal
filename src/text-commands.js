@@ -146,7 +146,10 @@ function tail(stdin, tokens, ctx) {
   // banners both operands and still fails on a missing one). Returning
   // here also means `slice(-n)` below never sees 0, where `slice(-0)`
   // would be `slice(0)` and hand back every line.
-  if (n.value === 0) return ok('')
+  // ...but an invalid flag combination is still an invalid invocation:
+  // check it before short-circuiting, or `tail -q -v -n 0` reads as
+  // success where `head -q -v -n 0` correctly errors.
+  if (n.value === 0) return banner?.error ? err(`tail: ${banner.error}`) : ok('')
   const range = (total) => [Math.max(0, total - n.value), total]
   if (unit === 'c') return takeBytes('tail', stdin, positional, ctx, range, banner)
   return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner)
@@ -245,7 +248,11 @@ function takeFrom(cmd, stdin, files, ctx, pick, banner = null) {
     // A directory yields no body at all — not even the newline an empty
     // line-pick would append — so `pick` is skipped for it entirely.
     const body = kind === 'dir' ? '' : pick(content)
-    blocks.push(showHeader ? `${i > 0 ? '\n' : ''}==> ${name} <==\n${body}` : body)
+    // `name` is null for the stdin input, which only reaches here under
+    // an explicit `-v` (no operands means no banner otherwise). GNU
+    // titles it `standard input`; interpolating the null printed a
+    // literal `==> null <==`. Same convention grep uses for stdin.
+    blocks.push(showHeader ? `${i > 0 ? '\n' : ''}==> ${name ?? 'standard input'} <==\n${body}` : body)
   }
   return okWith(blocks.join(''), r)
 }
@@ -387,15 +394,20 @@ function uniq(stdin, tokens, ctx) {
   const flush = () => {
     if (prev === null) return
     const isDup = count >= 2
-    const keep = (onlyDups && onlyUniques) ? false
-      : allDups ? isDup
+    // `-D` outranks `-d`: GNU gives `uniq -D -d -u` the same output as
+    // `uniq -D -u`, so it is tested before the `-d -u` empty-intersection
+    // rule rather than after it.
+    const keep = allDups ? isDup
+      : (onlyDups && onlyUniques) ? false
       : onlyDups ? isDup
       : onlyUniques ? !isDup
       : true
     if (!keep) return
     // `-D` prints every line of the run rather than one representative,
-    // so it is the only mode that needs the run kept around.
-    if (allDups) out.push(...run)
+    // so it is the only mode that needs the run kept around. Adding `-u`
+    // drops each group's FIRST line — verified against GNU: a doubled
+    // `a` prints once, a tripled `c` twice.
+    if (allDups) out.push(...(onlyUniques ? run.slice(1) : run))
     else out.push(showCount ? `${String(count).padStart(7)} ${prev}` : prev)
   }
   for (const l of lines) {
