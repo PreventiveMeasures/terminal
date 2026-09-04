@@ -46,6 +46,7 @@
     "src/nav-commands.js",
     "src/parse.js",
     "src/sed.js",
+    "src/sort.js",
     "src/text-commands.js",
     "src/util.js"
   ],

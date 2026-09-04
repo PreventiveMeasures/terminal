@@ -8,6 +8,7 @@
 import { parseArgs } from './parse.js'
 import { err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
 import { grep } from './grep.js'
+import { sort } from './sort.js'
 
 function cat(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['n'] })
@@ -267,50 +268,6 @@ function formatWc(counts, name, which, width) {
   if (which.m) parts.push(String(counts.m).padStart(width))
   if (which.c) parts.push(String(counts.c).padStart(width))
   return parts.join(' ') + (name ? ' ' + name : '')
-}
-
-function sort(stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['n', 'r', 'u'] })
-  // `sort a b` orders the concatenation of all inputs, matching coreutils.
-  const r = readContent('sort', positional, stdin, ctx)
-  let lines = splitLines(r.content)
-  const numeric = flags.has('n')
-  const unique = flags.has('u')
-  if (numeric) {
-    // -n orders by each line's leading numeric value. Equal values keep
-    // input order (stable sort); without -u the whole line breaks the
-    // tie (GNU's last-resort comparison). -u drops that tiebreak so
-    // equal-value lines (e.g. `1` and `01`) dedupe in input order.
-    const decorated = lines.map((line) => ({ line, key: numericKey(line) }))
-    decorated.sort(unique
-      ? (a, b) => a.key - b.key
-      : (a, b) => (a.key - b.key) || (a.line < b.line ? -1 : a.line > b.line ? 1 : 0))
-    lines = decorated.map((d) => d.line)
-  } else {
-    lines.sort()
-  }
-  // Dedup in ascending order (keeping the first of each run) before -r
-  // reverses, so the kept representative matches GNU regardless of -r.
-  if (unique) {
-    const seen = new Set()
-    lines = lines.filter((l) => {
-      const k = numeric ? numericKey(l) : l
-      if (seen.has(k)) return false
-      seen.add(k)
-      return true
-    })
-  }
-  if (flags.has('r')) lines.reverse()
-  return okWith(joinLines(lines), r)
-}
-
-// GNU `sort -n`: a line's value is its leading numeric prefix — optional
-// blanks, an optional `-`, then digits with an optional decimal part.
-// Anything else (a `+` sign, scientific `e`, or non-digit) isn't numeric,
-// so such lines sort as 0. Thousands separators aren't recognized (C locale).
-function numericKey(line) {
-  const m = /^[ \t]*(-?(?:\d+\.?\d*|\.\d+))/u.exec(line)
-  return m ? Number(m[1]) : 0
 }
 
 // Collapse adjacent duplicate lines from stdin. Flags compose:
