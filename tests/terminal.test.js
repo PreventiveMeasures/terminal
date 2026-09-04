@@ -217,7 +217,7 @@ describe('createTerminal — text commands', () => {
     assert.equal(d.exitCode, 1)
   })
 
-  it('multi-file partial failure spans wc / head / sort / cut; all-missing stays empty', () => {
+  it('multi-file partial failure spans wc / head / sort / cut', () => {
     const t = createTerminal({ 'a.txt': 'AAA\nzzz\n', 'b.txt': 'BBB\n' })
     // wc still tallies the readable files (with a total) and exits 1.
     const w = t.run('wc -l a.txt missing.txt b.txt')
@@ -232,11 +232,47 @@ describe('createTerminal — text commands', () => {
     assert.equal(h.exitCode, 1)
     assert.equal(t.run('sort a.txt missing.txt b.txt').stdout, 'AAA\nBBB\nzzz\n')
     assert.equal(t.run('cut -c1 a.txt missing.txt').stdout, 'A\nz\n')
-    // When every operand is unreadable, stdout is empty (no stray
-    // newline) and exit is non-zero.
+    // Even with every operand unreadable, wc still prints the total —
+    // GNU gates that row on how many files were NAMED, so two missing
+    // operands give a lone zero row rather than nothing at all.
     const all = t.run('wc m1 m2')
-    assert.equal(all.stdout, '')
+    assert.equal(all.stdout, '0 0 0 total\n')
     assert.equal(all.exitCode, 1)
+  })
+
+  it('wc totals by operand count, and a directory is a row of zeros', () => {
+    // Checked against GNU coreutils 9.4. The total follows the operand
+    // count, not the successful-read count, so a partial failure still
+    // totals. A directory opened fine and only failed to read, so it
+    // gets a zero row; a missing path gets no row.
+    const t = createTerminal({ 'a.txt': 'abc\n', 'dir/x': 'y' })
+    assert.equal(t.run('wc a.txt missing').stdout, '1 1 4 a.txt\n1 1 4 total\n')
+    assert.equal(t.run('wc -l a.txt missing').stdout, '1 a.txt\n1 total\n')
+    // One operand, so no total row at all.
+    assert.equal(t.run('wc -l a.txt').stdout, '1 a.txt\n')
+    assert.equal(t.run('wc -l dir').stdout, '0 dir\n')
+    assert.equal(t.run('wc -l dir').exitCode, 1)
+  })
+
+  it('head/tail banner a directory operand, but not a missing one', () => {
+    // GNU's open() SUCCEEDS on a directory and only the read fails, so
+    // the directory is bannered with an empty body and the first-file
+    // flag flips — which is what puts the blank line above the next
+    // banner. A missing path never opens and contributes nothing.
+    const t = createTerminal({ 'a.txt': 'abc\n', 'dir/x': 'y' })
+    assert.equal(t.run('head -n 1 dir a.txt').stdout, '==> dir <==\n\n==> a.txt <==\nabc\n')
+    assert.equal(t.run('head -n 1 a.txt dir').stdout, '==> a.txt <==\nabc\n\n==> dir <==\n')
+    assert.equal(t.run('tail -n 1 dir a.txt').stdout, '==> dir <==\n\n==> a.txt <==\nabc\n')
+    // Byte mode reads the same rule.
+    assert.equal(t.run('head -c 2 dir a.txt').stdout, '==> dir <==\n\n==> a.txt <==\nab')
+    // A missing operand between them is skipped entirely, so `dir` and
+    // `a.txt` stay adjacent.
+    assert.equal(t.run('head -n 1 dir missing a.txt').stdout, '==> dir <==\n\n==> a.txt <==\nabc\n')
+    // One operand means no banner, so a lone directory prints nothing.
+    const solo = t.run('head -n 1 dir')
+    assert.equal(solo.stdout, '')
+    assert.match(solo.stderr, /dir: is a directory/u)
+    assert.equal(solo.exitCode, 1)
   })
 
   it('grep keeps scanning readable files past an unreadable one (exit 2)', () => {
