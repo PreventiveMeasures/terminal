@@ -23,17 +23,24 @@ const BLANK = '[ \\t\\n\\r\\f\\v]*'
 const NUMBER = '[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?'
 const NUMERIC_RE = new RegExp(`^${BLANK}${NUMBER}${BLANK}$`, 'u')
 const PREFIX_RE = new RegExp(`^${BLANK}(${NUMBER})`, 'u')
+// gawk's "IEEE magic values": exactly these four spellings, a sign
+// required, are the infinities and NaNs; `inf` and `nan` alone are 0.
+const MAGIC_RE = new RegExp(`^${BLANK}([+-])(inf|nan)${BLANK}$`, 'iu')
 
 // "Looks numeric": the whole string, blanks aside, is a decimal number.
-// Hex (`0x10`) and `inf`/`nan` spellings are not numbers here — that is
-// gawk's default reading, and the one POSIX describes.
-export const looksNumeric = (s) => NUMERIC_RE.test(s)
+// Hex (`0x10`) is not a number here — gawk's default reading, and the
+// one POSIX describes.
+export const looksNumeric = (s) => NUMERIC_RE.test(s) || MAGIC_RE.test(s)
 
 // String → number conversion takes the longest numeric PREFIX, like C's
 // strtod: `"3x"` is 3, `" 4 "` is 4, `"abc"` is 0.
 function parsePrefix(s) {
   const m = PREFIX_RE.exec(s)
-  return m ? Number(m[1]) : 0
+  if (m) return Number(m[1])
+  const magic = MAGIC_RE.exec(s)
+  if (!magic) return 0
+  if (magic[2].toLowerCase() === 'nan') return Number.NaN
+  return magic[1] === '-' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY
 }
 
 const arrayInScalar = () => new AwkError('attempt to use an array in a scalar context')
@@ -46,21 +53,19 @@ export function toNum(v) {
   throw arrayInScalar()
 }
 
-// Number → string. Integral values print as integers (up to the point
-// where JS itself would switch to exponent notation, 1e21); everything
-// else goes through the awk format — CONVFMT for string conversions,
-// OFMT for print. `%.6g` by default, which is why `print 1/3` shows
-// `0.333333`.
+// Number → string. An integral value prints as an exact integer, however
+// large (gawk: `print 2^70` is 1180591620717411303424); anything else
+// goes through the awk format — CONVFMT for string conversions, OFMT for
+// print. `%.6g` by default, which is why `print 1/3` shows `0.333333`.
+// Infinities and NaN carry an explicit sign, as gawk prints them; JS has
+// no NaN sign, and `-nan` is what x86 produces for the usual sources
+// (log(-1), inf - inf).
 const FORMAT_CACHE = new Map()
 
 export function numToStr(n, fmt) {
-  if (Number.isNaN(n)) return 'nan'
-  if (!Number.isFinite(n)) return n < 0 ? '-inf' : 'inf'
-  if (Number.isInteger(n) && Math.abs(n) < 1e21) {
-    // Past 2^53 String() rounds the low digits (`2^62` → ...388000);
-    // BigInt prints the exact value the double holds, as gawk does.
-    return Math.abs(n) < 2 ** 53 ? String(n) : BigInt(n).toString()
-  }
+  if (Number.isNaN(n)) return '-nan'
+  if (!Number.isFinite(n)) return n < 0 ? '-inf' : '+inf'
+  if (Number.isInteger(n)) return Math.abs(n) < 2 ** 53 ? String(n) : BigInt(n).toString()
   let spec = FORMAT_CACHE.get(fmt)
   if (spec === undefined) {
     if (FORMAT_CACHE.size > 64) FORMAT_CACHE.clear()
@@ -96,16 +101,22 @@ export function toOutStr(v, m) {
 
 const isNumericValue = (v) => typeof v === 'number' || v === undefined || (v instanceof StrNum && looksNumeric(v.s))
 
+// gawk's IGNORECASE: regex matching, string comparison and index()
+// ignore case while it is non-zero.
+export const ignoreCase = (m) => truthy(m.globals.get('IGNORECASE'))
+
 // POSIX comparison rule: numeric when BOTH sides are numbers, numeric
-// strings, or uninitialized; string otherwise. Returns -1 / 0 / 1.
+// strings, or uninitialized; string otherwise. Returns -1 / 0 / 1, or
+// NaN when a NaN is involved (unordered: every test but `!=` is false).
 export function compare(a, b, m) {
   if (isNumericValue(a) && isNumericValue(b)) {
     const x = toNum(a)
     const y = toNum(b)
-    return x < y ? -1 : x > y ? 1 : 0
+    return x < y ? -1 : x > y ? 1 : x === y ? 0 : Number.NaN
   }
-  const s = toStr(a, m)
-  const t = toStr(b, m)
+  let s = toStr(a, m)
+  let t = toStr(b, m)
+  if (ignoreCase(m)) { s = s.toLowerCase(); t = t.toLowerCase() }
   return s < t ? -1 : s > t ? 1 : 0
 }
 
@@ -123,3 +134,12 @@ export function truthy(v) {
 // Array subscripts are strings; numbers convert with CONVFMT, so
 // `a[0.1 + 0.2]` and `a["0.3"]` name the same element.
 export const subscriptKey = (v, m) => toStr(v, m)
+
+// gawk's typeof(): the type of a cell as the program sees it.
+export function typeName(v) {
+  if (v instanceof Map) return 'array'
+  if (v === undefined) return 'untyped'
+  if (typeof v === 'number') return 'number'
+  if (v instanceof StrNum) return looksNumeric(v.s) ? 'strnum' : 'string'
+  return 'string'
+}

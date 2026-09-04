@@ -6,15 +6,15 @@
 //
 // Arrays are Maps. A user function receives an array by reference and
 // a scalar by value; an argument that is still UNTYPED at the call
-// (never assigned, never subscripted) is passed as a `Ref` back to the
-// caller's slot, so that if the callee uses it as an array the array
-// materializes in the caller — awk's rule for `function fill(arr)`
-// called on a fresh name.
+// (never assigned, never subscripted) is passed as a reference back to
+// the caller's slot, so that if the callee uses it as an array the
+// array materializes in the caller — awk's rule for `function
+// fill(arr)` called on a fresh name.
 
 import { AwkError, MAX_CALL_DEPTH } from './awk-common.js'
-import { splitFields } from './awk-input.js'
+import { splitRecord } from './awk-input.js'
 import { compileRegex } from './awk-regex.js'
-import { StrNum, compare, subscriptKey, toNum, toStr, truthy } from './awk-value.js'
+import { StrNum, compare, ignoreCase, subscriptKey, toNum, toStr, truthy } from './awk-value.js'
 
 const makeRef = (scope, name) => ({ isRef: true, scope, name })
 const isRef = (v) => typeof v === 'object' && v !== null && v.isRef === true
@@ -36,8 +36,8 @@ function scopeOf(m, name) {
   return frame !== undefined && frame.has(name) ? frame : m.globals
 }
 
-// A `Ref` reads as an array once its target holds one, otherwise as
-// uninitialized.
+// A reference reads as an array once its target holds one, otherwise
+// as uninitialized.
 function derefScalar(ref) {
   const v = ref.scope.get(ref.name)
   if (isRef(v)) return derefScalar(v)
@@ -59,10 +59,21 @@ export function getVar(m, name) {
   return isRef(v) ? derefScalar(v) : v
 }
 
+// Which of FS / FIELDWIDTHS / FPAT splits records is whichever was
+// assigned last; PROCINFO["FS"] names it, as in gawk.
+const FIELD_MODES = new Set(['FS', 'FIELDWIDTHS', 'FPAT'])
+
 export function setVar(m, name, v) {
   const scope = scopeOf(m, name)
   if (scope.get(name) instanceof Map) throw arrayAsScalar(name)
-  if (name === 'NF' && scope === m.globals) { setNF(m, v); return }
+  if (scope === m.globals) {
+    if (name === 'NF') { setNF(m, v); return }
+    if (FIELD_MODES.has(name)) {
+      m.fieldMode = name
+      const info = m.globals.get('PROCINFO')
+      if (info instanceof Map) info.set('FS', name)
+    }
+  }
   scope.set(name, v)
 }
 
@@ -82,11 +93,15 @@ export function getArray(m, name) {
 
 // --- record and fields ---------------------------------------------
 
-export function setRecord(m, text) {
+// `value` is what `$0` evaluates to: a numeric string for a record that
+// came from input (the default), the assigned value after `$0 = ...`,
+// and a plain string once fields were assigned and the record rebuilt —
+// so `$1 = $1` turns the line `10` into a string and `$0 < 9` becomes
+// a string comparison, as in gawk.
+export function setRecord(m, text, value = new StrNum(text)) {
   m.record = text
-  const fs = toStr(m.globals.get('FS'), m)
-  const paragraph = toStr(m.globals.get('RS'), m) === ''
-  m.fields = [undefined, ...splitFields(text, fs, paragraph).map((s) => new StrNum(s))]
+  m.recordValue = value
+  m.fields = [undefined, ...splitRecord(m, text).map((s) => new StrNum(s))]
   m.nf = m.fields.length - 1
   m.globals.set('NF', m.nf)
 }
@@ -94,17 +109,23 @@ export function setRecord(m, text) {
 function rebuildRecord(m) {
   const ofs = toStr(m.globals.get('OFS'), m)
   m.record = m.fields.slice(1).map((v) => toStr(v, m)).join(ofs)
+  m.recordValue = m.record
 }
 
 export function getField(m, i) {
-  if (i === 0) return new StrNum(m.record)
+  if (i === 0) return m.recordValue
   return i <= m.nf ? m.fields[i] : undefined
 }
 
 // Assigning past NF extends the record with empty fields; any field
-// assignment rebuilds $0 with OFS between fields. Assigning $0 re-splits.
+// assignment rebuilds $0 with OFS between fields. Assigning $0 re-splits
+// (a number becomes its CONVFMT text).
 export function setField(m, i, v) {
-  if (i === 0) { setRecord(m, toStr(v, m)); return }
+  if (i === 0) {
+    const text = toStr(v, m)
+    setRecord(m, text, typeof v === 'number' ? text : v)
+    return
+  }
   while (m.nf < i) m.fields[++m.nf] = ''
   m.fields[i] = v
   m.globals.set('NF', m.nf)
@@ -178,6 +199,8 @@ function arith(op, a, b) {
   }
 }
 
+// `compare` yields NaN for an unordered pair; every test but `!=` is
+// then false, as in C.
 const COMPARE = {
   __proto__: null,
   '<': (c) => c < 0, '<=': (c) => c <= 0, '==': (c) => c === 0,
@@ -186,9 +209,11 @@ const COMPARE = {
 
 // A regex literal in a `~` right-hand side (or a builtin's regex slot)
 // is the pattern itself; anything else evaluates to a string that is
-// compiled as a dynamic regex.
+// compiled as a dynamic regex. Both honor IGNORECASE.
 export function regexOf(m, node) {
-  return node.type === 'regex' ? node.re : compileRegex(toStr(evalExpr(m, node), m))
+  const ic = ignoreCase(m)
+  if (node.type === 'regex') return ic ? compileRegex(node.source, true) : node.re
+  return compileRegex(toStr(evalExpr(m, node), m), ic, m.warn)
 }
 
 function scalar(v, name) {
@@ -208,7 +233,7 @@ const EVAL = {
   __proto__: null,
   num: (m, n) => n.value,
   str: (m, n) => n.value,
-  regex: (m, n) => (n.re.test(m.record) ? 1 : 0),
+  regex: (m, n) => (regexOf(m, n).test(m.record) ? 1 : 0),
   var: (m, n) => scalar(getVar(m, n.name), n.name),
   index: (m, n) => {
     const arr = getArray(m, n.name)

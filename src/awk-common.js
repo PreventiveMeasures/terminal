@@ -1,7 +1,6 @@
-// Shared pieces of the awk implementation: the two error classes the
-// command surfaces (a syntax error at parse time, a fatal error at run
-// time), the keyword and builtin tables the lexer and parser share, and
-// the resource caps that keep a runaway program from hanging the
+// Shared pieces of the awk implementation: the error class the command
+// surfaces, the keyword and builtin tables the lexer and parser share,
+// and the resource caps that keep a runaway program from hanging the
 // (synchronous, in-memory) terminal.
 
 // Every error the interpreter raises on purpose. With a `line` it is a
@@ -18,9 +17,10 @@ export class AwkError extends Error {
 }
 
 export const KEYWORDS = new Set([
-  'BEGIN', 'END', 'function', 'func', 'if', 'else', 'while', 'for', 'do',
-  'break', 'continue', 'next', 'nextfile', 'exit', 'return', 'delete',
-  'in', 'getline', 'print', 'printf',
+  'BEGIN', 'END', 'BEGINFILE', 'ENDFILE', 'function', 'func', 'if', 'else',
+  'while', 'for', 'do', 'break', 'continue', 'next', 'nextfile', 'exit',
+  'return', 'delete', 'in', 'getline', 'print', 'printf',
+  'switch', 'case', 'default',
 ])
 
 // Every builtin name the lexer recognizes. The parser then decides what
@@ -32,6 +32,8 @@ export const BUILTINS = new Set([
   'length', 'substr', 'index', 'split', 'sub', 'gsub', 'gensub', 'match',
   'sprintf', 'sin', 'cos', 'atan2', 'exp', 'log', 'sqrt', 'int', 'rand',
   'srand', 'tolower', 'toupper', 'close', 'fflush', 'systime',
+  'strtonum', 'and', 'or', 'xor', 'lshift', 'rshift', 'compl',
+  'typeof', 'isarray',
   'system', 'strftime', 'mktime', 'asort', 'asorti', 'patsplit',
 ])
 

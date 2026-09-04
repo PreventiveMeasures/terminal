@@ -2,7 +2,8 @@
 // indexes into (it backtracks in one place — `print (a, b)` — so a
 // pre-tokenized array is simpler than a pull lexer). Each token is
 // `{ type, value, line }`:
-//   number   value is the literal's text
+//   number   value is the literal's text, decimal — `0x1A` and `011`
+//            (hex and octal, as gawk reads program text) already converted
 //   string   value is the DECODED string (escapes already applied)
 //   regex    value is the body between the slashes, untouched
 //   name     an identifier; `funcname` when a `(` follows immediately,
@@ -37,7 +38,8 @@ const isNameStart = (c) => c !== undefined && /[A-Za-z_]/u.test(c)
 const isNameChar = (c) => c !== undefined && /[A-Za-z0-9_]/u.test(c)
 const isDigit = (c) => c !== undefined && c >= '0' && c <= '9'
 
-export function tokenize(src) {
+// `warn`, when given, receives gawk's warnings about dubious escapes.
+export function tokenize(src, warn = null) {
   const toks = []
   let line = 1
   let i = 0
@@ -67,7 +69,7 @@ export function tokenize(src) {
       continue
     }
     if (c === '"') {
-      const r = scanString(src, i + 1, line)
+      const r = scanString(src, i + 1, line, warn)
       push('string', r.value); i = r.end
       continue
     }
@@ -77,8 +79,8 @@ export function tokenize(src) {
       continue
     }
     if (isDigit(c) || (c === '.' && isDigit(src[i + 1]))) {
-      const m = NUMBER.exec(src.slice(i))
-      push('number', m[0]); i += m[0].length
+      const r = scanNumber(src, i)
+      push('number', r.value); i = r.end
       continue
     }
     if (isNameStart(c)) {
@@ -103,16 +105,26 @@ function operatorAt(src, i) {
   return OPERATORS.find((o) => src.startsWith(o, i))
 }
 
+// A numeric constant in program text. gawk reads `0x1A` as hex and a
+// leading-zero constant of octal digits (`011`) as octal; the value is
+// normalized to decimal text here.
+function scanNumber(src, i) {
+  const text = NUMBER.exec(src.slice(i))[0]
+  let value = text
+  if (/^0[xX]/u.test(text)) value = String(Number.parseInt(text.slice(2), 16))
+  else if (/^0[0-7]+$/u.test(text)) value = String(Number.parseInt(text, 8))
+  return { value, end: i + text.length }
+}
+
 // Decode one backslash escape starting at `src[i]` (the backslash).
 // Returns the decoded text and the index just past the escape. The
-// recognized set is awk's: the C control escapes, `\"` `\\` `\/`, octal
-// `\ddd` and hex `\xHH`. Anything else keeps its backslash — the mawk
-// reading, and the friendlier one for the common `"a\.b"` used as a
-// dynamic regex, where dropping the backslash (as gawk does, with a
-// warning) would silently turn the `.` into a wildcard.
-const SIMPLE_ESCAPES = { __proto__: null, n: '\n', t: '\t', r: '\r', a: '\u0007', b: '\b', f: '\f', v: '\v', '"': '"', '\\': '\\', '/': '/' }
+// recognized set is awk's: the C control escapes, `\"` `\\`, octal
+// `\ddd` and hex `\xHH`. Anything else is the plain character with a
+// warning — gawk's reading, which matters for a string used as a
+// dynamic regex: `"a\.b"` is the regex `a.b`.
+const SIMPLE_ESCAPES = { __proto__: null, n: '\n', t: '\t', r: '\r', a: '\u0007', b: '\b', f: '\f', v: '\v', '"': '"', '\\': '\\' }
 
-function readEscape(src, i) {
+function readEscape(src, i, warn) {
   const c = src[i + 1]
   if (c === undefined) return { text: '\\', end: i + 1 }
   if (c in SIMPLE_ESCAPES) return { text: SIMPLE_ESCAPES[c], end: i + 2 }
@@ -126,10 +138,11 @@ function readEscape(src, i) {
     while (j < i + 4 && /[0-9a-fA-F]/u.test(src[j] ?? '')) j++
     return { text: String.fromCodePoint(Number.parseInt(src.slice(i + 2, j), 16)), end: j }
   }
-  return { text: '\\' + c, end: i + 2 }
+  warn?.(`escape sequence \`\\${c}' treated as plain \`${c}'`)
+  return { text: c, end: i + 2 }
 }
 
-function scanString(src, start, line) {
+function scanString(src, start, line, warn) {
   let out = ''
   let i = start
   while (i < src.length) {
@@ -139,7 +152,7 @@ function scanString(src, start, line) {
     if (c === '\\') {
       // Backslash-newline inside a string continues it (POSIX).
       if (src[i + 1] === '\n') { i += 2; continue }
-      const r = readEscape(src, i)
+      const r = readEscape(src, i, warn)
       out += r.text; i = r.end
       continue
     }
@@ -148,9 +161,9 @@ function scanString(src, start, line) {
   throw new AwkError('unterminated string', line)
 }
 
-// The regex body is kept verbatim (escapes included) for awk-regex.js
-// to translate. Only the closing `/` matters here: it cannot end the
-// literal from inside a bracket expression, and `\/` is an escaped slash.
+// The regex body is kept verbatim (escapes included) for awk-re-parse.js
+// to read. Only the closing `/` matters here: it cannot end the literal
+// from inside a bracket expression, and `\/` is an escaped slash.
 function scanRegex(src, start, line) {
   let i = start
   let inClass = false
@@ -182,11 +195,11 @@ function scanRegex(src, start, line) {
 
 // Apply string-literal escape processing to text that did not come
 // through the lexer: `-v var=value` and `var=value` operands, and `-F`.
-export function unescapeAwkString(s) {
+export function unescapeAwkString(s, warn = null) {
   let out = ''
   for (let i = 0; i < s.length;) {
     if (s[i] !== '\\') { out += s[i]; i++; continue }
-    const r = readEscape(s, i)
+    const r = readEscape(s, i, warn)
     out += r.text; i = r.end
   }
   return out

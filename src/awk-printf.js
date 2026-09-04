@@ -58,7 +58,8 @@ function formatOne(m, spec, arg) {
 }
 
 // `%c`: a number (or numeric string from input) is a code point; any
-// other string contributes its first character.
+// other string contributes its first character — for an empty string a
+// NUL, as gawk emits.
 function charOf(arg) {
   const numeric = typeof arg === 'number' || (arg instanceof StrNum && looksNumeric(arg.s))
   if (numeric) {
@@ -66,5 +67,5 @@ function charOf(arg) {
     return code >= 0 && code <= 0x10FFFF ? String.fromCodePoint(code) : ''
   }
   const s = arg instanceof StrNum ? arg.s : arg ?? ''
-  return s === '' ? '' : String.fromCodePoint(s.codePointAt(0))
+  return s === '' ? '\0' : String.fromCodePoint(s.codePointAt(0))
 }

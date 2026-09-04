@@ -6234,16 +6234,23 @@ describe('createTerminal — awk', () => {
     // printf with a parenthesized list, and the `%s` / `%c` of an empty
     // string.
     assert.equal(out("awk '{ printf(\"%-4s%s\\n\", $1, $2) }' people.txt"), 'ann 25\nbob 30\ncid 35\n')
-    assert.equal(out("awk 'BEGIN { printf \"[%s][%c]\\n\", \"\", \"\" }'"), '[][]\n')
+    // `%c` of an empty string is a NUL, as gawk emits.
+    assert.equal(out("awk 'BEGIN { printf \"[%s][%c]\\n\", \"\", \"\" }'"), '[][\0]\n')
     rejects("awk 'BEGIN { printf \"%s %s\\n\", \"only\" }'", /not enough arguments to satisfy format string/u)
     rejects("awk 'BEGIN { printf \"%1000000000d\", 1 }'", /field width or precision above/u)
   })
 
   it('numbers print as integers when integral and through OFMT (%.6g) otherwise; CONVFMT governs string conversion', () => {
     assert.equal(out("awk 'BEGIN { print 1e6, 0.1 + 0.2, 1 / 3, 2 ^ 0.5, 2 ^ 53, 2 ^ 62, 1e21, 123456.7, 1234567.8, -0 }'"),
-      '1000000 0.3 0.333333 1.41421 9007199254740992 4611686018427387904 1e+21 123457 1.23457e+06 0\n')
+      '1000000 0.3 0.333333 1.41421 9007199254740992 4611686018427387904 1000000000000000000000 123457 1.23457e+06 0\n')
     assert.equal(out("awk 'BEGIN { OFMT = \"%.2f\"; x = 3.14159; print x, x \"\"; CONVFMT = \"%.1f\"; print x \"\", 17 \"\" }'"), '3.14 3.14159\n3.1 17\n')
-    assert.equal(out("awk 'BEGIN { print log(-1), exp(1000), -exp(1000), 1e309 - 1e309 }'"), 'nan inf -inf nan\n')
+    // Infinities and NaN carry a sign, as gawk prints them; the domain
+    // errors warn on stderr without failing.
+    const r = run("awk 'BEGIN { print log(-1), exp(1000), -exp(1000), 1e309 - 1e309, \"+inf\" + 0, \"inf\" + 0 }'")
+    assert.equal(r.stdout, '-nan +inf -inf -nan +inf 0\n')
+    assert.match(r.stderr, /warning: log: received negative argument -1/u)
+    assert.match(r.stderr, /warning: exp: argument 1000 is out of range/u)
+    assert.equal(r.exitCode, 0)
   })
 
   it('compares numerically when both sides are numeric (fields that look like numbers included), as strings otherwise', () => {
@@ -6260,7 +6267,10 @@ describe('createTerminal — awk', () => {
 
   it('arithmetic: precedence, `^` and `**`, unary minus, `%`, string-to-number prefixes, increments', () => {
     assert.equal(out("awk 'BEGIN { print 2 + 3 * 4, (2 + 3) * 4, 2 ^ 3 ^ 2, -2 ^ 2, 2 ** 3, 2 ^ -1, 7 % 3, -7 % 3, 5.5 % 2, 8 / 2 / 2 }'"), '14 20 512 -4 8 0.5 1 -1 1.5 2\n')
-    assert.equal(out("awk 'BEGIN { print \"3x\" + 1, \" 4 \" + 1, \"1e2\" + 0, \".5\" + 0, \"abc\" + 0, \"0x10\" + 0, 010 + 0 }'"), '4 5 100 0.5 0 0 10\n')
+    // In program text (not in data) gawk reads `0x10` as hex and `010` as octal.
+    assert.equal(out("awk 'BEGIN { print \"3x\" + 1, \" 4 \" + 1, \"1e2\" + 0, \".5\" + 0, \"abc\" + 0, \"0x10\" + 0, 010 + 0, 0x10, 08 }'"), '4 5 100 0.5 0 0 8 16 8\n')
+    // `1e` with no exponent digits is `1` followed by the variable `e`, as gawk reads it.
+    assert.equal(out("awk 'BEGIN { print 1e, 1e5x }'"), '1 100000\n')
     assert.equal(out("awk 'BEGIN { x = 5; print x \" \" x++ \" \" x, ++x, x--, --x; y = 10; y += 5; y -= 3; y *= 2; y /= 4; y %= 4; y ^= 3; print y; a = b = 7; print a, b }'"), '5 5 6 7 7 5\n8\n7 7\n')
     assert.equal(out("echo '5 7' | awk '{ $1++; ++$2; print; i = 1; print $i++, i, $i }'"), '6 8\n6 1 7\n')
     rejects("awk 'BEGIN { print 1 / 0 }'", /division by zero/u)
@@ -6271,9 +6281,10 @@ describe('createTerminal — awk', () => {
     assert.equal(out("echo 'abcd ef' | awk '{ print length, length($1), length(\"\"), length(12345) }'"), '7 4 0 5\n')
     // `length` without parens is length($0), so `length $1` concatenates.
     assert.equal(out("echo 'abcd ef' | awk '{ print length $1 }'"), '7abcd\n')
-    // POSIX positions: characters m..m+n-1, clipped to the string.
-    assert.equal(out("awk 'BEGIN { print substr(\"hello\", 2, 3) \"|\" substr(\"hello\", 2) \"|\" substr(\"hello\", 0, 3) \"|\" substr(\"hello\", -1, 3) \"|\" substr(\"hello\", 4, 100) \"|\" substr(\"hello\", 6) \"|\" substr(12345, 2, 2) }'"), 'ell|ello|he|h|lo||23\n')
-    assert.equal(out("awk 'BEGIN { print index(\"foobar\", \"bar\"), index(\"abc\", \"x\"), index(\"abc\", \"\") }'"), '4 0 0\n')
+    // gawk's substr: a start below 1 acts as 1 with the length kept
+    // (verified: substr("hello", 0, 3) is "hel"), fractions truncate.
+    assert.equal(out("awk 'BEGIN { print substr(\"hello\", 2, 3) \"|\" substr(\"hello\", 2) \"|\" substr(\"hello\", 0, 3) \"|\" substr(\"hello\", -1, 3) \"|\" substr(\"hello\", 4, 100) \"|\" substr(\"hello\", 6) \"|\" substr(12345, 2, 2) \"|\" substr(\"hello\", 1.9, 2.9) \"|\" substr(\"hello\", 2, 0) }'"), 'ell|ello|hel|hel|lo||23|he|\n')
+    assert.equal(out("awk 'BEGIN { print index(\"foobar\", \"bar\"), index(\"abc\", \"x\"), index(\"abc\", \"\") }'"), '4 0 1\n')
     assert.equal(out("awk 'BEGIN { n = split(\"2024-01-15\", d, \"-\"); print n, d[1], d[3] + 0; print split(\"  a  b \", w), w[1] w[2]; print split(\"a1b2c\", p, /[0-9]/), p[3]; print split(\"\", e), length(e); print split(\"abc\", ch, \"\"), ch[2] }'"), '3 2024 15\n2 ab\n3 c\n0 0\n3 b\n')
     assert.equal(out("awk 'BEGIN { print toupper(\"héllo\"), tolower(\"MiXeD\"), sprintf(\"%03d-%s\", 7, \"x\") }'"), 'HÉLLO mixed 007-x\n')
     assert.equal(out("awk 'BEGIN { print int(3.9), int(-3.9), int(\"4.5abc\"), sqrt(16), exp(0), log(1), sin(0), cos(0), atan2(0, 1) }'"), '3 -3 4 4 1 0 0 1 0\n')
@@ -6307,9 +6318,9 @@ describe('createTerminal — awk', () => {
     // coincide, a["01"] is distinct, a[0.1 + 0.2] is a["0.3"].
     assert.equal(out("awk 'BEGIN { a[\"1\"]; a[1]; a[01]; a[\"01\"]; a[0.1 + 0.2]; print length(a), (\"0.3\" in a), (2.0 in a) }'"), '3 1 0\n')
     assert.equal(out("awk 'BEGIN { b[1, \"x\"] = 5; print ((1, \"x\") in b); for (k in b) { split(k, p, SUBSEP); print p[1], p[2] } SUBSEP = \":\"; c[1, 2]; for (k in c) print k }'"), '1\n1 x\n1:2\n')
-    // Deleting inside for-in skips the removed keys: 1 removes 2, 3
-    // removes 4, so the body runs twice and 1 and 3 remain.
-    assert.equal(out("awk 'BEGIN { for (i = 1; i <= 4; i++) a[i]; for (k in a) { delete a[k + 1]; n++ } print n, length(a) }'"), '2 2\n')
+    // for-in walks a snapshot of the keys, deleted ones included (gawk):
+    // every key is visited, and each visit removes the next one.
+    assert.equal(out("awk 'BEGIN { for (i = 1; i <= 4; i++) a[i]; for (k in a) { delete a[k + 1]; n++ } print n, length(a) }'"), '4 1\n')
   })
 
   it('control flow: if / else chains, while, do, for, for-in, break, continue, nested blocks, empty statements', () => {
@@ -6393,8 +6404,9 @@ describe('createTerminal — awk', () => {
     assert.equal(out("awk 'function fill(arr) { arr[\"k\"] = \"v\" } function outer(a) { inner(a) } function inner(b) { b[\"x\"] = 1 } BEGIN { fill(m); outer(n); print m[\"k\"], length(n), n[\"x\"] }'"), 'v 1 1\n')
     assert.equal(out("awk 'function f(a) { a = 5; return a } function g() { return } BEGIN { print f(u), \"[\" u \"]\", \"[\" g() \"]\", g() + 0 }'"), '5 [] [] 0\n')
     assert.equal(out("awk 'function clear(arr,  k) { for (k in arr) delete arr[k] } BEGIN { z[1]; z[2]; clear(z); print length(z) }'"), '0\n')
-    // Space before the paren still calls a defined function.
-    assert.equal(out("awk 'function twice(x) { return x x } BEGIN { print twice (\"ab\") }'"), 'abab\n')
+    // A space before the paren makes a call ambiguous with concatenation;
+    // gawk refuses it, and so does this.
+    rejects("awk 'function twice(x) { return x x } BEGIN { print twice (\"ab\") }'", /function `twice` called with space between name and `\(`/u)
     // exit and next from inside a function.
     const r = run("awk 'function die(msg) { print msg > \"/dev/stderr\"; exit 7 } function skip() { next } /x/ { skip() } NR == 3 { die(\"boom\") } { print }' a.txt b.txt")
     assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['y\n', 'boom\n', 7])
@@ -6408,10 +6420,16 @@ describe('createTerminal — awk', () => {
     assert.equal(out("awk 'BEGIN { print (\"abc\" ~ /^a.c$/), (\"abc\" !~ /x/), (\"a+b\" ~ /a\\+b/), (\"a+b\" ~ \"a\\\\+b\"), (\"a/b\" ~ /a\\/b/), (\"aa\" ~ /a{2}/), (\"a{2}\" ~ /a{2}/) }'"), '1 1 1 1 1 1 0\n')
     assert.equal(out("awk 'BEGIN { print (\"5\" ~ /^[[:digit:]]+$/), (\"x\" ~ /[[:alpha:][:digit:]]/), (\" \" ~ /[[:space:]]/), (\"a\" ~ /[^[:digit:]]/), (\"a]\" ~ /[]a]+$/), (\"-\" ~ /[a\\-z]/), (\"{\" ~ /{/) }'"), '1 1 1 1 1 1 1\n')
     assert.equal(out("awk 'BEGIN { print (\"word\" ~ /\\<word\\>/), (\"sword\" ~ /\\<word/), (\"a b\" ~ /a\\yb/), (\"tab\\there\" ~ /\\t/) }'"), '1 0 0 1\n')
-    // A string used as a regex keeps its backslash escapes for the
-    // regex to see (`"a\.b"` matches a literal dot); a regex literal
-    // by itself is a match against $0.
-    assert.equal(out("echo 'a.b' | awk '{ print ($0 ~ \"a\\\\.b\"), ($0 ~ \"a\\.b\"), (\"axb\" ~ \"a\\\\.b\"), (\"axb\" ~ \"a.b\"), /a\\.b/, /x/ }'"), '1 1 0 1 1 0\n')
+    // A dynamic regex needs a doubled backslash (`"a\\.b"`) to reach the
+    // regex as `\.`; a single one is an unknown string escape, which
+    // gawk drops with a warning — so `"a\.b"` is the regex `a.b` and
+    // matches `axb` too. A regex literal by itself matches $0.
+    assert.equal(out("echo 'a.b' | awk '{ print ($0 ~ \"a\\\\.b\"), (\"axb\" ~ \"a\\\\.b\"), (\"axb\" ~ \"a.b\"), /a\\.b/, /x/ }'"), '1 0 1 1 0\n')
+    const warned = run("echo 'a.b' | awk '{ print ($0 ~ \"a\\.b\"), (\"axb\" ~ \"a\\.b\") }'")
+    assert.equal(warned.stdout, '1 1\n')
+    // One warning per occurrence, as gawk.
+    assert.equal(warned.stderr, "awk: warning: escape sequence `\\.' treated as plain `.'\n".repeat(2))
+    assert.equal(warned.exitCode, 0)
     assert.equal(out("awk 'BEGIN { re = \"^[0-9]+$\"; print (\"42\" ~ re), (\"4x\" ~ re) }'"), '1 0\n')
     rejects("awk 'BEGIN { print \"a\" ~ /(/ }'", /syntax error at line 1: invalid regex \/\(\//u)
     rejects("awk 'BEGIN { re = \"(\"; print \"a\" ~ re }'", /invalid regex/u)
@@ -6495,10 +6513,155 @@ describe('createTerminal — awk', () => {
   })
 
   it('rand() repeats its sequence until srand(); srand returns the previous seed', () => {
-    assert.equal(out("awk 'BEGIN { a = rand(); b = rand(); print (a == b), (a >= 0 && a < 1), srand(5), srand(6) }'"), '0 1 0 5\n')
+    // gawk's initial seed is 1, so the first srand() reports 1.
+    assert.equal(out("awk 'BEGIN { a = rand(); b = rand(); print (a == b), (a >= 0 && a < 1), srand(5), srand(6) }'"), '0 1 1 5\n')
     assert.equal(out("awk 'BEGIN { srand(42); a = rand(); srand(42); b = rand(); print (a == b) }'"), '1\n')
     // Two runs see the same default sequence.
     assert.equal(out("awk 'BEGIN { print rand() }'"), out("awk 'BEGIN { print rand() }'"))
+  })
+
+  it('matches POSIX leftmost-longest for sub / gsub / match / split, unlike a plain JS regex', () => {
+    // Verified against gawk 5.2: the JS engine would report `ab` for
+    // the first two (leftmost-FIRST), and these are silent wrong answers
+    // if left to it.
+    assert.equal(out("awk 'BEGIN { print match(\"abcd\", /ab|abcd/), RLENGTH; s = \"ab\"; sub(/a|ab/, \"X\", s); print s; print match(\"aab\", /(a*)(ab)?/), RLENGTH; print match(\"abc\", /(ab)?(abc)?/), RLENGTH; n = split(\"xaby\", p, /a|ab/); print n, p[2] }'"), '1 4\nX\n1 3\n1 3\n2 y\n')
+    // The yes/no test and the extent operations agree with each other.
+    assert.equal(out("awk 'BEGIN { s = \"foobar\"; print (s ~ /o+b|oob/), match(s, /o+b|oob/), RSTART, RLENGTH }'"), '1 2 2 3\n')
+  })
+
+  it('gsub skips an empty match right after a match; gensub with a number counts every match', () => {
+    assert.equal(out("awk 'BEGIN { s = \"abc\"; gsub(/b*/, \"-\", s); print s; s = \"aaa\"; gsub(/a*/, \"-\", s); print s; s = \"abc\"; gsub(/x*/, \"-\", s); print s }'"), '-a-c-\n-\n-a-b-c-\n')
+    assert.equal(out("awk 'BEGIN { print gensub(/b*/, \"{&}\", 2, \"abb\"), gensub(/b*/, \"{&}\", 3, \"abb\"), gensub(/b*/, \"{&}\", \"g\", \"abb\"), gensub(/c*/, \"{&}\", 2, \"ccbc\") }'"), 'a{bb} abb{} {}a{bb} cc{}bc\n')
+    const r = run("awk 'BEGIN { print gensub(/x/, \"y\", \"z\", \"xx\") }'")
+    assert.deepEqual([r.stdout, r.stderr], ['yx\n', "awk: warning: gensub: third argument `z' treated as 1\n"])
+  })
+
+  it('reads the regex escapes as gawk does: `\\b` is a backspace, `\\d` a plain d, both with a warning', () => {
+    const r = run("awk 'BEGIN { print (\"a b\" ~ /a\\b/), (\"a\\bb\" ~ /a\\bb/), (\"5\" ~ /\\d/), (\"d\" ~ /\\d/), (\"a b\" ~ /a\\yb/), (\"a b\" ~ /a\\y/), (\"a\" ~ /\\a/) }'")
+    assert.equal(r.stdout, '0 1 0 1 0 1 0\n')
+    assert.match(r.stderr, /warning: regexp escape sequence `\\b' is a backspace here/u)
+    assert.match(r.stderr, /warning: regexp escape sequence `\\d' is not a known regexp operator/u)
+    assert.equal(r.exitCode, 0)
+  })
+
+  it('regex leniency and strictness follow GNU: literal leading quantifiers and stray `)`, errors for bad intervals and ranges', () => {
+    assert.equal(out("awk 'BEGIN { print (\"*a\" ~ /*a/), (\"aaa\" ~ /a**/), (\"+\" ~ /+/), (\"a)\" ~ /a)/), (\"a{1\" ~ /a{1/), (\"a{\" ~ /a{/), (\"aa\" ~ /^a{,2}$/), (\"aaa\" ~ /^a{,2}$/), (\"x\" ~ /()/), (\"\" ~ /(|a)/) }'"), '1 1 1 1 1 1 1 0 1 1\n')
+    rejects("awk 'BEGIN { print (\"a\" ~ /a{1,2,3}/) }'", /invalid regex \/a\{1,2,3\}\/: invalid content of \{\}/u)
+    rejects("awk 'BEGIN { print (\"a\" ~ /a{2,1}/) }'", /invalid interval/u)
+    rejects("awk 'BEGIN { print (\"a\" ~ /[b-a]/) }'", /invalid range end/u)
+    rejects("awk 'BEGIN { print (\"a\" ~ /(a/) }'", /missing `\)`/u)
+    rejects("awk 'BEGIN { print (\"a\" ~ /[a/) }'", /unterminated regexp/u)
+    rejects("awk 'BEGIN { re = \"[a\"; print (\"a\" ~ re) }'", /unterminated bracket expression/u)
+  })
+
+  it('IGNORECASE makes regex matching, string comparison and index() case-blind; single-character separators stay exact', () => {
+    assert.equal(out("awk 'BEGIN { IGNORECASE = 1; print (\"A\" ~ /a/), (\"ABC\" ~ /^[a-z]+$/), (\"abc\" ~ \"B\"), (\"A\" == \"a\"), (\"A\" < \"b\"), (\"B\" < \"a\"), index(\"ABC\", \"bc\"), match(\"xAy\", /a/), RSTART; s = \"AbA\"; print gsub(/a/, \"-\", s), s; a[\"A\"]; print (\"a\" in a), split(\"aXbxc\", p, \"x\"), split(\"aXbxc\", q, /x/) }'"), '1 1 1 1 1 0 2 2 2\n2 -b-\n0 2 3\n')
+    assert.equal(out("echo aXb | awk 'BEGIN { IGNORECASE = 1; FS = \"x\" } { print NF }'"), '1\n')
+    assert.equal(out("echo aXb | awk 'BEGIN { IGNORECASE = 1; FS = \"[x]\" } { print NF }'"), '2\n')
+    assert.equal(out("echo -e 'Foo\\nFOO' | awk -v IGNORECASE=1 '/foo/ { print \"ic:\" $0 } { IGNORECASE = 0 }'"), 'ic:Foo\n')
+  })
+
+  it('RT, ERRNO and PROCINFO["FS"] are maintained', () => {
+    assert.equal(out("echo -n 'a1b22c' | awk 'BEGIN { RS = \"[0-9]+\" } { print $0 \"[\" RT \"]\" }'"), 'a[1]\nb[22]\nc[]\n')
+    // In paragraph mode RT is the run of newlines that ended the record,
+    // the final record's being the trailing one.
+    assert.equal(out("echo -e 'a\\n\\n\\nb' | awk 'BEGIN { RS = \"\" } { print $0 \"[\" RT \"]\" }'"), 'a[\n\n\n]\nb[\n]\n')
+    assert.equal(out("awk 'BEGIN { print \"[\" ERRNO \"]\"; getline x < \"nope\"; print \"[\" ERRNO \"]\"; print close(\"never\"), \"[\" ERRNO \"]\"; print PROCINFO[\"FS\"]; FIELDWIDTHS = \"1 1\"; print PROCINFO[\"FS\"]; FS = \":\"; print PROCINFO[\"FS\"] }'"), '[]\n[No such file or directory]\n-1 [close of redirection that was never opened]\nFS\nFIELDWIDTHS\nFS\n')
+  })
+
+  it('FIELDWIDTHS and FPAT split records; whichever of FS / FIELDWIDTHS / FPAT was assigned last applies', () => {
+    assert.equal(out("echo abcdefghij | awk 'BEGIN { FIELDWIDTHS = \"2 3:2 *\" } { print NF; for (i = 1; i <= NF; i++) print \"[\" $i \"]\" }'"), '3\n[ab]\n[fg]\n[hij]\n')
+    assert.equal(out("echo ab | awk 'BEGIN { FIELDWIDTHS = \"1 3 2\" } { print NF, \"[\" $2 \"][\" $3 \"]\"; $1 = \"Z\"; print }'"), '2 [b][]\nZ b\n')
+    assert.equal(out("echo 'a,\"b,c\",d' | awk 'BEGIN { FPAT = \"([^,]+)|(\\\"[^\\\"]+\\\")\" } { print NF; for (i = 1; i <= NF; i++) print \"[\" $i \"]\" }'"), '3\n[a]\n["b,c"]\n[d]\n')
+    assert.equal(out("echo 'a b' | awk 'BEGIN { FIELDWIDTHS = \"1 1\"; FS = \" \" } { print NF }'"), '2\n')
+    assert.equal(out("echo 'a b' | awk -v 'FIELDWIDTHS=1 1' '{ print NF, $2 }'"), '2  \n')
+    rejects("echo x | awk 'BEGIN { FIELDWIDTHS = \"a\" } { print }'", /invalid FIELDWIDTHS value/u)
+  })
+
+  it('BEGINFILE / ENDFILE bracket every operand; ERRNO plus nextfile skips an unreadable one', () => {
+    const files = { 'a.txt': 'x\ny\n', 'b.txt': 'y\nz\n', 'd/x': 'q\n' }
+    assert.equal(out("awk 'BEGINFILE { print \"bf\", FILENAME, FNR, NR } ENDFILE { print \"ef\", FILENAME, FNR } { print }' a.txt b.txt", files), 'bf a.txt 0 0\nx\ny\nef a.txt 2\nbf b.txt 0 2\ny\nz\nef b.txt 2\n')
+    assert.equal(out("awk 'BEGINFILE { if (ERRNO) { print \"skip\", FILENAME, ERRNO; nextfile } print \"open\", FILENAME } { print } ENDFILE { print \"end\", FILENAME, FNR }' a.txt nope b.txt", files), 'open a.txt\nx\ny\nend a.txt 2\nskip nope No such file or directory\nopen b.txt\ny\nz\nend b.txt 2\n')
+    // Without the idiom a missing file is still fatal, after BEGINFILE ran.
+    let r = run("awk 'BEGINFILE { print \"bf\" } { print }' nope", files)
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['bf\n', 'awk: nope: no such file or directory\n', 2])
+    assert.equal(out("awk 'BEGINFILE { nextfile } ENDFILE { print \"ef\", FILENAME } END { print NR }' a.txt b.txt", files), 'ef a.txt\nef b.txt\n0\n')
+    assert.equal(out("awk 'FNR == 1 { nextfile } ENDFILE { print \"ef\", FILENAME, FNR, NR }' a.txt b.txt", files), 'ef a.txt 1 1\nef b.txt 1 2\n')
+    r = run("awk 'ENDFILE { exit 4 } END { print \"end\" }' a.txt b.txt", files)
+    assert.deepEqual([r.stdout, r.exitCode], ['end\n', 4])
+    r = run("awk 'BEGINFILE { print \"[\" ERRNO \"]\" } { print }' d a.txt", files)
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['[Is a directory]\n[]\nx\ny\n', "awk: warning: command line argument `d' is a directory: skipped\n", 0])
+    rejects("awk 'BEGINFILE { next }' a.txt", /`next` cannot be used in a BEGINFILE action/u, files)
+  })
+
+  it('switch falls through like C, matches by `==` or a regex, and rejects duplicate cases', () => {
+    assert.equal(out("awk 'BEGIN { x = \"abc\"; switch (x) { case /^a/: print \"re\"; case \"abc\": print \"str\"; break; case 5: print \"five\"; default: print \"def\" } switch (5) { case \"5\": print \"s5\"; break; case 6: print \"n6\" } switch (u) { default: print \"d\" } switch (\"x\") { case \"y\": print \"no\" } print \"after\" }'"), 're\nstr\ns5\nd\nafter\n')
+    assert.equal(out("echo -e '5 abc\\n6 x\\n7 b' | awk '{ switch ($1) { case 5: print \"num\"; break; case \"6\": print \"str\"; break; default: print \"d\" } switch ($2) { case /b/: print \"rx\"; break; default: print \"d2\" } }'"), 'num\nrx\nstr\nd2\nd\nrx\n')
+    assert.equal(out("awk 'BEGIN { for (i = 1; i <= 3; i++) { switch (i) { case 2: continue; default: print i } } switch (-1) { case -1: print \"neg\" } }'"), '1\n3\nneg\n')
+    rejects("awk 'BEGIN { switch (5) { case 5: print \"a\"; case \"5\": print \"b\" } }'", /duplicate case values in switch body: 5/u)
+    rejects("awk 'BEGIN { switch (1) { print \"x\" } }'", /expected `case` or `default` in switch body/u)
+  })
+
+  it('gawk builtins: strtonum, the bit operations, typeof and isarray', () => {
+    assert.equal(out("awk 'BEGIN { print and(7, 3, 1), or(1, 2, 4), xor(1, 3, 5), lshift(1, 62), rshift(16, 2), compl(5), compl(0), and(5.9, 3) }'"), '1 7 7 4611686018427387904 4 18014398509481978 9007199254740991 1\n')
+    assert.equal(out("awk 'BEGIN { print strtonum(\"017\"), strtonum(\"0x1f\"), strtonum(\" 0x1f \"), strtonum(\"12abc\"), strtonum(\"1e3\"), strtonum(\"08\"), strtonum(17) }'"), '15 31 0 12 1000 8 17\n')
+    assert.equal(out("echo '10 abc' | awk '{ x = 1; y = \"s\"; z[1]; print typeof($1), typeof($2), typeof(x), typeof(y), typeof(z), typeof(w), typeof(1 \"\"), typeof(NF); a[1]; print isarray(a), isarray(b) }'"), 'strnum string number string array untyped string number\n1 0\n')
+    rejects("awk 'BEGIN { print and(-1, 1) }'", /and: argument 1 negative value -1 is not allowed/u)
+    rejects("awk 'BEGIN { print and(1) }'", /and\(\) called with 1 argument; it takes 2 to any number/u)
+  })
+
+  it('$0 is a numeric string from input but a plain string once the program rebuilds it (gawk)', () => {
+    // `$1 = $1` rebuilds $0, after which `$0 < 9` is a string comparison
+    // ("10" < "9"); fields re-split from an assigned $0 are numeric again.
+    assert.equal(out("echo 10 | awk '{ print ($0 < 9); $1 = $1; print ($0 < 9), ($1 < 9) }'"), '0\n1 0\n')
+    assert.equal(out("echo 10 | awk '{ $2 = \"x\"; print ($0 < 9), ($1 < 9); $0 = $0; print ($0 < 9); $0 = \"10\"; print ($0 < 9), ($1 < 9); NF = 1; print ($0 < 9) }'"), '1 0\n1\n1 0\n1\n')
+    assert.equal(out("echo 10 | awk '{ sub(/x/, \"y\"); print ($0 < 9); sub(/1/, \"1\"); print ($0 < 9) }'"), '0\n1\n')
+  })
+
+  it('prints every integral value exactly, signed infinities and NaN, and rounds printf ties to even (gawk / C)', () => {
+    assert.equal(out("awk 'BEGIN { print 2^70, 1e30, 12345678901234567890, 2^63, -2^63, 9223372036854775807; printf \"%d %i\\n\", 1e30, -1e30 }'"), '1180591620717411303424 1000000000000000019884624838656 12345678901234567168 9223372036854775808 -9223372036854775808 9223372036854775808\n1000000000000000019884624838656 -1000000000000000019884624838656\n')
+    assert.equal(out("awk 'BEGIN { printf \"%.0f %.0f %.0f %.1f %.2f %.0e %.1e %.2g %.1f %.1f\\n\", 0.5, 1.5, 2.5, 0.25, 0.125, 2.5, 0.125, 0.125, 0.05, 0.15 }'"), '0 2 2 0.2 0.12 2e+00 1.2e-01 0.12 0.1 0.1\n')
+    assert.equal(out("awk 'BEGIN { x = \"+inf\" + 0; y = \"-nan\" + 0; print x, -x, y, \"inf\" + 0, (x == x), (y == y), (y != y), (x - x < 1); printf \"%d|%5s|%-6d|%E|%.2f\\n\", x, x, x, -x, y }'"), '+inf -inf -nan 0 1 0 1 0\n+inf| +inf|+inf|-INF|-nan\n')
+  })
+
+  it('printf corner cases match gawk: `%5%`, one length modifier, unsigned overflow to %g, zero with precision 0', () => {
+    assert.equal(out("awk 'BEGIN { printf \"%5%|%z|%|%ld %lld %hd\\n\", 1, 2, 3 }'"), '%|%z|%|1 %lld 2\n')
+    assert.equal(out("awk 'BEGIN { printf \"%x|%#x|%9.2x|%u|%X|%x|%u\\n\", 1e30, 1e30, 1e30, -1e30, 2^64, 2^63, -2^63 }'"), '1e+30|1.00000e+30|    1e+30|-1e+30|1.84467e+19|8000000000000000|9223372036854775808\n')
+    assert.equal(out("awk 'BEGIN { printf \"[%.0d][%.0u][%.0u][%#o][%#o][%#.2o][%-#.2o][%#x][%#.0x][%+.0d][%5.0d][%c]\\n\", 0.5, 0, 0.5, 0, 1e-6, 0, 0.5, 1e-6, 0, 0, 0, \"\" }'"), '[][][0][0][00][00][000][0x0][0][][     ][\0]\n')
+    assert.equal(out("awk 'BEGIN { printf \"%#.0g|%#g|%#.0e|%#.0f|%'\"'\"'d|%5'\"'\"'d\\n\", 1, 1, 1, 1, 1234567, 12 }'"), '1.|1.00000|1.e+00|1.|1234567|   12\n')
+  })
+
+  it('grammar corners follow gawk: comparisons do not chain, `~` does, a space before a call is an error, empty rules are errors', () => {
+    rejects("awk 'BEGIN { print 1 < 2 < 3 }'", /comparison operators do not chain \(`a < b < c`\)/u)
+    rejects("awk 'BEGIN { x = 1 == 1 == 1 }'", /comparison operators do not chain/u)
+    assert.equal(out("awk 'BEGIN { print \"a\" ~ \"b\" ~ \"c\", (\"aa\" ~ \"a\") ~ 1 }'"), '0 1\n')
+    rejects("awk ';;BEGIN { print 1 }'", /each rule must have a pattern or an action part/u)
+    rejects("awk 'BEGIN { print 1 };;'", /each rule must have a pattern or an action part/u)
+    assert.equal(out("awk 'BEGIN { print 1 }; END { print 2 };'"), '1\n2\n')
+    rejects("awk 'BEGIN { if (1) { print \"a\" } ; else print \"b\" }'", /unexpected `else`/u)
+    assert.equal(out("awk 'BEGIN { if (0) { print \"a\" }\n\nelse print \"b\" }'"), 'b\n')
+    // Constant folding: division by a constant zero is refused when the
+    // program is read, even in a branch that never runs.
+    rejects("awk 'BEGIN { if (0) print 2 ^ 3 / 0; print \"never\" }'", /syntax error at line 1: division by zero attempted/u)
+    rejects("awk 'BEGIN { print 5 % 0 }'", /division by zero attempted in `%`/u)
+    const r = run("awk 'BEGIN { print \"a\"; x = 0; print 1 / x; print \"b\" }'")
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['a\n', 'awk: division by zero attempted\n', 2])
+  })
+
+  it('warnings go to stderr without failing: dubious escapes in -v values and operands, math domain errors', () => {
+    let r = run("awk -v 'x=a\\qb' 'BEGIN { print x }'")
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['aqb\n', "awk: warning: escape sequence `\\q' treated as plain `q'\n", 0])
+    r = run("awk '{ print y }' 'y=1\\.5' a.txt", { 'a.txt': 'x\n' })
+    assert.deepEqual([r.stdout, r.stderr], ['1.5\n', "awk: warning: escape sequence `\\.' treated as plain `.'\n"])
+    r = run("awk 'BEGIN { print sqrt(-4), log(0) }'")
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['-nan -inf\n', 'awk: warning: sqrt: called with negative argument -4\n', 0])
+  })
+
+  it('`next` reaching BEGIN or END through a function is a fatal error, as in gawk', () => {
+    let r = run("awk 'function f() { next } BEGIN { f() }'")
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', "awk: `next' cannot be called from a BEGIN rule\n", 2])
+    r = run("awk 'function f() { next } END { f() }' a.txt", { 'a.txt': 'x\n' })
+    assert.deepEqual([r.stderr, r.exitCode], ["awk: `next' cannot be called from a END rule\n", 2])
   })
 
   it('is a first-class command: listed in the not-found hint, resolved by which, and tab-completed after a pipe', () => {
@@ -6672,6 +6835,14 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     // unit, so the fix is a code-point walk across all four.
     const t = createTerminal({})
     assert.equal(t.run("awk 'BEGIN { print length(\"a😀b\") }'").stdout, '3\n')
+  })
+
+  it.todo('awk keeps the sign of NaN (gawk prints `+nan` for -log(-1))', () => {
+    // JS numbers carry no observable NaN sign; every NaN prints as
+    // `-nan`, the value the usual sources (log of a negative, inf - inf)
+    // produce on x86, where gawk would show `+nan` after a negation.
+    const t = createTerminal({})
+    assert.equal(t.run("awk 'BEGIN { print -log(-1) }'").stdout, '+nan\n')
   })
 
   it.todo('awk POSIX classes are locale-aware (gawk matches `É` with [[:upper:]])', () => {

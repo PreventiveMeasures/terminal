@@ -1,151 +1,132 @@
-// awk regexes are POSIX EREs; the JS engine is close but not identical,
-// so every pattern — literal or dynamic — is translated before it is
-// compiled. What changes:
-//   `[[:alpha:]]` and friends   expanded to explicit ranges
-//   `\y` `\<` `\>`              gawk word boundaries → `\b`
-//   `\a`, octal `\ddd`, `\xHH`  awk escapes → ES escapes
-//   `\/` `\"`                   the delimiter escapes → plain chars
-//   `{`                         literal unless it forms an interval,
-//                               and `{,n}` → `{0,n}`
-//   stray `}` / `]`             literal (ES /u rejects them bare)
-//   `\q` (any other escape)     the plain character, escaped
-// The ES `u` flag is what makes the strictness bite (it rejects
-// identity escapes like `\_`), and `s` makes `.` match a newline, as
-// POSIX does — records read in paragraph mode contain them.
+// Compiled awk regexes. Every pattern — literal or dynamic — is parsed
+// once (awk-re-parse.js) and serves two matchers: a JS RegExp for the
+// yes/no tests, where its leftmost-first answer is the right answer
+// and native speed matters on a pattern-per-record hot path, and a
+// leftmost-longest NFA (awk-re.js) for every operation that needs the
+// EXTENT of a match — sub, gsub, gensub, match, split, FS, RS, FPAT.
+// The two engines share one AST, so they accept the same language.
 //
-// Known divergences: `\b` is a word boundary (as in every other regex
-// dialect a user is likely to know), not awk's backspace; `\d` `\s`
-// `\w` keep their ES meaning rather than being the plain letter.
+// Instances are cached by source and case mode: IGNORECASE can flip at
+// run time, and a dynamic regex built in the main loop would otherwise
+// recompile per record.
 
 import { AwkError } from './awk-common.js'
+import { parseEre, toJsSource } from './awk-re-parse.js'
+import { compileNfa, search } from './awk-re.js'
 
-const CLASSES = {
-  __proto__: null,
-  alpha: 'A-Za-z', digit: '0-9', alnum: 'A-Za-z0-9', upper: 'A-Z', lower: 'a-z',
-  space: ' \\t\\n\\r\\f\\v', blank: ' \\t', punct: '!-\\/:-@\\[-`{-~',
-  print: ' -~', graph: '!-~', cntrl: '\\x00-\\x1f\\x7f', xdigit: '0-9A-Fa-f',
-  word: 'A-Za-z0-9_',
-}
-
-const SYNTAX = '^$\\.*+?()[]{}|'
-const KEEP = new Set(['n', 't', 'r', 'f', 'v', 'b', 'B', 'd', 'D', 's', 'S', 'w', 'W'])
-const hex2 = (n) => '\\x' + n.toString(16).padStart(2, '0')
-
-// Translate the escape at `src[i]` (a backslash). Returns the ES text
-// and the index of the last consumed character.
-function escape(src, i, inClass) {
-  const c = src[i + 1]
-  if (c === undefined) throw new AwkError('trailing backslash in regex')
-  if (SYNTAX.includes(c) || c === '/' || (inClass && (c === '-' || c === '^'))) return { text: '\\' + c, end: i + 1 }
-  if (KEEP.has(c)) return { text: '\\' + c, end: i + 1 }
-  if (!inClass && (c === 'y' || c === '<' || c === '>')) return { text: '\\b', end: i + 1 }
-  if (c === 'a') return { text: hex2(7), end: i + 1 }
-  if (c >= '0' && c <= '7') {
-    let j = i + 1
-    while (j < i + 4 && src[j] >= '0' && src[j] <= '7') j++
-    return { text: '\\u{' + Number.parseInt(src.slice(i + 1, j), 8).toString(16) + '}', end: j - 1 }
-  }
-  if (c === 'x' && /[0-9a-fA-F]/u.test(src[i + 2] ?? '')) {
-    let j = i + 2
-    while (j < i + 4 && /[0-9a-fA-F]/u.test(src[j] ?? '')) j++
-    return { text: hex2(Number.parseInt(src.slice(i + 2, j), 16)), end: j - 1 }
-  }
-  // `\"`, `\&`, `\q`, ...: the character itself. RegExp.escape yields a
-  // spelling that is safe both inside and outside a bracket expression.
-  return { text: RegExp.escape(c), end: i + 1 }
-}
-
-// A bracket expression, `src[i]` being the `[`. Returns the ES class
-// and the index of the closing `]`.
-function bracket(src, i) {
-  let out = '['
-  let j = i + 1
-  if (src[j] === '^') { out += '^'; j++ }
-  // A `]` right after the opener (or `[^`) is literal in POSIX.
-  if (src[j] === ']') { out += '\\]'; j++ }
-  while (j < src.length && src[j] !== ']') {
-    const c = src[j]
-    if (c === '[' && src[j + 1] === ':') {
-      const close = src.indexOf(':]', j + 2)
-      if (close !== -1) {
-        const name = src.slice(j + 2, close)
-        if (!(name in CLASSES)) throw new AwkError(`invalid character class \`[:${name}:]\``)
-        out += CLASSES[name]; j = close + 2
-        continue
-      }
-    }
-    // Collating symbols / equivalence classes: `[.x.]` and `[=x=]` name
-    // the character itself in the C locale.
-    if (c === '[' && (src[j + 1] === '.' || src[j + 1] === '=')) {
-      const close = src.indexOf(src[j + 1] + ']', j + 2)
-      if (close !== -1) {
-        out += RegExp.escape(src.slice(j + 2, close)); j = close + 2
-        continue
-      }
-    }
-    if (c === '\\') {
-      const r = escape(src, j, true)
-      out += r.text; j = r.end + 1
-      continue
-    }
-    out += c === '[' ? '\\[' : c
-    j++
-  }
-  if (j >= src.length) throw new AwkError('unterminated bracket expression in regex')
-  return { text: out + ']', end: j }
-}
-
-const INTERVAL = /^\{(\d*)(,\d*)?\}/u
-
-export function ereToEs(src) {
-  let out = ''
-  for (let i = 0; i < src.length; i++) {
-    const c = src[i]
-    if (c === '\\') {
-      const r = escape(src, i, false)
-      out += r.text; i = r.end
-    } else if (c === '[') {
-      const r = bracket(src, i)
-      out += r.text; i = r.end
-    } else if (c === '{') {
-      const m = INTERVAL.exec(src.slice(i))
-      if (m && (m[1] !== '' || m[2] !== undefined)) {
-        out += `{${m[1] === '' ? '0' : m[1]}${m[2] ?? ''}}`
-        i += m[0].length - 1
-      } else out += '\\{'
-    } else if (c === '}' || c === ']') {
-      out += '\\' + c
-    } else out += c
-  }
-  return out
-}
-
-// Compiled patterns are cached by source text: a dynamic regex built
-// from a string in the main loop would otherwise recompile per record.
 const CACHE = new Map()
 
-export function compileRegex(src) {
-  const cached = CACHE.get(src)
+export class AwkRegex {
+  constructor(src, ignoreCase, warn) {
+    const { ast, groups } = parseEre(src, warn)
+    this.src = src
+    this.ignoreCase = ignoreCase
+    this.groupCount = groups
+    this.source = toJsSource(ast)
+    this.flags = ignoreCase ? 'siu' : 'su'
+    try {
+      this.js = new RegExp(this.source, this.flags)
+    } catch (e) {
+      throw new AwkError(`invalid regex /${src}/: ${e.message}`)
+    }
+    this.ast = ast
+    this.nfa = null
+    this.anchored = null
+  }
+
+  test(s) { return this.js.test(s) }
+
+  // Leftmost-longest match at or after `from`: { start, end } or null.
+  search(s, from = 0) {
+    if (this.nfa === null) this.nfa = compileNfa(this.ast, this.ignoreCase)
+    return search(this.nfa, s, from)
+  }
+
+  // Capture groups for a match whose extent is already known: the JS
+  // regex, anchored to exactly that span, assigns the groups. Entry 0 is
+  // the whole match; a group that did not take part is undefined.
+  groups(s, start, end) {
+    if (this.anchored === null) this.anchored = new RegExp(`^(?:${this.source})$`, this.flags + 'd')
+    const m = this.anchored.exec(s.slice(start, end))
+    if (!m) return [{ text: s.slice(start, end), start, end }]
+    return m.indices.map((span, i) => (span === undefined ? undefined : { text: m[i], start: start + span[0], end: start + span[1] }))
+  }
+}
+
+export function compileRegex(src, ignoreCase = false, warn = null) {
+  const key = (ignoreCase ? 'i' : 'c') + src
+  const cached = CACHE.get(key)
   if (cached) return cached
   if (CACHE.size >= 500) CACHE.clear()
-  let re
-  try {
-    re = new RegExp(ereToEs(src), 'su')
-  } catch (e) {
-    throw new AwkError(`invalid regex /${src}/: ${e.message}`)
-  }
-  CACHE.set(src, re)
+  const re = new AwkRegex(src, ignoreCase, warn)
+  CACHE.set(key, re)
   return re
 }
 
-// The same pattern with extra flags (`g` for gsub, `d` for match's
-// capture positions), also cached.
-export function withFlags(re, flags) {
-  const key = `${flags} ${re.source}`
-  let out = CACHE.get(key)
-  if (!out) {
-    out = new RegExp(re.source, re.flags + flags)
-    CACHE.set(key, out)
+// One UTF-16 step at `at`: 2 across a surrogate pair, else 1.
+export function stepAt(s, at) {
+  return s.codePointAt(at) > 0xFFFF ? 2 : 1
+}
+
+// Split `str` at every NON-empty match of `re`; empty matches are not
+// separators (gawk: `split("abc", a, /x*/)` is one field).
+export function splitByRegex(str, re) {
+  const out = []
+  let pos = 0
+  let last = 0
+  while (pos <= str.length) {
+    const m = re.search(str, pos)
+    if (!m) break
+    if (m.start === m.end) {
+      if (m.end >= str.length) break
+      pos = m.end + stepAt(str, m.end)
+      continue
+    }
+    out.push(str.slice(last, m.start))
+    last = m.end
+    pos = m.end
   }
+  out.push(str.slice(last))
   return out
+}
+
+// The substitution loop behind sub, gsub and gensub, with the POSIX
+// rule for empty matches: an empty match immediately after the previous
+// match is not a match (`gsub(/b*/, "-", "abc")` is `-a-c-`, not
+// `-a--c-`), and an empty match elsewhere replaces nothing but still
+// counts. `replace(start, end, index)` returns the replacement text for
+// the index-th match (1-based) or null to leave it as it was. `mode` is
+// 'first' (sub), 'global' (gsub, gensub "g") or 'nth' (gensub with a
+// number), where gawk counts every empty match, skip rule or not.
+export function substituteAll(str, re, replace, mode) {
+  const global = mode !== 'first'
+  const n = str.length
+  let out = ''
+  let pos = 0
+  let lastEnd = -1
+  let count = 0
+  while (pos <= n) {
+    const m = re.search(str, pos)
+    if (!m) break
+    const empty = m.start === m.end
+    if (empty && m.start === lastEnd && mode !== 'nth') {
+      if (m.start >= n) break
+      const step = stepAt(str, m.start)
+      out += str.slice(pos, m.start + step)
+      pos = m.start + step
+      continue
+    }
+    count++
+    const text = replace(m.start, m.end, count)
+    out += str.slice(pos, m.start) + (text === null ? str.slice(m.start, m.end) : text)
+    lastEnd = m.end
+    if (empty) {
+      if (m.end >= n) { pos = n; break }
+      const step = stepAt(str, m.end)
+      out += str.slice(m.end, m.end + step)
+      pos = m.end + step
+    } else pos = m.end
+    if (!global) break
+  }
+  return { out: out + str.slice(pos), count }
 }

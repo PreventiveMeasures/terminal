@@ -2,8 +2,10 @@
 // awk-parse.js. Lowest to highest:
 //   assignment  = += -= *= /= %= ^= **=       (right)
 //   ?:                                        (right)
-//   ||   &&   in   ~ !~                       (left)
-//   < <= == != > >=   (a `>` is a redirection inside print — opts.noGt)
+//   ||   &&   in                              (left)
+//   ~ !~                                      (non-associative)
+//   < <= == != > >=   (non-associative; a `>` is a redirection inside
+//                      print — opts.noGt)
 //   concatenation (juxtaposition)
 //   + -   * / %
 //   unary ! - +
@@ -102,19 +104,23 @@ function parseMatch(p, opts) {
   return left
 }
 
+const isRelOp = (p, opts) => p.tok.type === 'punct' && REL_OPS.has(p.tok.value) && !(opts.noGt && p.tok.value === '>')
+
+// The relational operators do not chain: `1 < 2 < 3` is a syntax error
+// in awk, not a left-associative chain.
 function parseComparison(p, opts) {
-  let left = parseConcat(p, opts)
-  for (;;) {
-    const t = p.tok
-    // Inside a print list (`noGt`) a `|` is an output pipe, which
-    // parsePrint reports; anywhere else it can only be `cmd | getline`.
-    if (t.type === 'punct' && (t.value === '|' || t.value === '|&') && !opts.noGt) {
-      p.fail(`command pipelines (\`"cmd" | getline\`) are not supported: ${NO_PROCESSES}`)
-    }
-    if (t.type !== 'punct' || !REL_OPS.has(t.value) || (opts.noGt && t.value === '>')) return left
-    p.next()
-    left = { type: 'compare', op: t.value, left, right: parseConcat(p, opts) }
+  const left = parseConcat(p, opts)
+  const t = p.tok
+  // Inside a print list (`noGt`) a `|` is an output pipe, which
+  // parsePrint reports; anywhere else it can only be `cmd | getline`.
+  if (t.type === 'punct' && (t.value === '|' || t.value === '|&') && !opts.noGt) {
+    p.fail(`command pipelines (\`"cmd" | getline\`) are not supported: ${NO_PROCESSES}`)
   }
+  if (!isRelOp(p, opts)) return left
+  p.next()
+  const node = { type: 'compare', op: t.value, left, right: parseConcat(p, opts) }
+  if (isRelOp(p, opts)) p.fail(`comparison operators do not chain (\`a ${t.value} b ${p.tok.value} c\`); parenthesize the first comparison`)
+  return node
 }
 
 // Concatenation has no operator: two operands side by side. Anything
@@ -141,11 +147,38 @@ function parseAdditive(p, opts) {
   return left
 }
 
+// The value of a constant numeric expression, or null. gawk folds
+// these while reading the program, so `1 / 0` — or `2 ^ 3 % 0` in a
+// branch that never runs — is refused before anything executes.
+function constValue(node) {
+  if (node.type === 'num') return node.value
+  if (node.type === 'neg' || node.type === 'plus') {
+    const v = constValue(node.expr)
+    return v === null ? null : node.type === 'neg' ? -v : v
+  }
+  if (node.type !== 'binary') return null
+  const a = constValue(node.left)
+  const b = constValue(node.right)
+  if (a === null || b === null) return null
+  switch (node.op) {
+    case '+': return a + b
+    case '-': return a - b
+    case '*': return a * b
+    case '/': return a / b
+    case '%': return a % b
+    default: return a ** b
+  }
+}
+
 function parseMultiplicative(p, opts) {
   let left = parseUnary(p, opts)
   while (p.is('*') || p.is('/') || p.is('%')) {
     const op = p.next().value
-    left = { type: 'binary', op, left, right: parseUnary(p, opts) }
+    const right = parseUnary(p, opts)
+    if (op !== '*' && constValue(right) === 0 && constValue(left) !== null) {
+      p.fail(op === '/' ? 'division by zero attempted' : 'division by zero attempted in `%`')
+    }
+    left = { type: 'binary', op, left, right }
   }
   return left
 }
@@ -212,7 +245,7 @@ function parsePrimary(p, opts) {
 }
 
 function compileOrFail(p, source) {
-  try { return compileRegex(source) } catch (e) { return p.fail(e.message) }
+  try { return compileRegex(source, false, (msg) => p.warn(msg)) } catch (e) { return p.fail(e.message) }
 }
 
 function parseName(p) {
@@ -222,9 +255,10 @@ function parseName(p) {
     p.expect(']')
     return { type: 'index', name, subs }
   }
-  // `f (x)` — a space before the paren — is still a call when `f` is a
-  // defined function; otherwise it is `f` concatenated with `(x)`.
-  if (p.is('(') && p.funcs.has(name)) return finishCall(p, name)
+  // `f (x)` — a space before the paren — is how awk writes `f`
+  // concatenated with `(x)`; when `f` is a function gawk refuses the
+  // ambiguity outright rather than guess.
+  if (p.is('(') && p.funcs.has(name)) p.fail(`function \`${name}\` called with space between name and \`(\``)
   return { type: 'var', name }
 }
 
@@ -259,6 +293,8 @@ const ARITY = {
   gensub: [3, 4], match: [2, 3], sprintf: [1, Infinity], sin: [1, 1], cos: [1, 1],
   atan2: [2, 2], exp: [1, 1], log: [1, 1], sqrt: [1, 1], int: [1, 1], rand: [0, 0],
   srand: [0, 1], tolower: [1, 1], toupper: [1, 1], close: [1, 2], fflush: [0, 1], systime: [0, 0],
+  strtonum: [1, 1], and: [2, Infinity], or: [2, Infinity], xor: [2, Infinity],
+  lshift: [2, 2], rshift: [2, 2], compl: [1, 1], typeof: [1, 1], isarray: [1, 1],
 }
 
 function parseBuiltin(p) {
