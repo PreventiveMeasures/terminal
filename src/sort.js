@@ -5,6 +5,7 @@
 
 import { parseArgs } from './parse.js'
 import { err, joinLines, okWith, readContent, splitLines } from './util.js'
+import { unsupported } from './unsupported.js'
 
 export function sort(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, {
@@ -82,6 +83,13 @@ export function sort(stdin, tokens, ctx) {
 // Character offsets (`-k1.2`) are not modelled; the message says so
 // rather than silently sorting on the wrong span.
 const KEY_MODS = 'nrfb'
+// Every modifier GNU sort accepts, including the ones above. The two
+// sets differ, and the difference is the whole point: a spec GNU would
+// take and this one won't (`-k2g`, `-k1.2`) is a GAP and belongs on the
+// diagnostic feed, while `-k2Z` is malformed for GNU too and is just an
+// error. Reporting both the same way would train a caller to ignore the
+// feed, or to treat its own typos as missing features.
+const GNU_KEY_MODS = 'bdfghiMnRrV'
 const KEY_POS = /^(\d+)([a-zA-Z]*)$/u
 
 function parseKeySpecs(raw, globals) {
@@ -89,15 +97,20 @@ function parseKeySpecs(raw, globals) {
   for (const spec of raw) {
     const parts = spec.split(',')
     const bad = () => {
-      const hint = spec.includes('.') ? ' (character offsets are not supported)' : ''
-      return { error: err(`sort: invalid key specification: ${spec}${hint}`) }
+      // A character offset (`-k1.2`) is the one malformed-looking spec
+      // that GNU accepts, so it is classified as the gap it is.
+      if (!spec.includes('.')) return { error: err(`sort: invalid key specification: ${spec}`) }
+      const message = `sort: invalid key specification: ${spec} (character offsets are not supported)`
+      return { error: unsupported('option', 'sort', `-k${spec}`, message) }
     }
     if (parts.length > 2) return bad()
     const [m1, m2] = parts.map((part) => KEY_POS.exec(part))
     if (!m1 || (parts.length === 2 && !m2)) return bad()
     const mods = m1[2] + (m2?.[2] ?? '')
     for (const c of mods) {
-      if (!KEY_MODS.includes(c)) return { error: err(`sort: unknown key option \`${c}\` in ${spec}`) }
+      if (KEY_MODS.includes(c)) continue
+      const message = `sort: unknown key option \`${c}\` in ${spec}`
+      return { error: GNU_KEY_MODS.includes(c) ? unsupported('option', 'sort', `-k${spec}`, message) : err(message) }
     }
     const start = Number(m1[1])
     const end = m2 === undefined ? undefined : Number(m2[1])

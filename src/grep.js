@@ -17,6 +17,7 @@
 import { basename, relativeTo, resolve } from './fs.js'
 import { parseArgs } from './parse.js'
 import { err, joinLines, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
+import { unsupportedFrom } from './unsupported.js'
 import { breToEs } from './bre.js'
 import { compileGlob } from './glob.js'
 
@@ -45,7 +46,10 @@ export function grep(stdin, tokens, ctx) {
   // errors exit 2 (GNU), distinct from dispatch's generic exit 1.
   let parsed
   try { parsed = parseArgs(tokens, { short: SHORT_FLAGS, valueShort: VALUE_SHORTS, repeatable: ['e', 'include', 'exclude', 'exclude-dir'] }) }
-  catch (e) { return err(`grep: ${e.message}`, 2) }
+  // `unsupportedFrom` keeps an unknown-option throw classified on its
+  // way through this catch — grep builds its own result here, so the
+  // dispatcher never sees the original.
+  catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
   const { flags, values, positional } = parsed
   const ePatterns = values.get('e') ?? []
   // If any `-e` patterns were collected, every positional is a file;

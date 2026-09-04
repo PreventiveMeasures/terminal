@@ -44,6 +44,7 @@
 import { basename, relativeTo, resolve, walkTree } from './fs.js'
 import { compileGlob } from './glob.js'
 import { err, parseNonNegativeInt } from './util.js'
+import { unsupported } from './unsupported.js'
 
 // `primaryFor` consumes the next token as the value for anything in
 // here — hence the name, matching grep.js's SHORT_FLAGS/VALUE_SHORTS
@@ -277,7 +278,7 @@ function walkExprTokens(tokens, minDepth, maxDepth) {
     // not a path. Reject so a typo (`find -X /src`) surfaces here
     // rather than as a "no such file or directory: -X" lower down.
     if (t.startsWith('-') && t !== '-' && !/^-\d/u.test(t)) {
-      return { error: err(`find: unknown option: ${t}`) }
+      return { error: unsupported('option', 'find', t, `find: unknown option: ${t}`) }
     }
     if (seenExpr) return { error: err(`find: paths must precede expression: ${t}`) }
     starts.push(t)
@@ -340,7 +341,7 @@ function consumeExec(tokens, i, pendingNot) {
     // command anyway. Reject up front rather than pick a surprising
     // semantic.
     if (pendingNot) {
-      return { error: err('find: `-not -exec ... +` is not supported (the `+` form has no meaningful negation)') }
+      return { error: unsupported('feature', 'find', '-not -exec ... +', 'find: `-not -exec ... +` is not supported (the `+` form has no meaningful negation)') }
     }
   }
   const pred = { kind: 'exec', mode, cmd: execTokens[0], args: execTokens.slice(1), negate: pendingNot }

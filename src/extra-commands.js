@@ -8,6 +8,7 @@
 
 import { parseArgs } from './parse.js'
 import { err, joinLines, ok, okWith, readInputs, splitLines, usage, utf8, utf8Decoder } from './util.js'
+import { unsupported } from './unsupported.js'
 import { hexdump, od, xxd } from './dump.js'
 
 // Reverse line order: read stdin (or each file in order, reversed
@@ -229,7 +230,7 @@ function tr(stdin, tokens) {
   const del = flags.has('d')
   const squeeze = flags.has('s')
   const complement = flags.has('c')
-  if (del && squeeze) return err('tr: -d combined with -s is not supported')
+  if (del && squeeze) return unsupported('option', 'tr', '-d -s', 'tr: -d combined with -s is not supported')
   const want = (del || squeeze) ? 1 : 2
   if (positional.length !== want) return usage('tr [-c] SET1 SET2  |  tr [-c] -d SET  |  tr [-c] -s SET')
   const set1 = expandTrSet(positional[0])

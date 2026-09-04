@@ -50,10 +50,12 @@
 
 import { NAME_RE, tokenize } from './tokenize.js'
 
+import { UnsupportedError } from './unsupported.js'
+
 export function parseLine(line) {
   const raw = tokenize(line)
   for (const t of raw) {
-    if (t.kind === 'amp') throw new Error('background processes (`&`) are not supported')
+    if (t.kind === 'amp') throw new UnsupportedError('feature', '&', 'background processes (`&`) are not supported')
   }
   // Trailing `;` is a no-op in bash; tolerate it so `cmd1; cmd2;`
   // doesn't trip the empty-stage check below. We don't extend the
@@ -277,13 +279,13 @@ function applyRedir(stage, raw, i) {
   const target = raw[i + 1]
   const label = tokenLabel(op)
   if (op.append) {
-    throw new Error(`filesystem is read-only — \`${label}\` append is not supported; use \`|\` to pipe or \`${prefix}>/dev/null\` to discard`)
+    throw new UnsupportedError('feature', label, `filesystem is read-only — \`${label}\` append is not supported; use \`|\` to pipe or \`${prefix}>/dev/null\` to discard`)
   }
   if (!target || target.kind !== 'word') {
     throw new Error(`redirect \`${label}\` requires a target`)
   }
   if (target.value !== '/dev/null') {
-    throw new Error(`filesystem is read-only — use \`|\` to pipe between commands, or \`${label}/dev/null\` to discard`)
+    throw new UnsupportedError('feature', label, `filesystem is read-only — use \`|\` to pipe between commands, or \`${label}/dev/null\` to discard`)
   }
   if (op.fd === '1') stage.stdoutToNull = true
   else stage.stderrToNull = true
@@ -379,7 +381,7 @@ export function parseArgs(tokens, schema = {}) {
       } else if (long.has(name)) {
         if (inlineVal !== null) throw new Error(`option --${name} doesn't allow an argument`)
         flags.add(name)
-      } else throw new Error(`unknown option: --${name}`)
+      } else throw new UnsupportedError('option', `--${name}`, `unknown option: --${name}`)
       continue
     }
     if (t.startsWith('-') && t.length > 1 && !isNumericPositional(t, short, valueShort, repeatable)) {
@@ -435,7 +437,7 @@ function consumeShorts(tokens, i, short, valueShort, repeatable, flags, values, 
       order.push({ name: c, value })
       return i
     }
-    if (!short.has(c)) throw new Error(`unknown option: -${c}`)
+    if (!short.has(c)) throw new UnsupportedError('option', `-${c}`, `unknown option: -${c}`)
     flags.add(c)
   }
   return i

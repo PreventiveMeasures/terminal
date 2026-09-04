@@ -122,6 +122,30 @@ export interface CreateTerminalOptions {
   commands?: Commands
 }
 
+/**
+ * What kind of gap an {@link Unsupported} entry reports.
+ *
+ * - `command` — the name is not a registered command.
+ * - `option` — a registered command was handed an option it does not
+ *   implement, or explicitly rejects.
+ * - `feature` — a construct the parser recognizes that deliberately goes
+ *   no further: `&` backgrounding, an append redirect against the
+ *   read-only filesystem, `sed` outside its one supported script form.
+ */
+export type UnsupportedKind = 'command' | 'option' | 'feature'
+
+/** One gap in this implementation, hit while running a command line. */
+export interface Unsupported {
+  /** Which of the three gap classes this is. */
+  kind: UnsupportedKind
+  /** The command that reported it, as typed; `null` for a gap in the shell itself rather than in a command. */
+  command: string | null
+  /** The construct that is missing, as typed — `-prune`, `--bogus`, `frobnicate`, `>>`. */
+  detail: string
+  /** Human-readable diagnostic: the same line the gap put on stderr, minus the trailing newline. Shell-level gaps omit the generic `error: ` prefix that stderr carries. */
+  message: string
+}
+
 /** Result of running a command line through {@link Terminal.run}. */
 export interface RunResult {
   /** Concatenated stdout from every stage that ran. */
@@ -132,6 +156,26 @@ export interface RunResult {
   exitCode: number
   /** Working directory after the line completed. */
   cwd: string
+  /**
+   * Gaps in this implementation hit anywhere in the line — the diagnostic
+   * channel, for callers driving the terminal programmatically.
+   *
+   * Frozen, empty when the line asked for nothing this terminal lacks, and
+   * deduplicated: one entry per distinct gap however many times it was hit.
+   *
+   * These are *also* reported on {@link RunResult.stderr} exactly as before,
+   * which is what an interactive user should see. The separate channel exists
+   * because stderr belongs to the command, so the shell's ordinary plumbing is
+   * free to discard it: `find . -prune -o -print 2>/dev/null | head` silences
+   * the message and then replaces the exit code, leaving a missing option
+   * indistinguishable from an empty tree. Nothing in a command line —
+   * redirect, pipe, `&&` gate, or subshell — can suppress this list.
+   *
+   * Scope is gaps, not failures. A missing file, a `grep` that matched
+   * nothing, or a `cd` into a non-directory are things GNU reports the same
+   * way; they stay on stderr and never appear here.
+   */
+  unsupported: readonly Unsupported[]
 }
 
 /** A virtual terminal instance with a mutable cwd carried across {@link Terminal.run} calls. */
