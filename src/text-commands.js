@@ -7,6 +7,7 @@
 
 import { parseArgs } from './parse.js'
 import { err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
+import { awk } from './awk.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
 import { xargs } from './xargs.js'
@@ -460,7 +461,7 @@ function cmdTrue() { return ok() }
 function cmdFalse() { return { stdout: '', stderr: '', exitCode: 1 } }
 
 export const TEXT_COMMANDS = {
-  cat, grep, head, tail, wc, sort, uniq, echo, xargs,
+  cat, grep, head, tail, wc, sort, uniq, echo, xargs, awk,
 }
 
 // Dispatchable but unlisted: `true` / `false` / `:` are useful in

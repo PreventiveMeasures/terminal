@@ -75,6 +75,13 @@ const HOSTILE = [
   'for c in "node -e 1" "sh -c id"; do $c; done',
   "for f in eval; do $f '1+1'; done",
   'for f in a; do $(id); done',
+  // awk is a real language with, in every other implementation, four
+  // ways to reach a shell. Each is refused by the parser.
+  "awk 'BEGIN { system(\"id\") }'",
+  "awk 'BEGIN { \"id\" | getline user; print user }'",
+  "awk '{ print $0 | \"sh\" }' a.js",
+  "awk 'BEGIN { print \"x\" > \"/etc/passwd\" }'",
+  "awk -f a.js",
 ]
 
 describe('no JS execution — source', () => {
@@ -211,6 +218,25 @@ describe('no JS execution — runtime', () => {
       assert.equal(r.exitCode, 127, name)
       assert.match(r.stderr, /command not found/u, name)
     }
+  })
+
+  it('awk refuses its process-spawning and file-writing forms at parse time', () => {
+    const t = createTerminal(SOURCES)
+    const cases = [
+      ["awk 'BEGIN { system(\"id\") }'", /system\(\) is not supported: this terminal runs no processes/u],
+      ["awk 'BEGIN { \"id\" | getline user }'", /command pipelines .* are not supported: this terminal runs no processes/u],
+      ["awk '{ print | \"sh\" }' a.js", /output pipes .* are not supported: this terminal runs no processes/u],
+      ["awk 'BEGIN { print \"x\" > \"/etc/passwd\" }'", /the filesystem is read-only/u],
+    ]
+    for (const [line, re] of cases) {
+      const r = t.run(line)
+      assert.equal(r.exitCode, 1, line)
+      assert.equal(r.stdout, '', line)
+      assert.match(r.stderr, re, line)
+    }
+    // Refused even when the statement could never run: the parser
+    // rejects the program as a whole.
+    assert.match(t.run("awk 'NR == -1 { system(\"id\") } { print }' a.js").stderr, /system\(\) is not supported/u)
   })
 
   it('find -exec and xargs dispatch through the registry, never to a host process', () => {
