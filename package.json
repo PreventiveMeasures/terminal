@@ -35,6 +35,7 @@
     "src/braces.js",
     "src/bre.js",
     "src/complete.js",
+    "src/custom.js",
     "src/dump.js",
     "src/extra-commands.js",
     "src/find.js",
@@ -45,6 +46,7 @@
     "src/index.js",
     "src/nav-commands.js",
     "src/parse.js",
+    "src/registry.js",
     "src/sed.js",
     "src/text-commands.js",
     "src/util.js"

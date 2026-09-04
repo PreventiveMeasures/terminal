@@ -12,6 +12,13 @@
 //   term.run('ls /missing 2>/dev/null && echo ok || echo failed')
 //   // → { stdout, stderr, exitCode, cwd }
 //
+// `opts.commands` wires in commands this package does not ship —
+// `sha256sum` and friends, whose implementation would mean bundling
+// a crypto library into a package that otherwise has no runtime
+// dependencies. The caller supplies the handler, the engine supplies
+// the shell around it (expansion, pipes, redirects, `&&` chains,
+// completion, `which`). See custom.js for the handler contract.
+//
 // `run` parses the line into a sequence of steps separated by
 // `&&` / `||` gates. Each step is a pipeline of stages (split on
 // `|`) that may suppress stdout/stderr via `>/dev/null` and
@@ -24,70 +31,12 @@
 // without changing the outer terminal's cwd.
 
 import { expandBraces } from './braces.js'
-import { EXTRA_COMMANDS, HIDDEN_EXTRAS } from './extra-commands.js'
 import { createFs, resolve } from './fs.js'
 import { expandGlobs } from './glob.js'
-import { NAV_COMMANDS } from './nav-commands.js'
 import { parseLine } from './parse.js'
-import { sed } from './sed.js'
-import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './text-commands.js'
+import { DEFAULT_REGISTRY, createRegistry } from './registry.js'
 import { err } from './util.js'
 import { complete } from './complete.js'
-
-// `__proto__: null` so a user typing e.g. `toString` doesn't reach
-// `Object.prototype.toString` through the prototype chain and have
-// `dispatch()` accidentally call it. Spreading copies own enumerable
-// properties only, so the registries contain exactly the names we
-// registered — nothing inherited.
-const COMMANDS = { __proto__: null, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_COMMANDS }
-// Hidden registry — dispatchable by name (and via ctx.dispatch from
-// xargs), but excluded from the "Available: …" hint so the
-// commands here don't read as part of the documented surface.
-// `sed` is narrow/single-purpose; the TRIVIAL_COMMANDS (`true` /
-// `false` / `:`) are dispatchable for pipeline-testing but too
-// uninteresting to mention.
-const HIDDEN = { __proto__: null, sed, ...HIDDEN_EXTRAS, ...TRIVIAL_COMMANDS }
-
-// Command priority for tab completion and the "not found" hint —
-// ordered for a code auditor: list & navigate, read, search, then
-// downstream pipelines. `pwd` lands near the end because the prompt
-// already tells you where you are; `seq` / `which` / `basename` /
-// `dirname` rarely earn their slot in an audit session. Commands
-// present in COMMANDS but missing from this list fall through at
-// the end alphabetically — a new command never silently drops out
-// of completion if someone forgets to update the priority list.
-const COMMAND_ORDER = [
-  'ls', 'cd', 'cat', 'grep', 'find',
-  'head', 'tail', 'wc', 'tree',
-  'sort', 'uniq', 'cut', 'tr', 'nl', 'tac', 'hexdump',
-  'xargs', 'echo',
-  'pwd', 'seq', 'which', 'basename', 'dirname',
-]
-const COMMAND_NAMES = orderedCommandNames()
-const KNOWN = COMMAND_NAMES.join(', ')
-
-// Pipe-target priority. After `|` the next command receives the
-// previous stage's stdout as stdin — completing `... | ls` would
-// be misleading since ls ignores its stdin. PIPE_NAMES is the
-// hand-curated subset of COMMAND_NAMES whose handlers actually
-// read `stdin` (no `_stdin` underscore on their first param). No
-// alphabetical fallback here: adding a pipeable command should be
-// a deliberate decision, not a silent default.
-const PIPE_NAMES = [
-  'grep', 'head', 'tail', 'wc',
-  'sort', 'uniq', 'cut', 'xargs',
-  'tr', 'nl', 'tac', 'hexdump', 'cat',
-]
-
-function orderedCommandNames() {
-  const remaining = new Set(Object.keys(COMMANDS))
-  const out = []
-  for (const name of COMMAND_ORDER) {
-    if (remaining.delete(name)) out.push(name)
-  }
-  out.push(...[...remaining].sort())
-  return out
-}
 
 export function createTerminal(sources, opts = {}) {
   const fs = createFs(sources)
@@ -100,47 +49,34 @@ export function createTerminal(sources, opts = {}) {
   // convention (`/home/user/...`). Surfacing as a plain ctx property
   // (not a getter) keeps the value snapshotted at terminal creation
   // — runtime swaps would need a new createTerminal call anyway.
-  const ctx = { cwd, fs, user: opts.user ?? 'user' }
+  //
+  // `registry` rides on ctx so the engine's step/pipeline/stage
+  // functions — which already thread ctx everywhere — reach the
+  // command set without a second parameter on each of them.
+  const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
+  const ctx = { cwd, fs, user: opts.user ?? 'user', registry }
   // Commands like `xargs` need to invoke other commands. Exposing
-  // `dispatch` on ctx (rather than importing COMMANDS at the
-  // command site) keeps the registry as the only place that knows
-  // the full command set, and lets command modules stay free of
-  // back-references into index.js.
+  // `dispatch` on ctx (rather than reaching for the registry at the
+  // command site) keeps lookup in one place, and lets command
+  // modules stay free of back-references into index.js.
   ctx.dispatch = (name, tokens, stdin) => dispatch(name, tokens, stdin, ctx)
   // `which` looks up names against the registries to print a fake
   // `/usr/bin/<name>` path. Exposing a predicate (rather than the
-  // registry objects) keeps the registries internal to index.js.
-  ctx.hasCommand = (name) => Boolean(COMMANDS[name] || HIDDEN[name])
+  // registry object) keeps the command set out of the command modules.
+  ctx.hasCommand = registry.has
   if (!fs.isDir(ctx.cwd)) throw new Error(`createTerminal: cwd is not a directory: ${ctx.cwd}`)
   return {
     run: (line) => safeRun(line, ctx),
     cwd: () => ctx.cwd,
-    complete: (line) => complete(line, ctx, { names: COMMAND_NAMES, pipeNames: PIPE_NAMES, binPrefixes: BIN_PREFIXES, resolveCommand }),
+    complete: (line) => complete(line, ctx, registry),
   }
-}
-
-// Strip a leading `/bin/`, `/sbin/`, `/usr/bin/`, or `/usr/local/bin/`
-// from `name` when the bare name resolves to a registered command.
-// Matches what users with shell muscle memory tend to type —
-// `/bin/ls`, `/usr/bin/grep`, `/usr/local/bin/node` — without
-// exposing the virtual FS as a real PATH. If the stripped name
-// isn't registered, fall through with the original so the
-// not-found error reflects what was typed.
-const BIN_PREFIXES = ['/usr/local/bin/', '/usr/bin/', '/bin/', '/sbin/']
-function resolveCommand(name) {
-  for (const prefix of BIN_PREFIXES) {
-    if (name.startsWith(prefix)) {
-      const stripped = name.slice(prefix.length)
-      if (COMMANDS[stripped] || HIDDEN[stripped]) return stripped
-    }
-  }
-  return name
 }
 
 function dispatch(name, tokens, stdin, ctx) {
-  const resolved = resolveCommand(name)
-  const cmd = COMMANDS[resolved] ?? HIDDEN[resolved]
-  if (!cmd) return unknownCommand(name)
+  const reg = ctx.registry
+  const resolved = reg.resolveCommand(name)
+  const cmd = reg.commands[resolved] ?? reg.hidden[resolved]
+  if (!cmd) return unknownCommand(name, reg)
   try {
     return cmd(stdin, tokens, ctx)
   } catch (e) {
@@ -249,6 +185,6 @@ function runGroup(steps, ctx, stdin) {
   }
 }
 
-function unknownCommand(name) {
-  return err(`${name}: command not found. Available: ${KNOWN}`, 127)
+function unknownCommand(name, reg) {
+  return err(`${name}: command not found. Available: ${reg.known}`, 127)
 }

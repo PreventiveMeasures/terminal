@@ -2,9 +2,10 @@
 // registry) because it's an independent concern with a different input
 // contract: it runs on PARTIAL, possibly-unparseable input (mid-token,
 // quote state in flight), so it carries its own light boundary scanner
-// instead of reusing parse.js's tokenizer. createTerminal hands in a
-// small registry view — { names, pipeNames, binPrefixes, resolveCommand }
-// — so completion stays decoupled from the registry's internals.
+// instead of reusing parse.js's tokenizer. createTerminal hands in the
+// registry, of which only a small view is used here — { names,
+// pipeNames, binPrefixes, resolveCommand } — so completion stays
+// decoupled from how the command set is assembled.
 
 import { resolve } from './fs.js'
 
