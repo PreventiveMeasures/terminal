@@ -39,7 +39,7 @@ const isBuiltin = (name) => Boolean(BUILTIN_COMMANDS[name] || BUILTIN_HIDDEN[nam
 const COMMAND_ORDER = [
   'ls', 'cd', 'cat', 'grep', 'find',
   'head', 'tail', 'wc', 'tree',
-  'sort', 'uniq', 'cut', 'tr', 'nl', 'tac', 'hexdump',
+  'sort', 'uniq', 'cut', 'tr', 'awk', 'nl', 'tac', 'hexdump',
   'xargs', 'echo',
   'pwd', 'seq', 'which', 'basename', 'dirname',
 ]
@@ -54,7 +54,7 @@ const BUILTIN_NAMES = orderedCommandNames()
 // a deliberate decision, not a silent default.
 const PIPE_NAMES = [
   'grep', 'head', 'tail', 'wc',
-  'sort', 'uniq', 'cut', 'xargs',
+  'sort', 'uniq', 'cut', 'xargs', 'awk',
   'tr', 'nl', 'tac', 'hexdump', 'cat',
 ]
 
