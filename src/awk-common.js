@@ -9,10 +9,18 @@
 // program it could not compile. Without one it is a fatal runtime error
 // (division by zero, unreadable input, output to a file, ...): exit 2,
 // as gawk.
+// `gap` names a construct this interpreter deliberately does not
+// implement though gawk does — `system()`, an output pipe, a write to a
+// real file. awk.js turns those into entries on the run's diagnostic
+// channel (see unsupported.js), so a caller that redirected stderr can
+// still tell "this awk cannot do that" from "your program is wrong".
+// Left null for ordinary errors: a syntax mistake, a division by zero,
+// or a function the PROGRAM never defined are the caller's, not ours.
 export class AwkError extends Error {
-  constructor(message, line = null) {
+  constructor(message, line = null, gap = null) {
     super(message)
     this.line = line
+    this.gap = gap
   }
 }
 

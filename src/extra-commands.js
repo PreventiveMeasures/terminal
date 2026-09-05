@@ -8,6 +8,7 @@
 
 import { parseArgs } from './parse.js'
 import { err, joinLines, ok, okWith, readInputs, splitLines, usage, utf8, utf8Decoder } from './util.js'
+import { unsupported } from './unsupported.js'
 import { hexdump, od, xxd } from './dump.js'
 
 // Reverse line order: read stdin (or each file in order, reversed
@@ -40,10 +41,11 @@ const MAX_SEQ_ELEMENTS = 1_000_000
 // `seq 1 0.1 2` doesn't silently misbehave. parseNonNegativeInt
 // can't be reused because seq legitimately accepts negatives.
 //
-// Auto-sign is gated to the two-arg form on purpose. In the one-arg
-// form FIRST is fixed at 1 and `seq 0` / `seq -5` should print
-// nothing (the loop just doesn't fire) — matching GNU. The earlier
-// shared auto-sign made `seq 0` emit `1\n0\n`, which is wrong.
+// Neither the one- nor the two-argument form infers a descending
+// increment: both fix INCR at 1, so `seq 0`, `seq -5`, and `seq 3 1`
+// all print nothing because the loop never fires. That is GNU — a
+// reversed range is empty, and counting down requires the explicit
+// three-argument `seq 3 -1 1`.
 function seq(_stdin, tokens) {
   const { flags, values, positional } = parseArgs(tokens, { short: ['w'], valueShort: ['s'] })
   if (positional.length === 0 || positional.length > 3) {
@@ -56,7 +58,7 @@ function seq(_stdin, tokens) {
   }
   let first, incr, last
   if (nums.length === 1) { first = 1; incr = 1; last = nums[0] }
-  else if (nums.length === 2) { first = nums[0]; last = nums[1]; incr = first <= last ? 1 : -1 }
+  else if (nums.length === 2) { first = nums[0]; last = nums[1]; incr = 1 }
   else { [first, incr, last] = nums }
   if (incr === 0) return err('seq: increment must be non-zero')
   // Reject oversized ranges up front (before allocating) so a huge
@@ -73,12 +75,30 @@ function seq(_stdin, tokens) {
   // `-w` pads every value with leading zeros to the widest one PRODUCED,
   // so `seq -w 8 11` is `08 09 10 11` while `seq -w 1 3` needs none. A
   // minus sign counts toward the width and stays ahead of the padding.
-  const padded = flags.has('w') ? out.map((n) => zeroPad(n, Math.max(...out.map((v) => v.length)))) : out
+  //
+  // The width is scanned ONCE, with a loop rather than
+  // `Math.max(...out.map(…))`: spreading a large array overflows the
+  // call stack (`seq -w 1 200000` died outright, well inside
+  // MAX_SEQ_ELEMENTS), and computing it inside the per-element map made
+  // the scan quadratic on top.
+  const width = flags.has('w') ? widest(out) : 0
+  const padded = width === 0 ? out : out.map((n) => zeroPad(n, width))
   // `-s` replaces the separator BETWEEN values; GNU still ends the
   // whole run with a newline, so `seq -s, 1 3` is `1,2,3\n`.
   const sep = values.get('s')
   if (sep === undefined) return ok(joinLines(padded))
   return ok(padded.length === 0 ? '' : padded.join(sep) + '\n')
+}
+
+// Widest element, by a plain loop. `Math.max(...values)` passes every
+// element as an argument and overflows the stack long before this
+// command's own element cap.
+function widest(values) {
+  let max = 0
+  for (const v of values) {
+    if (v.length > max) max = v.length
+  }
+  return max
 }
 
 function zeroPad(text, width) {
@@ -106,7 +126,12 @@ function nl(stdin, tokens, ctx) {
   const { values, positional } = parseArgs(tokens, { valueShort: ['b'] })
   const style = values.get('b') ?? 't'
   if (!['a', 't', 'n'].includes(style)) {
-    return err(`nl: -b: only \`a\`, \`t\` and \`n\` are supported (got \`${style}\`)`)
+    const message = `nl: -b: only \`a\`, \`t\` and \`n\` are supported (got \`${style}\`)`
+    // `pREGEX` — number only the lines matching a regex — is GNU's
+    // fourth style, and a working invocation there. That makes it a gap
+    // rather than a bad value, unlike a plain typo such as `-b x`.
+    if (style.startsWith('p')) return unsupported('option', 'nl', '-b p', message)
+    return err(message)
   }
   const r = readInputs('nl', positional, stdin, ctx)
   const out = []
@@ -229,7 +254,7 @@ function tr(stdin, tokens) {
   const del = flags.has('d')
   const squeeze = flags.has('s')
   const complement = flags.has('c')
-  if (del && squeeze) return err('tr: -d combined with -s is not supported')
+  if (del && squeeze) return unsupported('option', 'tr', '-d -s', 'tr: -d combined with -s is not supported')
   const want = (del || squeeze) ? 1 : 2
   if (positional.length !== want) return usage('tr [-c] SET1 SET2  |  tr [-c] -d SET  |  tr [-c] -s SET')
   const set1 = expandTrSet(positional[0])

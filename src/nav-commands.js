@@ -59,7 +59,7 @@ function ls(_stdin, tokens, ctx) {
   // itself + every subdir (matching GNU's listing order: list a dir,
   // then descend in sorted order). File targets pass through unchanged
   // — GNU's -R doesn't dereference files, just directories.
-  const targets = opts.recursive ? expandRecursive(initialTargets, opts.all, ctx) : initialTargets
+  const targets = opts.recursive ? expandRecursive(initialTargets, opts.all, ctx, opts.reverse) : initialTargets
   const out = []
   const errs = []
   let exitCode = 0
@@ -87,7 +87,7 @@ function ls(_stdin, tokens, ctx) {
 // yields sorted DFS order. The fs has no symlinks, so no cycle guard
 // is needed. Hidden-dir skipping mirrors lsTarget so descent into
 // `.git` (etc.) is gated by -a, just like the flat listing.
-function expandRecursive(targets, all, ctx) {
+function expandRecursive(targets, all, ctx, reverse = false) {
   const out = []
   for (const t of targets) {
     const abs = resolve(ctx.cwd, t)
@@ -97,8 +97,14 @@ function expandRecursive(targets, all, ctx) {
       const { display, abs: cur } = stack.pop()
       out.push(display)
       const { dirs } = ctx.fs.listDir(cur)
-      for (let i = dirs.length - 1; i >= 0; i--) {
-        const d = dirs[i]
+      // Push in reverse so pop yields sorted DFS order — and push in
+      // FORWARD order under `-r`, so the walk descends in the same
+      // reversed order the listing itself uses. Without this, `-r`
+      // reversed every directory's contents but still visited the
+      // subdirectories ascending, so the `dir:` sections came out in
+      // the opposite order to the entries that named them.
+      const walk = reverse ? dirs : dirs.toReversed()
+      for (const d of walk) {
         if (!all && d.startsWith('.')) continue
         stack.push({ display: appendChild(display, d), abs: joinPath(cur, d) })
       }
@@ -219,7 +225,10 @@ function formatDotEntry(name, long) {
 }
 
 function formatLsRow(name, size, isDir, long) {
-  const display = name + (isDir ? '/' : '')
+  // Directory rows get a trailing `/`, but only one: under `-d` the
+  // name is the operand as the user typed it, and `ls -d src/` already
+  // ends in a slash. Appending unconditionally printed `src//`.
+  const display = isDir && !name.endsWith('/') ? name + '/' : name
   if (!long) return display
   return `${isDir ? 'd' : '-'} ${String(size).padStart(8)}  ${display}`
 }

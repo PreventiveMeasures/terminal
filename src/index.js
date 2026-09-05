@@ -10,7 +10,15 @@
 //   term.run('cd src')
 //   term.run('cat foo.js | grep TODO | head -n 3')
 //   term.run('ls /missing 2>/dev/null && echo ok || echo failed')
-//   // → { stdout, stderr, exitCode, cwd }
+//   // → { stdout, stderr, exitCode, cwd, unsupported }
+//
+// `unsupported` is the diagnostic channel: the gaps in THIS
+// implementation — an unavailable command, an option we don't have —
+// hit anywhere in the line. They still go to stderr, which is what an
+// interactive user should see; the list is for callers driving the
+// terminal programmatically, because stderr belongs to the command and
+// so a redirect, a pipe, or a gate is free to discard it. See
+// unsupported.js for the case that made the difference matter.
 //
 // `opts.commands` wires in commands this package does not ship —
 // `sha256sum` and friends, whose implementation would mean bundling
@@ -42,6 +50,7 @@ import { expandGlobs } from './glob.js'
 import { parseLine } from './parse.js'
 import { DEFAULT_REGISTRY, createRegistry } from './registry.js'
 import { splitRefs } from './tokenize.js'
+import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
 import { err, ok } from './util.js'
 import { complete } from './complete.js'
 
@@ -62,7 +71,15 @@ export function createTerminal(sources, opts = {}) {
   // command set without a second parameter on each of them.
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
   // `vars` holds the `for` bindings in scope — empty outside a loop.
-  const ctx = { cwd, fs, user: opts.user ?? 'user', registry, vars: new Map() }
+  //
+  // `unsupported` is the run's diagnostic feed (see unsupported.js): the
+  // one report a redirect cannot silence. It rides on ctx for the same
+  // reason `registry` does — the engine's step/pipeline/stage functions
+  // already thread ctx everywhere, and `dispatch` is the choke point
+  // every command, wired or built-in, passes through. safeRun swaps in a
+  // fresh feed for the duration of each call, so this initial one is
+  // never written to; it exists so the field is never absent.
+  const ctx = { cwd, fs, user: opts.user ?? 'user', registry, vars: new Map(), unsupported: createUnsupportedFeed() }
   // Commands like `xargs` need to invoke other commands. Exposing
   // `dispatch` on ctx (rather than reaching for the registry at the
   // command site) keeps lookup in one place, and lets command
@@ -84,12 +101,35 @@ function dispatch(name, tokens, stdin, ctx) {
   const reg = ctx.registry
   const resolved = reg.resolveCommand(name)
   const cmd = reg.commands[resolved] ?? reg.hidden[resolved]
-  if (!cmd) return unknownCommand(name, reg)
+  if (!cmd) return record(ctx, unknownCommand(name, reg), resolved)
   try {
-    return cmd(stdin, tokens, ctx)
+    return record(ctx, cmd(stdin, tokens, ctx), resolved)
   } catch (e) {
-    return err(`${name}: ${reason(e)}`)
+    const message = `${name}: ${reason(e)}`
+    const note = unsupportedNote(e)
+    // A gap thrown out of shared arg parsing arrives incomplete:
+    // parseArgs is handed tokens, never told whose they are, so it
+    // cannot name the command or predict the stderr line its throw
+    // turns into. Both are known here, and only here.
+    if (note) ctx.unsupported.add({ ...note, command: note.command ?? name, message }, resolved)
+    return err(message)
   }
+}
+
+// Copy a command's "not implemented here" note onto the run's feed.
+// The result travels on untouched — the note is a symbol-keyed
+// passenger, and stderr keeps exactly the line it always had. Every
+// command lands here, including the ones reached through `ctx.dispatch`
+// from `find -exec` and `xargs`, so a gap hit two levels down still
+// reaches the caller.
+//
+// `resolved` is the bin-prefix-stripped name, used only to deduplicate:
+// `ls -t` and `/usr/bin/ls -t` are one gap even though each entry
+// records the name as it was typed.
+function record(ctx, result, resolved) {
+  const note = unsupportedNote(result)
+  if (note) ctx.unsupported.add(note, resolved)
+  return result
 }
 
 // The stderr text for a thrown value. Builtins only ever throw
@@ -109,17 +149,33 @@ function reason(e) {
   }
 }
 
+// The feed is swapped in and restored rather than reset, for the same
+// reason runGroup save/restores the cwd: an embedder holding the
+// terminal handle can call `run` again from inside a wired command, and
+// a bare reset would drop the outer run's entries on the floor. Each
+// `run` reports the gaps hit beneath it, to whoever made that call.
 function safeRun(line, ctx) {
+  const saved = ctx.unsupported
+  const feed = createUnsupportedFeed()
+  ctx.unsupported = feed
   try {
     const trimmed = line.trim()
-    if (trimmed === '') return { stdout: '', stderr: '', exitCode: 0, cwd: ctx.cwd }
-    const steps = parseLine(trimmed)
-    const r = runSteps(steps, ctx, '')
-    return { ...r, cwd: ctx.cwd }
+    const r = trimmed === '' ? { stdout: '', stderr: '', exitCode: 0 } : runSteps(parseLine(trimmed), ctx, '')
+    return finish(r, ctx, feed)
   } catch (e) {
-    return { ...err(`error: ${e.message}`), cwd: ctx.cwd }
+    // Line-parse gaps (`&`, an append redirect) throw past every stage,
+    // so they never meet `dispatch` and are collected here instead.
+    const note = unsupportedNote(e)
+    if (note) feed.add(note)
+    return finish(err(`error: ${e.message}`), ctx, feed)
+  } finally {
+    ctx.unsupported = saved
   }
 }
+
+// Freezing the list — and, in createUnsupportedFeed, each entry — keeps
+// a run's report from being rewritten under a caller that passes it on.
+const finish = (r, ctx, feed) => ({ ...r, cwd: ctx.cwd, unsupported: Object.freeze(feed.entries) })
 
 // Loop the gated steps. The previous step's exit code controls
 // whether the next runs (bash semantics: `&&` runs on 0, `||` runs
@@ -287,6 +343,23 @@ function runGroup(steps, ctx, stdin) {
   }
 }
 
+// Loop control. Not shell KEYWORDS — bash makes these builtins, and the
+// parser has no business rejecting a line that merely mentions them —
+// but they are shell machinery rather than commands someone could wire
+// in, so they are classified as the shell gaps they are. This is only
+// reachable when nothing is registered under the name, so a wired
+// command still wins — and it matters now that `for` loops exist, since
+// breaking out of one is the first thing a caller reaches for.
+const LOOP_CONTROL = new Map([
+  ['break', '`break` is not supported; a `for` loop always runs to the end of its word list'],
+  ['continue', '`continue` is not supported; a `for` loop always runs its body to the end'],
+])
+
+// `command` and `detail` coincide here — the name as typed is both who
+// failed and what was missing — which keeps the entry shape uniform
+// across all three kinds rather than leaving a hole for this one.
 function unknownCommand(name, reg) {
-  return err(`${name}: command not found. Available: ${reg.known}`, 127)
+  const control = LOOP_CONTROL.get(name)
+  if (control !== undefined) return unsupported('feature', name, name, `${name}: ${control}`, 127)
+  return unsupported('command', name, name, `${name}: command not found. Available: ${reg.known}`, 127)
 }

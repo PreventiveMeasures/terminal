@@ -53,7 +53,7 @@ export class Parser {
   }
   skipNewlines() { while (this.tok.type === 'newline') this.i++ }
   skipTerminators() { while (this.tok.type === 'newline' || this.is(';')) this.i++ }
-  fail(msg) { throw new AwkError(msg, this.tok.line) }
+  fail(msg, gap = null) { throw new AwkError(msg, this.tok.line, gap) }
   warn(msg) { this.warnings.push(msg) }
   unexpected() { this.fail(`unexpected ${describe(this.tok)}`) }
 }
@@ -349,10 +349,10 @@ function parsePrint(p, kind) {
   if (args === null) args = isPrintEnd(p) ? [] : parseExprList(p, { noGt: true })
   if (kind === 'printf' && args.length === 0) p.fail('printf needs a format string')
   let dest = null
-  if (p.is('|') || p.is('|&')) p.fail(`output pipes (\`${kind} ... | "cmd"\`) are not supported: ${NO_PROCESSES}`)
+  if (p.is('|') || p.is('|&')) p.fail(`output pipes (\`${kind} ... | "cmd"\`) are not supported: ${NO_PROCESSES}`, `${kind} | "cmd"`)
   if (p.accept('>') || p.accept('>>')) {
     dest = parseConcat(p, { noGt: true })
-    if (dest.type === 'str' && !OUTPUT_TARGETS.has(dest.value)) p.fail(redirectMessage(dest.value))
+    if (dest.type === 'str' && !OUTPUT_TARGETS.has(dest.value)) p.fail(redirectMessage(dest.value), `${kind} > FILE`)
   }
   endSimple(p)
   return { type: kind, args, dest }

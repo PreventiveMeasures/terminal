@@ -38,6 +38,11 @@ function xargs(stdin, tokens, ctx) {
   // invocations, so it is checked BEFORE the run-once-anyway fallback
   // below: substituting nothing and running the command with a literal
   // `{}` would be worse than not running it.
+  // An empty placeholder would reach `replaceAll('', item)`, which
+  // splices the item between every character of every argument —
+  // `-I "" echo abc` would emit `xaxbxcx`. GNU refuses the invocation
+  // outright, so refuse it here rather than silently corrupting args.
+  if (replace === '') return err('xargs: -I: replacement string must not be empty')
   if (replace !== undefined) return xargsReplace(ctx, cmd, baseArgs, items, replace)
   if (items.length === 0) {
     if (flags.has('r')) return ok()

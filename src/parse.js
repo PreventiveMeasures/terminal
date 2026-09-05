@@ -40,9 +40,10 @@
 //               the target (the virtual FS is read-only) and means
 //               "discard"
 //   `2>`      — redirect stderr; same `/dev/null`-only restriction
-//   `2>&1`    — merge stderr into stdout (and the symmetric `1>&2`).
-//               Applied before `/dev/null` sinks, so `>/dev/null 2>&1`
-//               silences both streams.
+//   `2>&1`    — merge stderr into stdout (and the symmetric `1>&2`,
+//               plus `>&2` / `>&1` with the fd left implicit, as bash
+//               allows). Applied before `/dev/null` sinks, so
+//               `>/dev/null 2>&1` silences both streams.
 //   `>>` / `1>>` / `2>>` — append form, rejected outright
 //
 // Boundary tokens are tagged by `kind`, not by string value, so a
@@ -50,10 +51,12 @@
 
 import { NAME_RE, tokenize } from './tokenize.js'
 
+import { UnsupportedError } from './unsupported.js'
+
 export function parseLine(line) {
   const raw = tokenize(line)
   for (const t of raw) {
-    if (t.kind === 'amp') throw new Error('background processes (`&`) are not supported')
+    if (t.kind === 'amp') throw new UnsupportedError('feature', '&', 'background processes (`&`) are not supported')
   }
   // Trailing `;` is a no-op in bash; tolerate it so `cmd1; cmd2;`
   // doesn't trip the empty-stage check below. We don't extend the
@@ -106,6 +109,30 @@ const commandPosition = (stage) => !stage.group && !stage.loop && stage.argv.len
 // matters right after `for NAME`, where parseFor looks for it.
 const KEYWORDS = new Set(['for', 'do', 'done'])
 
+// Block openers bash reserves that this shell does not implement.
+// Recognized under the same rule as KEYWORDS — unquoted, command
+// position — so `echo while` still prints a word.
+//
+// Naming them here rather than letting them fall through to the
+// dispatcher earns two things. The diagnostic names the CONSTRUCT
+// (`while true; do …; done` used to die on `unexpected \`do\``, pointing
+// at the wrong word entirely, and `if true; then …; fi` reported three
+// separate "command not found" gaps for one construct). And the
+// classification is right: `if` is not a command this terminal happens
+// to be missing, it is a piece of shell syntax it does not have.
+//
+// Closers (`then`, `fi`, `esac`, …) are deliberately absent: the line
+// dies at its opener, so they are unreachable, and leaving them out
+// keeps a stray `fi` in a pasted fragment an ordinary unknown command.
+const UNIMPLEMENTED_BLOCKS = new Map([
+  ['while', '`while` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
+  ['until', '`until` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
+  ['if', '`if` conditionals are not supported; gate on exit status with `&&` / `||` instead'],
+  ['case', '`case` statements are not supported; gate on exit status with `&&` / `||` instead'],
+  ['select', '`select` loops are not supported'],
+  ['function', 'shell functions are not supported'],
+])
+
 // Recursive: `end` names the token that closes the block being parsed
 // — `)` inside a `(...)` group, `done` inside a `for` body, `null` at
 // top level. The returned `consumed` index points one past the closing
@@ -150,6 +177,9 @@ function buildSteps(raw, start, end) {
     // loop itself (also above). Stray words like `(echo a) hi` land here.
     if (stage.group) throw new Error('unexpected token after `)`')
     if (stage.loop) throw new Error('unexpected token after `done`')
+    if (!t.quoted && commandPosition(stage) && UNIMPLEMENTED_BLOCKS.has(t.value)) {
+      throw new UnsupportedError('feature', t.value, UNIMPLEMENTED_BLOCKS.get(t.value))
+    }
     if (!t.quoted && commandPosition(stage) && KEYWORDS.has(t.value)) {
       if (t.value === 'done' && end === 'done') return finishBlock(steps, stage, i + 1, 'for: empty loop body')
       // `do` anywhere but in a `for` header, `done` with no loop open.
@@ -277,13 +307,13 @@ function applyRedir(stage, raw, i) {
   const target = raw[i + 1]
   const label = tokenLabel(op)
   if (op.append) {
-    throw new Error(`filesystem is read-only — \`${label}\` append is not supported; use \`|\` to pipe or \`${prefix}>/dev/null\` to discard`)
+    throw new UnsupportedError('feature', label, `filesystem is read-only — \`${label}\` append is not supported; use \`|\` to pipe or \`${prefix}>/dev/null\` to discard`)
   }
   if (!target || target.kind !== 'word') {
     throw new Error(`redirect \`${label}\` requires a target`)
   }
   if (target.value !== '/dev/null') {
-    throw new Error(`filesystem is read-only — use \`|\` to pipe between commands, or \`${label}/dev/null\` to discard`)
+    throw new UnsupportedError('feature', label, `filesystem is read-only — use \`|\` to pipe between commands, or \`${label}/dev/null\` to discard`)
   }
   if (op.fd === '1') stage.stdoutToNull = true
   else stage.stderrToNull = true
@@ -379,7 +409,7 @@ export function parseArgs(tokens, schema = {}) {
       } else if (long.has(name)) {
         if (inlineVal !== null) throw new Error(`option --${name} doesn't allow an argument`)
         flags.add(name)
-      } else throw new Error(`unknown option: --${name}`)
+      } else throw new UnsupportedError('option', `--${name}`, `unknown option: --${name}`)
       continue
     }
     if (t.startsWith('-') && t.length > 1 && !isNumericPositional(t, short, valueShort, repeatable)) {
@@ -435,8 +465,9 @@ function consumeShorts(tokens, i, short, valueShort, repeatable, flags, values, 
       order.push({ name: c, value })
       return i
     }
-    if (!short.has(c)) throw new Error(`unknown option: -${c}`)
+    if (!short.has(c)) throw new UnsupportedError('option', `-${c}`, `unknown option: -${c}`)
     flags.add(c)
   }
   return i
 }
+

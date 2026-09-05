@@ -4878,13 +4878,16 @@ describe('createTerminal — seq', () => {
     assert.equal(t.run('seq 4').stdout, '1\n2\n3\n4\n')
   })
 
-  it('two-arg form counts FIRST..LAST; descending range auto-picks -1', () => {
+  it('two-arg form counts FIRST..LAST, and a reversed range is empty', () => {
     const t = createTerminal({})
     assert.equal(t.run('seq 3 5').stdout, '3\n4\n5\n')
-    // Descending: `seq 5 3` defaults the increment to -1 (GNU does
-    // this when FIRST > LAST in the 2-arg form). Without the auto-
-    // detect, the loop would step +1 and emit nothing.
-    assert.equal(t.run('seq 5 3').stdout, '5\n4\n3\n')
+    // Verified against GNU coreutils 9.4: the two-argument form always
+    // uses increment 1, so `seq 5 3` prints NOTHING and exits 0. This
+    // previously auto-picked -1 and emitted `5 4 3` — counting down
+    // requires the explicit three-argument form below.
+    assert.equal(t.run('seq 5 3').stdout, '')
+    assert.equal(t.run('seq 5 3').exitCode, 0)
+    assert.equal(t.run('seq 5 -1 3').stdout, '5\n4\n3\n')
   })
 
   it('three-arg form uses explicit increment (positive and negative)', () => {
@@ -4914,8 +4917,9 @@ describe('createTerminal — seq', () => {
     assert.equal(t.run('seq 0').exitCode, 0)
     assert.equal(t.run('seq 0').stdout, '')
     assert.equal(t.run('seq -5').stdout, '')
-    // The 2-arg form keeps its auto-sign behavior, untouched.
-    assert.equal(t.run('seq 5 1').stdout, '5\n4\n3\n2\n1\n')
+    // The 2-arg form is empty for a reversed range for the same reason:
+    // INCR is 1 there too, so `1 <= 0` and `5 <= 1` both fail to fire.
+    assert.equal(t.run('seq 5 1').stdout, '')
   })
 
   it('caps oversized ranges instead of OOMing the buffered pipeline', () => {
@@ -6723,6 +6727,124 @@ describe('createTerminal — awk', () => {
 // readInputs to carry the source's terminator status, the `\;`
 // idiom needs the shell parser to honor backslash-escapes outside
 // quotes, walkTree order is shared by find/grep/ls, etc.
+describe('createTerminal — GNU fidelity fixes (verified against the real binaries)', () => {
+  const SRC = {
+    'f.txt': 'a\nhit\nb\nc\nhit\nd\n',
+    'blank.txt': '  b\na\n c\n',
+    'case.txt': 'beta\nAlpha\nalpha\nBeta\n',
+    'dup.txt': 'a\na\nb\nc\nc\nc\n',
+    'src/foo.js': 'x\n',
+    'src/sub/deep.js': 'y\n',
+    'node_modules/p/i.js': 'z\n',
+  }
+  const t = () => createTerminal(SRC)
+
+  it('seq -w scans the width once, instead of overflowing the stack', () => {
+    // `Math.max(...out.map(…))` spread a 200k-element array as call
+    // arguments and died with "Maximum call stack size exceeded", well
+    // inside seq's own element cap — and recomputed the scan per
+    // element on top, making it quadratic.
+    const r = t().run('seq -w 1 200000')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stderr, '')
+    const lines = r.stdout.split('\n')
+    assert.equal(lines[0], '000001')
+    assert.equal(lines[199999], '200000')
+  })
+
+  it('seq: a reversed two-arg range is empty, not a countdown', () => {
+    // GNU coreutils 9.4: the two-argument form always uses increment 1.
+    assert.equal(t().run('seq 5 3').stdout, '')
+    assert.equal(t().run('seq 5 3').exitCode, 0)
+    assert.equal(t().run('seq -s, 3 1').stdout, '')
+    assert.equal(t().run('seq 5 -1 3').stdout, '5\n4\n3\n')
+  })
+
+  it('head -v / tail -v title stdin `standard input`, not `null`', () => {
+    assert.equal(t().run('echo hi | head -v').stdout, '==> standard input <==\nhi\n')
+    assert.equal(t().run('echo hi | tail -v').stdout, '==> standard input <==\nhi\n')
+    assert.equal(t().run('echo hi | head -v -c 2').stdout, '==> standard input <==\nhi')
+  })
+
+  it('tail -n 0 still rejects an invalid flag combination', () => {
+    // The zero-count short-circuit returned success before the
+    // -q/-v check ran, so `tail` accepted what `head` refused.
+    assert.match(t().run('tail -q -v -n 0 f.txt').stderr, /mutually exclusive/u)
+    assert.equal(t().run('tail -q -v -n 0 f.txt').exitCode, 1)
+    assert.equal(t().run('tail -n 0 f.txt').exitCode, 0)
+  })
+
+  it('grep -m keeps the trailing context of its last match', () => {
+    // The cap used to truncate the input, which cannot express GNU's
+    // rule: after the Nth selection it stops SELECTING but still emits
+    // that match's trailing context, and a line in that window which
+    // happens to match prints as context, not as a match.
+    assert.equal(t().run('grep -m 1 -A 2 hit f.txt').stdout, 'hit\nb\nc\n')
+    assert.equal(t().run('grep -n -m 2 -A 1 hit f.txt').stdout, '2:hit\n3-b\n--\n5:hit\n6-d\n')
+    const t2 = createTerminal({ 'm.txt': 'hit\nhit\nx\n' })
+    assert.equal(t2.run('grep -n -m 1 -A 1 hit m.txt').stdout, '1:hit\n2-hit\n')
+    assert.equal(t2.run('grep -n -A 1 hit m.txt').stdout, '1:hit\n2:hit\n3-x\n')
+  })
+
+  it('grep -A 0 and -o still group with `--`', () => {
+    // The separator keys off context being ASKED FOR, not off a
+    // non-zero count.
+    assert.equal(t().run('grep -A 0 hit f.txt').stdout, 'hit\n--\nhit\n')
+    assert.equal(t().run('grep -o -A 1 hit f.txt').stdout, 'hit\n--\nhit\n')
+    assert.equal(t().run('grep hit f.txt').stdout, 'hit\nhit\n')
+  })
+
+  it('grep -m 0 selects nothing and prints nothing, in every mode', () => {
+    for (const line of ['grep -m 0 hit f.txt', 'grep -m 0 -c hit f.txt', 'grep -m 0 -l hit f.txt']) {
+      const r = t().run(line)
+      assert.equal(r.stdout, '', line)
+      assert.equal(r.exitCode, 1, line)
+    }
+    assert.equal(t().run('grep -c nomatch f.txt').stdout, '0\n', 'without -m, -c still reports 0')
+  })
+
+  it('sort -b ignores leading blanks without needing -k', () => {
+    // `-b` was threaded into the globals and then read only by the key
+    // parser, so it was a silent no-op unless -k happened to be given.
+    assert.equal(t().run('sort -b blank.txt').stdout, 'a\n  b\n c\n')
+    assert.equal(t().run('sort blank.txt').stdout, '  b\n c\na\n')
+  })
+
+  it('sort -fu keeps the first line read, like -nu does', () => {
+    // The -f path applied the whole-line tiebreak unconditionally, so
+    // -u kept `Beta` where GNU keeps the `beta` it saw first.
+    assert.equal(t().run('sort -fu case.txt').stdout, 'Alpha\nbeta\n')
+  })
+
+  it('uniq -D -u drops each duplicate group\'s first line', () => {
+    assert.equal(t().run('uniq -D -u dup.txt').stdout, 'a\nc\nc\n')
+    assert.equal(t().run('uniq -D dup.txt').stdout, 'a\na\nc\nc\nc\n')
+    // -D outranks -d: GNU gives `-D -d -u` the same output as `-D -u`.
+    assert.equal(t().run('uniq -D -d -u dup.txt').stdout, 'a\nc\nc\n')
+    assert.equal(t().run('uniq -D -d dup.txt').stdout, 'a\na\nc\nc\nc\n')
+  })
+
+  it('ls -d does not double a trailing slash the user typed', () => {
+    assert.equal(t().run('ls -d src/').stdout, 'src/\n')
+    assert.equal(t().run('ls -d src').stdout, 'src/\n')
+  })
+
+  it('ls -Rr reverses the walk order too, not just each listing', () => {
+    const headers = t().run('ls -Rr').stdout.split('\n').filter((l) => l.endsWith(':'))
+    assert.deepEqual(headers, ['.:', './src:', './src/sub:', './node_modules:', './node_modules/p:'])
+    const asc = t().run('ls -R').stdout.split('\n').filter((l) => l.endsWith(':'))
+    assert.deepEqual(asc, ['.:', './node_modules:', './node_modules/p:', './src:', './src/sub:'])
+  })
+
+  it('xargs -I rejects an empty placeholder instead of corrupting args', () => {
+    // `replaceAll('', item)` splices the item between every character:
+    // `-I "" echo abc` emitted `xaxbxcx`.
+    const r = t().run('echo x | xargs -I "" echo q')
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stderr, /must not be empty/u)
+  })
+})
+
 describe('createTerminal — known divergences from GNU (tracked)', () => {
   it.todo('sed preserves the last-line no-trailing-newline (no spurious `\\n` appended)', () => {
     // GNU: `printf 'Y' | sed -n '1p'` → `Y` (1 byte, no newline).

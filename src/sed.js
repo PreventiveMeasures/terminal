@@ -13,6 +13,7 @@
 
 import { parseArgs } from './parse.js'
 import { err, okWith, readInputs, splitLines } from './util.js'
+import { unsupported } from './unsupported.js'
 
 const SCRIPT = /^(\d+)(?:,(\d+))?p$/u
 
@@ -22,13 +23,14 @@ export function sed(stdin, tokens, ctx) {
   // error — `sed -i -n '1,2p' file` shouldn't surface a generic
   // "unknown option: -i" that hints at flag support we don't have.
   let parsed
-  try { parsed = parseArgs(tokens, { short: ['n'] }) } catch { return unsupported() }
+  try { parsed = parseArgs(tokens, { short: ['n'] }) } catch { return notSupported() }
   const { flags, positional } = parsed
-  if (!flags.has('n') || positional.length === 0) return unsupported()
+  if (positional.length === 0) return incomplete()
+  if (!flags.has('n')) return notSupported()
   const parsedScript = parseScript(positional[0])
   if (parsedScript.error) return parsedScript.error
   const { ranges } = parsedScript
-  if (ranges.length === 0) return unsupported()
+  if (ranges.length === 0) return notSupported()
   const files = positional.slice(1)
   const r = readInputs('sed', files, stdin, ctx)
   // Multi-file: GNU concatenates the inputs into one virtual stream
@@ -66,7 +68,7 @@ function parseScript(script) {
   for (const seg of script.split(';')) {
     if (seg === '') continue
     const m = SCRIPT.exec(seg)
-    if (!m) return { error: unsupported() }
+    if (!m) return { error: notSupported() }
     const start = Number(m[1])
     const end = m[2] === undefined ? start : Number(m[2])
     // `\d+` matches "0", so the start-must-be-positive check is
@@ -80,6 +82,23 @@ function parseScript(script) {
   return { ranges }
 }
 
-function unsupported() {
-  return err("sed: only `-n 'X[,Y]p'` (optionally `;`-joined into multi-range scripts) is supported")
+const NARROW = "sed: only `-n 'X[,Y]p'` (optionally `;`-joined into multi-range scripts) is supported"
+
+// Every way out of the narrow subset funnels here, so the diagnostic
+// feed gets one entry naming the whole gap rather than one per symptom
+// — an unknown flag, a missing `-n`, and a regex address are all the
+// same "this is not a real sed" as far as a caller deciding whether to
+// reach for it is concerned.
+function notSupported() {
+  return unsupported('feature', 'sed', 'script', NARROW)
+}
+
+// The same canonical message, but NOT a gap. With no script operand at
+// all the invocation is merely incomplete — GNU fails on bare `sed` and
+// on `sed -n` too — so stderr keeps the one message this command always
+// gives, while the diagnostic feed stays quiet. A caller told the
+// terminal lacks a feature would go looking for a workaround that does
+// not exist, when it simply omitted an argument.
+function incomplete() {
+  return err(NARROW)
 }

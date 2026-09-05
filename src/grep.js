@@ -17,6 +17,7 @@
 import { basename, relativeTo, resolve } from './fs.js'
 import { parseArgs } from './parse.js'
 import { err, joinLines, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
+import { unsupportedFrom } from './unsupported.js'
 import { breToEs } from './bre.js'
 import { compileGlob } from './glob.js'
 
@@ -45,7 +46,10 @@ export function grep(stdin, tokens, ctx) {
   // errors exit 2 (GNU), distinct from dispatch's generic exit 1.
   let parsed
   try { parsed = parseArgs(tokens, { short: SHORT_FLAGS, valueShort: VALUE_SHORTS, repeatable: ['e', 'include', 'exclude', 'exclude-dir'] }) }
-  catch (e) { return err(`grep: ${e.message}`, 2) }
+  // `unsupportedFrom` keeps an unknown-option throw classified on its
+  // way through this catch — grep builds its own result here, so the
+  // dispatcher never sees the original.
+  catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
   const { flags, values, positional } = parsed
   const ePatterns = values.get('e') ?? []
   // If any `-e` patterns were collected, every positional is a file;
@@ -69,14 +73,23 @@ export function grep(stdin, tokens, ctx) {
   const inputs = r.inputs.filter((inp) => inp.name === null || includedByName(basename(inp.name), filters.name))
   const showName = pickShowName(flags, recursive, rest.length)
   const invert = flags.has('v')
-  const opts = { showName, invert, showLine: flags.has('n'), only: flags.has('o'), after: ctxLines.after, before: ctxLines.before }
   const max = parseMaxCount(values)
   if (max.error) return max.error
+  const opts = { showName, invert, showLine: flags.has('n'), only: flags.has('o'), after: ctxLines.after, before: ctxLines.before, hasContext: ctxLines.given, max: max.value }
+  // -l / -L / -c only ask how many (or whether) lines were selected, and
+  // truncating the input at the Nth selection answers that exactly. The
+  // line-printing path gets the cap itself instead, because it also has
+  // to emit the trailing context that follows the last selection — see
+  // grepFileBlock.
   const capped = max.value === undefined ? inputs : inputs.map((inp) => capMatches(inp, re.res, invert, max.value))
-  const result = flags.has('l') ? grepListFiles(capped, re.res, invert, false)
+  // `-m 0` selects nothing, and GNU emits nothing at all for it in
+  // EVERY mode — including `-c`, which otherwise prints `0` for a file
+  // with no matches — then exits 1.
+  const result = max.value === 0 ? noMatch()
+    : flags.has('l') ? grepListFiles(capped, re.res, invert, false)
     : flags.has('L') ? grepListFiles(capped, re.res, invert, true)
     : flags.has('c') ? grepCount(capped, re.res, invert, showName)
-    : grepRun(capped, re.res, opts)
+    : grepRun(inputs, re.res, opts)
   // -q asks only whether anything matched: no stdout at all, and the
   // usual 0/1 status. An unreadable operand still forces the exit-2
   // below, matching GNU (`grep -q PAT missing` is 2, not 1).
@@ -194,7 +207,12 @@ function parseContext(values) {
   const a = parseNonNegativeInt(values.get('A') ?? c ?? '0', 'grep: -A')
   if (a.error) return a
   const b = parseNonNegativeInt(values.get('B') ?? c ?? '0', 'grep: -B')
-  return b.error ? b : { after: a.value, before: b.value }
+  // Whether context was ASKED FOR, which is not the same as asking for a
+  // non-zero amount. `grep -A 0` still groups its output — GNU prints a
+  // `--` between non-adjacent matches — so the separator keys off the
+  // flag being present, not off the count.
+  const given = c !== undefined || values.has('A') || values.has('B')
+  return b.error ? b : { after: a.value, before: b.value, given }
 }
 
 function pickShowName(flags, recursive, nFiles) {
@@ -308,28 +326,57 @@ function grepRun(inputs, res, opts) {
   return matched ? ok(output + (output ? '\n' : '')) : noMatch()
 }
 
+// Walks the file once, emitting each line as it is decided: a SELECTED
+// line (one that matches, while the `-m` cap still has room), or a
+// context line owed to an earlier selection.
+//
+// The `-m` cap lives here, in the selection step, rather than being
+// applied by truncating the input beforehand. Truncation cannot express
+// what GNU does: after the Nth selection it stops SELECTING but still
+// prints that match's trailing context, and a line in that window which
+// happens to match is printed as context (`-`) rather than as a match
+// (`:`). Verified against GNU — `grep -n -m 1 -A 1 hit` over
+// `hit/hit/x` gives `1:hit` then `2-hit`, where the same input without
+// `-m` gives `1:hit` then `2:hit`.
 function grepFileBlock(lines, res, name, opts) {
-  const { invert, after, before, only } = opts
-  // The `--` separator only fires when context is on. Without -A/-B,
-  // consecutive matches with gaps between them shouldn't be split
-  // by `--` — that matches GNU grep, and matters because the prior
-  // (non-context) behaviour piped clean lines into `sort`/`uniq`.
-  const hasContext = before > 0 || after > 0
+  const { invert, after, before, only, max, hasContext } = opts
   const out = []
   let matched = false
   let lastShown = -1
+  let selected = 0
+  let owedAfter = 0
   for (let i = 0; i < lines.length; i++) {
-    if (anyMatch(res, lines[i]) === invert) continue
-    matched = true
-    if (only) { out.push(...extractMatches(lines[i], name, i + 1, res, opts)); continue }
-    const start = Math.max(0, i - before)
-    const end = Math.min(lines.length - 1, i + after)
-    if (hasContext && lastShown >= 0 && start > lastShown + 1) out.push('--')
-    for (let j = Math.max(start, lastShown + 1); j <= end; j++) {
-      const isMatch = j === i || (anyMatch(res, lines[j]) !== invert)
-      out.push(formatLine(lines[j], name, j + 1, isMatch, opts))
+    const hit = anyMatch(res, lines[i]) !== invert
+    const capped = max !== undefined && selected >= max
+    if (hit && !capped) {
+      matched = true
+      selected++
+      const start = Math.max(0, i - before)
+      if (hasContext && lastShown >= 0 && start > lastShown + 1) out.push('--')
+      // -o prints only the matched substrings, but still GROUPS by the
+      // same context windows — `grep -o -A 1` separates non-adjacent
+      // matches with `--` exactly as the line-printing form does — so
+      // it shares all the bookkeeping and differs only in what it emits.
+      if (only) {
+        out.push(...extractMatches(lines[i], name, i + 1, res, opts))
+      } else {
+        for (let j = Math.max(start, lastShown + 1); j < i; j++) {
+          out.push(formatLine(lines[j], name, j + 1, false, opts))
+        }
+        out.push(formatLine(lines[i], name, i + 1, true, opts))
+      }
+      lastShown = i
+      owedAfter = after
+      continue
     }
-    lastShown = end
+    // Trailing context is emitted lazily, one line per iteration, so
+    // nothing is ever printed ahead of `i` and a later matching line
+    // still gets its own turn at the branch above.
+    if (owedAfter > 0) {
+      if (!only) out.push(formatLine(lines[i], name, i + 1, false, opts))
+      lastShown = i
+      owedAfter--
+    }
   }
   return { lines: out, matched }
 }

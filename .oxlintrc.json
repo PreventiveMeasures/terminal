@@ -13,7 +13,8 @@
   ],
   "globals": {
     "TextDecoder": "readonly",
-    "TextEncoder": "readonly"
+    "TextEncoder": "readonly",
+    "structuredClone": "readonly"
   },
   "rules": {
     "no-warning-comments": "off",

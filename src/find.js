@@ -44,6 +44,7 @@
 import { basename, relativeTo, resolve, walkTree } from './fs.js'
 import { compileGlob } from './glob.js'
 import { err, parseNonNegativeInt } from './util.js'
+import { unsupported } from './unsupported.js'
 
 // `primaryFor` consumes the next token as the value for anything in
 // here — hence the name, matching grep.js's SHORT_FLAGS/VALUE_SHORTS
@@ -277,7 +278,7 @@ function walkExprTokens(tokens, minDepth, maxDepth) {
     // not a path. Reject so a typo (`find -X /src`) surfaces here
     // rather than as a "no such file or directory: -X" lower down.
     if (t.startsWith('-') && t !== '-' && !/^-\d/u.test(t)) {
-      return { error: err(`find: unknown option: ${t}`) }
+      return { error: unsupported('option', 'find', t, `find: unknown option: ${t}`) }
     }
     if (seenExpr) return { error: err(`find: paths must precede expression: ${t}`) }
     starts.push(t)
@@ -296,9 +297,22 @@ function primaryFor(token) {
   return null
 }
 
+// The file types GNU find knows that this one cannot represent: the
+// virtual FS has only regular files and the directories implied by
+// them, so there is nothing to match a symlink, device, FIFO, or
+// socket against. They are a GAP rather than a bad value — `find . -type
+// l` is a working GNU invocation — and separating them from a genuine
+// typo like `-type q` is the difference between telling a caller "this
+// terminal cannot do that" and "you mistyped".
+const UNMODELLED_TYPES = 'lbcps'
+
 function checkPrimary(kind, value) {
   if (kind === 'type' && value !== 'f' && value !== 'd') {
-    return { error: err(`find: -type/--type expects 'f' or 'd', got: ${value}`) }
+    const message = `find: -type/--type expects 'f' or 'd', got: ${value}`
+    if (value.length === 1 && UNMODELLED_TYPES.includes(value)) {
+      return { error: unsupported('option', 'find', `-type ${value}`, message) }
+    }
+    return { error: err(message) }
   }
   return {}
 }
@@ -340,7 +354,7 @@ function consumeExec(tokens, i, pendingNot) {
     // command anyway. Reject up front rather than pick a surprising
     // semantic.
     if (pendingNot) {
-      return { error: err('find: `-not -exec ... +` is not supported (the `+` form has no meaningful negation)') }
+      return { error: unsupported('feature', 'find', '-not -exec ... +', 'find: `-not -exec ... +` is not supported (the `+` form has no meaningful negation)') }
     }
   }
   const pred = { kind: 'exec', mode, cmd: execTokens[0], args: execTokens.slice(1), negate: pendingNot }
@@ -401,9 +415,6 @@ function evalPredicate(p, entry, ctx) {
   // only come from a code bug.
   if (p.kind === 'type') return matchedOnly(p.value === 'f' ? entry.kind === 'file' : entry.kind === 'dir')
   if (p.kind === 'name' || p.kind === 'iname') return matchedOnly(p.re.test(basename(entry.path)))
-  // A file is empty when it has no content. A DIRECTORY can never be
-  // empty in this FS: it exists only because some file lives under it,
-  // so `-empty` simply never matches one.
   // Always true. On a directory it also records the path so walkTree
   // skips the subtree; on a file it is a no-op that still reports true,
   // which is what makes `-name X -prune -o -print` exclude X itself.
@@ -411,6 +422,9 @@ function evalPredicate(p, entry, ctx) {
     if (entry.kind === 'dir') entry.prune.add(entry.abs)
     return matchedOnly(true)
   }
+  // A file is empty when it has no content. A DIRECTORY can never be
+  // empty in this FS: it exists only because some file lives under it,
+  // so `-empty` simply never matches one.
   if (p.kind === 'empty') return matchedOnly(entry.kind === 'file' && ctx.fs.readFile(entry.abs) === '')
   if (p.kind === 'path') return matchedOnly(p.re.test(entry.path))
   // Always true, output as the side effect. `-not -print` inverts
