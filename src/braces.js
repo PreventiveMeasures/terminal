@@ -47,15 +47,18 @@ export function expandBraces(argv, quotedSet) {
 // comma. Split on that comma, recombine each alternative with the
 // surrounding prefix/suffix, and recurse so adjacent and nested
 // groups expand naturally. No comma → no expansion (matches bash).
+// The braces are paired in one pass up front (`pairBraces`), so a `{`
+// with no partner costs nothing to skip — scanning forward from each
+// `{` in turn made a word of N unmatched braces cost N passes over it.
 function expandOne(token) {
+  const { close, comma } = pairBraces(token)
   for (let i = 0; i < token.length; i++) {
     if (token[i] !== '{') continue
-    const close = matchBrace(token, i)
-    if (close === -1) continue
-    const parts = splitTopCommas(token.slice(i + 1, close))
-    if (parts.length < 2) continue
+    const end = close.get(i)
+    if (end === undefined || !comma.has(i)) continue
+    const parts = splitTopCommas(token.slice(i + 1, end))
     const prefix = token.slice(0, i)
-    const suffix = token.slice(close + 1)
+    const suffix = token.slice(end + 1)
     const out = []
     for (const part of parts) out.push(...expandOne(prefix + part + suffix))
     return out
@@ -63,16 +66,22 @@ function expandOne(token) {
   return [token]
 }
 
-function matchBrace(s, start) {
-  let depth = 1
-  for (let i = start + 1; i < s.length; i++) {
-    if (s[i] === '{') depth++
-    else if (s[i] === '}') {
-      depth--
-      if (depth === 0) return i
-    }
+// One pass over the word: `close` maps each matched `{` to its `}`, and
+// `comma` holds every `{` (matched or not) with a comma at its own
+// nesting level — the two facts the old forward scan re-derived for
+// each `{`. A `}` with nothing open is ordinary text, as before, and
+// so is a `{` still open at the end: it never appears in `close`.
+function pairBraces(s) {
+  const open = []
+  const close = new Map()
+  const comma = new Set()
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (c === '{') open.push(i)
+    else if (c === '}') { if (open.length > 0) close.set(open.pop(), i) }
+    else if (c === ',' && open.length > 0) comma.add(open.at(-1))
   }
-  return -1
+  return { close, comma }
 }
 
 function splitTopCommas(s) {

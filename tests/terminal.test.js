@@ -2222,6 +2222,22 @@ describe('createTerminal — pathological inputs', () => {
     assert.equal(r.exitCode, 0)
     assert.equal(r.stdout, word + '\n')
   })
+
+  it('brace expansion is linear on a long run of unmatched braces', () => {
+    // expandOne once scanned forward from every `{` for its partner, so
+    // a `{` with none cost a pass to the end of the word and N of them
+    // cost N passes: an unquoted word like these did not return in
+    // minutes. Braces are now paired in one pass up front.
+    const t = createTerminal(SOURCES)
+    for (const piece of ['{', '}', '{,', '{a']) {
+      const word = piece.repeat(300000)
+      const started = Date.now()
+      const r = t.run('echo ' + word)
+      assert.ok(Date.now() - started < 2000, `quadratic on ${JSON.stringify(piece)}`)
+      assert.equal(r.exitCode, 0, piece)
+      assert.equal(r.stdout, word + '\n', piece)
+    }
+  })
 })
 
 describe('createTerminal — read-only filesystem', () => {
@@ -3621,6 +3637,24 @@ describe('createTerminal — brace expansion', () => {
     assert.equal(t.run('echo {a}').stdout, '{a}\n')
     assert.equal(t.run('echo {}').stdout, '{}\n')
     assert.equal(t.run('echo {abc').stdout, '{abc\n')
+  })
+
+  it('unbalanced input: the leftmost balanced group with a top-level comma expands, the rest is literal', () => {
+    // Pins the pairing rules the one-pass scan has to reproduce: a `{`
+    // that never closes and a `}` with nothing open are ordinary text,
+    // a comma inside an unclosed `{` counts for nothing, and the group
+    // that expands is the leftmost by its `{`, not the first to close.
+    const t = createTerminal(SOURCES)
+    assert.equal(t.run('echo {a,{b,c}}').stdout, 'a b c\n')
+    assert.equal(t.run('echo {{a},b}').stdout, '{a} b\n')
+    assert.equal(t.run('echo {{a,b}').stdout, '{a {b\n')
+    assert.equal(t.run('echo {a,b}}').stdout, 'a} b}\n')
+    assert.equal(t.run('echo }{a,b}').stdout, '}a }b\n')
+    assert.equal(t.run('echo {a{b,c}').stdout, '{ab {ac\n')
+    assert.equal(t.run('echo {a,b{c,d}').stdout, '{a,bc {a,bd\n')
+    assert.equal(t.run('echo {a,b}{c').stdout, 'a{c b{c\n')
+    assert.equal(t.run('echo {a,{b}').stdout, '{a,{b}\n')
+    assert.equal(t.run('echo x{a,b{c}').stdout, 'x{a,b{c}\n')
   })
 
   it('quoted braces stay literal', () => {
