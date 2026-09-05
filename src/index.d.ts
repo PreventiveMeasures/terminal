@@ -128,9 +128,12 @@ export interface CreateTerminalOptions {
  * - `command` — the name is not a registered command.
  * - `option` — a registered command was handed an option it does not
  *   implement, or explicitly rejects.
- * - `feature` — a construct the parser recognizes that deliberately goes
- *   no further: `&` backgrounding, an append redirect against the
- *   read-only filesystem, `sed` outside its one supported script form.
+ * - `feature` — a construct this terminal recognizes and deliberately
+ *   goes no further on: `&` backgrounding, `while` / `if` / `case` and
+ *   the other shell blocks it does not implement, `break` inside a
+ *   `for` loop, an append redirect against the read-only filesystem,
+ *   `sed` outside its one supported script form, and the gawk features
+ *   its `awk` refuses (`system()`, output pipes, writing to a file).
  */
 export type UnsupportedKind = 'command' | 'option' | 'feature'
 

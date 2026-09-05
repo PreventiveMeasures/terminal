@@ -38,6 +38,7 @@
 //     a temporary), and `a[1][2]` (arrays of arrays) is refused.
 
 import { AwkError } from './awk-common.js'
+import { markUnsupported, unsupported } from './unsupported.js'
 import { unescapeAwkString } from './awk-lex.js'
 import { parseProgram } from './awk-parse.js'
 import { createMachine, runProgram } from './awk-run.js'
@@ -63,7 +64,15 @@ export function awk(stdin, tokens, ctx) {
     // pathologically nested expression: a program we cannot compile.
     if (e instanceof RangeError) return err(`awk: syntax error: program too deeply nested (${e.message})`)
     if (!(e instanceof AwkError)) throw e
-    return err(e.line === null ? `awk: ${e.message}` : `awk: syntax error at line ${e.line}: ${e.message}`)
+    const message = e.line === null ? `awk: ${e.message}` : `awk: syntax error at line ${e.line}: ${e.message}`
+    // A construct gawk implements and this interpreter refuses is a gap,
+    // not a broken program, so it also goes on the run's diagnostic
+    // channel. That matters more for awk than for most commands here:
+    // the program is a quoted argument, so a caller cannot tell from the
+    // exit code alone whether it wrote bad awk or reached for a feature
+    // this terminal does not have — and `2>/dev/null` hides the
+    // difference completely.
+    return e.gap === null ? err(message) : unsupported('feature', 'awk', e.gap, message)
   }
   const m = createMachine(program, ctx, stdin, source.operands)
   for (const w of program.warnings) m.warn(w)
@@ -74,6 +83,7 @@ export function awk(stdin, tokens, ctx) {
     m.assign(match[1], new StrNum(unescapeAwkString(match[2], m.warn)))
   }
   let exitCode
+  let gap = null
   try {
     exitCode = runProgram(m)
   } catch (e) {
@@ -84,8 +94,14 @@ export function awk(stdin, tokens, ctx) {
     if (!(e instanceof AwkError) && !(e instanceof RangeError)) throw e
     m.errOut.push(`awk: ${e.message}\n`)
     exitCode = 2
+    // Same rule as the parse-time catch, for the gaps that can only be
+    // reached once the program runs. The result is built by hand here
+    // (output already produced still has to survive), so the note is
+    // attached to it rather than coming from `unsupported`.
+    if (e.gap) gap = { detail: e.gap, message: `awk: ${e.message}` }
   }
-  return { stdout: m.out.join(''), stderr: m.errOut.join(''), exitCode }
+  const result = { stdout: m.out.join(''), stderr: m.errOut.join(''), exitCode }
+  return gap === null ? result : markUnsupported(result, 'feature', 'awk', gap.detail, gap.message)
 }
 
 // `-F', *'` reaches us as the single token `-F, *`: the shell glues a

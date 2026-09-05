@@ -89,6 +89,15 @@ export function unsupported(kind, command, detail, message, code = 1) {
   return mark(err(message, code), note(kind, command, detail, message))
 }
 
+// Attach a note to a result the command assembled itself, rather than
+// to one `unsupported` built from a message. `awk` needs this: a gap
+// reachable only at run time (a `system()` call in a branch that finally
+// executed) arrives after the program has already written output, and
+// that output has to survive on the result alongside the note.
+export function markUnsupported(result, kind, command, detail, message) {
+  return mark(result, note(kind, command, detail, message))
+}
+
 // Carry a gap thrown out of `parseArgs` onto a result the command built
 // for itself, instead of letting the dispatcher build it. `grep` is the
 // case: its usage failures exit 2 where the dispatcher's generic catch

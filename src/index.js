@@ -343,9 +343,23 @@ function runGroup(steps, ctx, stdin) {
   }
 }
 
+// Loop control. Not shell KEYWORDS — bash makes these builtins, and the
+// parser has no business rejecting a line that merely mentions them —
+// but they are shell machinery rather than commands someone could wire
+// in, so they are classified as the shell gaps they are. This is only
+// reachable when nothing is registered under the name, so a wired
+// command still wins — and it matters now that `for` loops exist, since
+// breaking out of one is the first thing a caller reaches for.
+const LOOP_CONTROL = new Map([
+  ['break', '`break` is not supported; a `for` loop always runs to the end of its word list'],
+  ['continue', '`continue` is not supported; a `for` loop always runs its body to the end'],
+])
+
 // `command` and `detail` coincide here — the name as typed is both who
 // failed and what was missing — which keeps the entry shape uniform
 // across all three kinds rather than leaving a hole for this one.
 function unknownCommand(name, reg) {
+  const control = LOOP_CONTROL.get(name)
+  if (control !== undefined) return unsupported('feature', name, name, `${name}: ${control}`, 127)
   return unsupported('command', name, name, `${name}: command not found. Available: ${reg.known}`, 127)
 }

@@ -114,7 +114,7 @@ function parseComparison(p, opts) {
   // Inside a print list (`noGt`) a `|` is an output pipe, which
   // parsePrint reports; anywhere else it can only be `cmd | getline`.
   if (t.type === 'punct' && (t.value === '|' || t.value === '|&') && !opts.noGt) {
-    p.fail(`command pipelines (\`"cmd" | getline\`) are not supported: ${NO_PROCESSES}`)
+    p.fail(`command pipelines (\`"cmd" | getline\`) are not supported: ${NO_PROCESSES}`, '"cmd" | getline')
   }
   if (!isRelOp(p, opts)) return left
   p.next()
@@ -299,7 +299,7 @@ const ARITY = {
 
 function parseBuiltin(p) {
   const name = p.next().value
-  if (UNSUPPORTED_BUILTINS.has(name)) p.fail(UNSUPPORTED_BUILTINS.get(name))
+  if (UNSUPPORTED_BUILTINS.has(name)) p.fail(UNSUPPORTED_BUILTINS.get(name), `${name}()`)
   if (!p.is('(')) {
     // `length` alone is `length($0)`; every other builtin needs its parens.
     if (name === 'length') return { type: 'builtin', name, args: [] }

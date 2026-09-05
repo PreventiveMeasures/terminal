@@ -173,6 +173,6 @@ const BUILTIN = {
 
 export function callBuiltin(m, n) {
   const fn = BUILTIN[n.name]
-  if (!fn) throw new AwkError(`function \`${n.name}\` is not supported`)
+  if (!fn) throw new AwkError(`function \`${n.name}\` is not supported`, null, `${n.name}()`)
   return fn(m, n.args)
 }

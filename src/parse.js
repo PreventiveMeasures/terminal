@@ -109,6 +109,30 @@ const commandPosition = (stage) => !stage.group && !stage.loop && stage.argv.len
 // matters right after `for NAME`, where parseFor looks for it.
 const KEYWORDS = new Set(['for', 'do', 'done'])
 
+// Block openers bash reserves that this shell does not implement.
+// Recognized under the same rule as KEYWORDS — unquoted, command
+// position — so `echo while` still prints a word.
+//
+// Naming them here rather than letting them fall through to the
+// dispatcher earns two things. The diagnostic names the CONSTRUCT
+// (`while true; do …; done` used to die on `unexpected \`do\``, pointing
+// at the wrong word entirely, and `if true; then …; fi` reported three
+// separate "command not found" gaps for one construct). And the
+// classification is right: `if` is not a command this terminal happens
+// to be missing, it is a piece of shell syntax it does not have.
+//
+// Closers (`then`, `fi`, `esac`, …) are deliberately absent: the line
+// dies at its opener, so they are unreachable, and leaving them out
+// keeps a stray `fi` in a pasted fragment an ordinary unknown command.
+const UNIMPLEMENTED_BLOCKS = new Map([
+  ['while', '`while` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
+  ['until', '`until` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
+  ['if', '`if` conditionals are not supported; gate on exit status with `&&` / `||` instead'],
+  ['case', '`case` statements are not supported; gate on exit status with `&&` / `||` instead'],
+  ['select', '`select` loops are not supported'],
+  ['function', 'shell functions are not supported'],
+])
+
 // Recursive: `end` names the token that closes the block being parsed
 // — `)` inside a `(...)` group, `done` inside a `for` body, `null` at
 // top level. The returned `consumed` index points one past the closing
@@ -153,6 +177,9 @@ function buildSteps(raw, start, end) {
     // loop itself (also above). Stray words like `(echo a) hi` land here.
     if (stage.group) throw new Error('unexpected token after `)`')
     if (stage.loop) throw new Error('unexpected token after `done`')
+    if (!t.quoted && commandPosition(stage) && UNIMPLEMENTED_BLOCKS.has(t.value)) {
+      throw new UnsupportedError('feature', t.value, UNIMPLEMENTED_BLOCKS.get(t.value))
+    }
     if (!t.quoted && commandPosition(stage) && KEYWORDS.has(t.value)) {
       if (t.value === 'done' && end === 'done') return finishBlock(steps, stage, i + 1, 'for: empty loop body')
       // `do` anywhere but in a `for` header, `done` with no loop open.

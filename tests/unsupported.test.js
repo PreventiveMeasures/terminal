@@ -313,3 +313,99 @@ describe('run().unsupported — wired commands', () => {
     assert.deepEqual(outer.unsupported.map((u) => u.detail), ['frobnicate'])
   })
 })
+
+describe('run().unsupported — awk', () => {
+  const t = () => createTerminal({ 'f.txt': 'a 1\nb 2\n' })
+  const gapsOf = (line) => t().run(line).unsupported
+
+  it('classifies the gawk constructs this interpreter refuses', () => {
+    // awk is the sharpest case for the channel in the whole package:
+    // the program is a quoted argument, so an exit code alone cannot
+    // tell a caller whether it wrote bad awk or reached for a feature
+    // this terminal does not have — and `2>/dev/null` erases the
+    // difference entirely.
+    const cases = [
+      [`awk '{ system("ls") }' f.txt`, 'system()'],
+      [`awk 'BEGIN { print strftime() }'`, 'strftime()'],
+      [`awk 'BEGIN { print mktime("x") }'`, 'mktime()'],
+      [`awk 'BEGIN { n = asort(a) }'`, 'asort()'],
+      [`awk 'BEGIN { n = asorti(a) }'`, 'asorti()'],
+      [`awk 'BEGIN { patsplit("a", x) }'`, 'patsplit()'],
+      [`awk 'BEGIN { "date" | getline x }'`, '"cmd" | getline'],
+      [`awk '{ print | "sort" }' f.txt`, 'print | "cmd"'],
+      [`awk '{ print > "out.txt" }' f.txt`, 'print > FILE'],
+      [`awk '{ printf "x" > "out.txt" }' f.txt`, 'printf > FILE'],
+    ]
+    for (const [line, detail] of cases) {
+      assert.deepEqual(gapsOf(line).map((u) => [u.kind, u.command, u.detail]), [['feature', 'awk', detail]], line)
+    }
+  })
+
+  it('does not classify a program\'s own mistakes as gaps', () => {
+    // gawk rejects these too, so they are the caller's, not ours.
+    for (const line of [
+      `awk 'BEGIN { frobnicate() }'`,       // function never defined
+      `awk 'BEGIN {' f.txt`,                // unbalanced brace
+      `awk '{ print $1 }' missing.txt`,     // unreadable operand
+      `awk -v 1bad=x 'BEGIN { }'`,          // malformed -v assignment
+      `awk 'BEGIN { print 1/0 }'`,          // division by zero
+    ]) {
+      const r = t().run(line)
+      assert.deepEqual(r.unsupported, [], line)
+      assert.notEqual(r.exitCode, 0, line)
+    }
+  })
+
+  it('survives a redirect, and keeps output produced before a runtime gap', () => {
+    const r = t().run(`awk '{ system("x") }' f.txt 2>/dev/null | wc -l`)
+    assert.equal(r.stderr, '')
+    assert.deepEqual(r.unsupported.map((u) => u.detail), ['system()'])
+    // A working program stays clean.
+    assert.deepEqual(gapsOf(`awk '{ print $2 }' f.txt`), [])
+    assert.equal(t().run(`awk '{ print $2 }' f.txt`).stdout, '1\n2\n')
+  })
+})
+
+describe('run().unsupported — shell constructs', () => {
+  const t = () => createTerminal({ 'f.txt': 'a\n' })
+  const detailsOf = (line) => t().run(line).unsupported.map((u) => u.detail)
+
+  it('names the construct, not the word the parser choked on', () => {
+    // `while true; do …; done` used to die on `unexpected \`do\``,
+    // pointing at the wrong word; `if true; then …; fi` reported three
+    // separate "command not found" gaps for one construct.
+    for (const [line, detail] of [
+      ['while true; do echo a; done', 'while'],
+      ['until false; do echo a; done', 'until'],
+      ['if true; then echo a; fi', 'if'],
+      ['case x in a) echo a;; esac', 'case'],
+      ['select x in a b; do echo $x; done', 'select'],
+      ['function f { echo a; }', 'function'],
+    ]) {
+      const r = t().run(line)
+      assert.deepEqual(r.unsupported.map((u) => [u.kind, u.command, u.detail]), [['feature', null, detail]], line)
+      assert.notEqual(r.exitCode, 0, line)
+    }
+  })
+
+  it('classifies loop control, which `for` loops make reachable', () => {
+    assert.deepEqual(detailsOf('for f in a b; do break; done'), ['break'])
+    assert.deepEqual(detailsOf('for f in a b; do continue; done'), ['continue'])
+    assert.equal(t().run('for f in a b; do break; done').unsupported[0].kind, 'feature')
+  })
+
+  it('leaves reserved words alone anywhere but command position', () => {
+    // Same rule bash uses, and the one `for` / `do` / `done` already
+    // followed: unquoted, in command position, or it is just a word.
+    assert.equal(t().run('echo while if case function').stdout, 'while if case function\n')
+    assert.equal(t().run('echo "while"').stdout, 'while\n')
+    assert.equal(t().run('for f in if while; do echo $f; done').stdout, 'if\nwhile\n')
+    assert.deepEqual(t().run('echo while').unsupported, [])
+  })
+
+  it('reports gaps from inside a loop body once, not once per iteration', () => {
+    const r = t().run('for f in a b c; do ls -t; done')
+    assert.deepEqual(r.unsupported.map((u) => u.detail), ['-t'])
+    assert.equal(r.stderr.split('\n').filter(Boolean).length, 3, 'stderr still shows all three')
+  })
+})
