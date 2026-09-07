@@ -293,6 +293,54 @@ describe('shell syntax — compound commands', () => {
   })
 })
 
+describe('shell syntax — subshell boundaries and redirect operands', () => {
+  it('every stage of a multi-stage pipeline runs in a subshell', () => {
+    const t = term()
+    assert.equal(out('x=before; export x=after | cat; echo $x', t), 'before\n')
+    assert.equal(out('cd src | cat; pwd', t), '/\n')
+    assert.equal(out('echo hi | cd src; pwd', t), '/\n')
+    assert.equal(out('y=1 | cat; echo [$y]', t), '[]\n')
+    assert.equal(out('for f in q; do z=1; done | cat; echo [$z]', t), '[]\n')
+    // A lone stage is the shell itself.
+    assert.equal(out('cd src; pwd', t), '/src\n')
+  })
+
+  it('a subshell restores OLDPWD along with the cwd', () => {
+    assert.equal(out('cd src; (cd /); cd -; pwd'), '/\n/\n')
+  })
+
+  it('a quoted `$@` is no argument at all; `$*` is one empty argument', () => {
+    assert.equal(out('echo x "$@" y'), 'x y\n')
+    assert.equal(out('echo x "$*" y'), 'x  y\n')
+    assert.equal(out('echo "a$@b"'), 'ab\n')
+  })
+
+  it('a backslash-newline in an unquoted here-document joins the lines', () => {
+    assert.equal(out('cat <<EOF\nfoo\\\nbar\nEOF'), 'foobar\n')
+    assert.equal(out("cat <<'EOF'\nfoo\\\nbar\nEOF"), 'foo\\\nbar\n')
+  })
+
+  it('a redirect operand is expanded like an argument and must be exactly one word', () => {
+    const t = term()
+    assert.equal(out('cat < b.tx*', t), 'B\n')
+    assert.equal(out('f=b.txt; cat < $f', t), 'B\n')
+    const glob = t.run('cat < *.txt')
+    assert.deepEqual([glob.stdout, glob.stderr, glob.exitCode], ['', 'error: *.txt: ambiguous redirect\n', 1])
+    assert.equal(t.run('f="a.txt b.txt"; cat < $f').stderr, 'error: $f: ambiguous redirect\n')
+    assert.equal(t.run('cat < {a,b}.txt').stderr, 'error: {a,b}.txt: ambiguous redirect\n')
+    assert.match(t.run('cat < nomatch*.txt').stderr, /nomatch\*\.txt: No such file or directory/u)
+    // A here-string is expanded but never split or globbed.
+    assert.equal(out('f="a b"; cat <<< $f', t), 'a b\n')
+  })
+
+  it('`export` arguments that look like assignments expand as assignments', () => {
+    const t = term()
+    assert.equal(out('y="a b"; export x=$y; echo [$x]', t), '[a b]\n')
+    assert.equal(out('export x=*.txt; echo [$x]', t), '[*.txt]\n')
+    assert.equal(out('export x=~/src; echo [$x]', t), '[/src]\n')
+  })
+})
+
 describe('shell syntax — command conventions', () => {
   it('`-` names standard input for the file readers', () => {
     assert.equal(out('echo hi | cat - a.txt'), 'hi\nx y z\nhello world\n')

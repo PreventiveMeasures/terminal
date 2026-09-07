@@ -40,7 +40,7 @@
 // body; the variable persists after the loop, as in bash.
 
 import { createFs, resolve } from './fs.js'
-import { expandScalar, expandWords } from './expand.js'
+import { expandRedirect, expandScalar, expandWords } from './expand.js'
 import { parseLine, refusedWrite } from './parse.js'
 import { DEFAULT_REGISTRY, createRegistry } from './registry.js'
 import { SHELL_GAPS } from './shell-builtins.js'
@@ -196,18 +196,17 @@ function runSteps(steps, ctx, initialStdin) {
 // its stderr wherever fd 2 points — the pipe / caller's stdout (`out`),
 // the caller's stderr (`err`), or nowhere. Mid-pipeline failure isn't
 // fatal — real shells keep going and surface the last stage's exit
-// code. An `exit` in a multi-stage pipeline ends only its own stage, as
-// bash's subshell-per-stage does.
+// code. Every stage of a multi-stage pipeline runs in a subshell, as in
+// bash: a `cd`, an assignment or an `exit` there reaches nothing
+// outside it, and its `break` binds no enclosing loop.
 function runPipeline(stages, ctx, initialStdin) {
   let stdin = initialStdin
   let stderr = ''
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]
     const io = resolveRedirs(stage, ctx, stdin)
-    const result = io.error ? io.error
-      : stage.group ? runGroup(stage, ctx, io.stdin)
-      : stage.loop ? runLoop(stage.loop, ctx, io.stdin)
-      : runStage(stage, ctx, io.stdin)
+    const run = () => (stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx, io.stdin) : runStage(stage, ctx, io.stdin))
+    const result = io.error ? io.error : stages.length > 1 ? isolated(ctx, run) : run()
     let stageOut = ''
     let stageErr = io.warnings
     if (io.fds[1] === 'out') stageOut += result.stdout
@@ -238,19 +237,22 @@ function resolveRedirs(stage, ctx, stdin) {
     if (r.op === 'dup') fds[r.fd] = fds[r.toFd]
     else if (r.op === 'close') fds[r.fd] = 'null'
     else if (r.op === 'to') {
-      const target = r.target ?? expandScalar(r.word, ctx, warnings)
-      const dest = target === '/dev/null' ? 'null' : target === '/dev/stdout' ? fds[1] : target === '/dev/stderr' ? fds[2] : null
+      const t = r.target === undefined ? expandRedirect(r.word, ctx, warnings) : { value: r.target }
+      if (t.error) return { error: err(`error: ${t.error}`), fds, warnings: warnings.join('') }
+      const dest = t.value === '/dev/null' ? 'null' : t.value === '/dev/stdout' ? fds[1] : t.value === '/dev/stderr' ? fds[2] : null
       if (dest === null) {
-        const e = refusedWrite(r.label, target)
+        const e = refusedWrite(r.label, t.value)
         ctx.unsupported.add(unsupportedNote(e))
         return { error: err(`error: ${e.message}`), fds, warnings: warnings.join('') }
       }
       fds[r.fd] = dest
       if (r.both) fds[2] = dest
     } else if (r.op === 'text') input = r.expand ? expandScalar(heredocWord(r.body), ctx, warnings) : r.body
+    // A here-string is expanded but neither split nor globbed (bash).
     else if (r.op === 'herestring') input = expandScalar(r.word, ctx, warnings) + '\n'
     else {
-      const read = readInput(expandScalar(r.word, ctx, warnings), ctx, stdin)
+      const t = expandRedirect(r.word, ctx, warnings)
+      const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, stdin)
       if (read.error) return { error: read.error, fds, warnings: warnings.join('') }
       input = read.content
     }
@@ -259,14 +261,15 @@ function resolveRedirs(stage, ctx, stdin) {
 }
 
 // An unquoted here-document body: `$NAME` expands, `\$` `\\` and
-// `` \` `` are escapes, nothing else is special — the double-quote
-// rules, minus the quotes.
+// `` \` `` are escapes, `\<newline>` joins two lines, nothing else is
+// special — the double-quote rules, minus the quotes.
 function heredocWord(body) {
   let value = ''
   let mask = ''
   for (let i = 0; i < body.length; i++) {
     const c = body[i]
     const n = body[i + 1]
+    if (c === '\\' && n === '\n') { i++; continue }
     if (c === '\\' && (n === '$' || n === '\\' || n === '`')) { value += n; mask += '1'; i++; continue }
     value += c
     mask += '2'
@@ -336,21 +339,26 @@ function runLoop(loop, ctx, stdin) {
   return { stdout, stderr, exitCode }
 }
 
-// A subshell snapshots the cwd and the variables and restores both;
-// an `exit` or a `break` inside it ends the subshell alone. A `{ … }`
-// group shares everything, so its signals travel on. The try/finally
-// keeps the restore safe across thrown errors.
+// A subshell: an `exit` or a `break` inside it ends the subshell alone.
+// A `{ … }` group shares everything, so its signals travel on.
 function runGroup(stage, ctx, stdin) {
   if (!stage.isolate) return runSteps(stage.group, ctx, stdin)
-  const savedCwd = ctx.cwd
-  const savedVars = ctx.vars
-  ctx.vars = new Map(savedVars)
+  const r = isolated(ctx, () => runSteps(stage.group, ctx, stdin))
+  return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }
+}
+
+// Run `fn` as a subshell would: on a copy of the variables, with the
+// working directory and `OLDPWD` put back afterwards. The try/finally
+// keeps the restore safe across thrown errors.
+function isolated(ctx, fn) {
+  const saved = { cwd: ctx.cwd, oldpwd: ctx.oldpwd, vars: ctx.vars }
+  ctx.vars = new Map(saved.vars)
   try {
-    const r = runSteps(stage.group, ctx, stdin)
-    return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }
+    return fn()
   } finally {
-    ctx.cwd = savedCwd
-    ctx.vars = savedVars
+    ctx.cwd = saved.cwd
+    ctx.oldpwd = saved.oldpwd
+    ctx.vars = saved.vars
   }
 }
 

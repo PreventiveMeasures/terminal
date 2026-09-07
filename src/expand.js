@@ -33,20 +33,56 @@ export function expandWords(words, ctx) {
   const out = []
   const warnings = []
   words.forEach((w, i) => {
-    const braced = i === 0 ? [w] : expandBraces(w)
-    for (const b of braced) {
-      for (const word of substitute(tilde(b, ctx), ctx, warnings, true)) {
-        if (i > 0 && hasGlobMeta(word)) {
-          const matches = globPaths(word, ctx)
-          if (matches.length > 0) { out.push(...matches); continue }
-        }
-        // Quote removal drops a bare word that expanded to nothing (`$x`
-        // unset, `{,a}`'s empty alternative); `""` and `"$x"` survive.
-        if (word.value !== '' || word.q) out.push(word.value)
-      }
+    if (i === 0) { out.push(...expandArg(w, ctx, warnings, false)); return }
+    for (const b of expandBraces(w)) {
+      // An argument of `export` that looks like an assignment expands as
+      // an assignment does — no splitting, no globbing (bash's rule for
+      // the declaration builtins) — so `export x=$y` keeps a spaced value.
+      if (out[0] === 'export' && assignmentOf(b)) out.push(expandAssignment(b, ctx, warnings))
+      else out.push(...expandArg(b, ctx, warnings, true))
     }
   })
   return { argv: out, stderr: warnings.join('') }
+}
+
+// One brace product to its argv words: substitution with splitting,
+// then pathname expansion (except for the command name), then quote
+// removal, which drops a bare word that expanded to nothing (`$x`
+// unset, `{,a}`'s empty alternative) while `""` and `"$x"` survive.
+function expandArg(b, ctx, warnings, glob) {
+  const out = []
+  for (const word of substitute(tilde(b, ctx), ctx, warnings, true)) {
+    if (glob && hasGlobMeta(word)) {
+      const matches = globPaths(word, ctx)
+      if (matches.length > 0) { out.push(...matches); continue }
+    }
+    if (word.value !== '' || word.q) out.push(word.value)
+  }
+  return out
+}
+
+// A redirect operand: expanded like an argument, and required to come
+// out as exactly one word — bash's "ambiguous redirect" otherwise, for
+// a glob with several matches, a split value, or an empty one.
+export function expandRedirect(word, ctx, warnings) {
+  const out = []
+  for (const b of expandBraces(word)) out.push(...expandArg(b, ctx, warnings, true))
+  return out.length === 1 ? { value: out[0] } : { error: `${word.value}: ambiguous redirect` }
+}
+
+const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=/u
+
+// `NAME=` with the name and `=` unquoted, or null.
+function assignmentOf(w) {
+  const m = ASSIGNMENT.exec(w.value)
+  if (!m || (w.mask !== null && /[12]/u.test(w.mask.slice(0, m[0].length)))) return null
+  return m[0].length
+}
+
+function expandAssignment(w, ctx, warnings) {
+  const eq = assignmentOf(w)
+  const rest = { value: w.value.slice(eq), mask: w.mask === null ? null : w.mask.slice(eq) }
+  return w.value.slice(0, eq) + expandScalar(rest, ctx, warnings)
 }
 
 // A single word expanded without splitting or globbing — an assignment
@@ -96,6 +132,9 @@ function substitute(w, ctx, warnings, split) {
     i += ref.raw.length - 1
     const r = lookup(ref.name, ctx, warnings)
     if (r.literal) { add(cur, ref.raw, m); continue }
+    // `"$@"` with no positional parameters is no word at all, where
+    // `"$*"` is one empty word; only the quoting of the rest decides.
+    if (r.omit) continue
     if (m === '2' || !split) { add(cur, r.value, '2'); continue }
     // IFS splitting of a bare expansion. Leading blanks end the current
     // word (an empty one is dropped, not emitted); each inner piece is a
@@ -138,7 +177,8 @@ function readRef(w, i, m) {
 function lookup(name, ctx, warnings) {
   if (name === '?') return { value: String(ctx.lastExit) }
   if (name === '#') return { value: '0' }
-  if (name === '@' || name === '*' || /^[1-9]$/u.test(name)) return { value: '' }
+  if (name === '@') return { value: '', omit: true }
+  if (name === '*' || /^[1-9]$/u.test(name)) return { value: '' }
   if (PROCESS_PARAMS.has(name)) {
     report(ctx, warnings, `$${name}`, `warning: \`$${name}\` is not supported (this terminal runs no process); left as typed`)
     return { literal: true }
