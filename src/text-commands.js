@@ -65,8 +65,7 @@ function squeezeBlankLines(content) {
 // over-large minus count leaves nothing rather than going negative,
 // which is why the remainder is clamped at 0.
 function head(stdin, tokens, ctx) {
-  const { flags, values, positional, order } = parseArgs(tokens, { short: ['q', 'v'], valueShort: ['c', 'n'] })
-  applyDashNumberShorthand(tokens, values, positional)
+  const { flags, values, positional, order } = parseArgs(dashNumberShorthand(tokens), { short: ['q', 'v'], valueShort: ['c', 'n'] })
   const unit = lastCountUnit(order)
   const count = parseSignedCount(values.get(unit) ?? '10', `head: -${unit}`)
   if (count.error) return count.error
@@ -127,8 +126,7 @@ function lastCountUnit(order) {
 // treated as `+1` (the whole file) rather than as an empty request.
 // An unsigned count, or `-N`, is the familiar last-N.
 function tail(stdin, tokens, ctx) {
-  const { flags, values, positional, order } = parseArgs(tokens, { short: ['q', 'v'], valueShort: ['c', 'n'] })
-  applyDashNumberShorthand(tokens, values, positional)
+  const { flags, values, positional, order } = parseArgs(dashNumberShorthand(tokens), { short: ['q', 'v'], valueShort: ['c', 'n'] })
   const unit = lastCountUnit(order)
   const n = parseSignedCount(values.get(unit) ?? '10', `tail: -${unit}`)
   if (n.error) return n.error
@@ -156,29 +154,11 @@ function tail(stdin, tokens, ctx) {
   return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner)
 }
 
-// GNU's obsolete shorthand: `head -200 file` means `head -n 200 file`.
-// POSITION is the whole rule. GNU rewrites `-NUM` to `-n NUM` only when
-// it is the FIRST argument, so it then loses to any later count the
-// same way one `-n` loses to the next (`head -1 -c 3` prints 3 bytes,
-// `head -2 -n 1` prints 1 line); a `-NUM` anywhere else is rejected
-// outright as an "invalid trailing option". Hence the check against
-// `tokens[0]` rather than the first positional — the two forms leave
-// `positional` looking identical.
-//
-// A trailing `-NUM` is where we diverge: it stays positional and fails
-// as a missing file operand, so unlike GNU (which rejects the line
-// before opening anything) the other operands are still read and still
-// print. An error either way, but not the same error, and not the same
-// stdout.
-function applyDashNumberShorthand(tokens, values, positional) {
-  const first = tokens[0] ?? ''
-  if (!/^-\d+$/u.test(first)) return
-  // parseArgs's `^-\d/` guard routes such a token straight to
-  // `positional`, and this one led the line, so it heads that list too.
-  positional.shift()
-  // Deliberately does NOT clobber an explicit `-n`: `head -1 -n 2` is
-  // the later option's count, exactly as `lastCountUnit` resolves `-c`.
-  if (!values.has('n')) values.set('n', first.slice(1))
+// Only the first argument admits GNU's obsolete -NUM form. Rewrite it
+// before option parsing so later -n/-c retain normal last-option precedence;
+// other digit options are diagnosed, and -- still protects numeric filenames.
+function dashNumberShorthand(tokens) {
+  return /^-\d+$/u.test(tokens[0] ?? '') ? ['-n', tokens[0].slice(1), ...tokens.slice(1)] : tokens
 }
 
 // `joinLines`, not a check on the JOINED string: one selected blank line
@@ -382,10 +362,11 @@ function uniq(stdin, tokens, ctx) {
   // then keep at most `-w`. GNU applies them in exactly that order, and
   // the key only ever decides EQUALITY — the line is emitted whole.
   const norm = (line) => {
-    let rest = skipFields.value > 0 ? dropFields(line, skipFields.value) : line
-    if (skipChars.value > 0) rest = rest.slice(skipChars.value)
-    if (width.value !== undefined) rest = rest.slice(0, width.value)
-    return ignoreCase ? rest.toLowerCase() : rest
+    const rest = skipFields.value > 0 ? dropFields(line, skipFields.value) : line
+    const bytes = utf8.encode(rest).subarray(skipChars.value, width.value === undefined ? undefined : skipChars.value + width.value)
+    // Keys may contain partial UTF-8: compare bytes without decoding or
+    // emitting them. GNU uniq's -s/-w and C case folding operate on bytes.
+    return (ignoreCase ? bytes.map((b) => b >= 65 && b <= 90 ? b + 32 : b) : bytes).join(',')
   }
   const lines = splitLines(r.content)
   const out = []

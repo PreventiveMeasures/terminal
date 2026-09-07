@@ -27,8 +27,8 @@
 //     Locale-sensitive classes on non-ASCII input are also diagnosed.
 //   - `for (k in a)` walks keys in insertion order; gawk's order is its
 //     hash order. Neither is specified.
-//   - ENVIRON is empty (the terminal has no environment), ARGV[0] is
-//     `awk`, PROCINFO holds only "FS", and rand() is a different
+//   - ENVIRON and PROCINFO metadata other than "FS" are diagnosed.
+//     ARGV[0] is `awk`, and rand() uses a different
 //     generator (deterministic, seeded by srand() like gawk's).
 //   - Two gawk oddities are not copied: split() with a regex that only
 //     matches the empty string at position 0 drops the first character
@@ -43,7 +43,7 @@ import { unescapeAwkString } from './awk-lex.js'
 import { parseProgram } from './awk-parse.js'
 import { createMachine, runProgram } from './awk-run.js'
 import { StrNum } from './awk-value.js'
-import { resolve } from './fs.js'
+import { lookup } from './fs.js'
 import { parseArgs } from './parse.js'
 import { err, usage } from './util.js'
 
@@ -137,8 +137,8 @@ function programSource(progFiles, positional, ctx) {
   }
   const parts = []
   for (const f of progFiles) {
-    const abs = resolve(ctx.cwd, f)
-    if (!ctx.fs.isFile(abs)) return { error: err(`awk: cannot open program file \`${f}\`: no such file or directory`, 2) }
+    const { path: abs, error } = lookup(ctx.cwd, f, ctx.fs)
+    if (error || !ctx.fs.isFile(abs)) return { error: err(`awk: cannot open program file \`${f}\`: ${error ?? 'Is a directory'}`, 2) }
     parts.push(ctx.fs.readFile(abs))
   }
   return { text: parts.join('\n'), operands: positional }

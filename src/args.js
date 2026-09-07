@@ -3,8 +3,8 @@
 // understands; any other `-x` / `--xyz` token throws — silent
 // acceptance would let typos like `head -X 5` look like they did
 // nothing. `--` ends flag processing; subsequent tokens are
-// positional. A bare `-` or a token like `-5` (digits) is also
-// positional so callers can pass numbers prefixed with `-`.
+// positional. A bare `-` is also positional; negative numbers need
+// the explicit numericOperands schema setting (used by seq).
 //
 // Schema fields (each accepts an iterable of names; defaults empty):
 //   short      — boolean short flags (e.g. `i` for `-i`)
@@ -24,6 +24,7 @@
 //                tokens are pushed as positional verbatim. Used by
 //                xargs so flags meant for the inner command (e.g.
 //                `xargs grep -n PATTERN`) aren't eaten by xargs.
+//   numericOperands — when true, undeclared -DIGIT tokens are operands.
 //
 // Bundled short flags split across chars (`-an` → `-a` + `-n`); a
 // value-taking short inside a bundle takes the rest of the bundle
@@ -82,7 +83,7 @@ export function parseArgs(tokens, schema = {}) {
       } else throw new UnsupportedError('option', `--${name}`, `unknown option: --${name}`)
       continue
     }
-    if (t.startsWith('-') && t.length > 1 && !isNumericPositional(t, short, valueShort, repeatable)) {
+    if (t.startsWith('-') && t.length > 1 && !(schema.numericOperands && isNumericPositional(t, short, valueShort, repeatable))) {
       i = consumeShorts(tokens, i, short, valueShort, repeatable, flags, values, order)
       continue
     }
@@ -92,11 +93,9 @@ export function parseArgs(tokens, schema = {}) {
   return { flags, values, positional, order }
 }
 
-// A `-<digit>` token is positional by default, which is what keeps the
-// `head -5` / `ls -10` shorthands working. But a command that DECLARES
-// a digit as one of its options means it as an option: `xargs -0` is
-// the NUL-separated mode, not a command named `-0`. Consulting the
-// schema keeps both readings available without a per-command hack.
+// Commands opting into numeric operands still give declared digit flags
+// precedence. Everywhere else digit options go through normal validation;
+// treating `grep -2` as a pattern or `cat -2` as a file corrupts results.
 function isNumericPositional(token, short, valueShort, repeatable) {
   if (!/^-\d/u.test(token)) return false
   const c = token[1]

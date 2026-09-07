@@ -43,7 +43,7 @@ including when stderr is redirected or piped away.
 
 ## Validation
 
-- 1,716 tests passed, with zero failures, skips, or TODOs.
+- 2,087 tests passed, with zero failures, skips, or TODOs.
 - The suite includes a native command differential matrix and the existing GNU
   AWK differential tests. Reference versions: coreutils 9.5, grep 3.11, gawk 5.2.2.
 - `npm run lint` and `git diff --check` pass.
@@ -54,3 +54,39 @@ For the native comparisons, place GNU coreutils, GNU grep, and GNU awk on `PATH`
 The command matrix also discovers GNU tools with `g` prefixes. Native comparison
 groups skip explicitly when their reference binary is unavailable; inspect the
 test summary rather than treating a skipped comparison as a pass.
+
+## Second pass: agent workflows
+
+This pass starts from `ced86d9` and prioritizes plausible but corrupt output.
+
+- Grep retains blank-line matches, including through `wc -l`; dot matches
+  carriage returns in CRLF input. GNU word-start/end assertions are directional,
+  ERE `\t`/`\n`/`\r` do not turn into JavaScript control escapes, and literal
+  backslashes survive only-matching extraction. Context output separates files,
+  and recursive searches distinguish explicit files from discovered descendants.
+- Filesystem operations validate path components before normalizing `..`.
+  `dir/../other` works when `dir` is a directory; `file/../other` fails when
+  `file` is a regular file, and `missing/../other` fails too. This applies to
+  readers, redirections, globs, AWK program/input files, and custom-handler views.
+- Find parses depth options at their expression position, leaving option-looking
+  `-name` patterns and `-exec` arguments intact. A literal `+` inside child
+  arguments is preserved. Root names retain `.`/`..`, and the empty root matches
+  `-empty`. Empty `ls` results no longer invent a blank line.
+- Sort and filename ordering use UTF-8 lexical order. Sort/uniq case folding
+  follows the C locale, avoiding Unicode expansions that merge different records.
+  Uniq's skip/width comparison keys operate on bytes without decoding partial
+  UTF-8. Numeric options cannot silently become patterns or filenames; supported
+  leading head/tail count shorthands and negative seq operands remain supported.
+- Pipe `/dev/stdin` aliases share consumption. Regular-file aliases retain the
+  original contents and reopen from the beginning, following the existing
+  GNU/Linux model. Nested API calls have independent input descriptors. AWK
+  handles `/dev/null` and repeated regular-file `/dev/stdin` operands.
+- AWK `ENVIRON` and unmodeled `PROCINFO` data, including `sorted_in`, now produce
+  diagnostics instead of empty values or ignored iteration settings. Grep
+  diagnoses binary matches and non-ASCII regex operations whose results depend
+  on an unmodeled locale; literal Unicode searches remain supported.
+
+The added tests include 292 strict native GNU comparisons and focused agent
+workflow regressions. Strict comparisons require the behavior to work and do
+not accept an unsupported diagnostic as a substitute for the expected output.
+The audit remains under `doc/` and is excluded from the npm package.

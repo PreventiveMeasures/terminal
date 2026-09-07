@@ -16,7 +16,7 @@ import { AwkError } from './awk-common.js'
 import { unescapeAwkString } from './awk-lex.js'
 import { AwkRegex, compileRegex, splitByRegex, stepAt } from './awk-regex.js'
 import { StrNum, ignoreCase, toNum, toStr } from './awk-value.js'
-import { resolve } from './fs.js'
+import { lookup } from './fs.js'
 import { consumeStdin } from './util.js'
 
 // `src` is `{ text, pos }`; advances `pos`. Returns { rec, rt } or null at
@@ -193,18 +193,23 @@ export class Input {
       const asg = ASSIGNMENT.exec(op)
       if (asg) { m.assign(asg[1], new StrNum(unescapeAwkString(asg[2], m.warn))); continue }
       this.sawFile = true
-      if (op === '-' || op === '/dev/stdin') { if (this.use(m, op, this.takeStdin())) return true; continue }
-      const abs = resolve(this.ctx.cwd, op)
+      if (op === '/dev/null') { if (this.use(m, op, '')) return true; continue }
+      if (op === '-' || op === '/dev/stdin') {
+        const text = op === '/dev/stdin' && this.ctx.stdinFile ? this.ctx.stdinOrigin : this.takeStdin()
+        if (this.use(m, op, text)) return true
+        continue
+      }
+      const { path: abs, error } = lookup(this.ctx.cwd, op, this.ctx.fs)
       if (this.ctx.fs.isDir(abs)) {
         this.failFile(m, op, 'Is a directory')
         if (this.exitSignal === undefined) m.warn(`command line argument \`${op}' is a directory: skipped`)
         continue
       }
-      if (!this.ctx.fs.isFile(abs)) {
-        const sig = this.failFile(m, op, 'No such file or directory')
+      if (error) {
+        const sig = this.failFile(m, op, error)
         if (sig !== undefined && sig.type === 'nextfile') continue
         if (this.exitSignal !== undefined) return false
-        throw new AwkError(`${op}: no such file or directory`)
+        throw new AwkError(`${op}: ${error.toLowerCase()}`)
       }
       if (this.use(m, op, this.ctx.fs.readFile(abs))) return true
     }
@@ -258,11 +263,12 @@ export class Input {
     let src = this.readers.get(name)
     if (!src) {
       let text
-      if (name === '-' || name === '/dev/stdin') text = this.stdin
+      if (name === '/dev/null') text = ''
+      else if (name === '-' || name === '/dev/stdin') text = this.ctx.stdinFile ? this.ctx.stdinOrigin : this.stdin
       else {
-        const abs = resolve(this.ctx.cwd, name)
+        const { path: abs, error } = lookup(this.ctx.cwd, name, this.ctx.fs)
         if (this.ctx.fs.isDir(abs)) { m.globals.set('ERRNO', 'Is a directory'); return { status: -1 } }
-        if (!this.ctx.fs.isFile(abs)) { m.globals.set('ERRNO', 'No such file or directory'); return { status: -1 } }
+        if (error) { m.globals.set('ERRNO', error); return { status: -1 } }
         text = this.ctx.fs.readFile(abs)
       }
       src = { text, pos: 0 }

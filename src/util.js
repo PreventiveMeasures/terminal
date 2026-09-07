@@ -4,7 +4,7 @@
 // registry, which would create a cycle.
 
 import { UnsupportedError } from './unsupported.js'
-import { resolve } from './fs.js'
+import { lookup } from './fs.js'
 
 // The byte model every `-c`-style option shares. Content is a JS string
 // (UTF-16 code units), so anything counting or slicing BYTES — `wc -c`,
@@ -92,19 +92,19 @@ export function readFilesFor(cmd, files, ctx, stdin = '') {
     // `-` is the standard input, by the convention every coreutils
     // reader follows; it keeps its name so banners can label it.
     if (f === '/dev/null') { entries.push({ name: f, content: '', kind: 'file' }); continue }
-    if (f === '/dev/stdin' && ctx.stdinFile) { entries.push({ name: f, content: stdin, kind: 'file' }); continue }
+    if (f === '/dev/stdin' && ctx.stdinFile) { entries.push({ name: f, content: ctx.stdinOrigin, kind: 'file' }); continue }
     if (f === '-' || f === '/dev/stdin') { entries.push({ name: f, content: pipe, kind: 'file', shared: true }); pipe = ''; consumeStdin(ctx); continue }
-    const abs = resolve(ctx.cwd, f)
+    const { path: abs, error } = lookup(ctx.cwd, f, ctx.fs)
+    if (error) {
+      stderr += `${cmd}: ${f}: ${error.toLowerCase()}\n`
+      failed = true
+      entries.push({ name: f, content: '', kind: 'missing' })
+      continue
+    }
     if (ctx.fs.isDir(abs)) {
       stderr += `${cmd}: ${f}: is a directory\n`
       failed = true
       entries.push({ name: f, content: '', kind: 'dir' })
-      continue
-    }
-    if (!ctx.fs.isFile(abs)) {
-      stderr += `${cmd}: ${f}: no such file or directory\n`
-      failed = true
-      entries.push({ name: f, content: '', kind: 'missing' })
       continue
     }
     entries.push({ name: f, content: ctx.fs.readFile(abs), kind: 'file' })

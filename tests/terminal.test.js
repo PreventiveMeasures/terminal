@@ -320,10 +320,10 @@ describe('createTerminal — text commands', () => {
     assert.doesNotMatch(r.stdout, /^\/src/mu)
   })
 
-  it('grep -r forces the filename prefix even on a single named file', () => {
+  it('grep -r leaves a single explicit file unprefixed', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('grep -r fix src/foo.js')
-    assert.match(r.stdout, /^src\/foo\.js:/u)
+    assert.equal(r.stdout, '// TODO: fix\n')
   })
 
   it('grep -r exits 1 with no output when nothing matches', () => {
@@ -566,14 +566,14 @@ describe('createTerminal — text commands', () => {
     assert.equal(t.run("grep -E '(' src/x.js").exitCode, 2)
   })
 
-  it('grep: error label reflects -i flag (`/iu` not `/u`)', () => {
+  it('grep: error label reflects -i and dotAll flags', () => {
     // Minor accuracy: the label tells users which RegExp flags were
     // actually in effect when the compile failed. Hard-coding `/u`
     // hid the fact that `-i` was set.
     const t = createTerminal({ 'src/x.js': 'hi\n' })
     const r = t.run("grep -iE '(' src/x.js")
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /\/iu/u)
+    assert.match(r.stderr, /\/isu/u)
   })
 
   it('grep BRE: `^` is literal mid-pattern, anchor at start (matches ugrep)', () => {
@@ -1650,16 +1650,12 @@ describe('createTerminal — find / tree / path', () => {
     assert.match(r.stderr, /definitelynotacmd/u)
   })
 
-  it('find -exec without `;` or `+` terminator hints at the `\\;` quoting trap', () => {
-    // The canonical GNU idiom is `find ... -exec CMD \\;`, but our
-    // shell parser doesn't honor backslash-escapes outside quotes,
-    // so `\\;` parses as the step separator before find sees it.
-    // The error message points users at the workaround.
+  it('find -exec without a terminator explains quoting or escaping it', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('find src -exec echo {}')
     assert.notEqual(r.exitCode, 0)
     assert.match(r.stderr, /missing terminator/u)
-    assert.match(r.stderr, /quoted|\\\\;/u, 'should hint at the shell-escape trap')
+    assert.match(r.stderr, /quote or escape/u)
   })
 
   it('find -exec ... + DOES bubble its exit code (unlike the `;` form)', () => {
@@ -1765,7 +1761,7 @@ describe('createTerminal — find / tree / path', () => {
     // `+` form must end in `{}`.
     const badPlus = t.run('find src -type f -exec echo +')
     assert.notEqual(badPlus.exitCode, 0)
-    assert.match(badPlus.stderr, /`\{\}` must be the last argument/u)
+    assert.match(badPlus.stderr, /missing terminator/u)
   })
 
   it('find -exec composes with -type / -name and runs only on the filtered set', () => {
@@ -1815,7 +1811,7 @@ describe('createTerminal — find / tree / path', () => {
     const t = createTerminal(SOURCES)
     const missing = t.run('tree /nope')
     assert.notEqual(missing.exitCode, 0)
-    assert.match(missing.stderr, /not a directory/u)
+    assert.match(missing.stderr, /No such file or directory/u)
     const onFile = t.run('tree src/foo.js')
     assert.notEqual(onFile.exitCode, 0)
     assert.match(onFile.stderr, /not a directory/u)
@@ -3788,17 +3784,13 @@ describe('createTerminal — head/tail -N shorthand', () => {
     assert.equal(t.run('tail -1 src/foo.js').stdout, 'const y = 2\n')
   })
 
-  it('explicit `-n N` wins over numeric shorthand in the same invocation', () => {
-    // Both forms in one call: `-n 1` is the explicit count;
-    // `-100` would have been the shorthand had `-n` not already
-    // been set. The shorthand-promotion logic skips when `-n` is
-    // present, so `-100` stays a positional — and since the file
-    // `-100` doesn't exist, head errors on it. The error message
-    // confirms the shorthand wasn't consumed (and so -n won).
+  it('a numeric option after -n is diagnosed instead of read as a file', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('head -n 1 -100 src/foo.js')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /-100: no such file/u)
+    assert.match(r.stderr, /unknown option/u)
+    assert.equal(r.stdout, '')
+    assert.equal(r.unsupported.length, 1)
   })
 
   it('redirect error messages use bare `>` / `>>` for stdout (fd=1) but `2>` for stderr', () => {
@@ -3919,18 +3911,13 @@ describe('createTerminal — head -c (byte counts)', () => {
     assert.equal(t.run('head -1 -n 2 h.txt').stdout, 'hello\nworld\n')
   })
 
-  it('a trailing `-NUM` is not promoted, and diverges from GNU in stdout too', () => {
-    // Position is the rule: `-1` arriving after another option is not
-    // the shorthand, so it stays positional and head reports it as a
-    // missing file — while still reading h.txt. Two operands, so the
-    // survivor is bannered. GNU rejects the line during argument
-    // parsing ("invalid trailing option") and writes NOTHING to stdout.
-    // Both exit non-zero, but the outputs differ.
+  it('a trailing -NUM is diagnosed before reading any file', () => {
     const t = createTerminal(BYTES)
     const r = t.run('head -c 3 -1 h.txt')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /-1: no such file/u)
-    assert.equal(r.stdout, '==> h.txt <==\nhel')
+    assert.match(r.stderr, /unknown option: -1/u)
+    assert.equal(r.stdout, '')
+    assert.equal(r.unsupported[0].detail, '-1')
   })
 })
 

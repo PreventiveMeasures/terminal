@@ -67,9 +67,8 @@ function escapeLength(pattern, i) {
 // POSIX (where `\d` would be literal `d`).
 //
 // GNU BRE extensions also recognized:
-//   `\<` / `\>` — start / end of word, both mapped to ES `\b`.
-//     `\b` is symmetric (matches both transitions) where GNU's are
-//     directional, but the common pattern `\<word\>` reads the same.
+//   `\<` / `\>` — directional start / end of word, retained for
+//     grep-pattern.js to render for the boolean and extent matchers.
 //   `*` at the very start of the pattern or immediately after `^`
 //     is treated as literal (POSIX BRE rule: no preceding atom to
 //     repeat). ES rejects these as "Nothing to repeat".
@@ -132,7 +131,7 @@ export function breToEs(pattern) {
       // BRE-specific transforms first — these aren't ES syntax,
       // so escapeLength would return 0 for them.
       if (SWAP.includes(next)) { out += next; i++; continue }
-      if (next === '<' || next === '>') { out += '\\b'; i++; continue }
+      if (next === '<' || next === '>' || next === '`' || next === "'") { out += '\\' + next; i++; continue }
       // Validated ES escape (including multi-char `\xHH`, `\p{...}`).
       const len = escapeLength(pattern, i)
       if (len > 0) { out += pattern.slice(i, i + len); i += len - 1; continue }

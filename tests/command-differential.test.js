@@ -19,13 +19,14 @@ function reference(name) {
   }
   return null
 }
-function compare(command, binary, argv, input) {
+function compare(command, binary, argv, input, allowUnsupported = true) {
   writeFileSync(join(dir, 'f'), input)
   const fd = openSync(join(dir, 'f'), 'r')
   let ref
   try { ref = spawnSync(binary, argv, { cwd: dir, env, stdio: [fd, 'pipe', 'pipe'], encoding: 'utf8', timeout: 5000 }) } finally { closeSync(fd) }
   assert.equal(ref.error, undefined, command)
   const mine = createTerminal({ f: input }).run(command)
+  if (!allowUnsupported) assert.deepEqual(mine.unsupported, [], command)
   if (mine.unsupported.length) {
     assert.notEqual(mine.exitCode, 0, command)
     assert.notEqual(mine.stderr, '', command)
@@ -72,3 +73,30 @@ describe('grep — native GNU regex differential', { skip: grep === null ? 'GNU 
     }
   }
 })
+
+describe('grep — agent search patterns against GNU', { skip: grep === null ? 'GNU grep is not available' : false }, () => {
+  const agentPatterns = ['^$', '.', '^.$', '^x.*$', '\\<word\\>', '\\>word\\<', '\\t', '\\n', '\\r', '\\\\b']
+  const agentInputs = ['\n', 'x\r\nword!\n!word\n\r\n', 't\nn\nr\n\t\n\\b\n\\y\n']
+  for (const mode of ['', '-E', '-o', '-Eo', '-c', '-n', '-r', '-A0']) {
+    for (const pattern of agentPatterns) {
+      for (const input of agentInputs) {
+        it(`${mode || 'BRE'} ${pattern} on ${JSON.stringify(input)}`, () => {
+          compare(`grep ${mode} '${pattern}' f`, grep, [...(mode ? [mode] : []), pattern, 'f'], input, false)
+        })
+      }
+    }
+  }
+})
+
+for (const [command, options] of Object.entries({ sort: ['', '-f', '-fu', '-nr', '-u', '-k1,1f'], uniq: ['', '-i', '-s1', '-s2', '-w1', '-w2', '-iw1'] })) {
+  const binary = reference(command)
+  describe(`${command} — Unicode comparison against GNU C locale`, { skip: binary === null ? `GNU ${command} is not available` : false }, () => {
+    for (const option of options) {
+      for (const input of ['ä\nÄ\nß\nSS\nſ\ns\n', 'éx\néy\n', '\uE000\n😀\n', 'é\nê\n😀\n😁\n']) {
+        it(`${option || 'default'} on ${JSON.stringify(input)}`, () => {
+          compare(`${command} ${option} f`, binary, [...(option ? [option] : []), 'f'], input, false)
+        })
+      }
+    }
+  })
+}

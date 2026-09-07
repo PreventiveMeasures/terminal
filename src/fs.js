@@ -27,6 +27,25 @@ export function resolve(cwd, path) {
   return normalize(cwd + '/' + path)
 }
 
+// Filesystem lookup must validate each component BEFORE collapsing `..`.
+// Otherwise `missing/../file` or `file/../other` can read an unrelated file.
+// Lexical helpers (dirname, basename, the public resolve API) stay separate.
+export function lookup(cwd, path, fs) {
+  const missing = { path: null, error: 'No such file or directory' }
+  const notDir = { path: null, error: 'Not a directory' }
+  if (path === '' || path.includes('\0')) return missing
+  const parts = (path.startsWith('/') ? path : cwd + '/' + path).split('/').filter(Boolean)
+  let at = '/'
+  for (const part of parts) {
+    if (!fs.isDir(at)) return fs.isFile(at) ? notDir : missing
+    if (part === '..') at = dirname(at)
+    else if (part !== '.') at = joinPath(at, part)
+  }
+  if (!fs.isDir(at) && !fs.isFile(at)) return missing
+  if (path.endsWith('/') && !fs.isDir(at)) return notDir
+  return { path: at, error: null }
+}
+
 export function dirname(path) {
   const p = normalize(path)
   if (p === '/') return '/'
@@ -40,6 +59,15 @@ export function basename(path) {
   if (p === '/') return '/'
   const i = p.lastIndexOf('/')
   return p.slice(i + 1)
+}
+
+// UTF-8 byte order is code-point order for valid Unicode. JavaScript's
+// default sort compares UTF-16 units and misorders astral characters.
+export function compareNames(a, b) {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i] !== b[i]) return a.codePointAt(i) - b.codePointAt(i)
+  }
+  return a.length - b.length
 }
 
 // Join an already-normalized directory path with a child name,
@@ -79,8 +107,8 @@ export function createFs(sources) {
     childMap.get(parent).files.push(basename(f))
   }
   for (const entry of childMap.values()) {
-    entry.dirs.sort()
-    entry.files.sort()
+    entry.dirs.sort(compareNames)
+    entry.files.sort(compareNames)
   }
   const fs = {
     isFile: (p) => files.has(p),
@@ -109,7 +137,7 @@ export function* walkTree(fs, root, maxDepth = Number.POSITIVE_INFINITY, shouldD
     if (entry.kind !== 'dir' || entry.depth >= maxDepth || !shouldDescend(entry.path)) continue
     const { dirs, files } = fs.listDir(entry.path)
     const children = [...dirs.map((name) => ({ name, kind: 'dir' })), ...files.map((name) => ({ name, kind: 'file' }))]
-    children.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+    children.sort((a, b) => compareNames(a.name, b.name))
     for (const child of children.toReversed()) stack.push({ path: joinPath(entry.path, child.name), kind: child.kind, depth: entry.depth + 1 })
   }
 }

@@ -3,7 +3,7 @@
 // tokens through parseArgs with a strict schema so unknown flags
 // fail fast instead of being silently dropped.
 
-import { joinPath, resolve } from './fs.js'
+import { compareNames, joinPath, lookup, resolve } from './fs.js'
 import { unsupported } from './unsupported.js'
 import { find } from './find.js'
 import { homeOf } from './expand.js'
@@ -31,7 +31,8 @@ function cd(_stdin, tokens, ctx) {
   }
   const printed = positional[0] === '-' ? target + '\n' : ''
   if (target === '') return ok(printed)
-  const abs = resolve(ctx.cwd, target)
+  const { path: abs, error } = lookup(ctx.cwd, target, ctx.fs)
+  if (error) return err(`cd: ${target}: ${error}`)
   if (!ctx.fs.isDir(abs)) return err(`cd: ${target}: ${ctx.fs.isFile(abs) ? 'Not a directory' : 'No such file or directory'}`)
   ctx.vars.set('OLDPWD', ctx.cwd)
   if (ctx.vars.has('PWD')) ctx.vars.set('PWD', abs)
@@ -44,13 +45,13 @@ function cd(_stdin, tokens, ctx) {
 function ls(_stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['1', 'l', 'a', 'A', 'R', 'd', 'r', 'F'] })
   if (flags.has('l')) return unsupported('feature', 'ls', '-l metadata', 'ls: long listings require permissions, ownership and timestamps absent from this virtual filesystem')
-  const targets = (positional.length ? positional : ['.']).toSorted()
+  const targets = (positional.length ? positional : ['.']).toSorted(compareNames)
   if (flags.has('r')) targets.reverse()
   const dirs = [], errors = [], files = []
   const display = (name, abs) => flags.has('F') && ctx.fs.isDir(abs) && !name.endsWith('/') ? name + '/' : name
   for (const target of targets) {
-    const abs = resolve(ctx.cwd, target)
-    if (!ctx.fs.isFile(abs) && !ctx.fs.isDir(abs)) errors.push(`ls: ${target}: no such file or directory`)
+    const { path: abs, error } = lookup(ctx.cwd, target, ctx.fs)
+    if (error) errors.push(`ls: ${target}: ${error.toLowerCase()}`)
     else if (flags.has('d') || ctx.fs.isFile(abs)) files.push(display(target, abs))
     else dirs.push(target)
   }
@@ -63,11 +64,11 @@ function ls(_stdin, tokens, ctx) {
       const entries = ctx.fs.listDir(abs)
       const names = [...entries.dirs, ...entries.files].filter((n) => flags.has('a') || flags.has('A') || !n.startsWith('.'))
       if (flags.has('a')) names.push('.', '..')
-      names.sort()
+      names.sort(compareNames)
       if (flags.has('r')) names.reverse()
       const rows = names.map((n) => display(n, resolve(abs, n)))
       if (targets.length > 1 || flags.has('R')) rows.unshift(path + ':')
-      blocks.push(rows.join('\n'))
+      if (rows.length) blocks.push(rows.join('\n'))
       if (!flags.has('R')) continue
       for (const name of names.toReversed()) {
         if (name === '.' || name === '..' || !ctx.fs.isDir(resolve(abs, name))) continue
@@ -82,7 +83,8 @@ function tree(_stdin, tokens, ctx) {
   const { positional } = parseArgs(tokens)
   if (positional.length > 1) return unsupported('feature', 'tree', 'multiple roots', 'tree: multiple roots are not supported')
   const start = positional[0] ?? '.'
-  const startAbs = resolve(ctx.cwd, start)
+  const { path: startAbs, error } = lookup(ctx.cwd, start, ctx.fs)
+  if (error) return err(`tree: ${start}: ${error}`)
   if (!ctx.fs.isDir(startAbs)) return err(`tree: ${start}: not a directory`)
   const out = [start]
   treeWalk(ctx.fs, startAbs, out)

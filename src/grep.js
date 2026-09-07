@@ -14,14 +14,12 @@
 //       common shapes (`(`, `|`, `+`, `?`, `{n,m}`).
 //   -F  fixed string — every metachar literal via `RegExp.escape`.
 
-import { basename, relativeTo, resolve } from './fs.js'
+import { basename, lookup, relativeTo } from './fs.js'
 import { parseArgs } from './parse.js'
 import { consumeStdin, err, joinLines, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
 import { unsupported, unsupportedFrom } from './unsupported.js'
 import { AwkError } from './awk-common.js'
-import { AwkRegex } from './awk-regex.js'
-import { ereClasses, validateRegex } from './grep-pattern.js'
-import { breToEs } from './bre.js'
+import { compilePatterns, inputGap } from './grep-pattern.js'
 import { compileGlob } from './glob.js'
 
 // Two forms because PATTERN is required UNLESS -e is given. Listing
@@ -76,7 +74,9 @@ export function grep(stdin, tokens, ctx) {
   // recursively-discovered files — matching GNU; stdin (name===null) is
   // exempt. exclude-dir already pruned directories inside grepInputs.
   const inputs = r.inputs.filter((inp) => inp.name === null || includedByName(basename(inp.name), filters.name))
-  const showName = pickShowName(flags, recursive, rest.length)
+  const gap = inputGap(inputs, re.res, flags.has('v'))
+  if (gap) return gap
+  const showName = pickShowName(flags, rest.length)
   const invert = flags.has('v')
   const max = parseMaxCount(values)
   if (max.error) return max.error
@@ -159,57 +159,6 @@ function checkConflicts(flags) {
   return null
 }
 
-function compilePatterns(patterns, flags) {
-  // Pattern dialect (mutually exclusive; default is BRE):
-  //   -F: literal match, via the standardized `RegExp.escape`.
-  //   -E: pass through — the JS RegExp engine accepts ERE for the
-  //       common shapes (`(`, `|`, `+`, `?`, `{n,m}`). POSIX char
-  //       classes like `[:alpha:]` are not modeled.
-  //   default / -G: translate BRE → ES so `function(arg)`, `a|b`,
-  //       `x?` are literal (matching POSIX and GNU grep). Use
-  //       `\(`, `\|`, `\?` etc. for the metachar forms.
-  // Each `-e` pattern is compiled SEPARATELY (not OR-combined into
-  // a single regex). Combining would shift backreference numbering
-  // across patterns — `grep -e '\(foo\)\(bar\)' -e '\(baz\)\1'`
-  // would let pattern2's `\1` accidentally refer to pattern1's
-  // group 1. A line matches when ANY of the regexes match.
-  const res = []
-  const reFlags = flags.has('i') ? 'iu' : 'u'
-  for (const pattern of patterns) {
-    if (!flags.has('F')) validateRegex(pattern, flags.has('E'))
-    let source
-    if (flags.has('F')) source = RegExp.escape(pattern)
-    else if (flags.has('E')) source = ereClasses(pattern)
-    else {
-      const r = breToEs(pattern)
-      if (r.error) return { error: err(`grep: ${r.error}`, 2) }
-      source = r.source
-    }
-    // -w wraps in word-boundary anchors. Per pattern so each gets
-    // its own boundary check rather than wrapping the union.
-    if (flags.has('w')) source = `(?<![A-Za-z0-9_])(?:${source})(?![A-Za-z0-9_])`
-    try {
-      const re = new RegExp(source, reFlags)
-      if (flags.has('o') && !flags.has('F')) {
-        if (flags.has('w') || /\\[1-9]|\(\?/u.test(source)) return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: only-matching with backreferences, lookarounds or word constraints is not supported', 2) }
-        try { re.extent = new AwkRegex(source.replaceAll('\\b', '\\y'), flags.has('i')) } catch {
-          return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: POSIX match extent for this pattern is not supported', 2) }
-        }
-      }
-      res.push(re)
-    } catch (e) {
-      // POSIX: regex syntax errors exit 2 (separate from "no match"
-      // which exits 1). Dialect label tells a confused user which
-      // mode was active (e.g. `grep -E "Function("` says ERE).
-      const dialect = flags.has('F') ? `fixed-string /${reFlags}`
-        : flags.has('E') ? `ERE / ECMAScript /${reFlags}`
-        : `BRE /${reFlags}`
-      return { error: err(`grep: invalid pattern (${dialect}): ${e.message}`, 2) }
-    }
-  }
-  return { res }
-}
-
 // `res.some((re) => re.test(line))` — line matches when any -e regex does.
 function anyMatch(res, line) { return res.some((re) => re.test(line)) }
 
@@ -235,17 +184,16 @@ function parseContext(values) {
   return b.error ? b : { after: a.value, before: b.value, given }
 }
 
-function pickShowName(flags, recursive, nFiles) {
-  // -h / -H override the default. Default: show when -r is set
-  // (matches come from discovered descendants) or when multiple
-  // explicit files were named.
+function pickShowName(flags, nFiles) {
+  // -h / -H override the default. Multiple operands force names;
+  // otherwise each file decides from whether it was found recursively.
   if (flags.has('h')) return false
   if (flags.has('H')) return true
-  return recursive || nFiles > 1
+  return nFiles > 1 ? true : undefined
 }
 
 function grepInputs(recursive, stdin, rest, ctx, filters) {
-  if (recursive) return readFilesRecursive('grep', rest.length > 0 ? rest : ['.'], ctx, filters.dir, rest.length === 0)
+  if (recursive) return readFilesRecursive('grep', rest.length > 0 ? rest : ['.'], ctx, filters.dir, rest.length === 0, stdin)
   // A `-` operand is stdin, labelled the way grep labels it.
   if (rest.length > 0) {
     const r = readFilesFor('grep', rest, ctx, stdin)
@@ -262,20 +210,26 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
 // user sees a consistent message. Displayed file names preserve
 // the user-typed prefix (`grep -r foo src` produces `src/bar.js:…`,
 // not `/src/bar.js:…`), matching GNU grep's output convention.
-function readFilesRecursive(cmd, paths, ctx, dirRes, implicitRoot) {
+function readFilesRecursive(cmd, paths, ctx, dirRes, implicitRoot, stdin) {
   const inputs = []
   let stderr = ''
   let failed = false
   for (const p of paths) {
-    const abs = resolve(ctx.cwd, p)
+    if (p === '-' || p === '/dev/stdin' || p === '/dev/null') {
+      const r = readFilesFor(cmd, [p], ctx, stdin)
+      inputs.push(...r.inputs.map((inp) => ({ ...inp, name: p === '-' ? null : p })))
+      if (p === '-' || p === '/dev/stdin') stdin = ''
+      continue
+    }
+    const { path: abs, error } = lookup(ctx.cwd, p, ctx.fs)
     // A named file operand is read as-is; include/exclude filtering of
     // both named and discovered files happens once, after collection.
     if (ctx.fs.isFile(abs)) { inputs.push({ name: p, content: ctx.fs.readFile(abs) }); continue }
-    if (!ctx.fs.isDir(abs)) { stderr += `${cmd}: ${p}: no such file or directory\n`; failed = true; continue }
+    if (error) { stderr += `${cmd}: ${p}: ${error.toLowerCase()}\n`; failed = true; continue }
     if (excludedStartDir(p, dirRes)) continue
     for (const filePath of ctx.fs.walkFiles(abs)) {
       if (excludedByDir(filePath, abs, dirRes)) continue
-      inputs.push({ name: displayName(implicitRoot && p === '.' ? '' : p, abs, filePath), content: ctx.fs.readFile(filePath) })
+      inputs.push({ name: displayName(implicitRoot && p === '.' ? '' : p, abs, filePath), content: ctx.fs.readFile(filePath), recursive: true })
     }
   }
   return { inputs, stderr, failed }
@@ -341,14 +295,14 @@ function displayName(userPath, absRoot, absFile) {
 function grepRun(inputs, res, opts) {
   const blocks = []
   let matched = false
-  for (const { name, content } of inputs) {
+  for (const { name, content, recursive } of inputs) {
     const lines = splitLines(content)
-    const fileBlock = grepFileBlock(lines, res, name, opts)
+    const fileBlock = grepFileBlock(lines, res, name, { ...opts, showName: opts.showName ?? recursive })
     if (fileBlock.matched) matched = true
     if (fileBlock.lines.length > 0) blocks.push(fileBlock.lines.join('\n'))
   }
-  const output = blocks.join('\n')
-  return matched ? ok(output + (output ? '\n' : '')) : noMatch()
+  const output = blocks.length ? blocks.join(opts.hasContext ? '\n--\n' : '\n') + '\n' : ''
+  return matched ? ok(output) : noMatch()
 }
 
 // Walks the file once, emitting each line as it is decided: a SELECTED
@@ -484,7 +438,7 @@ function grepListFiles(inputs, res, invert, listNonMatching) {
 function grepCount(inputs, res, invert, showName) {
   const lines = []
   let anyMatched = false
-  for (const { name, content } of inputs) {
+  for (const { name, content, recursive } of inputs) {
     const fileLines = splitLines(content)
     let count = 0
     for (const l of fileLines) if (anyMatch(res, l) !== invert) count++
@@ -493,7 +447,7 @@ function grepCount(inputs, res, invert, showName) {
     // `echo … | grep -Hc PATTERN` produces `(standard input):N`
     // rather than a bare count that's indistinguishable from the
     // single-file no-prefix case.
-    if (showName) lines.push(`${name ?? '(standard input)'}:${count}`)
+    if (showName ?? recursive) lines.push(`${name ?? '(standard input)'}:${count}`)
     else lines.push(String(count))
   }
   if (lines.length === 0) return noMatch()

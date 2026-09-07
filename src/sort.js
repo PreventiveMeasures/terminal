@@ -6,6 +6,7 @@
 import { parseArgs } from './parse.js'
 import { err, joinLines, okWith, readInputs, splitLines } from './util.js'
 import { unsupported } from './unsupported.js'
+import { compareNames as cmpStrings } from './fs.js'
 
 export function sort(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, {
@@ -37,7 +38,7 @@ export function sort(stdin, tokens, ctx) {
     const decorated = lines.map((line) => ({ line, key: numericKey(line) }))
     decorated.sort(unique
       ? (a, b) => compareNumeric(a.key, b.key)
-      : (a, b) => (compareNumeric(a.key, b.key)) || (a.line < b.line ? -1 : a.line > b.line ? 1 : 0))
+      : (a, b) => (compareNumeric(a.key, b.key)) || cmpStrings(a.line, b.line))
     lines = decorated.map((d) => d.line)
   } else {
     // -f folds case for the comparison only; the line is emitted as it
@@ -198,7 +199,9 @@ function keyOf(line, spec, sep) {
   return line.slice(from, Math.max(from, to))
 }
 
-const cmpStrings = (a, b) => a < b ? -1 : a > b ? 1 : 0
+// C-locale folding is ASCII-only; full Unicode case expansion can
+// silently merge distinct records under -u (for example ß and SS).
+const foldCase = (s) => s.replace(/[a-z]/gu, (c) => c.toUpperCase())
 
 // The comparison key for the whole-line (no `-k`) path. GNU applies -b
 // and -f to the whole line, not only to keys — `sort -b` really does
@@ -208,7 +211,7 @@ const cmpStrings = (a, b) => a < b ? -1 : a > b ? 1 : 0
 // made it a silent no-op unless `-k` happened to be given too.
 function wholeLineKey(line, globals) {
   const body = globals.b ? line.replace(/^[ \t]+/u, '') : line
-  return globals.f ? body.toUpperCase() : body
+  return globals.f ? foldCase(body) : body
 }
 
 function sortByKeys(lines, specs, sep, unique, globalReverse) {
@@ -220,7 +223,7 @@ function sortByKeys(lines, specs, sep, unique, globalReverse) {
       const spec = specs[i]
       const [x, y] = [a.keys[i], b.keys[i]]
       const d = spec.n ? compareNumeric(numericKey(x), numericKey(y))
-        : spec.f ? cmpStrings(x.toUpperCase(), y.toUpperCase())
+        : spec.f ? cmpStrings(foldCase(x), foldCase(y))
         : cmpStrings(x, y)
       if (d !== 0) return spec.r ? -d : d
     }

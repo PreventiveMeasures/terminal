@@ -39,7 +39,7 @@
 // whose `loop` carries the name, the unexpanded word list and the
 // body; the variable persists after the loop, as in bash.
 
-import { createFs, resolve } from './fs.js'
+import { createFs, lookup, resolve } from './fs.js'
 import { expandRedirect, expandScalar, expandWords } from './expand.js'
 import { backtickGap, readExpansion } from './lex.js'
 import { parseLine, refusedWrite } from './parse.js'
@@ -75,7 +75,7 @@ export function createTerminal(sources, opts = {}) {
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
   const ctx = {
     cwd, fs, user: opts.user ?? 'user', home: '/', registry,
-    vars: new BindingMap(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinLeft: '',
+    vars: new BindingMap(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinOrigin: null, stdinLeft: '',
     unsupported: createUnsupportedFeed(),
   }
   // Commands like `xargs` need to invoke other commands. Exposing
@@ -83,8 +83,9 @@ export function createTerminal(sources, opts = {}) {
   // command site) keeps lookup in one place, and lets command
   // modules stay free of back-references into index.js.
   ctx.dispatch = (name, tokens, stdin) => {
-    const saved = { stdinLeft: ctx.stdinLeft, stdinFile: ctx.stdinFile, loopDepth: ctx.loopDepth }
+    const saved = { stdinLeft: ctx.stdinLeft, stdinFile: ctx.stdinFile, stdinOrigin: ctx.stdinOrigin, loopDepth: ctx.loopDepth }
     ctx.stdinFile = false
+    ctx.stdinOrigin = null
     ctx.loopDepth = 0
     try { return isolated(ctx, () => dispatch(name, tokens, stdin, ctx)) } finally { Object.assign(ctx, saved) }
   }
@@ -148,9 +149,9 @@ function reason(e) {
 // terminal handle can call `run` again from inside a wired command.
 // Syntax errors exit 2, as bash's do; a refused construct exits 1.
 function safeRun(line, ctx) {
-  const saved = ctx.unsupported
+  const saved = { unsupported: ctx.unsupported, stdinFile: ctx.stdinFile, stdinOrigin: ctx.stdinOrigin, closed: ctx.closed }
   const feed = createUnsupportedFeed()
-  ctx.unsupported = feed
+  Object.assign(ctx, { unsupported: feed, stdinFile: false, stdinOrigin: null, closed: { out: false, err: false } })
   try {
     const r = runSteps(parseLine(line), ctx, { text: '' })
     return finish(r, ctx, feed)
@@ -160,7 +161,7 @@ function safeRun(line, ctx) {
     ctx.lastExit = note ? 1 : 2
     return finish(err(`error: ${e.message}`, ctx.lastExit), ctx, feed)
   } finally {
-    ctx.unsupported = saved
+    Object.assign(ctx, saved)
   }
 }
 
@@ -264,8 +265,9 @@ function resolveRedirs(stage, ctx, stdin, stdinFile) {
   const warnings = []
   let input = stdin
   let file = stdinFile
+  let origin = file ? ctx.stdinOrigin : null
   let inherited = true
-  const done = (error) => ({ error, fds, stdin: input, stdinFile: file, inherited, warnings: warnings.join('') })
+  const done = (error) => ({ error, fds, stdin: input, stdinFile: file, stdinOrigin: file ? origin : null, inherited, warnings: warnings.join('') })
   try {
     for (const r of stage.redirs) {
       if (r.op === 'dup') {
@@ -289,11 +291,13 @@ function resolveRedirs(stage, ctx, stdin, stdinFile) {
       else if (r.op === 'herestring') { input = expandScalar(r.word, ctx, warnings) + '\n'; file = false; inherited = false }
       else {
         const t = expandRedirect(r.word, ctx, warnings)
-        const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, input)
+        const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, file ? origin : input)
         if (read.error) return done(read.error)
         input = read.content
-        inherited = false
-        if (t.value !== '/dev/stdin') file = t.value !== '/dev/null'
+        // A pipe's /dev/stdin shares the current stream. A regular file
+        // is reopened from its original start with an independent offset.
+        if (t.value !== '/dev/stdin' || file) inherited = false
+        if (t.value !== '/dev/stdin') { file = t.value !== '/dev/null'; origin = file ? input : null }
       }
     }
   } catch (e) { return done(shellFailure(ctx, e)) }
@@ -334,16 +338,16 @@ function failedStage(stage, ctx, error) {
 // bash's commands report; `head` reads the input's kind. The input
 // starts out unread (`stdinLeft`); a reader records what it took.
 function withStreams(io, ctx, fn) {
-  const outer = { closed: ctx.closed, stdinFile: ctx.stdinFile }
+  const outer = { closed: ctx.closed, stdinFile: ctx.stdinFile, stdinOrigin: ctx.stdinOrigin }
   const closedAt = (fd) => io.fds[fd] === 'closed' || (io.fds[fd] === 'out' && outer.closed.out) || (io.fds[fd] === 'err' && outer.closed.err)
   ctx.closed = { out: closedAt(1), err: closedAt(2) }
   ctx.stdinFile = Boolean(io.stdinFile)
+  ctx.stdinOrigin = io.stdinOrigin
   ctx.stdinLeft = io.stdin
   try {
     return fn()
   } finally {
-    ctx.closed = outer.closed
-    ctx.stdinFile = outer.stdinFile
+    Object.assign(ctx, outer)
   }
 }
 
@@ -374,7 +378,8 @@ function heredocWord(body) {
 function readInput(path, ctx, stdin) {
   if (path === '/dev/null') return { content: '' }
   if (path === '/dev/stdin') return { content: stdin }
-  const abs = resolve(ctx.cwd, path)
+  const { path: abs, error } = lookup(ctx.cwd, path, ctx.fs)
+  if (error) return { error: err(`error: ${path}: ${error}`) }
   if (ctx.fs.isFile(abs)) return { content: ctx.fs.readFile(abs) }
   return { error: err(`error: ${path}: ${ctx.fs.isDir(abs) ? 'Is a directory' : 'No such file or directory'}`) }
 }

@@ -42,7 +42,7 @@
 // and `dispatch` turns the throw into a `name: reason` stderr line —
 // the same treatment a builtin's internal error gets.
 
-import { resolve } from './fs.js'
+import { lookup, resolve } from './fs.js'
 import { consumeStdin, ok, readInputs } from './util.js'
 
 // A wired name has to survive the tokenizer and the dispatcher:
@@ -185,7 +185,7 @@ function invoke(name, run, stdin, tokens, ctx) {
   // A wired command is handed its stdin outright, so it is taken to
   // have read it: the next command in a group starts at its end.
   consumeStdin(ctx)
-  const scope = { cwd: ctx.cwd, fs: ctx.fs }
+  const scope = { cwd: ctx.cwd, fs: ctx.fs, stdinFile: ctx.stdinFile, stdinOrigin: ctx.stdinOrigin }
   const io = {
     name,
     args: tokens,
@@ -215,9 +215,9 @@ function invoke(name, run, stdin, tokens, ctx) {
 // `../b`) without knowing that. Directory listings and walks are
 // copied out so a handler can't mutate the shared child index.
 function fsView(scope) {
-  const at = (path) => resolve(scope.cwd, path)
+  const at = (path) => lookup(scope.cwd, path, scope.fs).path
   return {
-    resolve: at,
+    resolve: (path) => resolve(scope.cwd, path),
     isFile: (path) => scope.fs.isFile(at(path)),
     isDir: (path) => scope.fs.isDir(at(path)),
     readFile: (path) => scope.fs.readFile(at(path)),

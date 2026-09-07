@@ -7,7 +7,7 @@
 // pipeNames, binPrefixes, resolveCommand } — so completion stays
 // decoupled from how the command set is assembled.
 
-import { resolve } from './fs.js'
+import { lookup } from './fs.js'
 
 // Returns full-line replacements (NOT just word replacements): each
 // entry preserves everything in `line` before the trailing word
@@ -162,7 +162,7 @@ function completePath(word, ctx, dirsOnly = false) {
   const lastSlash = word.lastIndexOf('/')
   const dirPart = word.slice(0, lastSlash + 1)
   const partial = word.slice(lastSlash + 1)
-  const absDir = resolve(ctx.cwd, dirPart)
+  const absDir = lookup(ctx.cwd, dirPart || '.', ctx.fs).path
   if (!ctx.fs.isDir(absDir)) return []
   const { dirs, files } = ctx.fs.listDir(absDir)
   // Bash convention: dotfiles surface only once the partial itself

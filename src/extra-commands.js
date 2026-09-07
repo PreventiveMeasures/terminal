@@ -46,7 +46,7 @@ const MAX_SEQ_ELEMENTS = 1_000_000
 // reversed range is empty, and counting down requires the explicit
 // three-argument `seq 3 -1 1`.
 function seq(_stdin, tokens) {
-  const { flags, values, positional } = parseArgs(tokens, { short: ['w'], valueShort: ['s'] })
+  const { flags, values, positional } = parseArgs(tokens, { short: ['w'], valueShort: ['s'], numericOperands: true })
   if (positional.length === 0 || positional.length > 3) {
     return usage('seq [-w] [-s SEP] LAST  |  seq FIRST LAST  |  seq FIRST INCR LAST')
   }

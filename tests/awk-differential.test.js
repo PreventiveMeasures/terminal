@@ -367,7 +367,7 @@ const SECTIONS = {
     {"prog":"{ print v }","input":"q\n","stdin":true,"files":{"a.txt":"x\ny\n"},"operands":["v=1","-","v=2","a.txt"]},
     {"prog":"{ print x }","files":{"a.txt":"x\ny\n"},"operands":["x=a\\qb","a.txt"]},
     {"prog":"BEGIN { print x }","args":["-v","x=a\\nb"]},
-    {"prog":"BEGIN { printf \"%s|%s\\n\", ENVIRON[\"NOPE\"], length(ENVIRON[\"NOPE\"]) }"},
+    {"prog":"BEGIN { printf \"%s|%s\\n\", ENVIRON[\"NOPE\"], length(ENVIRON[\"NOPE\"]) }","expect":"reject"},
     {"prog":"{ print tag, $0 }","files":{"a.txt":"x\ny\n","b.txt":"y\nz\n"},"operands":["tag=A","a.txt","tag=B","b.txt"]},
     {"prog":"{ print }","files":{"a.txt":"x\ny\n"},"args":["-v","OFS=,"],"operands":["a.txt","FS=:"]},
     {"prog":"{ $1 = $1; print }","args":["-v","FS=:","-v","OFS=-"],"input":"a:b\n"},

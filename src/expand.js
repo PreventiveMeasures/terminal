@@ -35,7 +35,7 @@ export function expandWords(words, ctx) {
       // An argument of `export` that looks like an assignment expands as
       // an assignment does — no splitting, no globbing (bash's rule for
       // the declaration builtins) — so `export x=$y` keeps a spaced value.
-      if (out[0] === 'export' && assignmentOf(b)) out.push(expandAssignment(b, ctx, warnings))
+      if (ctx.registry.resolveCommand(out[0] ?? '') === 'export' && assignmentOf(b)) out.push(expandAssignment(b, ctx, warnings))
       else out.push(...expandArg(b, ctx, warnings, true))
     }
   })

@@ -16,7 +16,7 @@
 //   The word's quoting mask decides which metacharacters are live:
 //   `"*"` and `\*` are literal asterisks, `"$d"/*.js` still globs.
 
-import { joinPath, resolve } from './fs.js'
+import { compareNames, joinPath, lookup } from './fs.js'
 import { UnsupportedError } from './unsupported.js'
 import { readPosixClass } from './charclass.js'
 
@@ -194,14 +194,14 @@ export function globPaths(word, ctx) {
   // avoids `//` if a top-level glob ever resolves to root.
   if (trailingSlash) {
     candidates = candidates
-      .filter((c) => ctx.fs.isDir(resolve(ctx.cwd, c)))
+      .filter((c) => ctx.fs.isDir(lookup(ctx.cwd, c, ctx.fs).path))
       .map((c) => c === '/' ? c : c + '/')
   } else {
     candidates = candidates.filter((c) => existsInFs(c, ctx))
   }
   if (dotSlash) candidates = candidates.map((c) => c.startsWith('./') ? c : './' + c)
   // Sort so callers see entries in a stable lexicographic order.
-  candidates.sort()
+  candidates.sort(compareNames)
   return candidates
 }
 
@@ -214,7 +214,7 @@ const unescape = (seg) => seg.replace(/\\(.)/gu, '$1')
 // when only `other/qux.js` actually exists. Final existence
 // check drops the dead branches.
 function existsInFs(path, ctx) {
-  const abs = resolve(ctx.cwd, path)
+  const abs = lookup(ctx.cwd, path, ctx.fs).path
   return ctx.fs.isFile(abs) || ctx.fs.isDir(abs)
 }
 
@@ -234,7 +234,7 @@ function expandSegment(candidates, seg, isLast, ctx) {
   }
   const next = []
   for (const c of candidates) {
-    const abs = resolve(ctx.cwd, c)
+    const abs = lookup(ctx.cwd, c, ctx.fs).path
     if (!ctx.fs.isDir(abs)) continue
     const { dirs, files } = ctx.fs.listDir(abs)
     for (const name of dirs) if (matches(name)) next.push(joinSeg(c, name))
