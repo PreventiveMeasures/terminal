@@ -14,16 +14,23 @@ import { unsupported } from './unsupported.js'
 // `exit [N]`: end the command line with status N (the last command's
 // status when omitted), modulo 256 as the OS would see it. Inside a
 // subshell or a pipeline it ends only that part, which index.js
-// arranges by dropping `halt` at those boundaries. A non-numeric
-// argument is an error that still exits, with status 2, and so is
-// more than one argument, with status 1 — both as bash 5.2 behaves.
+// arranges by dropping `halt` at those boundaries. An argument that is
+// not a number bash can hold (a 64-bit integer) is an error that still
+// exits, with status 2, and so is more than one argument, with status
+// 1 — both as bash 5.2 behaves. BigInt keeps the modulo exact for any
+// length of digits.
+const INT64_MAX = 9223372036854775807n
+const INT64_MIN = -9223372036854775808n
+
 function exit(_stdin, tokens, ctx) {
   if (tokens.length > 1) return { stdout: '', stderr: 'exit: too many arguments\n', exitCode: 1, halt: true }
   if (tokens.length === 0) return { stdout: '', stderr: '', exitCode: ctx.lastExit, halt: true }
   const arg = tokens[0]
-  if (!/^[+-]?\d+$/u.test(arg)) return { stdout: '', stderr: `exit: ${arg}: numeric argument required\n`, exitCode: 2, halt: true }
-  const n = Number(arg) % 256
-  return { stdout: '', stderr: '', exitCode: (n + 256) % 256, halt: true }
+  const n = /^[+-]?\d+$/u.test(arg) ? BigInt(arg) : null
+  if (n === null || n > INT64_MAX || n < INT64_MIN) {
+    return { stdout: '', stderr: `exit: ${arg}: numeric argument required\n`, exitCode: 2, halt: true }
+  }
+  return { stdout: '', stderr: '', exitCode: Number(((n % 256n) + 256n) % 256n), halt: true }
 }
 
 // `break` / `continue` end or skip the current iteration of the

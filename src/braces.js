@@ -90,7 +90,7 @@ function splitTopCommas(body) {
 // null when it is not a sequence. Bash takes the step's absolute value
 // and counts in the direction of the endpoints; a zero step is 1.
 function sequence(body) {
-  if (body.mask !== null) return null
+  if (body.mask !== null && /[12]/u.test(body.mask)) return null
   const num = NUM_RANGE.exec(body.value)
   const chr = num ? null : CHAR_RANGE.exec(body.value)
   if (!num && !chr) return null

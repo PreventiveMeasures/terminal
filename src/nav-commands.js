@@ -5,6 +5,7 @@
 
 import { basename as baseName, dirname as dirName, joinPath, resolve } from './fs.js'
 import { find } from './find.js'
+import { homeOf } from './expand.js'
 import { parseArgs } from './parse.js'
 import { err, ok, usage } from './util.js'
 
@@ -19,7 +20,7 @@ function pwd(_stdin, tokens, ctx) {
 function cd(_stdin, tokens, ctx) {
   const { positional } = parseArgs(tokens)
   if (positional.length > 1) return err('cd: too many arguments')
-  let target = positional[0] ?? ctx.home
+  let target = positional[0] ?? homeOf(ctx)
   if (target === '-') {
     if (ctx.oldpwd === null) return err('cd: OLDPWD not set')
     target = ctx.oldpwd

@@ -299,7 +299,7 @@ function runStage(stage, ctx, stdin) {
   const { argv, stderr } = expandWords(stage.words, ctx)
   if (argv.length === 0) {
     const warnings = []
-    for (const a of stage.assigns) ctx.vars.set(a.name, expandScalar(a.word, ctx, warnings))
+    for (const a of stage.assigns) ctx.vars.set(a.name, expandScalar(a.word, ctx, warnings, true))
     return { stdout: '', stderr: stderr + warnings.join(''), exitCode: 0 }
   }
   const r = dispatch(argv[0], argv.slice(1), stdin, ctx)

@@ -47,7 +47,20 @@ export function compileGlob(pattern, opts = {}) {
     } else if (REGEX_META.test(c)) re += '\\' + c
     else re += c
   }
-  return new RegExp(re + '$', opts?.ignoreCase ? 'ui' : 'u')
+  const flags = opts?.ignoreCase ? 'ui' : 'u'
+  try {
+    return new RegExp(re + '$', flags)
+  } catch {
+    // A bracket expression the regex engine rejects (`[z-a]`) matches
+    // nothing in bash either, so the pattern stands for its own text.
+    return new RegExp('^' + literalSource(pattern) + '$', flags)
+  }
+}
+
+// The pattern as a regex for exactly its literal text, `\x` escapes
+// resolved.
+function literalSource(pattern) {
+  return pattern.replace(/\\(.)/gu, '$1').replace(/[.+*?^${}()|[\]\\/]/gu, '\\$&')
 }
 
 // One bracket expression starting at the `[` at `pattern[start]`. `!`
@@ -93,14 +106,17 @@ export function hasGlobMeta(word) {
 
 // The word as a pattern for compileGlob: bare characters as typed,
 // quoted ones backslash-escaped where they would otherwise be read as
-// glob syntax.
+// glob syntax — including the characters that are only special inside
+// a bracket expression, so `[a"-"c]` is a set of three, not a range.
+const QUOTABLE = /[*?[\]^!\\-]/u
+
 function toPattern(word) {
   const { value, mask } = word
   if (mask === null) return value
   let out = ''
   for (let i = 0; i < value.length; i++) {
     const c = value[i]
-    out += mask[i] !== '0' && (META.test(c) || c === '\\') ? '\\' + c : c
+    out += mask[i] !== '0' && QUOTABLE.test(c) ? '\\' + c : c
   }
   return out
 }

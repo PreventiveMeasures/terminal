@@ -82,28 +82,54 @@ function assignmentOf(w) {
 function expandAssignment(w, ctx, warnings) {
   const eq = assignmentOf(w)
   const rest = { value: w.value.slice(eq), mask: w.mask === null ? null : w.mask.slice(eq) }
-  return w.value.slice(0, eq) + expandScalar(rest, ctx, warnings)
+  return w.value.slice(0, eq) + expandScalar(rest, ctx, warnings, true)
 }
 
 // A single word expanded without splitting or globbing — an assignment
-// value, a redirect target, a here-string. Braces are left alone too, as
-// bash leaves them in an assignment.
-export function expandScalar(word, ctx, warnings = []) {
-  return substitute(tilde(word, ctx), ctx, warnings, false).map((p) => p.value).join('')
+// value, a here-string, a here-document. Braces are left alone too, as
+// bash leaves them in an assignment. `assignmentValue` marks the right-
+// hand side of an assignment, where a `:` also starts a tilde-prefix.
+export function expandScalar(word, ctx, warnings = [], assignmentValue = false) {
+  return substitute(tilde(word, ctx, assignmentValue), ctx, warnings, false).map((p) => p.value).join('')
 }
+
+// The home directory: an assigned `HOME` wins over the terminal's own.
+export const homeOf = (ctx) => ctx.vars.get('HOME') ?? ctx.home
 
 const maskAt = (w, i) => (w.mask === null ? '0' : w.mask[i])
 
-// `~` and `~/…`, unquoted and leading: the home directory. `~user` and
-// a `~` anywhere else stay literal, as in bash for an unknown user.
-function tilde(w, ctx) {
-  if (w.value[0] !== '~' || maskAt(w, 0) !== '0') return w
-  const rest = w.value.slice(1)
-  if (rest !== '' && !(rest[0] === '/' && maskAt(w, 1) === '0')) return w
-  // A root home makes `~/x` `/x`, not `//x`.
-  const home = ctx.home === '/' && rest !== '' ? '' : ctx.home
-  const restMask = w.mask === null ? '0'.repeat(rest.length) : w.mask.slice(1)
-  return { value: home + rest, mask: '1'.repeat(home.length) + restMask }
+// Tilde expansion: a bare `~` (alone, or before a bare `/`) at the
+// start of the word is the home directory. In a word that looks like an
+// assignment (`root=~`, `PATH=a:~/bin`) bash also expands after the
+// first bare `=` and after each bare `:` beyond it, and a `:` ends the
+// prefix there; an assignment's value gets the same treatment on its
+// own. `~user`, a quoted `~` and a `~` anywhere else stay literal.
+function tilde(w, ctx, assignmentValue = false) {
+  if (!w.value.includes('~')) return w
+  const v = w.value
+  const bare = (i) => maskAt(w, i) === '0'
+  const eqLen = assignmentValue ? null : assignmentOf(w)
+  const inValue = (i) => assignmentValue || (eqLen !== null && i >= eqLen)
+  const home = homeOf(ctx)
+  let value = ''
+  let mask = ''
+  for (let i = 0; i < v.length; i++) {
+    const prefixStart = i === 0 || i === eqLen || (inValue(i) && v[i - 1] === ':' && bare(i - 1))
+    if (prefixStart && v[i] === '~' && bare(i)) {
+      const n = v[i + 1]
+      const ends = n === undefined || (bare(i + 1) && (n === '/' || (n === ':' && inValue(i))))
+      if (ends) {
+        // A root home makes `~/x` `/x`, not `//x`.
+        const h = home === '/' && n === '/' ? '' : home
+        value += h
+        mask += '1'.repeat(h.length)
+        continue
+      }
+    }
+    value += v[i]
+    mask += maskAt(w, i)
+  }
+  return { value, mask: /[12]/u.test(mask) ? mask : null }
 }
 
 const fresh = () => ({ value: '', mask: '', q: false })

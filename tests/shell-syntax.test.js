@@ -126,9 +126,22 @@ describe('shell syntax — parameters', () => {
   })
 
   it('`~` is the home directory (the tree root) at the start of a bare word', () => {
-    assert.equal(out('echo ~ ~/src "~" x~'), '/ /src ~ x~\n')
+    assert.equal(out('echo ~ ~/src "~" x~ ~"/src" ~user'), '/ /src ~ x~ ~/src ~user\n')
     assert.equal(out('cd src; cd ~; pwd'), '/\n')
     assert.equal(out('ls ~/src'), 'bar.ts\nfoo.js\n')
+  })
+
+  it('`~` also expands after `=` and `:` in assignment-like words, as bash does', () => {
+    const t = term()
+    assert.equal(out('echo root=~ a:~ x=a:~ x=~"/y"', t), 'root=/ a:~ x=a:/ x=~/y\n')
+    assert.equal(out('p=foo:~/src:~; echo $p', t), 'foo:/src:/\n')
+    assert.equal(out('export q=y:~; echo $q', t), 'y:/\n')
+  })
+
+  it('an assigned HOME drives `~`, `$HOME` and a bare `cd`', () => {
+    const t = term()
+    assert.equal(out('HOME=/src; echo ~ ~/foo.js $HOME; cd; pwd', t), '/src /src/foo.js /src\n/src\n')
+    assert.equal(out('unset HOME; echo ~', t), '/\n')
   })
 
   it('the substitutions this shell lacks are refused, not passed through', () => {
@@ -155,6 +168,8 @@ describe('shell syntax — brace and pathname expansion', () => {
   it('sequence braces: numbers, zero padding, letters, steps, descending', () => {
     assert.equal(out('echo {1..5} {01..3} {a..e..2} {3..1}'), '1 2 3 4 5 01 02 03 a c e 3 2 1\n')
     assert.equal(out('for i in {1..3}; do echo $i; done'), '1\n2\n3\n')
+    // Quoting elsewhere in the word does not freeze a bare sequence.
+    assert.equal(out('echo "x"{1..3} "{1..3}"'), 'x1 x2 x3 {1..3}\n')
   })
 
   it('a quoted fragment protects only its own characters', () => {
@@ -176,6 +191,17 @@ describe('shell syntax — brace and pathname expansion', () => {
     // find's -name uses the same glob language.
     assert.equal(out("find src -name '[fb]oo.js' | sort", t), 'src/boo.js\nsrc/foo.js\n')
     assert.equal(out("find src -name '[!f]oo.js'", t), 'src/boo.js\n')
+  })
+
+  it('quoted characters inside a bracket expression are members, and a bad range is literal', () => {
+    const t = createTerminal({ a: '', b: '', c: '' })
+    assert.equal(out('echo [a"-"c]', t), 'a c\n')
+    assert.equal(out('echo [a-c]', t), 'a b c\n')
+    assert.equal(out('echo ["!"a] ["^"a] [a"]"]', t), 'a a a\n')
+    assert.equal(out("echo [\\!a]", t), 'a\n')
+    const bad = t.run('echo [z-a] [b-a]x; echo rc=$?')
+    assert.equal(bad.stdout, '[z-a] [b-a]x\nrc=0\n')
+    assert.equal(bad.stderr, '')
   })
 })
 
@@ -239,6 +265,15 @@ describe('shell syntax — compound commands', () => {
     assert.equal(term().run('false; exit').exitCode, 1)
     assert.equal(term().run('exit 256').exitCode, 0)
     assert.equal(term().run('exit -1').exitCode, 255)
+    assert.equal(term().run('exit +7').exitCode, 7)
+    // Exact for any digit string bash accepts (a 64-bit integer)…
+    assert.equal(term().run('exit 9007199254740993').exitCode, 1)
+    assert.equal(term().run('exit 9223372036854775807').exitCode, 255)
+    assert.equal(term().run('exit -9223372036854775808').exitCode, 0)
+    // …and past that, bash's numeric-argument error.
+    const huge = term().run('exit 9223372036854775808; echo never')
+    assert.deepEqual([huge.stdout, huge.exitCode], ['', 2])
+    assert.match(huge.stderr, /numeric argument required/u)
     const bad = term().run('exit abc; echo never')
     assert.deepEqual([bad.stdout, bad.exitCode], ['', 2])
     assert.match(bad.stderr, /numeric argument required/u)
