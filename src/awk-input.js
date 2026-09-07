@@ -17,6 +17,7 @@ import { unescapeAwkString } from './awk-lex.js'
 import { AwkRegex, compileRegex, splitByRegex, stepAt } from './awk-regex.js'
 import { StrNum, ignoreCase, toNum, toStr } from './awk-value.js'
 import { resolve } from './fs.js'
+import { consumeStdin } from './util.js'
 
 // `src` is `{ text, pos }`; advances `pos`. Returns { rec, rt } or null at
 // the end of the text. A terminator at the very end does not start an
@@ -209,12 +210,13 @@ export class Input {
     }
     if (this.sawFile || this.exitSignal !== undefined) return false
     this.sawFile = true
-    return this.use(m, '-', this.stdin)
+    return this.use(m, '-', this.takeStdin())
   }
 
   takeStdin() {
     const text = this.stdin
     this.stdin = ''
+    consumeStdin(this.ctx)
     return text
   }
 

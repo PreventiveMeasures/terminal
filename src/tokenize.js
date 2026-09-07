@@ -94,9 +94,11 @@ function openQuote(st, c) {
   st.inToken = true
 }
 
+// `ch` is one character, which for a `$'\U0001F600'` is two UTF-16
+// units: the mask is per unit, so it repeats.
 function put(st, ch, m) {
   st.cur += ch
-  st.mask += m
+  st.mask += m.repeat(ch.length)
   st.inToken = true
 }
 

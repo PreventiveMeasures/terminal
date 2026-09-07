@@ -3,7 +3,7 @@
 // shapes (chunked, placeholder-substituted).
 
 import { parseArgs } from './parse.js'
-import { err, ok, parseNonNegativeInt, splitLines } from './util.js'
+import { consumeStdin, err, ok, parseNonNegativeInt, splitLines } from './util.js'
 
 export // Read whitespace-separated tokens from stdin and append them as
 // extra args to CMD. With `-n N`, run CMD once per chunk of N
@@ -12,6 +12,7 @@ export // Read whitespace-separated tokens from stdin and append them as
 // xargs runs CMD once with no extra args by default; `-r` matches
 // `--no-run-if-empty`). Defaults to `echo` when CMD is omitted.
 function xargs(stdin, tokens, ctx) {
+  consumeStdin(ctx)
   // stopAtFirstPositional so flags after the inner command name
   // (e.g. `xargs grep -n PATTERN`) belong to grep, not to xargs.
   // Otherwise xargs greedily consumes `-n PATTERN` as its own

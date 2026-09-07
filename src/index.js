@@ -63,7 +63,9 @@ export function createTerminal(sources, opts = {}) {
   // `closed` says which of the running stage's output streams `>&-`
   // closed, so a write into one can fail as bash's commands fail;
   // `stdinFile` whether its standard input is a regular file (`< path`)
-  // rather than a pipe, which decides how much of it `head - -` leaves.
+  // rather than a pipe, which decides how much of it `head` leaves;
+  // `stdinLeft` what the command that just ran left of that input, for
+  // the next command in its group (see consumeStdin in util.js).
   //
   // `registry` rides on ctx so the engine's step/pipeline/stage
   // functions — which already thread ctx everywhere — reach the
@@ -73,7 +75,7 @@ export function createTerminal(sources, opts = {}) {
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
   const ctx = {
     cwd, fs, user: opts.user ?? 'user', home: '/', registry,
-    vars: new Map(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false,
+    vars: new Map(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinLeft: '',
     unsupported: createUnsupportedFeed(),
   }
   // Commands like `xargs` need to invoke other commands. Exposing
@@ -146,7 +148,7 @@ function safeRun(line, ctx) {
   ctx.unsupported = feed
   try {
     const trimmed = line.trim()
-    const r = trimmed === '' ? ok() : runSteps(parseLine(trimmed), ctx, '')
+    const r = trimmed === '' ? ok() : runSteps(parseLine(trimmed), ctx, { text: '' })
     return finish(r, ctx, feed)
   } catch (e) {
     const note = unsupportedNote(e)
@@ -175,28 +177,30 @@ const finish = (r, ctx, feed) => ({ stdout: r.stdout, stderr: r.stderr, exitCode
 // exits 3, as in bash (a negated `break` does report 1, also as in
 // bash).
 //
-// `initialStdin` is only meaningful for subshell groups and loop
-// bodies: when a `(...)` or a `for` appears in a pipeline (`echo hi |
-// (cat)`), the upstream output becomes the block's stdin and is
-// delivered to the first step's pipeline (the first iteration's, for
-// a loop). Later steps inside the block start with empty stdin, same
-// as at top level.
-function runSteps(steps, ctx, initialStdin) {
+// `stream` is the list's standard input — what a `(...)`, `{ … }` or
+// `for` in a pipeline (`echo hi | (cat)`) or under `<` received — and
+// it is one stream for every step, as bash's is: each command reads
+// from where the one before stopped, so `{ echo x; cat; }` prints the
+// input after `x` and `{ cat; cat; }` prints it once. What is left at
+// the end is reported through `ctx.stdinLeft` for an enclosing list.
+function runSteps(steps, ctx, stream) {
   let stdout = ''
   let stderr = ''
   let exitCode = 0
+  let signal = {}
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
     if (step.gate === 'and' && exitCode !== 0) continue
     if (step.gate === 'or' && exitCode === 0) continue
-    const r = runPipeline(step.stages, ctx, i === 0 ? initialStdin : '')
+    const r = runPipeline(step.stages, ctx, stream)
     stdout += r.stdout
     stderr += r.stderr
     exitCode = step.negate && !r.halt ? (r.exitCode === 0 ? 1 : 0) : r.exitCode
     ctx.lastExit = exitCode
-    if (r.halt || r.control) return { stdout, stderr, exitCode, halt: r.halt, control: r.control }
+    if (r.halt || r.control) { signal = { halt: r.halt, control: r.control }; break }
   }
-  return { stdout, stderr, exitCode }
+  ctx.stdinLeft = stream.text
+  return { stdout, stderr, exitCode, ...signal }
 }
 
 // Each stage's output is routed by the redirects it carries: its
@@ -208,16 +212,21 @@ function runSteps(steps, ctx, initialStdin) {
 // fatal — real shells keep going and surface the last stage's exit
 // code. Every stage of a multi-stage pipeline runs in a subshell, as in
 // bash: a `cd`, an assignment or an `exit` there reaches nothing
-// outside it, and its `break` binds no enclosing loop.
-function runPipeline(stages, ctx, initialStdin) {
-  let stdin = initialStdin
+// outside it, and its `break` binds no enclosing loop. The first stage
+// reads the list's shared `stream` (unless a redirect gave it another
+// input) and leaves what it did not read for the next command; a later
+// stage reads the pipe. A bare `!` — no stages at all — is bash's empty
+// negated pipeline: nothing runs, status 0 before the negation.
+function runPipeline(stages, ctx, stream) {
+  let pipe = ''
   let stderr = ''
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]
-    // The first stage inherits the enclosing input; a later one reads the pipe.
-    const io = resolveRedirs(stage, ctx, stdin, i === 0 && ctx.stdinFile)
+    const first = i === 0
+    const io = resolveRedirs(stage, ctx, first ? stream.text : pipe, first && ctx.stdinFile)
     const run = () => (io.error ? failedStage(stage, ctx, io.error) : stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx, io.stdin) : runStage(stage, ctx, io.stdin))
     const result = withStreams(io, ctx, () => (stages.length > 1 ? isolated(ctx, run) : run()))
+    if (first && io.inherited) stream.text = ctx.stdinLeft
     const errText = io.warnings + result.stderr
     let stageOut = ''
     let stageErr = ''
@@ -231,9 +240,8 @@ function runPipeline(stages, ctx, initialStdin) {
       if (stages.length === 1) { r.halt = result.halt; r.control = result.control }
       return r
     }
-    stdin = stageOut
+    pipe = stageOut
   }
-  // Unreachable: stages is non-empty (parseLine guarantees it).
   return { stdout: '', stderr, exitCode: 0 }
 }
 
@@ -242,44 +250,48 @@ function runPipeline(stages, ctx, initialStdin) {
 // `<`, `<<` and `<<<`, and `/dev/stdin` names it as redirected so far.
 // `stdinFile` follows along: true once `<` opened a regular file, false
 // after a here-document or here-string (bash feeds those through a
-// pipe), unchanged by `/dev/stdin`. Targets that needed expansion are
-// checked here with the same rule parse.js applied to literal ones.
-// Duplicating a closed descriptor, or opening `/dev/stdout` over one,
-// is the error bash gives.
+// pipe), unchanged by `/dev/stdin`; `inherited` says no input redirect
+// applied at all, so the stage reads its list's shared stream. Targets
+// that needed expansion are checked here with the same rule parse.js
+// applied to literal ones. Duplicating a closed descriptor, or opening
+// `/dev/stdout` over one, is the error bash gives.
 function resolveRedirs(stage, ctx, stdin, stdinFile) {
   const fds = { 1: 'out', 2: 'err' }
   const warnings = []
   let input = stdin
   let file = stdinFile
+  let inherited = true
+  const done = (error) => ({ error, fds, stdin: input, stdinFile: file, inherited, warnings: warnings.join('') })
   for (const r of stage.redirs) {
     if (r.op === 'dup') {
-      if (fds[r.toFd] === 'closed') return { error: err(`error: ${r.toFd}: Bad file descriptor`), fds, warnings: warnings.join('') }
+      if (fds[r.toFd] === 'closed') return done(err(`error: ${r.toFd}: Bad file descriptor`))
       fds[r.fd] = fds[r.toFd]
     } else if (r.op === 'close') fds[r.fd] = 'closed'
     else if (r.op === 'to') {
       const t = r.target === undefined ? expandRedirect(r.word, ctx, warnings) : { value: r.target }
-      if (t.error) return { error: err(`error: ${t.error}`), fds, warnings: warnings.join('') }
+      if (t.error) return done(err(`error: ${t.error}`))
       const dest = t.value === '/dev/null' ? 'null' : t.value === '/dev/stdout' ? fds[1] : t.value === '/dev/stderr' ? fds[2] : null
       if (dest === null) {
         const e = refusedWrite(r.label, t.value)
         ctx.unsupported.add(unsupportedNote(e))
-        return { error: err(`error: ${e.message}`), fds, warnings: warnings.join('') }
+        return done(err(`error: ${e.message}`))
       }
-      if (dest === 'closed') return { error: err(`error: ${t.value}: No such file or directory`), fds, warnings: warnings.join('') }
+      if (dest === 'closed') return done(err(`error: ${t.value}: No such file or directory`))
       fds[r.fd] = dest
       if (r.both) fds[2] = dest
-    } else if (r.op === 'text') { input = r.expand ? expandScalar(heredocWord(r.body), ctx, warnings) : r.body; file = false }
+    } else if (r.op === 'text') { input = r.expand ? expandScalar(heredocWord(r.body), ctx, warnings) : r.body; file = false; inherited = false }
     // A here-string is expanded but neither split nor globbed (bash).
-    else if (r.op === 'herestring') { input = expandScalar(r.word, ctx, warnings) + '\n'; file = false }
+    else if (r.op === 'herestring') { input = expandScalar(r.word, ctx, warnings) + '\n'; file = false; inherited = false }
     else {
       const t = expandRedirect(r.word, ctx, warnings)
       const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, input)
-      if (read.error) return { error: read.error, fds, warnings: warnings.join('') }
+      if (read.error) return done(read.error)
       input = read.content
+      inherited = false
       if (t.value !== '/dev/stdin') file = t.value !== '/dev/null'
     }
   }
-  return { fds, stdin: input, stdinFile: file, warnings: warnings.join('') }
+  return done()
 }
 
 // A stage whose redirect failed. Nothing runs — except that a command
@@ -301,12 +313,14 @@ function failedStage(stage, ctx, error) {
 // (`out` / `err`) at a stream the enclosing stage already closed, as
 // `{ echo a; }` does under `>&-` — and whether its input is a regular
 // file. runStage turns a write into a closed stream into the error
-// bash's commands report; `head` reads the input's kind.
+// bash's commands report; `head` reads the input's kind. The input
+// starts out unread (`stdinLeft`); a reader records what it took.
 function withStreams(io, ctx, fn) {
   const outer = { closed: ctx.closed, stdinFile: ctx.stdinFile }
   const closedAt = (fd) => io.fds[fd] === 'closed' || (io.fds[fd] === 'out' && outer.closed.out) || (io.fds[fd] === 'err' && outer.closed.err)
   ctx.closed = { out: closedAt(1), err: closedAt(2) }
   ctx.stdinFile = Boolean(io.stdinFile)
+  ctx.stdinLeft = io.stdin
   try {
     return fn()
   } finally {
@@ -418,9 +432,9 @@ function writeError(name, r, ctx) {
 // runs once per word with NAME bound. The binding outlives the loop
 // (`echo $f` after `done` prints the last value) and the body shares
 // the terminal's cwd, both as in bash. Exit status is the last
-// iteration's, or 0 when the list is empty; stdin, as for a group,
-// reaches only the first step of the first iteration. `break` ends the
-// loop, `continue` the iteration, `exit` everything.
+// iteration's, or 0 when the list is empty; the loop's standard input
+// is one stream across every iteration, as for a group. `break` ends
+// the loop, `continue` the iteration, `exit` everything.
 function runLoop(loop, ctx, stdin) {
   // Slot 0 is the `for` keyword parse.js parks in the command position.
   const expanded = expandWords(loop.words, ctx)
@@ -428,11 +442,12 @@ function runLoop(loop, ctx, stdin) {
   let stdout = ''
   let stderr = expanded.stderr
   let exitCode = 0
+  const stream = { text: stdin }
   ctx.loopDepth++
   try {
-    for (const [i, value] of values.entries()) {
+    for (const value of values) {
       ctx.vars.set(loop.name, value)
-      const r = runSteps(loop.body, ctx, i === 0 ? stdin : '')
+      const r = runSteps(loop.body, ctx, stream)
       stdout += r.stdout
       stderr += r.stderr
       exitCode = r.exitCode
@@ -448,8 +463,9 @@ function runLoop(loop, ctx, stdin) {
 // A subshell: an `exit` or a `break` inside it ends the subshell alone.
 // A `{ … }` group shares everything, so its signals travel on.
 function runGroup(stage, ctx, stdin) {
-  if (!stage.isolate) return runSteps(stage.group, ctx, stdin)
-  const r = isolated(ctx, () => runSteps(stage.group, ctx, stdin))
+  const stream = { text: stdin }
+  if (!stage.isolate) return runSteps(stage.group, ctx, stream)
+  const r = isolated(ctx, () => runSteps(stage.group, ctx, stream))
   return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }
 }
 

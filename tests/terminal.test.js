@@ -2652,25 +2652,22 @@ describe('createTerminal — `(...)` subshell grouping', () => {
   })
 
   it('`cmd | (...)` delivers stdin to the group\'s first step only', () => {
-    // Bash semantics for a string-typed stdin: the group "owns" the
-    // pipe, and within the group only the first command in the first
-    // step gets to read it. Later steps (after `;`/gates) see empty.
+    // The group owns the pipe: `cat` reads it, and a later step finds
+    // it at end of file, as in bash.
     const t = createTerminal(SOURCES)
     const r = t.run('echo hi | (cat; echo done)')
     assert.equal(r.exitCode, 0)
     assert.equal(r.stdout, 'hi\ndone\n')
   })
 
-  it('`cmd | (true; cat)` — second step sees empty stdin (documented divergence)', () => {
-    // Diverges from real bash (where `cat` would inherit the pipe fd
-    // and print "hi"). Our string-typed pipe can only deliver stdin
-    // to one consumer, and the chosen consumer is the first step.
-    // Pinning this so a future "let any step read it" change is a
-    // deliberate decision, not an accident.
+  it('`cmd | (true; cat)` — a later step reads what earlier ones left', () => {
+    // As in bash: `cat` inherits the pipe, which `true` never read.
+    // (This used to be a documented divergence, with the pipe delivered
+    // to the first step only.)
     const t = createTerminal(SOURCES)
     const r = t.run('echo hi | (true; cat)')
     assert.equal(r.exitCode, 0)
-    assert.equal(r.stdout, '')
+    assert.equal(r.stdout, 'hi\n')
   })
 
   it('stdin reaches a multi-stage pipeline inside the group', () => {

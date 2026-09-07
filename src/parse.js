@@ -80,7 +80,7 @@ export function parseLine(line) {
 // lets the same validator handle every shape.
 function validateSteps(steps) {
   for (const step of steps) {
-    if (step.stages.length === 0) throw new Error('empty pipeline stage')
+    if (step.stages.length === 0 && !step.bang) throw new Error('empty pipeline stage')
     for (const s of step.stages) {
       if (s.group) validateSteps(s.group)
       else if (s.loop) validateSteps(s.loop.body)
@@ -90,7 +90,12 @@ function validateSteps(steps) {
 }
 
 const newStage = () => ({ words: [], assigns: [], redirs: [] })
-const newStep = (gate) => ({ gate, stages: [], negate: false })
+const newStep = (gate) => ({ gate, stages: [], negate: false, bang: false })
+
+// A `!` with nothing after it before the separator — bash's empty
+// negated pipeline, a complete command with status 1 (`!` alone on a
+// line, `{ !⏎}`, `do !; done`). The step keeps no stage at all.
+const bareBang = (step, stage) => step.bang && step.stages.length === 0 && commandPosition(stage) && stage.redirs.length === 0
 
 const wordOf = (t) => ({ value: t.value, mask: t.mask })
 
@@ -160,7 +165,7 @@ function buildSteps(raw, start, end) {
     if (t.kind === 'pipe' || t.kind === 'pipe_err' || t.kind === 'and' || t.kind === 'or' || t.kind === 'semi') {
       // `|&` is `2>&1 |`, applied after the stage's own redirects.
       if (t.kind === 'pipe_err') stage.redirs.push({ fd: 2, op: 'dup', toFd: 1 })
-      steps.at(-1).stages.push(stage)
+      if (!(t.kind === 'semi' && bareBang(steps.at(-1), stage))) steps.at(-1).stages.push(stage)
       stage = newStage()
       if (t.kind === 'and') steps.push(newStep('and'))
       else if (t.kind === 'or') steps.push(newStep('or'))
@@ -193,7 +198,7 @@ function buildSteps(raw, start, end) {
   if (end === ')') throw new Error('unmatched `(`')
   if (end === '}') throw new Error('unmatched `{`')
   if (end === 'done') throw new Error('for: missing `done`')
-  steps.at(-1).stages.push(stage)
+  if (!bareBang(steps.at(-1), stage)) steps.at(-1).stages.push(stage)
   return { steps, consumed: i }
 }
 
@@ -231,6 +236,7 @@ function commandWord(t, raw, i, steps, stage, end) {
   if (v === '!') {
     if (steps.at(-1).stages.length > 0 || stage.redirs.length > 0) throw new Error('syntax error near unexpected token `!`')
     steps.at(-1).negate = !steps.at(-1).negate
+    steps.at(-1).bang = true
     return { next: i + 1 }
   }
   if (v === '{') {
@@ -351,6 +357,8 @@ function finishBlock(steps, stage, consumed, emptyError) {
   const lastStep = steps.at(-1)
   const emptyTail = commandPosition(stage) && stage.redirs.length === 0 && lastStep.stages.length === 0
   if (emptyTail && steps.length === 1) throw new Error(emptyError)
+  // `{ echo a; ! }`: bash wants a separator after a bare `!`.
+  if (emptyTail && lastStep.bang) throw new Error('syntax error near unexpected token after `!`')
   if (emptyTail && lastStep.gate === 'seq') steps.pop()
   else lastStep.stages.push(stage)
   return { steps, consumed }

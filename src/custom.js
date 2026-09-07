@@ -43,7 +43,7 @@
 // the same treatment a builtin's internal error gets.
 
 import { resolve } from './fs.js'
-import { ok, readInputs } from './util.js'
+import { consumeStdin, ok, readInputs } from './util.js'
 
 // A wired name has to survive the tokenizer and the dispatcher:
 // whitespace or shell punctuation could never be typed as a command,
@@ -182,6 +182,9 @@ function checkSpec(name, value, isBuiltin) {
 // holds, would otherwise read `io.cwd` as one directory while
 // resolving its operands in another.
 function invoke(name, run, stdin, tokens, ctx) {
+  // A wired command is handed its stdin outright, so it is taken to
+  // have read it: the next command in a group starts at its end.
+  consumeStdin(ctx)
   const scope = { cwd: ctx.cwd, fs: ctx.fs }
   const io = {
     name,

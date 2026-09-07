@@ -57,6 +57,10 @@ describe('shell syntax — comments and backslashes', () => {
 
   it("$'…' decodes ANSI-C escapes and $\"…\" is a plain double-quoted string", () => {
     assert.equal(out("echo $'a\\tb' | cat -A"), 'a^Ib$\n')
+    // A character beyond the BMP is two UTF-16 units, one mask unit each.
+    assert.equal(out("echo $'\\U0001F600'x"), '\u{1F600}x\n')
+    assert.equal(out("echo $'\\U0001F600' | wc -c"), '5\n')
+    assert.equal(out('echo "$\'\\U0001F600\'"'), "$'\\U0001F600'\n")
     assert.equal(out("echo $'\\x41\\u00E9\\n' | wc -l"), '2\n')
     assert.equal(out('echo $"hi there"'), 'hi there\n')
   })
@@ -415,6 +419,16 @@ describe('shell syntax — compound commands', () => {
     assert.equal(out('! false; echo $?'), '0\n')
     assert.equal(out('! true; echo $?'), '1\n')
     assert.equal(out('! ! true; echo $?'), '0\n')
+    // A `!` on its own is bash's empty negated pipeline: status 1, a
+    // complete command, so the next line is not the thing negated.
+    assert.equal(out('!\necho $?'), '1\n')
+    assert.equal(out('!\ntrue; echo $?'), '0\n')
+    assert.equal(out('! !\necho $?'), '0\n')
+    assert.equal(out('!; echo $?'), '1\n')
+    assert.equal(out('{ !\n}; echo $?'), '1\n')
+    assert.equal(out('for i in 1; do !; done; echo $?'), '1\n')
+    assert.equal(term().run('!').exitCode, 1)
+    for (const line of ['! | cat', '! && echo yes', '( ! )', '{ echo a; ! }']) assert.equal(term().run(line).exitCode, 2, line)
     // An `exit` keeps its status under `!`; a subshell's status is negated.
     assert.equal(term().run('! exit 3').exitCode, 3)
     assert.equal(term().run('! exit 0').exitCode, 0)
@@ -468,6 +482,35 @@ describe('shell syntax — compound commands', () => {
 })
 
 describe('shell syntax — subshell boundaries and redirect operands', () => {
+  it('commands in a group share its standard input; a reader takes what it reads', () => {
+    assert.equal(out('echo hi | { echo x; cat; }'), 'x\nhi\n')
+    assert.equal(out('echo hi | { cat; cat; }'), 'hi\n')
+    assert.equal(out('echo -n abc | { head -c 1; cat; }'), 'abc')
+    assert.equal(out('echo hi | { cat b.txt; cat; }'), 'B\nhi\n')
+    assert.equal(out('echo hi | { cat <b.txt; cat; }'), 'B\nhi\n')
+    assert.equal(out('echo hi | { cat <<< x; cat; }'), 'x\nhi\n')
+    assert.equal(out('echo hi | { echo x | cat; cat; }'), 'x\nhi\n')
+    assert.equal(out('echo hi | { cat | cat; cat; }'), 'hi\n')
+    assert.equal(out('echo hi | { (cat); cat; }'), 'hi\n')
+    assert.equal(out('echo hi | { { cat; }; cat; }'), 'hi\n')
+    assert.equal(out('echo hi | for i in 1 2; do echo $i; cat; done'), '1\nhi\n2\n')
+    assert.equal(out('echo hi | { seq 1; cat; }'), '1\nhi\n')
+    assert.equal(out('echo hi | { head -n1 b.txt; cat; }'), 'B\nhi\n')
+    // Every reader consumes what it reads from the shared input…
+    for (const line of ['grep h', 'wc -l', 'tr a b', 'xargs echo', 'awk 1', 'sort', 'tail -n1', 'hexdump -C', 'nl']) {
+      assert.equal(out(`echo hi | { ${line} >/dev/null; cat; }`), '', line)
+    }
+    assert.equal(out('echo hi | { grep h b.txt; cat; }'), 'hi\n')
+    // …and a command that never reads it leaves it be.
+    for (const line of ['ls >/dev/null', 'true', 'x=1', 'cd .', 'find . -name nope', 'hexdump -C b.txt >/dev/null', 'echo -n']) {
+      assert.equal(out(`echo hi | { ${line}; cat; }`), 'hi\n', line)
+    }
+    // A regular file seeks back to where head stopped; a pipe does not.
+    assert.equal(out('{ head -n1; cat; } < a.txt'), 'x y z\nhello world\n')
+    assert.equal(out('{ head -c 1; cat; } < a.txt'), 'x y z\nhello world\n')
+    assert.equal(out('cat a.txt | { head -n1; cat; }'), 'x y z\n')
+  })
+
   it('every stage of a multi-stage pipeline runs in a subshell', () => {
     const t = term()
     assert.equal(out('x=before; export x=after | cat; echo $x', t), 'before\n')
@@ -579,7 +622,7 @@ describe('shell syntax — command conventions', () => {
     assert.equal(out('head -n1 - - < a.txt'), banners('x y z\n', 'hello world\n'))
     assert.equal(out('cat a.txt | head -n1 - -'), banners('x y z\n', ''))
     assert.equal(out('head -n1 - - <<< "x y z"'), banners('x y z\n', ''))
-    assert.equal(out('head -c 1 - - < a.txt'), banners('x', ''))
+    assert.equal(out('head -c 1 - - < a.txt'), banners('x', ' '))
     assert.equal(out('head -n -1 - - < a.txt'), banners('x y z\n', ''))
     assert.equal(out('head -n1 /dev/stdin - < a.txt'), '==> /dev/stdin <==\nx y z\n\n==> standard input <==\nx y z\n')
     // A group, a subshell and a loop hand their own input on.

@@ -6,7 +6,7 @@
 // `${name}: ${message}` and returns an exit-1 stderr result.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
+import { consumeStdin, err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
 import { awk } from './awk.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
@@ -97,16 +97,15 @@ function head(stdin, tokens, ctx) {
   return takeLines('head', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner, leftover)
 }
 
-// What a `-` operand leaves of the standard input for the next `-`, as
-// GNU head leaves it (checked against coreutils 9.4): `-c N` on a pipe
-// reads exactly N bytes, and `-n N` on a regular file seeks back to the
-// end of line N. Every other form reads to the end — a minus count must
-// see the end to know where to stop, `-c N` on a file takes a whole
-// buffer, and so does `-n N` on a pipe, where anything shorter than one
-// (8 KiB, not modeled) is gone with it.
+// What a read of the standard input leaves for the next `-` operand, or
+// the next command in the group, as GNU head leaves it (checked against
+// coreutils 9.4): `-c N` reads exactly N bytes, and `-n N` on a regular
+// file seeks back to the end of line N. The other forms read to the end
+// — a minus count must see the end to know where to stop, and `-n N` on
+// a pipe takes whole buffers, so anything shorter than one (8 KiB, not
+// modeled) is gone with it.
 function headLeftover(count, unit, ctx) {
-  const file = Boolean(ctx.stdinFile)
-  if (count.sign === '-' || (unit === 'c' && file) || (unit === 'n' && !file)) return () => ''
+  if (count.sign === '-' || (unit === 'n' && !ctx.stdinFile)) return () => ''
   if (unit === 'c') return (content) => sliceBytes(content, (total) => [Math.min(count.value, total), total])
   return (content) => {
     let pos = 0
@@ -258,9 +257,11 @@ function sliceBytes(content, range) {
 // not on the first operand tried. That same `\n` is what terminates the
 // preceding block when its chunk doesn't end in one.
 //
-// Operands that share the standard input read it in turn: each gets
-// what the one before left, which `leftover` computes (nothing, unless
-// the command stops short of the end, as `head -c N` does).
+// Operands that share the standard input (a `-`, or the nameless input
+// of a command given no operand) read it in turn: each gets what the
+// one before left, which `leftover` computes (nothing, unless the
+// command stops short of the end, as `head -c N` does), and what the
+// last one leaves is the next command's.
 function takeFrom(cmd, stdin, files, ctx, pick, banner = null, leftover = () => '') {
   if (banner?.error) return err(`${cmd}: ${banner.error}`)
   const r = readInputs(cmd, files, stdin, ctx)
@@ -273,9 +274,10 @@ function takeFrom(cmd, stdin, files, ctx, pick, banner = null, leftover = () => 
   for (let i = 0; i < opened.length; i++) {
     const { name, kind, shared } = opened[i]
     let { content } = opened[i]
-    if (shared) {
+    if (shared || name === null) {
       if (rest !== null) content = rest
       rest = leftover(content)
+      consumeStdin(ctx, rest)
     }
     // A directory yields no body at all — not even the newline an empty
     // line-pick would append — so `pick` is skipped for it entirely.

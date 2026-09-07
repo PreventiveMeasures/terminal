@@ -16,7 +16,7 @@
 
 import { basename, relativeTo, resolve } from './fs.js'
 import { parseArgs } from './parse.js'
-import { err, joinLines, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
+import { consumeStdin, err, joinLines, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
 import { unsupportedFrom } from './unsupported.js'
 import { breToEs } from './bre.js'
 import { compileGlob } from './glob.js'
@@ -231,6 +231,7 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
     const r = readFilesFor('grep', rest, ctx, stdin)
     return { ...r, inputs: r.inputs.map((i) => (i.name === '-' ? { ...i, name: null } : i)) }
   }
+  consumeStdin(ctx)
   return { inputs: [{ name: null, content: stdin }], stderr: '', failed: false }
 }
 
