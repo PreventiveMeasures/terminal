@@ -43,24 +43,25 @@ export function compileGlob(pattern, opts = {}) {
     else if (c === '?') re += '.'
     else if (c === '[') {
       const bracket = readBracket(pattern, i)
+      if (bracket?.voided) return literalRegex(pattern, opts)
       if (bracket) { re += bracket.source; i = bracket.end } else re += '\\['
     } else if (REGEX_META.test(c)) re += '\\' + c
     else re += c
   }
-  const flags = opts?.ignoreCase ? 'ui' : 'u'
   try {
-    return new RegExp(re + '$', flags)
+    return new RegExp(re + '$', opts?.ignoreCase ? 'ui' : 'u')
   } catch {
     // A bracket expression the regex engine rejects (`[z-a]`) matches
     // nothing in bash either, so the pattern stands for its own text.
-    return new RegExp('^' + literalSource(pattern) + '$', flags)
+    return literalRegex(pattern, opts)
   }
 }
 
-// The pattern as a regex for exactly its literal text, `\x` escapes
-// resolved.
-function literalSource(pattern) {
-  return pattern.replace(/\\(.)/gu, '$1').replace(/[.+*?^${}()|[\]\\/]/gu, '\\$&')
+// A regex for exactly the pattern's own literal text, `\x` escapes
+// resolved — where a pattern bash refuses to match anything with lands.
+function literalRegex(pattern, opts) {
+  const source = pattern.replace(/\\(.)/gu, '$1').replace(/[.+*?^${}()|[\]\\/]/gu, '\\$&')
+  return new RegExp('^' + source + '$', opts?.ignoreCase ? 'ui' : 'u')
 }
 
 // One bracket expression starting at the `[` at `pattern[start]`. `!`
@@ -68,26 +69,66 @@ function literalSource(pattern) {
 // other POSIX classes expand to their ranges; `\x` is a literal member.
 // An unmatched `[` (no closing `]`, or nothing inside) is not a bracket
 // expression at all and stays a literal `[`, as fnmatch treats it.
+//
+// A class name fnmatch does not know is read and contributes NO member,
+// rather than failing the pattern the way grep does: `[[:bogus:]]` is an
+// empty set that matches no name (so the word stands for its own text),
+// `[[:bogus:]x]` still matches `x`, and `[![:bogus:]]` — the negation of
+// nothing — matches any single character. Bash does the same.
+//
+// No class, known or unknown, may END a range: fnmatch rejects such a
+// pattern outright, and a rejected pattern matches nothing at all — even
+// negated, so `[a-[:alpha:]x]` and `[^a-[:bogus:]x]` both match no name.
+// That is `voided`, which the caller turns into the same literal the
+// engine's own rejected ranges (`[z-a]`) produce. A class may still sit
+// on either side of a LITERAL `-`, which is what a `-` after one is:
+// `[[:alpha:]-[:digit:]]` is those two sets plus a hyphen. So the flags
+// below track only what a single character can begin — `rangeAt` says a
+// range may start here, `openRange` that one is waiting for its end —
+// which is also what stops an empty class body from fusing its
+// neighbours into `[a-x]`.
 function readBracket(pattern, start) {
   let i = start + 1
   let negated = false
   if (pattern[i] === '!' || pattern[i] === '^') { negated = true; i++ }
   let body = ''
   let members = 0
-  if (pattern[i] === ']') { body += '\\]'; i++; members++ }
+  let rangeAt = false
+  let openRange = false
+  let voided = false
+  if (pattern[i] === ']') { body += '\\]'; i++; members++; rangeAt = true }
   for (; i < pattern.length && pattern[i] !== ']'; i++) {
     const c = pattern[i]
     if (c === '[' && pattern[i + 1] === ':') {
-      const cls = readPosixClass(pattern, i)
-      if (cls) { body += cls.body; i = cls.end - 1; members++; continue }
+      const cls = readPosixClass(pattern, i, { unknown: 'empty' })
+      if (cls) {
+        if (openRange) voided = true
+        body += cls.body
+        i = cls.end - 1
+        members++
+        rangeAt = false
+        openRange = false
+        continue
+      }
     }
-    if (c === '\\' && i + 1 < pattern.length) {
-      const next = pattern[++i]
-      body += /[\]\\^[-]/u.test(next) ? `\\${next}` : next
-    } else body += c === '\\' || c === '[' ? `\\${c}` : c
+    if (c === '-' && rangeAt) {
+      body += '-'
+      openRange = true
+      rangeAt = false
+    } else {
+      if (c === '\\' && i + 1 < pattern.length) {
+        const next = pattern[++i]
+        body += /[\]\\^[-]/u.test(next) ? `\\${next}` : next
+      } else body += c === '\\' || c === '[' ? `\\${c}` : c
+      // A character that closed a range cannot begin the next one, so
+      // the second `-` in `[a-z-x]` is a member, not another operator.
+      rangeAt = !openRange
+      openRange = false
+    }
     members++
   }
   if (i >= pattern.length || members === 0) return null
+  if (voided) return { voided: true, end: i }
   return { source: `[${negated ? '^' : ''}${body}]`, end: i }
 }
 

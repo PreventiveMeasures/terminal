@@ -63,6 +63,17 @@ describe('shell syntax — comments and backslashes', () => {
     assert.equal(out('echo "$\'\\U0001F600\'"'), "$'\\U0001F600'\n")
     assert.equal(out("echo $'\\x41\\u00E9\\n' | wc -l"), '2\n')
     assert.equal(out('echo $"hi there"'), 'hi there\n')
+    // An escape that decodes to NUL ends the value: bash builds it as a
+    // C string, so the rest of the quotes contributes nothing while the
+    // word around them is untouched. `\c@` is the same NUL.
+    assert.equal(out("echo -n X$'\\0'Y | wc -c"), '2\n')
+    assert.equal(out("echo [$'a\\0b\\0c']"), '[a]\n')
+    assert.equal(out("echo [$'a\\c@b']"), '[a]\n')
+    assert.equal(out("echo [$'\\x00abc'z]"), '[z]\n')
+    assert.equal(out("echo [$'a\\u0000b'][$'a\\U00000000b']"), '[a][a]\n')
+    // The closing quote is still the last one, not the first after the
+    // NUL: the `\'` here is an escaped quote inside the string.
+    assert.equal(out("echo [$'a\\0\\'b']"), '[a]\n')
   })
 
   it('only blanks separate words — a no-break space is part of the word', () => {
@@ -230,6 +241,54 @@ describe('shell syntax — brace and pathname expansion', () => {
     assert.equal(out("find src -name '[!f]oo.js'", t), 'src/boo.js\n')
   })
 
+  it('a POSIX class name that is not one contributes no member, as fnmatch reads it', () => {
+    // grep rejects `[[:bogus:]]`; a shell glob must not — bash reads the
+    // class, finds nothing under that name and matches nothing for it,
+    // so the pattern stands for its own text rather than failing the
+    // line. The rest of the bracket keeps working, and negating the
+    // empty set matches any single character.
+    const t = createTerminal({ b: '', x: '', 'sub/y': '' })
+    assert.equal(out('echo [[:bogus:]]', t), '[[:bogus:]]\n')
+    assert.equal(out('echo [[:bogus:]x]', t), 'x\n')
+    assert.equal(out('echo [x[:bogus:]]', t), 'x\n')
+    assert.equal(out('echo [[:bogus:][:digit:]x]', t), 'x\n')
+    assert.equal(out('echo [![:bogus:]]', t), 'b x\n')
+    assert.equal(out('echo [^[:bogus:]]', t), 'b x\n')
+    assert.equal(out('echo x[[:bogus:]]y sub/[[:bogus:]]', t), 'x[[:bogus:]]y sub/[[:bogus:]]\n')
+    // A name is a class only in the `[:name:]` shape and in lower case.
+    assert.equal(out('echo [[:BOGUS:]]', t), '[[:BOGUS:]]\n')
+    // An empty class must not let its neighbours fuse into a range.
+    assert.equal(out('echo [a-[:bogus:]x]', t), '[a-[:bogus:]x]\n')
+    const r = t.run('echo [[:bogus:]]')
+    assert.deepEqual([r.stderr, r.exitCode], ['', 0])
+    // grep keeps rejecting it — that is a POSIX pattern, not a glob.
+    assert.notEqual(t.run('echo b | grep "[[:bogus:]]"').exitCode, 0)
+  })
+
+  it('no POSIX class may end a range, and a `-` after one is a member', () => {
+    // fnmatch rejects a range whose end is a class, and a pattern it
+    // rejects matches nothing — even negated. Unknown and known names
+    // alike, so an empty class body can never fuse `a-` and `x` into a
+    // live `[a-x]`.
+    const t = createTerminal({ a: '', b: '', c: '', x: '', A: '', '-': '' })
+    for (const line of ['[a-[:bogus:]x]', '[a-[:alpha:]x]', '[A-[:lower:]]', '[a-[:bogus:]]', '[^a-[:bogus:]x]', '[!a-[:alpha:]x]']) {
+      assert.equal(out(`echo ${line}`, t), `${line}\n`, line)
+    }
+    // A class may sit on either side of a `-` that is a MEMBER: after
+    // one, `-` cannot open a range, so these are sets plus a hyphen.
+    assert.equal(out('echo [[:bogus:]-x]', t), '- x\n')
+    assert.equal(out('echo [[:digit:]-b]', t), '- b\n')
+    assert.equal(out('echo [[:alpha:]-[:digit:]]', t), '- A a b c x\n')
+    // An escaped `-` is a member too, so the class after it still ends
+    // no range; and the `-` closing a range cannot open the next.
+    assert.equal(out('echo [a\\-[:bogus:]x]', t), '- a x\n')
+    assert.equal(out('echo [-[:bogus:]x]', t), '- x\n')
+    assert.equal(out('echo [a-c-[:bogus:]]', t), '- a b c\n')
+    // Ordinary ranges are untouched.
+    assert.equal(out('echo [a-c]', t), 'a b c\n')
+    assert.equal(out('echo []-x]', t), 'a b c x\n')
+  })
+
   it('quoted characters inside a bracket expression are members, and a bad range is literal', () => {
     const t = createTerminal({ a: '', b: '', c: '' })
     assert.equal(out('echo [a"-"c]', t), 'a c\n')
@@ -243,6 +302,35 @@ describe('shell syntax — brace and pathname expansion', () => {
 })
 
 describe('shell syntax — redirects', () => {
+  it('a stage of nothing but redirects is the null command: it performs them, and nothing else', () => {
+    const t = term()
+    // Status 0 on its own, and the `!` in front of one negates that to
+    // 1 — bash's redirected empty pipeline, not a syntax error.
+    assert.equal(out('>/dev/null; echo rc=$?', t), 'rc=0\n')
+    assert.equal(out('! >/dev/null; echo rc=$?', t), 'rc=1\n')
+    assert.equal(out('! >/dev/null || echo fallback', t), 'fallback\n')
+    assert.equal(out('! 2>&1; echo rc=$?', t), 'rc=1\n')
+    assert.equal(out('{ >/dev/null; }; echo rc=$?', t), 'rc=0\n')
+    assert.equal(out('(>/dev/null); echo rc=$?', t), 'rc=0\n')
+    assert.equal(out('for i in 1 2; do >/dev/null; done; echo rc=$?', t), 'rc=0\n')
+    assert.equal(out('echo a | >/dev/null; echo rc=$?', t), 'rc=0\n')
+    // The redirect is really performed: one that fails reports and
+    // takes status 1, which `!` in turn negates to 0.
+    const missing = t.run('< nope; echo rc=$?')
+    assert.equal(missing.stdout, 'rc=1\n')
+    assert.match(missing.stderr, /nope: No such file or directory/u)
+    assert.equal(out('! < nope 2>/dev/null; echo rc=$?', t), 'rc=0\n')
+    // A stage with nothing at all in it is still the empty one — and
+    // `|&` must not disguise one, since its `2>&1` is the operator's
+    // redirect rather than a null command the user wrote.
+    for (const line of ['echo a | | wc -l', 'echo a &&', '()', '{ }', '|& echo hi', '{ |& echo hi; }', '! |& echo hi']) {
+      assert.equal(t.run(line).exitCode, 2, line)
+    }
+    // `|&` after a real null command is still fine.
+    assert.equal(out('>/dev/null |& cat; echo rc=$?', t), 'rc=0\n')
+    assert.equal(out('cat nope |& wc -l', t), '1\n')
+  })
+
   it('redirects apply left to right, so `2>&1 >/dev/null` keeps stderr and drops stdout', () => {
     assert.equal(out('cat nope 2>&1 >/dev/null | wc -l'), '1\n')
     const r = term().run('cat nope a.txt 1>&2 2>/dev/null')
@@ -576,6 +664,21 @@ describe('shell syntax — subshell boundaries and redirect operands', () => {
     assert.equal(out('y="a b"; export x=$y; echo [$x]', t), '[a b]\n')
     assert.equal(out('export x=*.txt; echo [$x]', t), '[*.txt]\n')
     assert.equal(out('export x=~/src; echo [$x]', t), '[/src]\n')
+  })
+
+  it('`export --` ends option processing, as `help export` specifies', () => {
+    const t = term()
+    assert.equal(out('export -- x=1; echo $x', t), '1\n')
+    assert.equal(out('export -- a=1 b=2; echo $a$b', t), '12\n')
+    assert.equal(out('x=5; export -- x; echo $x', t), '5\n')
+    assert.equal(out('export -- x=--; echo [$x]', t), '[--]\n')
+    assert.deepEqual(gaps('export -- x=1', t), [])
+    // After it, a word that looks like an option is a name — and a bad
+    // one. `--` on its own still asks for the listing there is not.
+    assert.match(t.run('export -- -p').stderr, /`-p': not a valid identifier/u)
+    assert.match(t.run('export -- --').stderr, /`--': not a valid identifier/u)
+    assert.deepEqual(gaps('export --', t), ['option:-p'])
+    assert.deepEqual(gaps('export -p', t), ['option:-p'])
   })
 })
 

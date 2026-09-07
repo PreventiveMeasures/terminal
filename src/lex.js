@@ -61,6 +61,11 @@ export const backtickGap = () => new UnsupportedError('feature', '`', 'command s
 
 // `$'…'`: bash's ANSI-C quoting. Returns the decoded text and the index
 // just past the closing quote.
+//
+// An escape that decodes to NUL ends the text: bash builds the value as
+// a C string, so `$'a\0b'` is `a` and `X$'\0'Y` is `XY` — the rest of
+// the quotes is still scanned (the closing quote is the last one, not
+// the first after the NUL), it just contributes nothing.
 const ANSI_SIMPLE = { a: '\u0007', b: '\b', e: '\u001B', E: '\u001B', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?' }
 
 export function decodeAnsiC(line, start) {
@@ -87,7 +92,8 @@ export function decodeAnsiC(line, start) {
     out += '\\'
   }
   if (i >= line.length) throw new Error('unterminated single quote')
-  return { text: out, end: i + 1 }
+  const nul = out.indexOf('\0')
+  return { text: nul === -1 ? out : out.slice(0, nul), end: i + 1 }
 }
 
 // The boundary token starting at `line[i]`, or null when the character

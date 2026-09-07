@@ -59,11 +59,16 @@ function loopControl(name) {
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
 
 function exportCmd(_stdin, tokens, ctx) {
-  if (tokens.length === 0 || tokens[0] === '-p') return unsupported('option', 'export', '-p', 'export: listing the environment is not supported (there is none)')
-  for (const t of tokens) {
+  // `--` ends option processing, as `help export` says: everything after
+  // it is a name, so `export -- -p` is an invalid identifier rather than
+  // the listing option, and `export --` alone still lists.
+  const terminated = tokens[0] === '--'
+  const operands = terminated ? tokens.slice(1) : tokens
+  if (operands.length === 0 || (!terminated && operands[0] === '-p')) return unsupported('option', 'export', '-p', 'export: listing the environment is not supported (there is none)')
+  for (const t of operands) {
     const eq = t.indexOf('=')
     const name = eq === -1 ? t : t.slice(0, eq)
-    if (t.startsWith('-')) return unsupported('option', 'export', t, `export: option \`${t}\` is not supported`)
+    if (!terminated && t.startsWith('-')) return unsupported('option', 'export', t, `export: option \`${t}\` is not supported`)
     if (!NAME.test(name)) return err(`export: \`${name}': not a valid identifier`)
     if (eq !== -1) ctx.vars.set(name, t.slice(eq + 1))
     else if (ctx.vars.has(name)) ctx.vars.set(name, ctx.vars.get(name))
