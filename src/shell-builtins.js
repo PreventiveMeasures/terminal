@@ -50,7 +50,9 @@ function loopControl(name) {
 }
 
 // `export NAME[=value]…`: there is no environment to export into, so
-// this is assignment (or, without a value, a no-op). `unset NAME…`
+// this is assignment — or, without a value, a rebinding of the current
+// value, which is what lets `x=2 export x` keep `x` as bash does (a
+// prefix assignment the command rebinds outlives it). `unset NAME…`
 // removes bindings. Both accept the names bash accepts.
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
 
@@ -62,6 +64,7 @@ function exportCmd(_stdin, tokens, ctx) {
     if (t.startsWith('-')) return unsupported('option', 'export', t, `export: option \`${t}\` is not supported`)
     if (!NAME.test(name)) return err(`export: \`${name}': not a valid identifier`)
     if (eq !== -1) ctx.vars.set(name, t.slice(eq + 1))
+    else if (ctx.vars.has(name)) ctx.vars.set(name, ctx.vars.get(name))
   }
   return ok()
 }

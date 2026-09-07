@@ -59,6 +59,8 @@ export function createTerminal(sources, opts = {}) {
   // a bare `cd` resolve to: the tree root, the one directory guaranteed
   // to exist. `vars` holds `for` bindings and `NAME=value` assignments;
   // `lastExit` is `$?`; `cd` keeps `OLDPWD` in `vars`, as bash does.
+  // `closed` says which of the running stage's output streams `>&-`
+  // closed, so a write into one can fail as bash's commands fail.
   //
   // `registry` rides on ctx so the engine's step/pipeline/stage
   // functions — which already thread ctx everywhere — reach the
@@ -68,7 +70,7 @@ export function createTerminal(sources, opts = {}) {
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
   const ctx = {
     cwd, fs, user: opts.user ?? 'user', home: '/', registry,
-    vars: new Map(), lastExit: 0, loopDepth: 0,
+    vars: new Map(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false },
     unsupported: createUnsupportedFeed(),
   }
   // Commands like `xargs` need to invoke other commands. Exposing
@@ -211,7 +213,7 @@ function runPipeline(stages, ctx, initialStdin) {
     const stage = stages[i]
     const io = resolveRedirs(stage, ctx, stdin)
     const run = () => (stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx, io.stdin) : runStage(stage, ctx, io.stdin))
-    const result = io.error ? io.error : stages.length > 1 ? isolated(ctx, run) : run()
+    const result = io.error ?? withClosed(io.fds, ctx, () => (stages.length > 1 ? isolated(ctx, run) : run()))
     const errText = io.warnings + result.stderr
     let stageOut = ''
     let stageErr = ''
@@ -232,16 +234,20 @@ function runPipeline(stages, ctx, initialStdin) {
 }
 
 // Apply a stage's redirects in order. `fds` maps fd 1 and 2 to where
-// their text ends up; `stdin` is replaced by `<`, `<<` and `<<<`.
+// their text ends up (`closed` after `>&-`); `stdin` is replaced by
+// `<`, `<<` and `<<<`, and `/dev/stdin` names it as redirected so far.
 // Targets that needed expansion are checked here with the same rule
-// parse.js applied to literal ones.
+// parse.js applied to literal ones. Duplicating a closed descriptor,
+// or opening `/dev/stdout` over one, is the error bash gives.
 function resolveRedirs(stage, ctx, stdin) {
   const fds = { 1: 'out', 2: 'err' }
   const warnings = []
   let input = stdin
   for (const r of stage.redirs) {
-    if (r.op === 'dup') fds[r.fd] = fds[r.toFd]
-    else if (r.op === 'close') fds[r.fd] = 'null'
+    if (r.op === 'dup') {
+      if (fds[r.toFd] === 'closed') return { error: err(`error: ${r.toFd}: Bad file descriptor`), fds, warnings: warnings.join('') }
+      fds[r.fd] = fds[r.toFd]
+    } else if (r.op === 'close') fds[r.fd] = 'closed'
     else if (r.op === 'to') {
       const t = r.target === undefined ? expandRedirect(r.word, ctx, warnings) : { value: r.target }
       if (t.error) return { error: err(`error: ${t.error}`), fds, warnings: warnings.join('') }
@@ -251,6 +257,7 @@ function resolveRedirs(stage, ctx, stdin) {
         ctx.unsupported.add(unsupportedNote(e))
         return { error: err(`error: ${e.message}`), fds, warnings: warnings.join('') }
       }
+      if (dest === 'closed') return { error: err(`error: ${t.value}: No such file or directory`), fds, warnings: warnings.join('') }
       fds[r.fd] = dest
       if (r.both) fds[2] = dest
     } else if (r.op === 'text') input = r.expand ? expandScalar(heredocWord(r.body), ctx, warnings) : r.body
@@ -258,7 +265,7 @@ function resolveRedirs(stage, ctx, stdin) {
     else if (r.op === 'herestring') input = expandScalar(r.word, ctx, warnings) + '\n'
     else {
       const t = expandRedirect(r.word, ctx, warnings)
-      const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, stdin)
+      const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, input)
       if (read.error) return { error: read.error, fds, warnings: warnings.join('') }
       input = read.content
     }
@@ -266,16 +273,32 @@ function resolveRedirs(stage, ctx, stdin) {
   return { fds, stdin: input, warnings: warnings.join('') }
 }
 
+// Run a stage knowing which of its output streams lead nowhere: a
+// descriptor `>&-` closed on the stage itself, or one that points
+// (`out` / `err`) at a stream the enclosing stage already closed, as
+// `{ echo a; }` does under `>&-`. runStage turns a write into such a
+// stream into the error bash's commands report.
+function withClosed(fds, ctx, fn) {
+  const outer = ctx.closed
+  const closedAt = (fd) => fds[fd] === 'closed' || (fds[fd] === 'out' && outer.out) || (fds[fd] === 'err' && outer.err)
+  ctx.closed = { out: closedAt(1), err: closedAt(2) }
+  try {
+    return fn()
+  } finally {
+    ctx.closed = outer
+  }
+}
+
 // An unquoted here-document body: `$NAME` expands, `\$` `\\` and
-// `` \` `` are escapes, `\<newline>` joins two lines, nothing else is
-// special — the double-quote rules, minus the quotes.
+// `` \` `` are escapes, nothing else is special — the double-quote
+// rules, minus the quotes. (A `\<newline>` joined its lines back in
+// lex.js, before the delimiter was looked for.)
 function heredocWord(body) {
   let value = ''
   let mask = ''
   for (let i = 0; i < body.length; i++) {
     const c = body[i]
     const n = body[i + 1]
-    if (c === '\\' && n === '\n') { i++; continue }
     if (c === '\\' && (n === '$' || n === '\\' || n === '`')) { value += n; mask += '1'; i++; continue }
     value += c
     mask += '2'
@@ -296,20 +319,67 @@ function readInput(path, ctx, stdin) {
 
 // A simple command: expand the words, then either dispatch argv[0] or,
 // when nothing but assignments remains, perform them. Assignments in
-// front of a command would scope to that command's environment, which
-// no command here reads, so they are dropped — exactly what a user
-// sees from `x=1 echo $x` in bash, where `$x` expands before `x` is
-// set. Every word expanding to nothing (`$c` with an empty binding) is
-// no command at all, status 0, as in bash.
+// front of a command hold for that command alone (`HOME=/tmp cd` goes
+// there and leaves HOME as it was) and are expanded after the words,
+// so `x=2 echo $x` prints the old value — both as in bash. Every word
+// expanding to nothing (`$c` with an empty binding) is no command at
+// all, status 0, as in bash. Output into a closed stdout is the write
+// error bash's commands report.
 function runStage(stage, ctx, stdin) {
   const { argv, stderr } = expandWords(stage.words, ctx)
+  const warnings = []
   if (argv.length === 0) {
-    const warnings = []
     for (const a of stage.assigns) ctx.vars.set(a.name, expandScalar(a.word, ctx, warnings, true))
     return { stdout: '', stderr: stderr + warnings.join(''), exitCode: 0 }
   }
-  const r = dispatch(argv[0], argv.slice(1), stdin, ctx)
-  return stderr === '' ? r : { ...r, stderr: stderr + r.stderr }
+  let r = withTemporaries(stage.assigns, ctx, warnings, () => dispatch(argv[0], argv.slice(1), stdin, ctx))
+  if (ctx.closed.out && r.stdout !== '') r = writeError(argv[0], r, ctx)
+  const prefix = stderr + warnings.join('')
+  return prefix === '' ? r : { ...r, stderr: prefix + r.stderr }
+}
+
+// A Map that remembers which names were bound while `bound` is set.
+class BindingMap extends Map {
+  set(name, value) {
+    this.bound?.add(name)
+    return super.set(name, value)
+  }
+}
+
+// Run `fn` with the stage's prefix assignments in force: each value
+// expands with the ones before it in place (`a=1 b=$a cmd`), the
+// command sees them all, and afterwards they are gone — except a
+// temporary the command itself rebound, which bash keeps (`x=2 export
+// x`, `OLDPWD=/tmp cd -`). Whatever else the command bound or unset
+// was never temporary and stays too (`cd` setting `OLDPWD` under
+// `HOME=/tmp cd`).
+function withTemporaries(assigns, ctx, warnings, fn) {
+  if (assigns.length === 0) return fn()
+  const outer = ctx.vars
+  const temps = new Set(assigns.map((a) => a.name))
+  const inner = new BindingMap(outer)
+  ctx.vars = inner
+  for (const a of assigns) inner.set(a.name, expandScalar(a.word, ctx, warnings, true))
+  inner.bound = new Set()
+  try {
+    return fn()
+  } finally {
+    ctx.vars = outer
+    for (const [name, value] of inner) if (!temps.has(name) || inner.bound.has(name)) outer.set(name, value)
+    for (const name of outer.keys()) if (!inner.has(name) && !temps.has(name)) outer.delete(name)
+  }
+}
+
+// What a command does when its stdout is closed, as the real ones do
+// (checked against the binaries and bash's builtins): most report
+// `write error: Bad file descriptor` and exit 1; these exit otherwise,
+// and two never notice.
+const WRITE_ERROR_STATUS = new Map([['ls', 2], ['grep', 2], ['sort', 2], ['xxd', 3], ['sed', 4], ['xargs', 123], ['hexdump', 0], ['tree', 0]])
+
+function writeError(name, r, ctx) {
+  const status = WRITE_ERROR_STATUS.get(ctx.registry.resolveCommand(name)) ?? 1
+  if (status === 0) return { ...r, stdout: '' }
+  return { ...r, stdout: '', stderr: r.stderr + `${name}: write error: Bad file descriptor\n`, exitCode: status }
 }
 
 // `for NAME in WORDS; do BODY; done`. The word list expands when the

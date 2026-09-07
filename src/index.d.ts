@@ -196,8 +196,9 @@ export interface Terminal {
    * Parse and execute one command line: pipelines, `&&` / `||` / `;`
    * gates, `!`, `(...)` subshells and `{ …; }` groups, `for … in …; do …;
    * done` loops with `break` / `continue`, `exit`, `NAME=value`
-   * assignments (`export` / `unset`), redirects (`>` `>>` `2>` `&>` to
-   * `/dev/null` and the two stream devices, `2>&1`, `<`, `<<`, `<<<`),
+   * assignments (`export` / `unset`, and in front of a command),
+   * redirects (`>` `>>` `2>` `&>` to `/dev/null` and the two stream
+   * devices, `2>&1`, `>&-`, `<`, `<<`, `<<<`),
    * comments, bash quoting and backslash rules, brace expansion with
    * sequences, `~`, `$NAME` / `${NAME}` / `$?`, and globs with bracket
    * expressions. Variables and the working directory persist across calls.

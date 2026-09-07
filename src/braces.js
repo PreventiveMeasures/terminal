@@ -21,11 +21,16 @@
 //
 // A sequence bigger than SEQ_LIMIT is refused rather than materialized:
 // bash tries and runs out of memory; here the pipeline buffers whole
-// argv lists, so the cap is the honest answer.
+// argv lists, so the cap is the honest answer. Endpoints and steps are
+// bash's 64-bit integers, counted exactly; a word whose numbers do not
+// fit stays literal, as in bash.
 
 const SEQ_LIMIT = 100_000
-const NUM_RANGE = /^(-?\d+)\.\.(-?\d+)(?:\.\.(-?\d+))?$/u
-const CHAR_RANGE = /^([A-Za-z])\.\.([A-Za-z])(?:\.\.(-?\d+))?$/u
+const NUM_RANGE = /^([+-]?\d+)\.\.([+-]?\d+)(?:\.\.([+-]?\d+))?$/u
+const CHAR_RANGE = /^([A-Za-z])\.\.([A-Za-z])(?:\.\.([+-]?\d+))?$/u
+const INT64_MAX = 2n ** 63n - 1n
+const INT64_MIN = -(2n ** 63n)
+const int64 = (s) => { const n = BigInt(s); return n > INT64_MAX || n < INT64_MIN ? null : n }
 
 const maskAt = (w, i) => (w.mask === null ? '0' : w.mask[i])
 const slice = (w, a, b) => ({ value: w.value.slice(a, b), mask: w.mask === null ? null : w.mask.slice(a, b) })
@@ -87,38 +92,46 @@ function splitTopCommas(body) {
 }
 
 // `{x..y}` / `{x..y..step}` on a body that is entirely unquoted, or
-// null when it is not a sequence. Bash takes the step's absolute value
-// and counts in the direction of the endpoints; a zero step is 1.
+// null when it is not a sequence — including one bash's arithmetic
+// cannot hold: an endpoint or step outside 64 bits, the one step whose
+// absolute value overflows, a span that does. Bash takes the step's
+// absolute value and counts in the direction of the endpoints; a zero
+// step is 1.
 function sequence(body) {
   if (body.mask !== null && /[12]/u.test(body.mask)) return null
   const num = NUM_RANGE.exec(body.value)
   const chr = num ? null : CHAR_RANGE.exec(body.value)
   if (!num && !chr) return null
-  const [from, to] = num ? [Number(num[1]), Number(num[2])] : [chr[1].codePointAt(0), chr[2].codePointAt(0)]
-  const step = Math.abs(Number((num ?? chr)[3] ?? 1)) || 1
-  const count = Math.floor(Math.abs(to - from) / step) + 1
+  const [from, to] = num ? [int64(num[1]), int64(num[2])] : [BigInt(chr[1].codePointAt(0)), BigInt(chr[2].codePointAt(0))]
+  const rawStep = (num ?? chr)[3] === undefined ? 1n : int64((num ?? chr)[3])
+  if (from === null || to === null || rawStep === null || rawStep === INT64_MIN) return null
+  const span = to >= from ? to - from : from - to
+  if (span > INT64_MAX) return null
+  const step = (rawStep < 0n ? -rawStep : rawStep) || 1n
+  const count = span / step + 1n
   if (count > SEQ_LIMIT) throw new Error(`brace expansion \`{${body.value}}\` would produce ${count} words (limit ${SEQ_LIMIT})`)
   const width = num ? padWidth(num[1], num[2]) : 0
   const out = []
-  const dir = to >= from ? 1 : -1
-  for (let k = 0; k < count; k++) {
+  const dir = to >= from ? 1n : -1n
+  for (let k = 0n; k < count; k++) {
     const n = from + dir * k * step
-    const text = num ? pad(n, width) : String.fromCodePoint(n)
+    const text = num ? pad(n, width) : String.fromCodePoint(Number(n))
     out.push({ value: text, mask: null })
   }
   return out
 }
 
 // Zero padding applies when either endpoint was written with a leading
-// zero (`{01..10}`, `{1..010}`); the width is the longest endpoint's,
-// sign included, as bash pads `-1` alongside `-10` to `-01`.
+// zero (`{01..10}`, `{1..010}`) — a `+` sign in front of it does not
+// count, as in bash; the width is the longest endpoint's, sign
+// included, as bash pads `-1` alongside `-10` to `-01`.
 function padWidth(a, b) {
   const zero = (s) => /^-?0\d/u.test(s)
   return zero(a) || zero(b) ? Math.max(a.length, b.length) : 0
 }
 
 function pad(n, width) {
-  const s = String(Math.abs(n))
-  const sign = n < 0 ? '-' : ''
+  const s = String(n < 0n ? -n : n)
+  const sign = n < 0n ? '-' : ''
   return sign + s.padStart(width - sign.length, '0')
 }

@@ -109,6 +109,25 @@ describe('shell syntax — parameters', () => {
     assert.equal(out('export z=3; echo $z; unset z; echo [$z]', t), '3\n[]\n')
   })
 
+  it('assignments in front of a command hold for that command alone, as in bash', () => {
+    const t = term()
+    assert.equal(out('HOME=/src cd; pwd; echo [$HOME]', t), '/src\n[/]\n')
+    assert.equal(out('cd /; OLDPWD=/src cd -; pwd; echo [$OLDPWD]', t), '/src\n/src\n[/]\n')
+    assert.equal(out('cd /src; HOME=/ cd; cd -; pwd', t), '/src\n/src\n')
+    // The words expand before the assignments do, and each assignment
+    // sees the ones before it.
+    assert.equal(out('x=1; x=2 echo $x; echo $x', t), '1\n1\n')
+    assert.equal(out('cd /; x=1; x=$x$x pwd; echo $x', t), '/\n1\n')
+    assert.equal(out('a=/src HOME=$a cd; pwd; cd /', t), '/src\n')
+    assert.equal(out('x=1; x=2 export y=$x; echo [$x][$y]', t), '[1][1]\n')
+    // A temporary the command itself rebinds stays, as bash keeps it.
+    assert.equal(out('x=1; x=2 unset x; echo [$x]', t), '[1]\n')
+    assert.equal(out('x=2 export x; echo [$x]', t), '[2]\n')
+    assert.equal(out('HOME=/nope cd || echo failed', t), 'failed\n')
+    assert.equal(term().run('x=2 exit 4').exitCode, 4)
+    assert.deepEqual(gaps('x=$NOPE echo hi'), ['feature:$NOPE'])
+  })
+
   it('a bare expansion is split on blanks; a quoted one is one word', () => {
     const t = term()
     t.run('f="a.txt b.txt"')
@@ -170,6 +189,20 @@ describe('shell syntax — brace and pathname expansion', () => {
     assert.equal(out('for i in {1..3}; do echo $i; done'), '1\n2\n3\n')
     // Quoting elsewhere in the word does not freeze a bare sequence.
     assert.equal(out('echo "x"{1..3} "{1..3}"'), 'x1 x2 x3 {1..3}\n')
+  })
+
+  it('sequences count in exact 64-bit integers, as bash does; outside that range the word is literal', () => {
+    assert.equal(out('echo {9007199254740992..9007199254740994}'), '9007199254740992 9007199254740993 9007199254740994\n')
+    assert.equal(out('echo {9223372036854775806..9223372036854775807}'), '9223372036854775806 9223372036854775807\n')
+    assert.equal(out('echo {-9223372036854775808..-9223372036854775807}'), '-9223372036854775808 -9223372036854775807\n')
+    assert.equal(out('echo {1..9223372036854775807..9223372036854775806}'), '1 9223372036854775807\n')
+    assert.equal(out('echo {0..9223372036854775807..4611686018427387904}'), '0 4611686018427387904\n')
+    assert.equal(out('echo {1..3..9223372036854775807} {a..c..9223372036854775807}'), '1 a\n')
+    for (const word of ['{9223372036854775807..9223372036854775808}', '{99999999999999999999..1}', '{-9223372036854775808..9223372036854775807..9223372036854775807}', '{1..2..-9223372036854775808}', '{a..c..9223372036854775808}']) {
+      assert.equal(out(`echo ${word}`), `${word}\n`)
+    }
+    // A `+` sign is accepted; a `+`-signed endpoint never asks for zero padding.
+    assert.equal(out('echo {+1..3} {01..+3} {+01..3} {-01..+3} {1..3..+0}'), '1 2 3 01 02 03 1 2 3 -01 000 001 002 003 1 2 3\n')
   })
 
   it('a quoted fragment protects only its own characters', () => {
@@ -241,6 +274,43 @@ describe('shell syntax — redirects', () => {
     assert.equal(out("cat <<'EOF'\nhello $HOME\nEOF"), 'hello $HOME\n')
     assert.equal(out('cat <<-EOF\n\tindented\n\tEOF'), 'indented\n')
     assert.equal(out('cat <<EOF | wc -l\na\nb\nEOF'), '2\n')
+  })
+
+  it('a backslash-newline in an unquoted here-document joins physical lines, the delimiter line too', () => {
+    assert.equal(out('cat <<EOF\nhi\nEO\\\nF\necho after'), 'hi\nafter\n')
+    assert.equal(out('cat <<EOF\n\\\nEOF\necho after'), 'after\n')
+    assert.equal(out('cat <<EOF\na\\\\\nb\nEOF'), 'a\\\nb\n')
+    assert.equal(out('cat <<EOF\na\\\\\\\nb\nEOF'), 'a\\b\n')
+    assert.equal(out('cat <<-EOF\n\ta\\\n\tb\n\tEOF'), 'a\tb\n')
+    assert.equal(out("cat <<'EOF'\nhi\nEO\\\nF\nEOF\necho after"), 'hi\nEO\\\nF\nafter\n')
+  })
+
+  it('`/dev/stdin` is the input as redirected so far, left to right', () => {
+    assert.equal(out('echo -n pipe | cat <b.txt </dev/stdin'), 'B\n')
+    assert.equal(out('echo -n pipe | cat </dev/stdin <b.txt'), 'B\n')
+    assert.equal(out('echo -n pipe | cat </dev/stdin'), 'pipe')
+  })
+
+  it('a write into a closed stdout fails as each real command fails; a closed stderr is silent', () => {
+    assert.equal(out('echo hi >&- || echo fallback'), 'fallback\n')
+    const e = term().run('echo hi >&-')
+    assert.deepEqual([e.stdout, e.stderr, e.exitCode], ['', 'echo: write error: Bad file descriptor\n', 1])
+    assert.equal(term().run('cat a.txt >&-').exitCode, 1)
+    assert.equal(term().run('ls >&-').exitCode, 2)
+    assert.equal(term().run('grep x a.txt >&-').exitCode, 2)
+    assert.equal(term().run('echo hi | cat >&-').exitCode, 1)
+    assert.equal(term().run('for i in 1 2; do echo $i; done >&-').exitCode, 1)
+    const group = term().run('{ echo a; echo b; } >&-')
+    assert.deepEqual([group.stderr, group.exitCode], ['echo: write error: Bad file descriptor\n'.repeat(2), 1])
+    assert.equal(term().run('{ echo a >&2; } 2>&-').exitCode, 1)
+    // Nothing written, or written elsewhere: no error.
+    for (const line of ['true >&-', 'echo -n "" >&-', 'echo hi >&- >/dev/null', 'cd src >&-', 'cat a.txt 2>&-']) {
+      assert.equal(term().run(line).exitCode, 0, line)
+    }
+    assert.equal(out('cat nope 2>&-; echo $?'), '1\n')
+    // Duplicating a closed descriptor is bash's own error.
+    const dup = term().run('echo hi >&- 2>&1')
+    assert.deepEqual([dup.stderr, dup.exitCode], ['error: 1: Bad file descriptor\n', 1])
   })
 
   it('a real file target is refused with a gap; unusual descriptors are gaps or errors as in bash', () => {
@@ -423,6 +493,16 @@ describe('shell syntax — command conventions', () => {
     assert.equal(out('echo hi | wc -l -'), '1 -\n')
     assert.equal(out('echo hi | grep -H hi -'), '(standard input):hi\n')
     assert.equal(out('echo b | sort - b.txt'), 'B\nb\n')
+  })
+
+  it('repeated `-` operands share one standard input: the second finds it at end of file', () => {
+    assert.equal(out('echo -n x | cat - -'), 'x')
+    assert.equal(out('echo a | cat - b.txt -'), 'a\nB\n')
+    assert.equal(out('echo a | cat - - < b.txt'), 'B\n')
+    assert.equal(out('echo a | grep a - -'), '(standard input):a\n')
+    assert.equal(out('echo a | grep -c a - -'), '(standard input):1\n(standard input):0\n')
+    assert.equal(out('echo a | head -n1 - -'), '==> standard input <==\na\n\n==> standard input <==\n')
+    assert.equal(out("echo a | awk '{ print FILENAME, $0 }' - -"), '- a\n')
   })
 
   it('a value option with its argument glued on is an option, even quoted with a space', () => {

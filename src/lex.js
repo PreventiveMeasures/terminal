@@ -142,22 +142,27 @@ function readDup(line, ampAt, fd, label) {
 
 // Here-document bodies. Called at the newline that ends the line the
 // `<<` operators appeared on: each pending heredoc, in order, takes the
-// following lines up to (not including) its delimiter line. `<<-`
-// strips leading tabs from the body and the delimiter. Returns the
-// index of the newline that ended the last delimiter line, or the end
-// of input when a body ran out of text (bash warns and takes what it
-// got; here the same).
+// following lines up to (not including) its delimiter line. With an
+// unquoted delimiter a backslash-newline joins the next physical line
+// on first — so `EO\⏎F` closes an `EOF` heredoc, as in bash. `<<-`
+// then strips leading tabs from the (joined) line. Returns the index of
+// the newline that ended the last delimiter line, or the end of input
+// when a body ran out of text (bash warns and takes what it got; here
+// the same).
 export function readHeredocBodies(line, newlineAt, pending) {
   let i = newlineAt + 1
   for (const h of pending) {
     const lines = []
-    for (;;) {
-      if (i > line.length) break
-      const end = line.indexOf('\n', i)
-      const stop = end === -1 ? line.length : end
-      let text = line.slice(i, stop)
+    while (i <= line.length) {
+      let end = line.indexOf('\n', i)
+      let text = line.slice(i, end === -1 ? line.length : end)
+      i = (end === -1 ? line.length : end) + 1
+      while (!h.quotedDelim && end !== -1 && continues(text)) {
+        end = line.indexOf('\n', i)
+        text = text.slice(0, -1) + line.slice(i, end === -1 ? line.length : end)
+        i = (end === -1 ? line.length : end) + 1
+      }
       if (h.strip) text = text.replace(/^\t+/u, '')
-      i = stop + 1
       if (text === h.delim) break
       lines.push(text)
       if (end === -1) break
@@ -165,4 +170,12 @@ export function readHeredocBodies(line, newlineAt, pending) {
     h.body = lines.length === 0 ? '' : lines.join('\n') + '\n'
   }
   return i - 1
+}
+
+// A line ending in an odd number of backslashes: the last one escapes
+// the newline (`a\\` ends in an escaped backslash instead).
+function continues(text) {
+  let n = 0
+  while (n < text.length && text[text.length - 1 - n] === '\\') n++
+  return n % 2 === 1
 }

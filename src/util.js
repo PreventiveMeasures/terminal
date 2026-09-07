@@ -60,15 +60,17 @@ export const joinLines = (lines) => lines.length === 0 ? '' : lines.join('\n') +
 // gets nothing at all. `entries` carries every operand in order with
 // that distinction as `kind`; `inputs` is the readable subset, which is
 // what every other caller wants, so this changed nothing for them.
-// `stdin` backs a `-` operand.
+// `stdin` backs a `-` operand — the first one; a second `-` names the
+// same stream and finds it at end of file, as `cat - -` does.
 export function readFilesFor(cmd, files, ctx, stdin = '') {
   const entries = []
   let stderr = ''
   let failed = false
+  let pipe = stdin
   for (const f of files) {
     // `-` is the standard input, by the convention every coreutils
     // reader follows; it keeps its name so banners can label it.
-    if (f === '-') { entries.push({ name: '-', content: stdin, kind: 'file' }); continue }
+    if (f === '-') { entries.push({ name: '-', content: pipe, kind: 'file' }); pipe = ''; continue }
     const abs = resolve(ctx.cwd, f)
     if (ctx.fs.isDir(abs)) {
       stderr += `${cmd}: ${f}: is a directory\n`
