@@ -5,6 +5,7 @@
 
 import { basename as baseName, dirname as dirName, joinPath, resolve } from './fs.js'
 import { find } from './find.js'
+import { homeOf } from './expand.js'
 import { parseArgs } from './parse.js'
 import { err, ok, usage } from './util.js'
 
@@ -13,13 +14,28 @@ function pwd(_stdin, tokens, ctx) {
   return ok(ctx.cwd + '\n')
 }
 
+// `cd` alone goes home (the tree root here); `cd -` goes to `$OLDPWD`
+// and prints that value, as bash does — the variable is the shell's,
+// so an assignment or `unset` of it steers the next `cd -`, and a
+// successful change sets it (and refreshes an assigned `PWD`). `cd ''`
+// is a no-op. The failure messages are bash's, capitalized as bash
+// prints them.
 function cd(_stdin, tokens, ctx) {
   const { positional } = parseArgs(tokens)
-  const target = positional[0] ?? '/'
+  if (positional.length > 1) return err('cd: too many arguments')
+  let target = positional[0] ?? homeOf(ctx)
+  if (target === '-') {
+    if (!ctx.vars.has('OLDPWD')) return err('cd: OLDPWD not set')
+    target = ctx.vars.get('OLDPWD')
+  }
+  const printed = positional[0] === '-' ? target + '\n' : ''
+  if (target === '') return ok(printed)
   const abs = resolve(ctx.cwd, target)
-  if (!ctx.fs.isDir(abs)) return err(`cd: not a directory: ${target}`)
+  if (!ctx.fs.isDir(abs)) return err(`cd: ${target}: ${ctx.fs.isFile(abs) ? 'Not a directory' : 'No such file or directory'}`)
+  ctx.vars.set('OLDPWD', ctx.cwd)
+  if (ctx.vars.has('PWD')) ctx.vars.set('PWD', abs)
   ctx.cwd = abs
-  return ok()
+  return ok(printed)
 }
 
 function ls(_stdin, tokens, ctx) {

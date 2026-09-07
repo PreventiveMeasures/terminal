@@ -180,21 +180,23 @@ describe('no JS execution — runtime', () => {
     }
   })
 
-  it('has no command substitution: `$(…)`, backticks and `${…}` stay literal text', () => {
+  it('has no command substitution: `$(…)` and backticks are refused, `${…}` never runs anything', () => {
     const t = createTerminal(SOURCES)
-    // Backticks are ordinary word characters here. `$HOME` / `${HOME}`
-    // are variable references, but the only bindings this shell has
-    // are `for` loop variables — there is no environment — so an
-    // unbound name echoes back verbatim rather than naming anything.
-    assert.equal(t.run('echo `id`').stdout, '`id`\n')
-    assert.equal(t.run('echo ${HOME}').stdout, '${HOME}\n')
-    assert.equal(t.run('echo $HOME').stdout, '$HOME\n')
-    assert.equal(t.run('for x in a; do echo $HOME; done').stdout, '$HOME\n')
-    // `$(` is not a substitution form; the grammar rejects the paren
-    // outright rather than treating the contents as a command.
-    const sub = t.run('echo $(whoami)')
-    assert.notEqual(sub.exitCode, 0)
-    assert.match(sub.stderr, /unexpected `\(`/u)
+    // Both substitution spellings are refused at parse time, so the
+    // text between them never reaches a command, let alone a process.
+    for (const line of ['echo `id`', 'echo $(whoami)', 'x=$(id)', 'echo "$(id)"', 'echo $((1+1))']) {
+      const r = t.run(line)
+      assert.equal(r.exitCode, 1, line)
+      assert.equal(r.stdout, '', line)
+      assert.match(r.stderr, /not supported/u, line)
+      assert.equal(r.unsupported[0].kind, 'feature', line)
+    }
+    // `$NAME` / `${NAME}` are variable references, and the only bindings
+    // this shell has are its own (`for` variables, assignments, and the
+    // few names it answers itself) — there is no environment behind them.
+    assert.equal(t.run('echo ${PATH}').stdout, '\n')
+    assert.equal(t.run('for x in a; do echo $SHELL; done').stdout, '\n')
+    assert.equal(t.run('echo $HOME').stdout, '/\n')
     // `&` would be the other way to hand work to a real process.
     assert.match(t.run('cat a.js & id').stderr, /background processes/u)
   })
@@ -245,9 +247,10 @@ describe('no JS execution — runtime', () => {
     // name must fail closed at the registry rather than escaping.
     assert.match(t.run("find . -exec node -e 'x' ';'").stderr, /node: command not found/u)
     assert.match(t.run('echo a | xargs node -e').stderr, /node: command not found/u)
-    // A loop value in command position is one unsplit word, looked up
-    // as-is: `sh -c id` is a command name that does not exist.
-    assert.match(t.run('for c in "sh -c id"; do $c; done').stderr, /sh -c id: command not found/u)
+    // A loop value in command position is word-split like bash splits
+    // it: `sh` is a command name that does not exist, `-c id` its args.
+    assert.match(t.run('for c in "sh -c id"; do $c; done').stderr, /^sh: command not found/u)
+    assert.match(t.run('for c in "sh -c id"; do "$c"; done').stderr, /^sh -c id: command not found/u)
     // And a registered one still works, so this is failing closed
     // rather than -exec being broken outright.
     assert.equal(t.run("find . -name 'a.js' -exec echo found {} ';'").stdout, 'found ./a.js\n')

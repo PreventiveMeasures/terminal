@@ -17,6 +17,7 @@ import { unescapeAwkString } from './awk-lex.js'
 import { AwkRegex, compileRegex, splitByRegex, stepAt } from './awk-regex.js'
 import { StrNum, ignoreCase, toNum, toStr } from './awk-value.js'
 import { resolve } from './fs.js'
+import { consumeStdin } from './util.js'
 
 // `src` is `{ text, pos }`; advances `pos`. Returns { rec, rt } or null at
 // the end of the text. A terminator at the very end does not start an
@@ -180,8 +181,9 @@ export class Input {
 
   // Advance to the next readable operand. `var=value` operands are
   // assignments, applied when reached (so they can differ per file);
-  // an empty operand is skipped; `-` is stdin. With no file operand at
-  // all, stdin is read once at the end. A missing file is fatal — unless
+  // an empty operand is skipped; `-` is stdin, which a second `-` then
+  // finds at end of file. With no file operand at all, stdin is read
+  // once at the end. A missing file is fatal — unless
   // a BEGINFILE rule sees ERRNO and says `nextfile`, gawk's idiom for
   // skipping unreadable files. A directory is skipped with a warning.
   open(m) {
@@ -191,7 +193,7 @@ export class Input {
       const asg = ASSIGNMENT.exec(op)
       if (asg) { m.assign(asg[1], new StrNum(unescapeAwkString(asg[2], m.warn))); continue }
       this.sawFile = true
-      if (op === '-' || op === '/dev/stdin') { if (this.use(m, op, this.stdin)) return true; continue }
+      if (op === '-' || op === '/dev/stdin') { if (this.use(m, op, this.takeStdin())) return true; continue }
       const abs = resolve(this.ctx.cwd, op)
       if (this.ctx.fs.isDir(abs)) {
         this.failFile(m, op, 'Is a directory')
@@ -208,7 +210,14 @@ export class Input {
     }
     if (this.sawFile || this.exitSignal !== undefined) return false
     this.sawFile = true
-    return this.use(m, '-', this.stdin)
+    return this.use(m, '-', this.takeStdin())
+  }
+
+  takeStdin() {
+    const text = this.stdin
+    this.stdin = ''
+    consumeStdin(this.ctx)
+    return text
   }
 
   // Open a readable operand and run BEGINFILE. Returns false when the

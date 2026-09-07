@@ -16,7 +16,7 @@
 
 import { basename, relativeTo, resolve } from './fs.js'
 import { parseArgs } from './parse.js'
-import { err, joinLines, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
+import { consumeStdin, err, joinLines, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
 import { unsupportedFrom } from './unsupported.js'
 import { breToEs } from './bre.js'
 import { compileGlob } from './glob.js'
@@ -226,7 +226,12 @@ function pickShowName(flags, recursive, nFiles) {
 
 function grepInputs(recursive, stdin, rest, ctx, filters) {
   if (recursive) return readFilesRecursive('grep', rest.length > 0 ? rest : ['.'], ctx, filters.dir)
-  if (rest.length > 0) return readFilesFor('grep', rest, ctx)
+  // A `-` operand is stdin, labelled the way grep labels it.
+  if (rest.length > 0) {
+    const r = readFilesFor('grep', rest, ctx, stdin)
+    return { ...r, inputs: r.inputs.map((i) => (i.name === '-' ? { ...i, name: null } : i)) }
+  }
+  consumeStdin(ctx)
   return { inputs: [{ name: null, content: stdin }], stderr: '', failed: false }
 }
 

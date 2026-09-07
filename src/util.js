@@ -60,11 +60,31 @@ export const joinLines = (lines) => lines.length === 0 ? '' : lines.join('\n') +
 // gets nothing at all. `entries` carries every operand in order with
 // that distinction as `kind`; `inputs` is the readable subset, which is
 // what every other caller wants, so this changed nothing for them.
-export function readFilesFor(cmd, files, ctx) {
+// A command that reads its standard input records what it leaves of
+// it — nothing, unless it stopped short as `head -c N` does — for the
+// next command in the same group: `echo hi | { echo x; cat; }` prints
+// both, `{ cat; cat; }` once. A command that never reads it leaves it
+// be. The engine (index.js) resets the record before each command.
+export function consumeStdin(ctx, rest = '') {
+  ctx.stdinLeft = rest
+}
+
+// `stdin` backs a `-` operand — the first one; a second `-` names the
+// same stream and finds it at end of file, as `cat - -` does. Such
+// entries are marked `shared` so a reader that stops short (`head`)
+// can leave the rest for the next one. `/dev/stdin` is that stream too
+// when it is a pipe; on a regular file it reopens the file from the
+// start, on its own, as the kernel does.
+export function readFilesFor(cmd, files, ctx, stdin = '') {
   const entries = []
   let stderr = ''
   let failed = false
+  let pipe = stdin
   for (const f of files) {
+    // `-` is the standard input, by the convention every coreutils
+    // reader follows; it keeps its name so banners can label it.
+    if (f === '/dev/stdin' && ctx.stdinFile) { entries.push({ name: f, content: stdin, kind: 'file' }); continue }
+    if (f === '-' || f === '/dev/stdin') { entries.push({ name: f, content: pipe, kind: 'file', shared: true }); pipe = ''; consumeStdin(ctx); continue }
     const abs = resolve(ctx.cwd, f)
     if (ctx.fs.isDir(abs)) {
       stderr += `${cmd}: ${f}: is a directory\n`
@@ -90,10 +110,11 @@ export function readFilesFor(cmd, files, ctx) {
 // (wc, head, grep) iterate `.inputs`.
 export function readInputs(cmd, files, stdin, ctx) {
   if (files.length === 0) {
+    consumeStdin(ctx)
     const only = [{ name: null, content: stdin, kind: 'file' }]
     return { inputs: only, entries: only, stderr: '', failed: false }
   }
-  return readFilesFor(cmd, files, ctx)
+  return readFilesFor(cmd, files, ctx, stdin)
 }
 
 // The concatenated-stream model: every readable input joined into one

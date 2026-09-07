@@ -7,7 +7,7 @@
 // originals.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, ok, okWith, readInputs, splitLines, usage, utf8, utf8Decoder } from './util.js'
+import { consumeStdin, err, joinLines, ok, okWith, readInputs, splitLines, usage, utf8, utf8Decoder } from './util.js'
 import { unsupported } from './unsupported.js'
 import { hexdump, od, xxd } from './dump.js'
 
@@ -249,7 +249,8 @@ function cutFields(line, delim, ranges) {
 //   tr -s SET      collapse adjacent duplicates of SET chars
 // SET supports `a-z` ranges and `\n` / `\t` / `\\` / `\0` escapes.
 // GNU's `-c` (complement) and combined `-ds` aren't modeled.
-function tr(stdin, tokens) {
+function tr(stdin, tokens, ctx) {
+  consumeStdin(ctx)
   const { flags, positional } = parseArgs(tokens, { short: ['c', 'd', 's'] })
   const del = flags.has('d')
   const squeeze = flags.has('s')

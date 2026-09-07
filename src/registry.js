@@ -11,6 +11,7 @@ import { defineCommands } from './custom.js'
 import { EXTRA_COMMANDS, HIDDEN_EXTRAS } from './extra-commands.js'
 import { NAV_COMMANDS } from './nav-commands.js'
 import { sed } from './sed.js'
+import { SHELL_BUILTINS } from './shell-builtins.js'
 import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './text-commands.js'
 
 // `__proto__: null` so a user typing e.g. `toString` doesn't reach
@@ -24,8 +25,9 @@ const BUILTIN_COMMANDS = { __proto__: null, ...TEXT_COMMANDS, ...NAV_COMMANDS, .
 // commands here don't read as part of the documented surface.
 // `sed` is narrow/single-purpose; the TRIVIAL_COMMANDS (`true` /
 // `false` / `:`) are dispatchable for pipeline-testing but too
-// uninteresting to mention.
-const BUILTIN_HIDDEN = { __proto__: null, sed, ...HIDDEN_EXTRAS, ...TRIVIAL_COMMANDS }
+// uninteresting to mention; the SHELL_BUILTINS (`exit`, `break`, …)
+// are shell machinery.
+const BUILTIN_HIDDEN = { __proto__: null, sed, ...HIDDEN_EXTRAS, ...TRIVIAL_COMMANDS, ...SHELL_BUILTINS }
 const isBuiltin = (name) => Boolean(BUILTIN_COMMANDS[name] || BUILTIN_HIDDEN[name])
 
 // Command priority for tab completion and the "not found" hint —

@@ -1,84 +1,122 @@
-// Shell-style glob matching and argv expansion. Two layers:
+// Shell-style glob matching and pathname expansion. Two layers:
 //
 // `compileGlob` / `globMatch` — basename / full-path predicate
 //   (used by find for -name and -path, where matching is per-entry
-//   against a single pattern). `*` and `?` are the only metachars;
+//   against a single pattern). `*`, `?` and `[...]` are the metachars;
 //   `*` spans `/` in this form, matching the `-path '*/node_modules/*'`
 //   idiom. Hot-path callers compile once and reuse the RegExp;
 //   `globMatch` is the one-shot convenience.
 //
-// `expandGlobs` — argv-level wildcard expansion, called once per
-//   pipeline stage in index.js between parse and dispatch. Splits
-//   each unquoted token on `/`, walks the FS segment by segment,
-//   and replaces the pattern token with the matching paths in
-//   lexicographic order. Quoted tokens (marked by tokenize.js) and
-//   the leading argv[0] (command name) are passed
-//   through verbatim. A pattern that matches nothing also passes
-//   through literally — bash's default, which leaves it to the
-//   receiving command to report "no such file" with the user's
-//   original text.
+// `globPaths` — pathname expansion of one argv word, called from
+//   expand.js after parameter expansion. Splits the pattern on `/`,
+//   walks the FS segment by segment, and returns the matching paths in
+//   lexicographic order — or an empty list, which the caller turns back
+//   into the literal word (bash's default, which leaves it to the
+//   receiving command to report "no such file" with the user's text).
+//   The word's quoting mask decides which metacharacters are live:
+//   `"*"` and `\*` are literal asterisks, `"$d"/*.js` still globs.
 
 import { joinPath, resolve } from './fs.js'
+import { readPosixClass } from './charclass.js'
 
-const META = /[*?]/u
+const META = /[*?[]/u
+const REGEX_META = /[.+*?^${}()|[\]\\/]/u
 
 // Compile a glob pattern to a RegExp. `*` → `.*` (no `/` exemption:
-// `*/foo/*` is the standard exclusion idiom), `?` → `.`, `\<x>` → `x`
-// taken literally (so `\-foo` matches `-foo`, `\*` matches `*`),
-// other regex metacharacters escaped. Callers on hot paths (per-
-// directory scans, find's per-entry evaluation) should compile once
-// and reuse rather than calling `globMatch` repeatedly.
-//
-// `REGEX_META` includes `*` and `?` so the `\<x>` branch escapes them
-// when emitting a literal. The unescaped `*` / `?` branches come
-// first in the loop, so the `REGEX_META.test(c)` arm only sees other
-// metachars — the redundancy doesn't fire there.
-const REGEX_META = /[.+*?^${}()|[\]\\]/u
-// `opts.ignoreCase` gives a caller case-insensitive matching (`find
-// -iname`); everything else about the translation is identical, so the
-// two spellings can never drift apart. It is an OPTIONS OBJECT rather
-// than a positional flag string on purpose: this function is passed
-// straight to `Array#map` in places, which would hand a positional
-// second parameter the element INDEX — silently corrupting the regex
-// flags. A stray number reads as `{}.ignoreCase === undefined` and is
-// harmlessly ignored.
+// `*/foo/*` is the standard exclusion idiom), `?` → `.`, `[...]` → a
+// character class (see readBracket), `\<x>` → `x` taken literally (so
+// `\-foo` matches `-foo`, `\*` matches `*`), other regex metacharacters
+// escaped. `opts.ignoreCase` gives a caller case-insensitive matching
+// (`find -iname`). It is an OPTIONS OBJECT rather than a positional
+// flag on purpose: this function is passed straight to `Array#map` in
+// places, which would hand a positional second parameter the element
+// INDEX — silently corrupting the regex flags.
 export function compileGlob(pattern, opts = {}) {
   let re = '^'
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i]
-    // `\<x>` consumes the backslash and emits `x` as a literal char.
-    // Matches bash's shell-glob convention: `\*` matches `*`, `\-foo`
-    // matches `-foo` (handy for filenames that start with `-`). A
-    // trailing backslash with no follower stays literal.
     if (c === '\\' && i + 1 < pattern.length) {
       const next = pattern[i + 1]
       re += REGEX_META.test(next) ? '\\' + next : next
       i++
     } else if (c === '*') re += '.*'
     else if (c === '?') re += '.'
-    else if (REGEX_META.test(c)) re += '\\' + c
+    else if (c === '[') {
+      const bracket = readBracket(pattern, i)
+      if (bracket) { re += bracket.source; i = bracket.end } else re += '\\['
+    } else if (REGEX_META.test(c)) re += '\\' + c
     else re += c
   }
-  return new RegExp(re + '$', opts?.ignoreCase ? 'ui' : 'u')
+  const flags = opts?.ignoreCase ? 'ui' : 'u'
+  try {
+    return new RegExp(re + '$', flags)
+  } catch {
+    // A bracket expression the regex engine rejects (`[z-a]`) matches
+    // nothing in bash either, so the pattern stands for its own text.
+    return new RegExp('^' + literalSource(pattern) + '$', flags)
+  }
+}
+
+// The pattern as a regex for exactly its literal text, `\x` escapes
+// resolved.
+function literalSource(pattern) {
+  return pattern.replace(/\\(.)/gu, '$1').replace(/[.+*?^${}()|[\]\\/]/gu, '\\$&')
+}
+
+// One bracket expression starting at the `[` at `pattern[start]`. `!`
+// or `^` first negates; a `]` first is a member; `[:alpha:]` and the
+// other POSIX classes expand to their ranges; `\x` is a literal member.
+// An unmatched `[` (no closing `]`, or nothing inside) is not a bracket
+// expression at all and stays a literal `[`, as fnmatch treats it.
+function readBracket(pattern, start) {
+  let i = start + 1
+  let negated = false
+  if (pattern[i] === '!' || pattern[i] === '^') { negated = true; i++ }
+  let body = ''
+  let members = 0
+  if (pattern[i] === ']') { body += '\\]'; i++; members++ }
+  for (; i < pattern.length && pattern[i] !== ']'; i++) {
+    const c = pattern[i]
+    if (c === '[' && pattern[i + 1] === ':') {
+      const cls = readPosixClass(pattern, i)
+      if (cls) { body += cls.body; i = cls.end - 1; members++; continue }
+    }
+    if (c === '\\' && i + 1 < pattern.length) {
+      const next = pattern[++i]
+      body += /[\]\\^[-]/u.test(next) ? `\\${next}` : next
+    } else body += c === '\\' || c === '[' ? `\\${c}` : c
+    members++
+  }
+  if (i >= pattern.length || members === 0) return null
+  return { source: `[${negated ? '^' : ''}${body}]`, end: i }
 }
 
 export function globMatch(name, pattern) {
   return compileGlob(pattern).test(name)
 }
 
-export function expandGlobs(argv, quotedSet, ctx) {
-  if (argv.length === 0) return []
-  // Command name (argv[0]) is never glob-expanded — bash doesn't
-  // either, and treating a pattern match as a command name would
-  // be surprising (and likely run an arbitrary file path through
-  // the dispatcher).
-  const out = [argv[0]]
-  for (let i = 1; i < argv.length; i++) {
-    const tok = argv[i]
-    if (quotedSet.has(i) || !META.test(tok)) { out.push(tok); continue }
-    const matches = expandOne(tok, ctx)
-    if (matches.length > 0) out.push(...matches)
-    else out.push(tok)
+// Whether a word has an unquoted `*`, `?` or `[` — the only case that
+// reaches the filesystem at all.
+export function hasGlobMeta(word) {
+  const { value, mask } = word
+  if (mask === null) return META.test(value)
+  for (let i = 0; i < value.length; i++) if (mask[i] === '0' && META.test(value[i])) return true
+  return false
+}
+
+// The word as a pattern for compileGlob: bare characters as typed,
+// quoted ones backslash-escaped where they would otherwise be read as
+// glob syntax — including the characters that are only special inside
+// a bracket expression, so `[a"-"c]` is a set of three, not a range.
+const QUOTABLE = /[*?[\]^!\\-]/u
+
+function toPattern(word) {
+  const { value, mask } = word
+  if (mask === null) return value
+  let out = ''
+  for (let i = 0; i < value.length; i++) {
+    const c = value[i]
+    out += mask[i] !== '0' && QUOTABLE.test(c) ? '\\' + c : c
   }
   return out
 }
@@ -87,7 +125,8 @@ export function expandGlobs(argv, quotedSet, ctx) {
 // into every matching child. Literal segments append unchanged.
 // Returns paths in the same shape the user typed (relative stays
 // relative, absolute stays absolute) so output reads naturally.
-function expandOne(pattern, ctx) {
+export function globPaths(word, ctx) {
+  const pattern = toPattern(word)
   const absolute = pattern.startsWith('/')
   // Bash preserves a leading `./` in expansion output (`./*.js` →
   // `./foo.js`, not `foo.js`). Tracked separately from the internal
@@ -101,7 +140,7 @@ function expandOne(pattern, ctx) {
   for (let s = 0; s < segments.length; s++) {
     const seg = segments[s]
     if (!META.test(seg)) {
-      candidates = candidates.map((c) => joinSeg(c, seg))
+      candidates = candidates.map((c) => joinSeg(c, unescape(seg)))
       continue
     }
     candidates = expandSegment(candidates, seg, s === segments.length - 1, ctx)
@@ -123,6 +162,10 @@ function expandOne(pattern, ctx) {
   return candidates
 }
 
+// A literal segment may still carry escapes from toPattern (a quoted
+// `*` in a path component that has no live metacharacter).
+const unescape = (seg) => seg.replace(/\\(.)/gu, '$1')
+
 // Literal segments append onto every candidate without checking
 // the FS — `*/qux.js` would otherwise yield `dir/qux.js` even
 // when only `other/qux.js` actually exists. Final existence
@@ -136,11 +179,12 @@ function existsInFs(path, ctx) {
 // last segment may match files; intermediate segments need a dir
 // to descend through. Compiles the segment regex once and applies
 // the bash dotfile rule (a segment whose pattern doesn't start with
-// `.` doesn't match basenames that do — real `find -name` doesn't
-// have this rule, only argv expansion does) before testing.
+// a literal `.` doesn't match basenames that do — real `find -name`
+// doesn't have this rule, only argv expansion does) before testing.
+// Bash 5.2 also never yields `.` and `..` themselves (`globskipdots`).
 function expandSegment(candidates, seg, isLast, ctx) {
   const re = compileGlob(seg)
-  const segStartsWithDot = seg.startsWith('.')
+  const segStartsWithDot = seg.startsWith('.') || seg.startsWith('\\.')
   const matches = (name) => {
     if (!segStartsWithDot && name.startsWith('.')) return false
     return re.test(name)

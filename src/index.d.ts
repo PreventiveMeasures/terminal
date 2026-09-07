@@ -130,10 +130,14 @@ export interface CreateTerminalOptions {
  *   implement, or explicitly rejects.
  * - `feature` — a construct this terminal recognizes and deliberately
  *   goes no further on: `&` backgrounding, `while` / `if` / `case` and
- *   the other shell blocks it does not implement, `break` inside a
- *   `for` loop, an append redirect against the read-only filesystem,
- *   `sed` outside its one supported script form, and the gawk features
- *   its `awk` refuses (`system()`, output pipes, writing to a file).
+ *   the other shell blocks it does not implement, command substitution
+ *   and arithmetic, the `${…}` parameter-expansion operators, shell
+ *   builtins it lacks (`test`, `printf`, `source`, …), a variable
+ *   nothing set (there is no environment: `$PATH` expands to nothing,
+ *   with this entry), a redirect that would write a file against the
+ *   read-only filesystem, `sed` outside its one supported script form,
+ *   and the gawk features its `awk` refuses (`system()`, output pipes,
+ *   writing to a file).
  */
 export type UnsupportedKind = 'command' | 'option' | 'feature'
 
@@ -188,7 +192,17 @@ export interface RunResult {
 
 /** A virtual terminal instance with a mutable cwd carried across {@link Terminal.run} calls. */
 export interface Terminal {
-  /** Parse and execute one command line (pipelines, `&&` / `||` / `;` gates, `(...)` subshells, `for … in …; do …; done` loops, redirects). */
+  /**
+   * Parse and execute one command line: pipelines, `&&` / `||` / `;`
+   * gates, `!`, `(...)` subshells and `{ …; }` groups, `for … in …; do …;
+   * done` loops with `break` / `continue`, `exit`, `NAME=value`
+   * assignments (`export` / `unset`, and in front of a command),
+   * redirects (`>` `>>` `2>` `&>` to `/dev/null` and the two stream
+   * devices, `2>&1`, `>&-`, `<`, `<<`, `<<<`),
+   * comments, bash quoting and backslash rules, brace expansion with
+   * sequences, `~`, `$NAME` / `${NAME}` / `$?`, and globs with bracket
+   * expressions. Variables and the working directory persist across calls.
+   */
   run(line: string): RunResult
   /** Current working directory. */
   cwd(): string

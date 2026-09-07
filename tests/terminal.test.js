@@ -30,7 +30,7 @@ describe('createTerminal — basics', () => {
     assert.equal(t.run('cd src').exitCode, 0)
     assert.equal(t.cwd(), '/src')
     assert.equal(t.run('cd nope').exitCode, 1)
-    assert.match(t.run('cd nope').stderr, /not a directory/u)
+    assert.match(t.run('cd nope').stderr, /No such file or directory/u)
   })
 
   it('cd .. and cd / behave', () => {
@@ -1568,14 +1568,12 @@ describe('createTerminal — find / tree / path', () => {
     // argument and silently change the dispatched command. The suite
     // guards `{}` / `;` / `+` the same way.
     //
-    // The `--` is for our `echo`, not for find: unlike GNU echo, ours
-    // scans every argument position for flags, so a bare `-print`
-    // argument would trip its own option parser before it could prove
-    // anything about find.
+    // echo prints `--` and `-print` literally, as bash's echo does, so
+    // both reach stdout untouched.
     const t = createTerminal({ 'a.txt': 'x\n' })
     const r = t.run("find a.txt -exec echo -- -print {} ';'")
     assert.equal(r.exitCode, 0)
-    assert.equal(r.stdout, '-print a.txt\n', 'the inner -print must reach echo as a literal argument')
+    assert.equal(r.stdout, '-- -print a.txt\n', 'the inner -print must reach echo as a literal argument')
   })
 
   it('find still rejects -printf (the -print* family is not prefix-matched)', () => {
@@ -1959,8 +1957,6 @@ describe('createTerminal — strict option parsing', () => {
     'sort -z',
     'sort --bogus',
     'uniq -z',
-    'echo -z hi',
-    'echo --bogus',
     'ls -z',
     'ls -laz',
     'find -z',
@@ -1987,7 +1983,10 @@ describe('createTerminal — strict option parsing', () => {
 
   it('-- ends flag parsing so leading-dash positionals survive', () => {
     const t = createTerminal(SOURCES)
-    assert.equal(t.run('echo -- -z hi').stdout, '-z hi\n')
+    // bash's echo prints `--` itself; every other command ends its
+    // options there.
+    assert.equal(t.run('echo -- -z hi').stdout, '-- -z hi\n')
+    assert.equal(t.run('cat -- README.md').stdout, '# Hello\n\nA project.\n')
     // After `--`, `-z` is treated as a filename — cat tries to read it.
     const r = t.run('cat -- -z')
     assert.equal(r.exitCode, 1)
@@ -2013,8 +2012,10 @@ describe('createTerminal — strict option parsing', () => {
     // empty token is just an empty positional.
     assert.equal(t.run('echo "-n"').stdout, '')
     assert.equal(t.run('echo ""').stdout, '\n')
-    // Unquoted single-token flags are still parsed strictly.
-    assert.match(t.run('echo -z hi').stderr, /unknown option/u)
+    // Unquoted single-token flags are still parsed strictly — except
+    // by echo, whose bash builtin prints anything it does not recognize.
+    assert.match(t.run('head -z').stderr, /unknown option/u)
+    assert.equal(t.run('echo -z hi').stdout, '-z hi\n')
     // The rule lives in the shared parser, so it reaches every command:
     // `grep "-- foo"` searches for the literal pattern rather than
     // erroring on a malformed option.
@@ -2214,13 +2215,15 @@ describe('createTerminal — pathological inputs', () => {
     // goes through the reference scan but skips brace expansion, whose
     // own end-of-line rescan per unmatched `{` predates this and is
     // not what is being pinned here.
+    // `${` with no name is a parameter-expansion form this shell refuses,
+    // so the run fails — but it must fail fast.
     const t = createTerminal(SOURCES)
     const word = '${'.repeat(500000)
     const started = Date.now()
     const r = t.run(`echo "${word}"`)
     assert.ok(Date.now() - started < 2000, 'tokenizer went quadratic')
-    assert.equal(r.exitCode, 0)
-    assert.equal(r.stdout, word + '\n')
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stderr, /parameter expansion operators are not supported/u)
   })
 
   it('brace expansion is linear on a long run of unmatched braces', () => {
@@ -2499,8 +2502,8 @@ describe('createTerminal — `;` sequential separator', () => {
   it('consecutive `;;` errors', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('echo a ;; echo b')
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /empty pipeline/u)
+    assert.equal(r.exitCode, 2)
+    assert.match(r.stderr, /syntax error near unexpected token `;;`/u)
   })
 
   it('a quoted `;` stays a literal argv token', () => {
@@ -2649,25 +2652,22 @@ describe('createTerminal — `(...)` subshell grouping', () => {
   })
 
   it('`cmd | (...)` delivers stdin to the group\'s first step only', () => {
-    // Bash semantics for a string-typed stdin: the group "owns" the
-    // pipe, and within the group only the first command in the first
-    // step gets to read it. Later steps (after `;`/gates) see empty.
+    // The group owns the pipe: `cat` reads it, and a later step finds
+    // it at end of file, as in bash.
     const t = createTerminal(SOURCES)
     const r = t.run('echo hi | (cat; echo done)')
     assert.equal(r.exitCode, 0)
     assert.equal(r.stdout, 'hi\ndone\n')
   })
 
-  it('`cmd | (true; cat)` — second step sees empty stdin (documented divergence)', () => {
-    // Diverges from real bash (where `cat` would inherit the pipe fd
-    // and print "hi"). Our string-typed pipe can only deliver stdin
-    // to one consumer, and the chosen consumer is the first step.
-    // Pinning this so a future "let any step read it" change is a
-    // deliberate decision, not an accident.
+  it('`cmd | (true; cat)` — a later step reads what earlier ones left', () => {
+    // As in bash: `cat` inherits the pipe, which `true` never read.
+    // (This used to be a documented divergence, with the pipe delivered
+    // to the first step only.)
     const t = createTerminal(SOURCES)
     const r = t.run('echo hi | (true; cat)')
     assert.equal(r.exitCode, 0)
-    assert.equal(r.stdout, '')
+    assert.equal(r.stdout, 'hi\n')
   })
 
   it('stdin reaches a multi-stage pipeline inside the group', () => {
@@ -2747,11 +2747,16 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     const r = t.run('(echo a; echo b) >/dev/null')
     assert.equal(r.exitCode, 0)
     assert.equal(r.stdout, '')
-    // 2>&1 on the group merges everything; the trailing /dev/null then
-    // discards the merged stream — both stdout AND stderr must be empty.
+    // Redirects apply left to right, as in bash: `2>&1` points stderr
+    // at the current stdout, THEN `>/dev/null` discards stdout only —
+    // the error line arrives on stdout, nothing on stderr.
     const silenced = t.run('(cat /nope; echo ok) 2>&1 >/dev/null')
-    assert.equal(silenced.stdout, '')
+    assert.equal(silenced.stdout, 'cat: /nope: no such file or directory\n')
     assert.equal(silenced.stderr, '')
+    // The other order silences both.
+    const both = t.run('(cat /nope; echo ok) >/dev/null 2>&1')
+    assert.equal(both.stdout, '')
+    assert.equal(both.stderr, '')
   })
 
   it('leading redirects attach to a following group (bash compat)', () => {
@@ -2767,14 +2772,15 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     const merged = t.run('2>&1 (cat /nope)')
     assert.match(merged.stdout, /no such file/u)
     assert.equal(merged.stderr, '')
-    // Leading + trailing redirects on the same group must both apply.
+    // Leading + trailing redirects on the same group must both apply,
+    // in that order: stderr joins stdout, then stdout goes to /dev/null.
     const both = t.run('2>&1 (cat /nope; echo ok) >/dev/null')
-    assert.equal(both.stdout, '')
+    assert.equal(both.stdout, 'cat: /nope: no such file or directory\n')
     assert.equal(both.stderr, '')
     // Leading redirect on a nested group attaches to the OUTER group,
     // not the inner — the inner is parsed by a separate buildSteps
     // call that starts with a fresh stage.
-    const nested = t.run('>/dev/null ((echo hi))')
+    const nested = t.run('>/dev/null ( (echo hi) )')
     assert.equal(nested.exitCode, 0)
     assert.equal(nested.stdout, '')
   })
@@ -2815,14 +2821,19 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     }
   })
 
-  it('nested `((...))` parses and runs', () => {
+  it('nested `( (...) )` parses and runs; adjacent `((` is arithmetic, which is refused', () => {
     const t = createTerminal(SOURCES)
-    const r = t.run('((echo nested))')
+    const r = t.run('( (echo nested) )')
     assert.equal(r.exitCode, 0)
     assert.equal(r.stdout, 'nested\n')
     // Inner cd is still isolated from the outer terminal.
-    t.run('((cd src; cd util))')
+    t.run('( (cd src; cd util) )')
     assert.equal(t.cwd(), '/')
+    // `((…))` is bash's arithmetic command, not a nested subshell.
+    const arith = t.run('((echo nested))')
+    assert.equal(arith.exitCode, 1)
+    assert.match(arith.stderr, /arithmetic evaluation/u)
+    assert.deepEqual(arith.unsupported.map((u) => u.detail), ['(('])
   })
 
   it('whitespace around `(` / `)` is optional (bash compat)', () => {
@@ -2924,38 +2935,50 @@ describe('createTerminal — `for` loops', () => {
     assert.equal(pasted.exitCode, 0)
     assert.equal(pasted.stdout, '== a\n3:int foo1_bar;\n== b\n')
     assert.equal(pasted.stdout, oneLine.stdout)
-    // One `;` after `do` (what a `do⏎` becomes after tokenizing) and a
-    // trailing `;` after `done` are tolerated, and `in` may open its
-    // own line. Doubled separators are errors, as in bash.
-    assert.equal(t.run('for f in a; do; echo $f; done;').stdout, 'a\n')
+    // A trailing `;` after `done` is tolerated, and `in` may open its
+    // own line. A `;` right after `do` (only a newline may follow it)
+    // and doubled separators are errors, as in bash.
+    assert.equal(t.run('for f in a; do echo $f; done;').stdout, 'a\n')
+    assert.equal(t.run('for f in a; do; echo $f; done').exitCode, 2)
     assert.equal(t.run('for f\nin a b\ndo\necho $f\ndone').stdout, 'a\nb\n')
-    assert.match(t.run('for f in a;; do echo $f; done').stderr, /for: expected `do`, got `;`/u)
+    assert.match(t.run('for f in a;; do echo $f; done').stderr, /for: unexpected `;;` in word list/u)
   })
 
   it('`$f` expands bare and inside double quotes, stays literal in single quotes', () => {
     const t = createTerminal(SOURCES)
     const r = t.run("for f in a b; do echo '$f' \"$f\" $f ${f}x $fx $f.h; done")
     assert.equal(r.exitCode, 0)
-    // `$fx` is a reference to `fx`, which nothing binds; `${f}x` is
-    // how to append to the value, and `.` ends a name on its own.
-    assert.equal(r.stdout, '$f a a ax $fx a.h\n$f b b bx $fx b.h\n')
+    // `$fx` is a reference to `fx`, which nothing binds, so it expands
+    // to nothing (with a warning); `${f}x` is how to append to the
+    // value, and `.` ends a name on its own.
+    assert.equal(r.stdout, '$f a a ax a.h\n$f b b bx b.h\n')
+    assert.match(r.stderr, /warning: \$fx is unset/u)
+    assert.deepEqual(r.unsupported.map((u) => u.detail), ['$fx'])
   })
 
   it('`$` spellings that are not references stay as typed, inside a loop too', () => {
     const t = createTerminal(SOURCES)
-    const r = t.run('for f in a; do echo "\\$f" $1 $? ${} ${f ${f.h} ${f}; done')
+    // `\\$f` is a literal `$f`; `$1` is an (empty) positional parameter;
+    // `$?` is the last status; a `$` before anything else is text.
+    const r = t.run('for f in a; do echo "\\$f" $1 $? $. $ ${f}; done')
     assert.equal(r.exitCode, 0)
-    assert.equal(r.stdout, '\\$f $1 $? ${} ${f ${f.h} a\n')
+    assert.equal(r.stdout, '$f 0 $. $ a\n')
+    assert.equal(r.stderr, '')
   })
 
-  it('a loop variable is scoped to its body; an unbound `$name` stays as typed', () => {
+  it('a loop variable keeps its last value after `done`; an unbound `$name` is empty, with a warning', () => {
     const t = createTerminal(SOURCES)
-    assert.equal(t.run('for f in a; do :; done; echo $f').stdout, '$f\n')
-    assert.equal(t.run('for f in a b; do echo $g; done').stdout, '$g\n$g\n')
-    // Nothing persists across `run` calls either — there is no
-    // environment, only the binding an enclosing `for` makes.
+    assert.equal(t.run('for f in a b; do :; done; echo $f').stdout, 'b\n')
+    const unbound = t.run('for f in a b; do echo [$g]; done')
+    assert.equal(unbound.stdout, '[]\n[]\n')
+    // Bash expands an unset name to nothing; this shell says so too,
+    // once per occurrence on stderr and once on the channel.
+    assert.equal(unbound.stderr.split('\n').filter(Boolean).length, 2)
+    assert.match(unbound.stderr, /warning: \$g is unset/u)
+    assert.deepEqual(unbound.unsupported.map((u) => u.detail), ['$g'])
+    // The binding persists across `run` calls, as in an interactive shell.
     t.run('for f in a; do :; done')
-    assert.equal(t.run('echo $f').stdout, '$f\n')
+    assert.equal(t.run('echo $f').stdout, 'a\n')
     // Re-binding the same name in a later loop on the same line.
     assert.equal(t.run('for f in a; do echo $f; done; for f in b; do echo $f; done').stdout, 'a\nb\n')
   })
@@ -2974,13 +2997,16 @@ describe('createTerminal — `for` loops', () => {
     assert.equal(t.run('for f in "*.js"; do echo $f; done').stdout, 'bar.js foo.js\n')
   })
 
-  it('a bound value is substituted as ONE word — spaces and all, or empty', () => {
+  it('a quoted reference is one word; a bare one is split on blanks, as in bash', () => {
     const t = createTerminal(SOURCES)
     assert.equal(t.run('for f in "a b" c; do echo "[$f]"; done').stdout, '[a b]\n[c]\n')
     assert.equal(t.run('for f in ""; do echo "[$f]"; done').stdout, '[]\n')
-    // Unlike bash, no word splitting: `$f` stays a single operand.
-    assert.equal(t.run('for f in "a b"; do echo $f | wc -w; done').stdout.trim(), '2')
-    assert.equal(t.run('for f in "README.md src"; do cat $f; done').stderr, 'cat: README.md src: no such file or directory\n')
+    // Word splitting: a bare `$f` holding `README.md src` is two operands.
+    assert.equal(t.run('for f in "a b"; do echo [$f]; done').stdout, '[a b]\n')
+    const split = t.run('for f in "README.md src"; do cat $f; done')
+    assert.equal(split.stdout, '# Hello\n\nA project.\n')
+    assert.equal(split.stderr, 'cat: src: is a directory\n')
+    assert.equal(t.run('for f in " a  b "; do echo $f | wc -w; done').stdout.trim(), '2')
   })
 
   it('a reference in command position substitutes too', () => {
@@ -2994,10 +3020,10 @@ describe('createTerminal — `for` loops', () => {
     const t = createTerminal(SOURCES)
     assert.equal(t.run('for a in 1 2; do for b in x y; do echo $a$b; done; done').stdout, '1x\n1y\n2x\n2y\n')
     const r = t.run('for a in 1; do for b in $a; do echo $b; done; echo $b; done')
-    assert.equal(r.stdout, '1\n$b\n')
-    // An inner loop over the SAME name shadows the outer binding for
-    // its body only; the outer value is back afterwards.
-    assert.equal(t.run('for f in a; do for f in b; do echo $f; done; echo $f; done').stdout, 'b\na\n')
+    assert.equal(r.stdout, '1\n1\n')
+    // An inner loop over the SAME name is the same variable: the value
+    // it leaves behind is what the outer body then sees, as in bash.
+    assert.equal(t.run('for f in a; do for f in b; do echo $f; done; echo $f; done').stdout, 'b\nb\n')
   })
 
   it('exit status is the last iteration\'s (0 for an empty list) and gates `&&` / `||`', () => {
@@ -3063,7 +3089,7 @@ describe('createTerminal — `for` loops', () => {
     // A quoted `"for"` is an ordinary word, so the `do` that follows
     // is the stray one — the same error bash reports.
     const quoted = t.run('"for" f in a; do echo; done')
-    assert.equal(quoted.exitCode, 1)
+    assert.equal(quoted.exitCode, 2)
     assert.match(quoted.stderr, /unexpected `do`/u)
   })
 
@@ -3071,14 +3097,15 @@ describe('createTerminal — `for` loops', () => {
     const t = createTerminal(SOURCES)
     const cases = [
       ['for', /for: expected a variable name/u],
-      ['for f', /for: expected `in` after `f`/u],
-      ['for f; do echo; done', /for: expected `in` after `f`/u],
+      ['for f', /positional parameters/u, 1],
+      ['for f; do echo; done', /positional parameters/u, 1],
+      ['for f x in a; do echo; done', /for: expected `in` after `f`/u],
       ['for x-y in a; do echo; done', /for: `x-y` is not a valid variable name/u],
       ['for "f" in a; do echo; done', /for: `f` is not a valid variable name/u],
       ['for f in a b', /for: missing `do`/u],
       ['for f in a b; echo x', /for: expected `do`, got `echo`/u],
       ['for f in a do echo; done', /for: expected `;` or newline before `do`/u],
-      ['for f in a;; do echo; done', /for: expected `do`, got `;`/u],
+      ['for f in a;; do echo; done', /for: unexpected `;;` in word list/u],
       ['for f in a; "do" echo; done', /for: expected `do`, got `"do"`/u],
       ['for f in a | b; do echo; done', /for: unexpected `\|` in word list/u],
       ['for f in a >/dev/null; do echo; done', /for: unexpected `>` in word list/u],
@@ -3093,9 +3120,10 @@ describe('createTerminal — `for` loops', () => {
       ['done', /unexpected `done`/u],
       ['echo a; do', /unexpected `do`/u],
     ]
-    for (const [line, re] of cases) {
+    // Syntax errors exit 2, as bash's do; a refused feature exits 1.
+    for (const [line, re, code = 2] of cases) {
       const r = t.run(line)
-      assert.equal(r.exitCode, 1, line)
+      assert.equal(r.exitCode, code, line)
       assert.equal(r.stdout, '', line)
       assert.match(r.stderr, re, line)
     }
@@ -3105,7 +3133,7 @@ describe('createTerminal — `for` loops', () => {
     const t = createTerminal(SOURCES)
     for (const line of ['for f in a; do echo x && done', 'for f in a; do false || done', '(echo a &&)', '(false ||)']) {
       const r = t.run(line)
-      assert.equal(r.exitCode, 1, line)
+      assert.equal(r.exitCode, 2, line)
       assert.equal(r.stdout, '', line)
       assert.match(r.stderr, /empty pipeline stage/u, line)
     }
@@ -3121,10 +3149,12 @@ describe('createTerminal — `for` loops', () => {
     assert.equal(t.run('for f in *.txt; do cat $f; done').stdout, 'one\nbrace\n')
     assert.equal(t.run("for p in 'x{1,3}'; do echo $p; done").stdout, 'x{1,3}\n')
     // Braces next to a reference still multiply the word, and each
-    // product is re-split: `$f{a,b}` names `fa` and `fb` (bash does the
-    // same; `${f}{a,b}` is the spelling that appends).
+    // product is re-split: `$f{a,b}` names `fa` and `fb`, both unset
+    // (bash does the same; `${f}{a,b}` is the spelling that appends).
     assert.equal(t.run('for f in a b; do echo src/$f.{h,c}; done').stdout, 'src/a.h src/a.c\nsrc/b.h src/b.c\n')
-    assert.equal(t.run('for f in x; do echo $f{a,b} ${f}{a,b}; done').stdout, '$fa $fb xa xb\n')
+    const multiplied = t.run('for f in x; do echo $f{a,b} ${f}{a,b}; done')
+    assert.equal(multiplied.stdout, 'xa xb\n')
+    assert.deepEqual(multiplied.unsupported.map((u) => u.detail), ['$fa', '$fb'])
     // A quoted word is untouched by both phases.
     assert.equal(t.run('for f in x; do echo "$f{a,b}"; done').stdout, 'x{a,b}\n')
   })
@@ -3154,15 +3184,15 @@ describe('createTerminal — `for` loops', () => {
     const t = createTerminal(SOURCES)
     assert.equal(t.run('for f in a do; do echo [$f]; done').stdout, '[a]\n[do]\n')
     const missing = t.run('for f in a do echo $f; done')
-    assert.equal(missing.exitCode, 1)
+    assert.equal(missing.exitCode, 2)
     assert.match(missing.stderr, /for: expected `;` or newline before `do`/u)
   })
 
-  it('an escaped backslash before `$` does not suppress the reference', () => {
+  it('a backslash before `$` quotes it; an escaped backslash does not', () => {
     const t = createTerminal(SOURCES)
-    // Backslashes are not otherwise processed, so `\$f` stays as typed
-    // and `\\$f` keeps both backslashes ahead of the value.
-    assert.equal(t.run('for f in a; do echo \\$f \\\\$f "\\$f" "\\\\$f"; done').stdout, '\\$f \\\\a \\$f \\\\a\n')
+    // `\\$f` is a literal `$f`, bare or in double quotes; `\\\\$f` is a
+    // literal backslash followed by the value — exactly bash's reading.
+    assert.equal(t.run('for f in a; do echo \\$f \\\\$f "\\$f" "\\\\$f"; done').stdout, '$f \\a $f \\a\n')
   })
 
   it('tab-completion: the word after `do` is in command position', () => {
@@ -3663,10 +3693,12 @@ describe('createTerminal — brace expansion', () => {
     assert.equal(t.run("echo '{a,b}'").stdout, '{a,b}\n')
   })
 
-  it('empty alternatives are preserved (`{,a,}` → 3 items, two empty)', () => {
-    // Bash compat: trailing/leading commas produce empty argv tokens.
+  it('empty alternatives expand to nothing unless the word has other text (bash)', () => {
+    // `{,a,}` yields two empty words, which quote removal drops; with a
+    // prefix the empty alternative still contributes the prefix.
     const t = createTerminal(SRC)
-    assert.equal(t.run('echo {,a,}').stdout, ' a \n')
+    assert.equal(t.run('echo {,a,}').stdout, 'a\n')
+    assert.equal(t.run('echo x{,a,}').stdout, 'x xa x\n')
   })
 
   it('feeds the glob expander — braces resolve first, then `*` matches', () => {
@@ -6123,12 +6155,15 @@ describe('createTerminal — GNU-match regression guards', () => {
     // Pin each supported escape so a refactor that drops one fails
     // loudly. Bare echo (no -e) keeps the backslashes literal.
     const t = createTerminal({})
-    assert.equal(t.run('echo -e a\\tb').stdout, 'a\tb\n')
-    assert.equal(t.run('echo -e a\\nb').stdout, 'a\nb\n')
-    assert.equal(t.run('echo -e a\\\\b').stdout, 'a\\b\n')
-    assert.equal(t.run('echo -e a\\0b').stdout, 'a b\n')
+    // Single-quoted, so the backslashes reach echo (bare, the shell
+    // would consume them: `echo -e a\\tb` prints `atb` in bash too).
+    assert.equal(t.run("echo -e 'a\\tb'").stdout, 'a\tb\n')
+    assert.equal(t.run("echo -e 'a\\nb'").stdout, 'a\nb\n')
+    assert.equal(t.run("echo -e 'a\\\\b'").stdout, 'a\\b\n')
+    assert.equal(t.run("echo -e 'a\\0b'").stdout, 'a b\n')
+    assert.equal(t.run('echo -e a\\tb').stdout, 'atb\n')
     // -E (or no flag) is the inverse: backslashes pass through.
-    assert.equal(t.run('echo -E a\\tb').stdout, 'a\\tb\n')
+    assert.equal(t.run("echo -E 'a\\tb'").stdout, 'a\\tb\n')
   })
 
   it('find -name matches hidden files by default (no special-case skip)', () => {
@@ -6868,13 +6903,10 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     assert.equal(t.run('tail -n 1 noNl.txt').stdout, 'foo')
   })
 
-  it.todo('find ... -exec CMD \\; works (canonical GNU idiom)', () => {
-    // GNU's documented form uses bare `\;` for the terminator. Our
-    // shell parser doesn't honor backslash-escapes outside quotes,
-    // so `\;` becomes the step separator before find sees it.
-    // Workaround `';'` / `";"` works today; this would fail under
-    // the same shell parser. Fixing requires honoring `\<char>`
-    // escapes in parse.js (project-wide impact on every command).
+  it('find ... -exec CMD \\; works (canonical GNU idiom)', () => {
+    // GNU's documented form uses bare `\;` for the terminator: the
+    // shell's backslash escape makes it a literal `;` word for find,
+    // exactly as in bash.
     const t = createTerminal({ 'src/foo.js': '', 'src/bar.js': '' })
     const r = t.run('find src -type f -exec echo {} \\;')
     assert.equal(r.exitCode, 0)
@@ -6937,14 +6969,15 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     assert.ok(t.run("find . -name '*'").stdout.includes('plain'))
   })
 
-  it.todo('find -name glob supports character classes (`[fb]oo.js` matches `foo.js`)', () => {
-    // GNU shell-style glob accepts `[...]` (POSIX too). Our impl
-    // only models `*` and `?` (the glob.js header documents this).
-    // Silent miss — would benefit from either implementation or
-    // explicit rejection so users see "unsupported pattern".
+  it('find -name glob supports character classes (`[fb]oo.js` matches `foo.js`)', () => {
+    // GNU shell-style glob accepts `[...]` (POSIX too). This used to
+    // return an empty successful result: a particularly dangerous
+    // silent miss for agents narrowing a file traversal.
     const t = createTerminal({ 'src/foo.js': '', 'src/boo.js': '', 'src/bar.js': '' })
     const lines = new Set(t.run("find src -name '[fb]oo.js'").stdout.split('\n').filter(Boolean))
     assert.deepEqual(lines, new Set(['src/foo.js', 'src/boo.js']))
+    assert.equal(t.run("find src -name '[e-f]oo.js'").stdout, 'src/foo.js\n')
+    assert.equal(t.run("find src -name '[!f]oo.js'").stdout, 'src/boo.js\n')
   })
 
   it.todo('grep -r/-R prefixes paths with the user-typed `.` (matches GNU)', () => {

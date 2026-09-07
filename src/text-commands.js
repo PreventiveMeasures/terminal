@@ -6,7 +6,7 @@
 // `${name}: ${message}` and returns an exit-1 stderr result.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
+import { consumeStdin, err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
 import { awk } from './awk.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
@@ -92,8 +92,29 @@ function head(stdin, tokens, ctx) {
   // head always counts from the front; the sign only decides where the
   // slice STOPS — at N, or N short of the end.
   const range = (total) => [0, count.sign === '-' ? Math.max(0, total - count.value) : count.value]
-  if (unit === 'c') return takeBytes('head', stdin, positional, ctx, range, banner)
-  return takeLines('head', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner)
+  const leftover = headLeftover(count, unit, ctx)
+  if (unit === 'c') return takeBytes('head', stdin, positional, ctx, range, banner, leftover)
+  return takeLines('head', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner, leftover)
+}
+
+// What a read of the standard input leaves for the next `-` operand, or
+// the next command in the group, as GNU head leaves it (checked against
+// coreutils 9.4): `-c N` reads exactly N bytes, and `-n N` on a regular
+// file seeks back to the end of line N. The other forms read to the end
+// — a minus count must see the end to know where to stop, and `-n N` on
+// a pipe takes whole buffers, so anything shorter than one (8 KiB, not
+// modeled) is gone with it.
+function headLeftover(count, unit, ctx) {
+  if (count.sign === '-' || (unit === 'n' && !ctx.stdinFile)) return () => ''
+  if (unit === 'c') return (content) => sliceBytes(content, (total) => [Math.min(count.value, total), total])
+  return (content) => {
+    let pos = 0
+    for (let k = 0; k < count.value && pos < content.length; k++) {
+      const nl = content.indexOf('\n', pos)
+      pos = nl === -1 ? content.length : nl + 1
+    }
+    return content.slice(pos)
+  }
 }
 
 // `-v` always banners, `-q` never does, and with neither the operand
@@ -185,8 +206,8 @@ function applyDashNumberShorthand(tokens, values, positional) {
 // lines at all, and suppressing its terminator would print nothing where
 // GNU prints a newline. Branching on the array length keeps the two
 // apart (`head -n 1` of a file of blank lines is one `\n`).
-function takeLines(cmd, stdin, files, ctx, picker, banner) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => joinLines(picker(splitLines(content))), banner)
+function takeLines(cmd, stdin, files, ctx, picker, banner, leftover) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => joinLines(picker(splitLines(content))), banner, leftover)
 }
 
 // `head -c N` takes the first N BYTES of each input instead of its
@@ -194,8 +215,8 @@ function takeLines(cmd, stdin, files, ctx, picker, banner) {
 // bytes verbatim, so `head -c 3` of `hello\n` is `hel` with nothing
 // after it, and in the multi-input form it's the `\n` before the next
 // banner that ends the block.
-function takeBytes(cmd, stdin, files, ctx, range, banner) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => sliceBytes(content, range), banner)
+function takeBytes(cmd, stdin, files, ctx, range, banner, leftover) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => sliceBytes(content, range), banner, leftover)
 }
 
 // A cut can land mid-character: `head -c 1` of `é` keeps only the
@@ -235,7 +256,13 @@ function sliceBytes(content, range) {
 // GNU, whose own "first file" flag flips on the first banner WRITTEN,
 // not on the first operand tried. That same `\n` is what terminates the
 // preceding block when its chunk doesn't end in one.
-function takeFrom(cmd, stdin, files, ctx, pick, banner = null) {
+//
+// Operands that share the standard input (a `-`, or the nameless input
+// of a command given no operand) read it in turn: each gets what the
+// one before left, which `leftover` computes (nothing, unless the
+// command stops short of the end, as `head -c N` does), and what the
+// last one leaves is the next command's.
+function takeFrom(cmd, stdin, files, ctx, pick, banner = null, leftover = () => '') {
   if (banner?.error) return err(`${cmd}: ${banner.error}`)
   const r = readInputs(cmd, files, stdin, ctx)
   // `-q` / `-v` override the operand-count rule outright; `banner` is
@@ -243,8 +270,15 @@ function takeFrom(cmd, stdin, files, ctx, pick, banner = null) {
   const showHeader = banner ?? files.length > 1
   const opened = r.entries.filter((e) => e.kind !== 'missing')
   const blocks = []
+  let rest = null
   for (let i = 0; i < opened.length; i++) {
-    const { name, content, kind } = opened[i]
+    const { name, kind, shared } = opened[i]
+    let { content } = opened[i]
+    if (shared || name === null) {
+      if (rest !== null) content = rest
+      rest = leftover(content)
+      consumeStdin(ctx, rest)
+    }
     // A directory yields no body at all — not even the newline an empty
     // line-pick would append — so `pick` is skipped for it entirely.
     const body = kind === 'dir' ? '' : pick(content)
@@ -252,7 +286,8 @@ function takeFrom(cmd, stdin, files, ctx, pick, banner = null) {
     // an explicit `-v` (no operands means no banner otherwise). GNU
     // titles it `standard input`; interpolating the null printed a
     // literal `==> null <==`. Same convention grep uses for stdin.
-    blocks.push(showHeader ? `${i > 0 ? '\n' : ''}==> ${name ?? 'standard input'} <==\n${body}` : body)
+    const label = name === null || name === '-' ? 'standard input' : name
+    blocks.push(showHeader ? `${i > 0 ? '\n' : ''}==> ${label} <==\n${body}` : body)
   }
   return okWith(blocks.join(''), r)
 }
@@ -419,15 +454,23 @@ function uniq(stdin, tokens, ctx) {
   return okWith(joinLines(out), r)
 }
 
-// `-n` drops the trailing newline; `-e` enables backslash-escape
-// interpretation (`-E`, the default, disables it). The parser tracks
-// flags in a set, not by order, so when both `-e` and `-E` appear we
-// honor `-e` rather than bash's last-one-wins — a rare combination.
+// bash's `echo` builtin, whose option parsing is its own: a leading
+// word is an option only if it is entirely `-` followed by `n`, `e` and
+// `E` letters, and anything else — `--`, `-x`, `-n5`, a later `-n` —
+// is printed. `-n` drops the trailing newline; `-e` enables
+// backslash-escape interpretation and `-E` disables it, last one wins.
 function echo(_stdin, tokens) {
-  const { flags, positional } = parseArgs(tokens, { short: ['n', 'e', 'E'] })
-  let out = positional.join(' ')
-  let trailingNewline = !flags.has('n')
-  if (flags.has('e')) {
+  let i = 0
+  let trailingNewline = true
+  let escapes = false
+  for (; i < tokens.length && /^-[neE]+$/u.test(tokens[i]); i++) {
+    for (const c of tokens[i].slice(1)) {
+      if (c === 'n') trailingNewline = false
+      else escapes = c === 'e'
+    }
+  }
+  let out = tokens.slice(i).join(' ')
+  if (escapes) {
     const r = interpretEscapes(out)
     out = r.text
     // `\c` halts output and suppresses the trailing newline.
@@ -436,10 +479,10 @@ function echo(_stdin, tokens) {
   return ok(trailingNewline ? out + '\n' : out)
 }
 
-// Backslash escapes recognized by GNU coreutils `echo -e`. `\c` stops
-// all further output; octal `\0NNN` (up to 3 digits) and hex `\xHH`
-// (up to 2 digits) map to the matching code point. An unrecognized
-// escape keeps its backslash literal, as GNU does.
+// Backslash escapes recognized by bash's `echo -e`. `\c` stops all
+// further output; octal `\0NNN` (up to 3 digits), hex `\xHH` (up to 2
+// digits) and `\uHHHH` / `\UHHHHHHHH` map to the matching code point.
+// An unrecognized escape keeps its backslash literal, as bash does.
 function interpretEscapes(s) {
   // letter -> code point: BEL, BS, ESC, FF, LF, CR, TAB, VT, backslash.
   const simple = { a: 7, b: 8, e: 27, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92 }
@@ -455,10 +498,12 @@ function interpretEscapes(s) {
       out += String.fromCodePoint(digits === '' ? 0 : parseInt(digits, 8))
       continue
     }
-    if (c === 'x' && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) {
+    const hexLen = c === 'x' ? 2 : c === 'u' ? 4 : c === 'U' ? 8 : 0
+    if (hexLen > 0 && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) {
       let digits = ''
-      while (digits.length < 2 && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) digits += s[++i]
-      out += String.fromCodePoint(parseInt(digits, 16))
+      while (digits.length < hexLen && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) digits += s[++i]
+      const code = parseInt(digits, 16)
+      out += code <= 0x10FFFF ? String.fromCodePoint(code) : '\uFFFD'
       continue
     }
     out += '\\' + c
