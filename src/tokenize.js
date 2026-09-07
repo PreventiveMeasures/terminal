@@ -36,8 +36,7 @@
 // (`$((…))`, `$[…]`), process substitution (`<(…)`, `>(…)`) and the
 // parameter-expansion operators (`${x%.js}` and friends).
 
-import { NAME_RE, decodeAnsiC, readHeredocBodies, readOperator, readRef } from './lex.js'
-import { UnsupportedError } from './unsupported.js'
+import { NAME_RE, backtickGap, decodeAnsiC, readExpansion, readHeredocBodies, readOperator } from './lex.js'
 
 export { NAME_RE }
 
@@ -71,7 +70,7 @@ export function tokenize(line) {
     if (c === '\\') { readEscape(st); continue }
     if (c === "'" || c === '"') { openQuote(st, c); st.i++; continue }
     if (c === '$') { readDollar(st); continue }
-    if (c === '`') throw new UnsupportedError('feature', '`', 'command substitution (backticks) is not supported')
+    if (c === '`') throw backtickGap()
     if (c === '#' && !st.inToken) { skipComment(st); continue }
     if (c === '\n') { newline(st); continue }
     if (isBlank(c)) { flush(st); st.i++; continue }
@@ -142,7 +141,7 @@ function readDoubleQuoted(st) {
     return
   }
   if (c === '$') { readDollar(st); return }
-  if (c === '`') throw new UnsupportedError('feature', '`', 'command substitution (backticks) is not supported')
+  if (c === '`') throw backtickGap()
   put(st, c, '2')
   st.i++
 }
@@ -176,12 +175,7 @@ function readDollar(st) {
     return
   }
   if (m === '0' && n === '"') { openQuote(st, '"'); st.i += 2; return }
-  if (n === '(') {
-    if (line[st.i + 2] === '(') throw new UnsupportedError('feature', '$((', 'arithmetic expansion (`$((…))`) is not supported')
-    throw new UnsupportedError('feature', '$(', 'command substitution (`$(…)`) is not supported')
-  }
-  if (n === '[') throw new UnsupportedError('feature', '$[', 'arithmetic expansion (`$[…]`) is not supported')
-  const ref = readRef(line, st.i)
+  const ref = readExpansion(line, st.i)
   if (!ref) { put(st, '$', m); st.i++; return }
   for (const ch of ref.raw) put(st, ch, m)
   st.i += ref.raw.length

@@ -41,6 +41,7 @@
 
 import { createFs, resolve } from './fs.js'
 import { expandRedirect, expandScalar, expandWords } from './expand.js'
+import { backtickGap, readExpansion } from './lex.js'
 import { parseLine, refusedWrite } from './parse.js'
 import { DEFAULT_REGISTRY, createRegistry } from './registry.js'
 import { SHELL_GAPS } from './shell-builtins.js'
@@ -215,8 +216,8 @@ function runPipeline(stages, ctx, initialStdin) {
     const stage = stages[i]
     // The first stage inherits the enclosing input; a later one reads the pipe.
     const io = resolveRedirs(stage, ctx, stdin, i === 0 && ctx.stdinFile)
-    const run = () => (stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx, io.stdin) : runStage(stage, ctx, io.stdin))
-    const result = io.error ?? withStreams(io, ctx, () => (stages.length > 1 ? isolated(ctx, run) : run()))
+    const run = () => (io.error ? failedStage(stage, ctx, io.error) : stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx, io.stdin) : runStage(stage, ctx, io.stdin))
+    const result = withStreams(io, ctx, () => (stages.length > 1 ? isolated(ctx, run) : run()))
     const errText = io.warnings + result.stderr
     let stageOut = ''
     let stageErr = ''
@@ -281,6 +282,20 @@ function resolveRedirs(stage, ctx, stdin, stdinFile) {
   return { fds, stdin: input, stdinFile: file, warnings: warnings.join('') }
 }
 
+// A stage whose redirect failed. Nothing runs — except that a command
+// with no name still performs its assignments, as bash does: `x=new
+// <missing` binds `x` and then fails (status 1). A group or a loop
+// binds nothing; in a multi-stage pipeline the binding stays in that
+// stage's subshell, as the caller arranges.
+function failedStage(stage, ctx, error) {
+  if (stage.group || stage.loop || stage.assigns.length === 0) return error
+  const { argv, stderr } = expandWords(stage.words, ctx)
+  if (argv.length > 0) return error
+  const warnings = []
+  for (const a of stage.assigns) ctx.vars.set(a.name, expandScalar(a.word, ctx, warnings, true))
+  return { ...error, stderr: error.stderr + stderr + warnings.join('') }
+}
+
 // Run a stage knowing its streams: which of its outputs lead nowhere —
 // a descriptor `>&-` closed on the stage itself, or one that points
 // (`out` / `err`) at a stream the enclosing stage already closed, as
@@ -291,7 +306,7 @@ function withStreams(io, ctx, fn) {
   const outer = { closed: ctx.closed, stdinFile: ctx.stdinFile }
   const closedAt = (fd) => io.fds[fd] === 'closed' || (io.fds[fd] === 'out' && outer.closed.out) || (io.fds[fd] === 'err' && outer.closed.err)
   ctx.closed = { out: closedAt(1), err: closedAt(2) }
-  ctx.stdinFile = io.stdinFile
+  ctx.stdinFile = Boolean(io.stdinFile)
   try {
     return fn()
   } finally {
@@ -303,7 +318,9 @@ function withStreams(io, ctx, fn) {
 // An unquoted here-document body: `$NAME` expands, `\$` `\\` and
 // `` \` `` are escapes, nothing else is special — the double-quote
 // rules, minus the quotes. (A `\<newline>` joined its lines back in
-// lex.js, before the delimiter was looked for.)
+// lex.js, before the delimiter was looked for.) The substitutions this
+// shell lacks are refused here as the tokenizer refuses them in a word:
+// bash would run `$(…)` and `` `…` `` in such a body.
 function heredocWord(body) {
   let value = ''
   let mask = ''
@@ -311,6 +328,8 @@ function heredocWord(body) {
     const c = body[i]
     const n = body[i + 1]
     if (c === '\\' && (n === '$' || n === '\\' || n === '`')) { value += n; mask += '1'; i++; continue }
+    if (c === '`') throw backtickGap()
+    if (c === '$') readExpansion(body, i)
     value += c
     mask += '2'
   }

@@ -313,6 +313,43 @@ describe('shell syntax — redirects', () => {
     assert.deepEqual([dup.stderr, dup.exitCode], ['error: 1: Bad file descriptor\n', 1])
   })
 
+  it('an assignment-only command still binds when its redirect fails, as bash binds it', () => {
+    const t = term()
+    assert.equal(out('x=old; x=new <missing; echo "$x [$?]"', t), 'new [1]\n')
+    assert.equal(out('x=old; e=; x=new $e <missing; echo $x', t), 'new\n')
+    assert.equal(out('x=old; x=new y=$x <<< hi <missing; echo $x $y', t), 'new new\n')
+    assert.match(term().run('x=new <missing').stderr, /^error: missing: No such file or directory/u)
+    // Not through a subshell or a group, and not a command's own prefix.
+    assert.equal(out('x=old; x=new <missing | cat; echo $x', t), 'old\n')
+    assert.equal(out('x=old; { x=new; } <missing; echo $x', t), 'old\n')
+    assert.equal(out('x=old; x=new cat <missing; echo $x', t), 'old\n')
+  })
+
+  it('the substitutions this shell lacks are refused inside an unquoted here-document too', () => {
+    assert.deepEqual(gaps('cat <<EOF\n$(echo owned)\nEOF'), ['feature:$('])
+    assert.deepEqual(gaps('cat <<EOF\n`echo owned`\nEOF'), ['feature:`'])
+    assert.deepEqual(gaps('cat <<EOF\n$((1+2))\nEOF'), ['feature:$(('])
+    assert.deepEqual(gaps('x=5; cat <<EOF\n${x:-y}\nEOF'), ['feature:${'])
+    const r = term().run('cat <<EOF\n$(echo owned)\nEOF')
+    assert.deepEqual([r.stdout, r.exitCode], ['', 1])
+    // Escaped, under a quoted delimiter, or a plain dollar: text.
+    assert.equal(out('cat <<EOF\n\\$(echo kept) \\`x\\` \\${x:-y}\nEOF'), '$(echo kept) `x` ${x:-y}\n')
+    assert.equal(out("cat <<'EOF'\n$(echo owned) `x` $((1)) ${x:-y}\nEOF"), '$(echo owned) `x` $((1)) ${x:-y}\n')
+    assert.equal(out('x=5; cat <<EOF\n$x ${x}z $ (x) price $5 and $\nEOF'), '5 5z $ (x) price  and $\n')
+  })
+
+  it('an output target with a glob or a brace is expanded before it is checked', () => {
+    const t = createTerminal({ 'dev/stdout': '', 'dev/null': '' })
+    assert.equal(out('echo hi >/dev/std*', t), 'hi\n')
+    assert.equal(out('echo hi >/dev/nu*; echo $?', t), '0\n')
+    assert.equal(out('echo hi >/dev/nul?', t), '')
+    assert.equal(out('echo hi >/dev/[n]ull', t), '')
+    assert.match(t.run('echo hi >/dev/{null,zero}').stderr, /ambiguous redirect/u)
+    // No match, or quoted: the literal name, a real file, and so a gap.
+    assert.deepEqual(gaps('echo hi >/dev/nope*', t), ['feature:>'])
+    assert.deepEqual(gaps('echo hi >"/dev/nu*"', t), ['feature:>'])
+  })
+
   it('a real file target is refused with a gap; unusual descriptors are gaps or errors as in bash', () => {
     assert.deepEqual(gaps('echo hi > out.txt'), ['feature:>'])
     assert.deepEqual(gaps('echo hi 3>/dev/null'), ['feature:3>'])

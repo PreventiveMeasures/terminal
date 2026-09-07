@@ -398,13 +398,23 @@ function applyRedir(stage, raw, i) {
   if (op.fd === 0) throw new UnsupportedError('feature', label, `writing to file descriptor 0 (\`${label}\`) is not supported`)
   const both = op.op === 'both' || op.op === 'bothAppend'
   const word = wordOf(target)
-  if (/[$~]/u.test(word.value) && word.mask !== '1'.repeat(word.value.length)) {
+  if (needsExpansion(word)) {
     stage.redirs.push({ fd: op.fd, op: 'to', word, both, label })
     return i + 1
   }
   if (!DEVICES.has(word.value)) throw refusedWrite(label, word.value)
   stage.redirs.push({ fd: op.fd, op: 'to', target: word.value, both })
   return i + 1
+}
+
+// A target that is not yet its final text: a `$` that is not hard-quoted
+// (a reference), or a bare `~`, glob character or brace — expanded when
+// the stage runs, and checked then (`>/dev/nu*` may well be `/dev/null`).
+function needsExpansion(word) {
+  return [...word.value].some((ch, i) => {
+    const m = word.mask === null ? '0' : word.mask[i]
+    return (ch === '$' && m !== '1') || (m === '0' && /[~*?[{]/u.test(ch))
+  })
 }
 
 // The read-only FS's one refusal, worded for the operator that hit it.

@@ -42,6 +42,23 @@ export function readRef(line, i) {
   throw new UnsupportedError('feature', '${', `parameter expansion operators are not supported (\`${shown}\`); only \`$NAME\` and \`\${NAME}\` expand`)
 }
 
+// The `$` at `line[i]`: the reference it starts (see readRef), null
+// when it is a literal dollar, or a refusal for the substitutions this
+// shell lacks — `$(…)`, `$((…))` and `$[…]` — raised wherever bash would
+// expand them: a bare or double-quoted word, an unquoted here-document.
+export function readExpansion(line, i) {
+  const n = line[i + 1]
+  if (n === '(') {
+    if (line[i + 2] === '(') throw new UnsupportedError('feature', '$((', 'arithmetic expansion (`$((…))`) is not supported')
+    throw new UnsupportedError('feature', '$(', 'command substitution (`$(…)`) is not supported')
+  }
+  if (n === '[') throw new UnsupportedError('feature', '$[', 'arithmetic expansion (`$[…]`) is not supported')
+  return readRef(line, i)
+}
+
+// A backtick outside single quotes opens the other command substitution.
+export const backtickGap = () => new UnsupportedError('feature', '`', 'command substitution (backticks) is not supported')
+
 // `$'…'`: bash's ANSI-C quoting. Returns the decoded text and the index
 // just past the closing quote.
 const ANSI_SIMPLE = { a: '\u0007', b: '\b', e: '\u001B', E: '\u001B', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?' }
