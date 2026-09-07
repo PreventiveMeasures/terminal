@@ -2801,24 +2801,29 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     assert.match(sym.stderr, /^hi$/mu)
   })
 
-  it('a group whose only contents are redirects errors (not silently dropped)', () => {
+  it('a group whose only contents are redirects runs them as bash\'s null command', () => {
     // `(>/dev/null)` and `(echo a; >/dev/null)` both produce a step
-    // whose stage has redirect flags but no argv. finishGroup must
-    // NOT treat that as the trailing-`;` case — the redirect would
-    // vanish and the user would never know. Also covers `2>&1` (a
-    // merge flag, not a null sink) to pin that hasRedirects checks
-    // the full flag set, not just the null sinks.
+    // whose stage has redirect flags but no argv. finishGroup must NOT
+    // treat that as the trailing-`;` case — the redirect would vanish
+    // and the user would never know. It is the null command instead:
+    // bash performs the redirect and nothing else, status 0. Also
+    // covers `2>&1` (a merge flag, not a null sink) to pin that the
+    // check reads the full flag set, not just the null sinks.
     const t = createTerminal(SOURCES)
-    for (const cmd of [
-      '(>/dev/null)',
-      '(echo a; >/dev/null)',
-      '(2>&1)',
-      '(echo a; 2>&1)',
+    for (const [cmd, stdout] of [
+      ['(>/dev/null)', ''],
+      ['(echo a; >/dev/null)', 'a\n'],
+      ['(2>&1)', ''],
+      ['(echo a; 2>&1)', 'a\n'],
     ]) {
       const r = t.run(cmd)
-      assert.notEqual(r.exitCode, 0, `${cmd} should error`)
-      assert.match(r.stderr, /empty pipeline/u, `${cmd} should report empty pipeline`)
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode], [stdout, '', 0], cmd)
     }
+    // Performed, not dropped: a redirect that cannot be honored still
+    // reports and still fails the null command.
+    const missing = t.run('(</nope)')
+    assert.equal(missing.exitCode, 1)
+    assert.match(missing.stderr, /\/nope: No such file or directory/u)
   })
 
   it('nested `( (...) )` parses and runs; adjacent `((` is arithmetic, which is refused', () => {

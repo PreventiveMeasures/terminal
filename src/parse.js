@@ -78,13 +78,19 @@ export function parseLine(line) {
 // `steps`; a "loop stage" likewise carries its content in `loop.body`.
 // Their words are unreachable, but checking `.group` / `.loop` first
 // lets the same validator handle every shape.
+//
+// Redirects alone are a stage: bash's null command performs them and
+// nothing else, so `>/dev/null` is a complete command with status 0 and
+// `! </missing` reports the failure, takes status 1 from it and negates
+// that to 0. Only a stage with nothing at all — `echo a | | wc` — is the
+// empty one.
 function validateSteps(steps) {
   for (const step of steps) {
     if (step.stages.length === 0 && !step.bang) throw new Error('empty pipeline stage')
     for (const s of step.stages) {
       if (s.group) validateSteps(s.group)
       else if (s.loop) validateSteps(s.loop.body)
-      else if (s.words.length === 0 && s.assigns.length === 0) throw new Error('empty pipeline stage')
+      else if (s.words.length === 0 && s.assigns.length === 0 && s.redirs.length === 0) throw new Error('empty pipeline stage')
     }
   }
 }
@@ -351,8 +357,8 @@ function tokenLabel(t) {
 //     dangling `&&` / `||` before the closer keeps its empty step for
 //     the validator to reject, as `cat x &&` is rejected at top level.
 // "Empty" excludes redirects: `(>/dev/null)` and `(echo a; >/dev/null)`
-// must NOT silently drop the redirect — they fall through to the
-// regular validator and surface as "empty pipeline stage".
+// must NOT drop the redirect — they fall through as an ordinary stage,
+// the null command that performs it.
 function finishBlock(steps, stage, consumed, emptyError) {
   const lastStep = steps.at(-1)
   const emptyTail = commandPosition(stage) && stage.redirs.length === 0 && lastStep.stages.length === 0

@@ -68,6 +68,12 @@ function literalSource(pattern) {
 // other POSIX classes expand to their ranges; `\x` is a literal member.
 // An unmatched `[` (no closing `]`, or nothing inside) is not a bracket
 // expression at all and stays a literal `[`, as fnmatch treats it.
+//
+// A class name fnmatch does not know is read and contributes NO member,
+// rather than failing the pattern the way grep does: `[[:bogus:]]` is an
+// empty set that matches no name (so the word stands for its own text),
+// `[[:bogus:]x]` still matches `x`, and `[![:bogus:]]` — the negation of
+// nothing — matches any single character. Bash does the same.
 function readBracket(pattern, start) {
   let i = start + 1
   let negated = false
@@ -78,7 +84,7 @@ function readBracket(pattern, start) {
   for (; i < pattern.length && pattern[i] !== ']'; i++) {
     const c = pattern[i]
     if (c === '[' && pattern[i + 1] === ':') {
-      const cls = readPosixClass(pattern, i)
+      const cls = readPosixClass(pattern, i, { unknown: 'empty' })
       if (cls) { body += cls.body; i = cls.end - 1; members++; continue }
     }
     if (c === '\\' && i + 1 < pattern.length) {

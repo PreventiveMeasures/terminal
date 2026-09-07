@@ -24,11 +24,19 @@ export const POSIX_CLASSES = {
 
 // The `[:name:]` at `s[i]` (which must be `[`), as `{ body, end }` with
 // `end` the index just past the closing `:]`, or null when it is not a
-// class. An unknown name is reported, as the GNU tools reject it.
-export function readPosixClass(s, i) {
+// class. An unknown name is reported, as the GNU tools reject it —
+// except under `{ unknown: 'empty' }`, which returns it with no members
+// instead. That is what shell globbing needs: glibc's fnmatch reads an
+// unknown class and simply matches nothing for it, where grep fails the
+// pattern (see readBracket). An OPTIONS OBJECT rather than a positional
+// flag for the reason compileGlob gives.
+export function readPosixClass(s, i, opts = {}) {
   const m = /^\[:([a-z]+):\]/u.exec(s.slice(i))
   if (!m) return null
   const body = POSIX_CLASSES[m[1]]
-  if (body === undefined) throw new Error(`invalid character class \`[:${m[1]}:]\``)
+  if (body === undefined) {
+    if (opts?.unknown !== 'empty') throw new Error(`invalid character class \`[:${m[1]}:]\``)
+    return { body: '', end: i + m[0].length }
+  }
   return { body, end: i + m[0].length }
 }
