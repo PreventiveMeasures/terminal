@@ -49,19 +49,15 @@ export { NAME_RE }
 // no-op, so blank lines never produce an empty stage.
 const NEWLINE_ABSORB = new Set(['semi', 'and', 'or', 'pipe', 'pipe_err', 'paren_open'])
 
-// Only these separate words: bash's default IFS plus `\r`, so a
-// `\r\n` pair ends the word cleanly for Windows pastes (bash keeps a
-// lone `\r` literal; treating it as whitespace is a deliberate quirk
-// so a stray `\r` never glues onto a word). Other Unicode spaces
-// (NBSP, U+3000) are ordinary characters, as in bash.
-const isBlank = (c) => c === ' ' || c === '\t' || c === '\r'
+// Shell token boundaries are space and tab; CR and Unicode spaces stay literal.
+const isBlank = (c) => c === ' ' || c === '\t'
 
 export function tokenize(line) {
-  const st = { line, i: 0, tokens: [], cur: '', mask: '', quote: null, sawQuote: false, inToken: false, heredocs: [], lastParenAt: -2 }
+  const st = { line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoteStart: 0, quote: null, sawQuote: false, inToken: false, heredocs: [], lastParenAt: -2 }
   while (st.i < line.length) {
     const c = line[st.i]
     if (st.quote === "'") {
-      if (c === "'") st.quote = null
+      if (c === "'") closeQuote(st)
       else put(st, c, '1')
       st.i++
       continue
@@ -89,9 +85,15 @@ export function tokenize(line) {
 // quotes: `""` is an (empty) argument, where a bare word that expands
 // to nothing is no argument at all.
 function openQuote(st, c) {
+  st.quoteStart = st.cur.length
   st.quote = c
   st.sawQuote = true
   st.inToken = true
+}
+
+function closeQuote(st) {
+  if (st.cur.length === st.quoteStart) st.empty.push(st.cur.length)
+  st.quote = null
 }
 
 // `ch` is one character, which for a `$'\U0001F600'` is two UTF-16
@@ -105,7 +107,7 @@ function put(st, ch, m) {
 function flush(st) {
   if (st.inToken) {
     const quoted = st.sawQuote || /[12]/u.test(st.mask)
-    const token = { kind: 'word', value: st.cur, mask: quoted ? st.mask : null, quoted }
+    const token = { kind: 'word', value: st.cur, mask: quoted ? st.mask : null, quoted, ...(st.empty.length ? { empty: st.empty } : {}) }
     st.tokens.push(token)
     // The word after `<<` is its delimiter: recorded here for the body
     // collection at the end of the line, and left in the stream as the
@@ -115,6 +117,7 @@ function flush(st) {
   }
   st.cur = ''
   st.mask = ''
+  st.empty = []
   st.sawQuote = false
   st.inToken = false
 }
@@ -132,7 +135,7 @@ function emit(st, token) {
 function readDoubleQuoted(st) {
   const { line } = st
   const c = line[st.i]
-  if (c === '"') { st.quote = null; st.i++; return }
+  if (c === '"') { closeQuote(st); st.i++; return }
   if (c === '\\') {
     const n = line[st.i + 1]
     if (n === '\n') { st.i += 2; return }
@@ -170,6 +173,7 @@ function readDollar(st) {
   const n = line[st.i + 1]
   if (m === '0' && n === "'") {
     const r = decodeAnsiC(line, st.i + 2)
+    if (r.text === '') st.empty.push(st.cur.length)
     for (const ch of r.text) put(st, ch, '1')
     st.sawQuote = true
     st.inToken = true
@@ -178,8 +182,12 @@ function readDollar(st) {
   }
   if (m === '0' && n === '"') { openQuote(st, '"'); st.i += 2; return }
   const ref = readExpansion(line, st.i)
-  if (!ref) { put(st, '$', m); st.i++; return }
-  for (const ch of ref.raw) put(st, ch, m)
+  if (!ref) { put(st, '$', '1'); st.i++; return }
+  // Quote removal must not join a reference to the next quoted fragment.
+  const next = line[st.i + ref.raw.length]
+  const text = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(ref.name) && (next === '"' || next === "'")
+    ? '${' + ref.name + '}' : ref.raw
+  for (const ch of text) put(st, ch, m)
   st.i += ref.raw.length
 }
 

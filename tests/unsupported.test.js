@@ -142,7 +142,7 @@ describe('run().unsupported — what counts as a gap', () => {
     // syntax are the ones worth pinning: they are the reason parseArgs
     // has a schema-aware numeric guard at all.
     for (const line of [
-      'head -2 f.txt', 'ls -10', 'tail -1 f.txt',
+      'head -2 f.txt', 'ls -- -10', 'tail -1 f.txt',
       'find . -name "*.txt" -print0 | xargs -0 wc -l',
       'sort -k2n f.txt', 'sort -t" " -k1,1 f.txt',
       'cat f.txt | tr -c "a-z" .', 'uniq -f1 f.txt',

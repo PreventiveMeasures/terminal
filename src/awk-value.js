@@ -63,7 +63,7 @@ export function toNum(v) {
 const FORMAT_CACHE = new Map()
 
 export function numToStr(n, fmt) {
-  if (Number.isNaN(n)) return '-nan'
+  if (Number.isNaN(n)) throw new AwkError('formatting signed NaN is not supported', null, 'signed NaN')
   if (!Number.isFinite(n)) return n < 0 ? '-inf' : '+inf'
   if (Number.isInteger(n)) return Math.abs(n) < 2 ** 53 ? String(n) : BigInt(n).toString()
   let spec = FORMAT_CACHE.get(fmt)

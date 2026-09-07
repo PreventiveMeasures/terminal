@@ -17,6 +17,8 @@
 // `$-` and `$_` name process facts that do not exist here; they stay as
 // typed, with the same warning.
 
+import { sliceWord } from './word.js'
+import { UnsupportedError } from './unsupported.js'
 import { expandBraces } from './braces.js'
 import { globPaths, hasGlobMeta } from './glob.js'
 
@@ -24,16 +26,11 @@ const SPECIAL = /[?#@*$!0-9_-]/u
 const NAME_CHAR = /[A-Za-z0-9_]/u
 const PROCESS_PARAMS = new Set(['$', '!', '0', '-', '_'])
 
-// Expand a stage's words into argv strings. argv[0] — the command name —
-// skips brace and pathname expansion, matching what bash users expect
-// from a literal command name (`{ls,pwd}` as a command is not a thing
-// anyone types); it still expands `$c`, so `for c in cat wc; do $c f`
-// works. Returns the argv plus any warnings for stderr.
+// Expand command words and arguments in the same order as bash.
 export function expandWords(words, ctx) {
   const out = []
   const warnings = []
-  words.forEach((w, i) => {
-    if (i === 0) { out.push(...expandArg(w, ctx, warnings, false)); return }
+  words.forEach((w) => {
     for (const b of expandBraces(w)) {
       // An argument of `export` that looks like an assignment expands as
       // an assignment does — no splitting, no globbing (bash's rule for
@@ -46,7 +43,7 @@ export function expandWords(words, ctx) {
 }
 
 // One brace product to its argv words: substitution with splitting,
-// then pathname expansion (except for the command name), then quote
+// then pathname expansion (including the command name), then quote
 // removal, which drops a bare word that expanded to nothing (`$x`
 // unset, `{,a}`'s empty alternative) while `""` and `"$x"` survive.
 function expandArg(b, ctx, warnings, glob) {
@@ -81,7 +78,7 @@ function assignmentOf(w) {
 
 function expandAssignment(w, ctx, warnings) {
   const eq = assignmentOf(w)
-  const rest = { value: w.value.slice(eq), mask: w.mask === null ? null : w.mask.slice(eq) }
+  const rest = sliceWord(w, eq)
   return w.value.slice(0, eq) + expandScalar(rest, ctx, warnings, true)
 }
 
@@ -103,7 +100,8 @@ const maskAt = (w, i) => (w.mask === null ? '0' : w.mask[i])
 // assignment (`root=~`, `PATH=a:~/bin`) bash also expands after the
 // first bare `=` and after each bare `:` beyond it, and a `:` ends the
 // prefix there; an assignment's value gets the same treatment on its
-// own. `~user`, a quoted `~` and a `~` anywhere else stay literal.
+// own. Named users and stack references are diagnosed; a quoted `~`
+// and a `~` anywhere else stay literal.
 function tilde(w, ctx, assignmentValue = false) {
   if (!w.value.includes('~')) return w
   const v = w.value
@@ -113,10 +111,13 @@ function tilde(w, ctx, assignmentValue = false) {
   const home = homeOf(ctx)
   let value = ''
   let mask = ''
+  const empty = []
   for (let i = 0; i < v.length; i++) {
+    if (w.empty?.includes(i)) empty.push(value.length)
     const prefixStart = i === 0 || i === eqLen || (inValue(i) && v[i - 1] === ':' && bare(i - 1))
     if (prefixStart && v[i] === '~' && bare(i)) {
       const n = v[i + 1]
+      if (n && n !== '/' && n !== ':' && bare(i + 1)) throw new UnsupportedError('feature', 'tilde prefix', 'named-user and directory-stack tilde prefixes are not supported')
       const ends = n === undefined || (bare(i + 1) && (n === '/' || (n === ':' && inValue(i))))
       if (ends) {
         // A root home makes `~/x` `/x`, not `//x`.
@@ -129,7 +130,8 @@ function tilde(w, ctx, assignmentValue = false) {
     value += v[i]
     mask += maskAt(w, i)
   }
-  return { value, mask: /[12]/u.test(mask) ? mask : null }
+  if (w.empty?.includes(v.length)) empty.push(value.length)
+  return { value, mask: /[12]/u.test(mask) ? mask : null, ...(empty.length ? { empty } : {}) }
 }
 
 const fresh = () => ({ value: '', mask: '', q: false })
@@ -151,7 +153,9 @@ function substitute(w, ctx, warnings, split) {
   // `""`: nothing to add, but the word was quoted, so it survives.
   if (w.value === '' && w.mask !== null) cur.q = true
   const push = () => { words.push(cur); cur = fresh() }
-  for (let i = 0; i < w.value.length; i++) {
+  for (let i = 0; i <= w.value.length; i++) {
+    if (w.empty?.includes(i)) cur.q = true
+    if (i === w.value.length) break
     const m = maskAt(w, i)
     const ref = m !== '1' && w.value[i] === '$' ? readRef(w, i, m) : null
     if (!ref) { add(cur, w.value[i], m); continue }
@@ -165,7 +169,9 @@ function substitute(w, ctx, warnings, split) {
     // IFS splitting of a bare expansion. Leading blanks end the current
     // word (an empty one is dropped, not emitted); each inner piece is a
     // word of its own; the last piece starts the next word.
-    const pieces = r.value.split(/[ \t\n]+/u)
+    const ifs = ctx.vars.get('IFS') ?? ' \t\n'
+    if (ifs !== '' && ifs !== ' \t\n') throw new UnsupportedError('feature', 'IFS', 'custom IFS separators are not supported')
+    const pieces = ifs === '' ? [r.value] : r.value.split(/[ \t\n]+/u)
     if (pieces.length === 1) { add(cur, pieces[0], '0'); continue }
     if (pieces[0] !== '') add(cur, pieces[0], '0')
     if (cur.value !== '' || cur.q) push()

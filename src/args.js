@@ -29,8 +29,8 @@
 // value-taking short inside a bundle takes the rest of the bundle
 // as its value (`-n5`).
 //
-// The result also carries `order`: every value-option — short or long
-// — in the sequence it appeared, as `[{ name, value }]`. grep uses it
+// The result also carries `order`: every option — short or long
+// — in the sequence it appeared, as `[{ name, value? }]`. grep uses it
 // to resolve `--include` / `--exclude` by GNU's last-match-wins rule
 // and head to resolve `-n` / `-c` the same way; neither is expressible
 // through the per-name `values` map, which loses order across names.
@@ -56,22 +56,10 @@ export function parseArgs(tokens, schema = {}) {
     // check has to run AFTER any value-consumption opportunity. POSIX
     // getopt behavior — pre-splitting the token list breaks it.
     if (t === '--') { positional.push(...tokens.slice(i + 1)); break }
-    // Pure-dash tokens (`-`, `---`, `----`, …) are positional, not
-    // flags. Without this `echo "---"` would die with
-    // `unknown option: --` because the `--` long-flag branch (or
-    // the short-flag bundle below) would try to interpret it.
-    if (/^-+$/u.test(t)) { positional.push(t); continue }
-    // A token carrying whitespace can only have come from a quoted
-    // string — the tokenizer splits unquoted input on whitespace — so
-    // it is data, never a boolean option: `echo "---- foo ----"`,
-    // `echo "-n x"`, `grep "-- foo"`. Real getopt rejects these only
-    // because the shell strips the quotes before exec; here the quoting
-    // survives as the embedded space, so (like the pure-dash sibling
-    // above) treat the token as positional. The exception is an option
-    // that TAKES a value glued on: `cut -d' '`, `sort -t' '` and
-    // `--include='a b'` reach us as one token with the value attached,
-    // and getopt reads them the same way.
-    if (/\s/u.test(t) && !valueAttached(t, valueShort, repeatable)) { positional.push(t); continue }
+    if (t === '-') {
+      if (stopEarly) { positional.push(...tokens.slice(i)); break }
+      positional.push(t); continue
+    }
     if (t.startsWith('--') && t.length > 2) {
       // GNU long options accept both `--name value` and `--name=value`.
       // Split on the first `=`: everything after it is the inline value,
@@ -90,6 +78,7 @@ export function parseArgs(tokens, schema = {}) {
       } else if (long.has(name)) {
         if (inlineVal !== null) throw new Error(`option --${name} doesn't allow an argument`)
         flags.add(name)
+        order.push({ name })
       } else throw new UnsupportedError('option', `--${name}`, `unknown option: --${name}`)
       continue
     }
@@ -101,12 +90,6 @@ export function parseArgs(tokens, schema = {}) {
     positional.push(t)
   }
   return { flags, values, positional, order }
-}
-
-// `-d ` (a value flag with its value glued on) or `--name=…`.
-function valueAttached(t, valueShort, repeatable) {
-  if (t.startsWith('--')) return t.indexOf('=') > 2
-  return t.length > 2 && t[0] === '-' && (valueShort.has(t[1]) || repeatable.has(t[1]))
 }
 
 // A `-<digit>` token is positional by default, which is what keeps the
@@ -154,6 +137,7 @@ function consumeShorts(tokens, i, short, valueShort, repeatable, flags, values, 
     }
     if (!short.has(c)) throw new UnsupportedError('option', `-${c}`, `unknown option: -${c}`)
     flags.add(c)
+    order.push({ name: c })
   }
   return i
 }

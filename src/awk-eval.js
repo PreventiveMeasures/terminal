@@ -283,7 +283,7 @@ function callUser(m, n) {
   if (n.args.length > fn.params.length) {
     throw new AwkError(`function \`${n.name}\` called with ${n.args.length} arguments, but it accepts only ${fn.params.length}`)
   }
-  if (m.frames.length >= MAX_CALL_DEPTH) throw new AwkError(`function call nesting deeper than ${MAX_CALL_DEPTH} levels (runaway recursion?)`)
+  if (m.frames.length >= MAX_CALL_DEPTH) throw new AwkError(`function call nesting deeper than ${MAX_CALL_DEPTH} levels (runaway recursion?)`, null, 'call depth limit')
   const frame = new Map()
   for (let i = 0; i < fn.params.length; i++) frame.set(fn.params[i], i < n.args.length ? argValue(m, n.args[i]) : undefined)
   m.frames.push(frame)

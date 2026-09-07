@@ -14,15 +14,14 @@ import { hexdump, od, xxd } from './dump.js'
 // Reverse line order: read stdin (or each file in order, reversed
 // individually) and emit. Matches GNU `tac`'s per-file behavior —
 // `tac a b` is reversed(a) then reversed(b), not reversed(a ++ b).
-// Trailing newline is preserved because splitLines drops the empty
-// post-newline element and we re-add one `\n` at the end iff we
-// emitted anything.
+// Newline separators stay attached to the preceding record, including
+// an unterminated final record (a\nb becomes ba\n).
 function tac(stdin, tokens, ctx) {
   const { positional } = parseArgs(tokens)
   const r = readInputs('tac', positional, stdin, ctx)
   const out = []
-  for (const { content } of r.inputs) out.push(...splitLines(content).toReversed())
-  return okWith(joinLines(out), r)
+  for (const { content } of r.inputs) out.push(...(content.match(/[^\n]*\n|[^\n]+$/gu) ?? []).toReversed())
+  return okWith(out.join(''), r)
 }
 
 // Cap on how many elements `seq` will materialize. Pipelines buffer
@@ -35,7 +34,7 @@ const MAX_SEQ_ELEMENTS = 1_000_000
 
 // Generate a numeric sequence, one per line. Forms:
 //   seq LAST            → 1, 2, …, LAST              (step 1, even if LAST < 1 → empty)
-//   seq FIRST LAST      → FIRST..LAST                (step ±1, sign auto-picked)
+//   seq FIRST LAST      → FIRST..LAST                (step 1)
 //   seq FIRST INCR LAST → FIRST, FIRST+INCR, …       (INCR may be negative)
 // Integers only — floats and scientific notation are rejected so
 // `seq 1 0.1 2` doesn't silently misbehave. parseNonNegativeInt
@@ -53,21 +52,24 @@ function seq(_stdin, tokens) {
   }
   const nums = []
   for (const t of positional) {
-    if (!/^-?\d+$/u.test(t)) return err(`seq: invalid integer: ${t}`)
-    nums.push(Number(t))
+    if (!/^[+-]?\d+$/u.test(t)) {
+      if (Number.isFinite(Number(t)) && t.trim() !== '') return unsupported('feature', 'seq', 'non-integer operands', 'seq: fractional and exponential operands are not supported')
+      return err(`seq: invalid integer: ${t}`)
+    }
+    nums.push(BigInt(t))
   }
   let first, incr, last
-  if (nums.length === 1) { first = 1; incr = 1; last = nums[0] }
-  else if (nums.length === 2) { first = nums[0]; last = nums[1]; incr = 1 }
+  if (nums.length === 1) { first = 1n; incr = 1n; last = nums[0] }
+  else if (nums.length === 2) { first = nums[0]; last = nums[1]; incr = 1n }
   else { [first, incr, last] = nums }
-  if (incr === 0) return err('seq: increment must be non-zero')
+  if (incr === 0n) return err('seq: increment must be non-zero')
   // Reject oversized ranges up front (before allocating) so a huge
   // `seq` can't OOM the buffered pipeline. Compute the count directly
   // rather than counting in the loop.
   const inRange = incr > 0 ? first <= last : first >= last
-  const count = inRange ? Math.floor(Math.abs(last - first) / Math.abs(incr)) + 1 : 0
+  const count = inRange ? ((last > first ? last - first : first - last) / (incr > 0n ? incr : -incr)) + 1n : 0
   if (count > MAX_SEQ_ELEMENTS) {
-    return err(`seq: range too large: ${count} elements exceeds limit of ${MAX_SEQ_ELEMENTS}`)
+    return unsupported('feature', 'seq', 'sequence limit', `seq: range too large: ${count} elements exceeds limit of ${MAX_SEQ_ELEMENTS}`)
   }
   const out = []
   if (incr > 0) for (let n = first; n <= last; n += incr) out.push(String(n))
@@ -81,7 +83,7 @@ function seq(_stdin, tokens) {
   // call stack (`seq -w 1 200000` died outright, well inside
   // MAX_SEQ_ELEMENTS), and computing it inside the per-element map made
   // the scan quadratic on top.
-  const width = flags.has('w') ? widest(out) : 0
+  const width = flags.has('w') ? Math.max(widest(out), ...[positional[0], positional.at(-1)].map((v) => v.replace(/^\+/u, '').length)) : 0
   const padded = width === 0 ? out : out.map((n) => zeroPad(n, width))
   // `-s` replaces the separator BETWEEN values; GNU still ends the
   // whole run with a newline, so `seq -s, 1 3` is `1,2,3\n`.
@@ -134,6 +136,7 @@ function nl(stdin, tokens, ctx) {
     return err(message)
   }
   const r = readInputs('nl', positional, stdin, ctx)
+  if (r.inputs.some(({ content }) => /(?:^|\n)(?:\\:){1,3}(?:\n|$)/u.test(content))) return unsupported('feature', 'nl', 'logical pages', 'nl: logical page delimiters are not supported')
   const out = []
   let n = 0
   for (const { content } of r.inputs) {
@@ -187,7 +190,7 @@ function cut(stdin, tokens, ctx) {
 // `cut -c1-3` of `héllo` is `hé` (h plus é's two bytes) rather than
 // three characters. Slicing code points instead silently disagreed with
 // coreutils on any multibyte line. A range boundary landing mid
-// character yields U+FFFD, the same modelling `head -c` uses.
+// character is refused with an unsupported diagnostic, as in `head -c`.
 function cutBytes(line, ranges) {
   const bytes = utf8.encode(line)
   return utf8Decoder.decode(Uint8Array.from(pickByPositions([...bytes], ranges)))
@@ -248,7 +251,7 @@ function cutFields(line, delim, ranges) {
 //   tr -d SET      delete every char in SET
 //   tr -s SET      collapse adjacent duplicates of SET chars
 // SET supports `a-z` ranges and `\n` / `\t` / `\\` / `\0` escapes.
-// GNU's `-c` (complement) and combined `-ds` aren't modeled.
+// Complement operates on byte order; combined `-ds` is diagnosed.
 function tr(stdin, tokens, ctx) {
   consumeStdin(ctx)
   const { flags, positional } = parseArgs(tokens, { short: ['c', 'd', 's'] })
@@ -256,13 +259,17 @@ function tr(stdin, tokens, ctx) {
   const squeeze = flags.has('s')
   const complement = flags.has('c')
   if (del && squeeze) return unsupported('option', 'tr', '-d -s', 'tr: -d combined with -s is not supported')
+  if (squeeze && !del && positional.length === 2) return unsupported('feature', 'tr', 'translate and squeeze', 'tr: combined translation and squeezing is not supported')
   const want = (del || squeeze) ? 1 : 2
   if (positional.length !== want) return usage('tr [-c] SET1 SET2  |  tr [-c] -d SET  |  tr [-c] -s SET')
+  if ([...stdin, ...positional.join('')].some((c) => c.codePointAt(0) > 127)) return unsupported('feature', 'tr', 'non-ASCII bytes', 'tr: translation of non-ASCII bytes is not supported')
+  if (positional.some((s) => /\[[:.=]|\[[^\]]*\*/u.test(s))) return unsupported('feature', 'tr', 'set expressions', 'tr: character classes, equivalence classes and repetition expressions are not supported')
+  if (positional.some((s) => /\\[0-7]{2}|\\[1-7abfrv]/u.test(s))) return unsupported('feature', 'tr', 'set escapes', 'tr: these set escape sequences are not supported')
   const set1 = expandTrSet(positional[0])
   if (set1.error) return set1.error
   const members = new Set(set1.chars)
   // `-c` inverts membership rather than materialising the complement,
-  // which would be every code point NOT in SET1.
+  // which would be every byte NOT in SET1.
   const selected = (ch) => complement !== members.has(ch)
   if (del) return ok([...stdin].filter((c) => !selected(c)).join(''))
   if (squeeze) return ok(squeezeChars(stdin, selected))
@@ -270,12 +277,11 @@ function tr(stdin, tokens, ctx) {
   if (set2.error) return set2.error
   if (set2.chars.length === 0) return err('tr: SET2 must not be empty')
   if (complement) {
-    // GNU walks the complement in code-point order and pads SET2 with
-    // its last character; the complement always outruns SET2, so every
-    // selected character lands on that last one — `tr -c a-z XY` turns
-    // each non-letter into `Y`, not into `X`.
-    const to = set2.chars.at(-1)
-    return ok([...stdin].map((c) => selected(c) ? to : c).join(''))
+    // GNU walks the complement in byte order and pads SET2 with
+    // its last character once the replacement set is exhausted.
+    const complementChars = Array.from({ length: 256 }, (_, i) => String.fromCodePoint(i)).filter((c) => !members.has(c))
+    const mapping = new Map(complementChars.map((c, i) => [c, set2.chars[i] ?? set2.chars.at(-1)]))
+    return ok([...stdin].map((c) => mapping.get(c) ?? c).join(''))
   }
   const map = new Map()
   // GNU pads SET2 by repeating its last char to SET1's length. The
@@ -371,6 +377,7 @@ function date(_stdin, tokens) {
     if (!positional[0].startsWith('+')) return usage('date [-u] [+FORMAT]')
     fmt = positional[0].slice(1)
   }
+  if (/%(?:[-_0^#0-9:EO]|[cCDgGhIjklNpPrRuUVwWxXy+])/u.test(fmt)) return unsupported('feature', 'date', 'format', 'date: this format directive or modifier is not supported')
   return ok(formatDate(new Date(), fmt, flags.has('u')) + '\n')
 }
 

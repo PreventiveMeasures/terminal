@@ -76,8 +76,8 @@ function match(m, args) {
   const s = str(m, args[0])
   const re = regexOf(m, args[1])
   const found = re.search(s, 0)
-  m.globals.set('RSTART', found ? found.start + 1 : 0)
-  m.globals.set('RLENGTH', found ? found.end - found.start : -1)
+  m.globals.set('RSTART', found ? Array.from(s.slice(0, found.start)).length + 1 : 0)
+  m.globals.set('RLENGTH', found ? Array.from(s.slice(found.start, found.end)).length : -1)
   if (args[2]) {
     const arr = getArray(m, args[2].name)
     arr.clear()
@@ -86,12 +86,12 @@ function match(m, args) {
       re.groups(s, found.start, found.end).forEach((g, i) => {
         if (g === undefined) return
         arr.set(String(i), new StrNum(g.text))
-        arr.set(`${i}${subsep}start`, g.start + 1)
-        arr.set(`${i}${subsep}length`, g.end - g.start)
+        arr.set(`${i}${subsep}start`, Array.from(s.slice(0, g.start)).length + 1)
+        arr.set(`${i}${subsep}length`, [...g.text].length)
       })
     }
   }
-  return found ? found.start + 1 : 0
+  return found ? Array.from(s.slice(0, found.start)).length + 1 : 0
 }
 
 // split(s, arr [, sep]): sep follows the FS rules when it is a string,
@@ -114,7 +114,7 @@ function split(m, args) {
 // below 1 acts as 1 (with the length as given, so substr("hello", 0, 3)
 // is "hel"); a length of 0 or less, or a NaN, is the empty string.
 function substr(m, args) {
-  const s = str(m, args[0])
+  const s = [...str(m, args[0])]
   const start = Math.trunc(num(m, args[1]))
   const from = Number.isNaN(start) ? 1 : Math.max(start, 1)
   let to = s.length + 1
@@ -123,24 +123,25 @@ function substr(m, args) {
     if (!(len >= 1)) return ''
     to = Math.min(to, from + len)
   }
-  return to > from ? s.slice(from - 1, to - 1) : ''
+  return to > from ? s.slice(from - 1, to - 1).join('') : ''
 }
 
 function length(m, args) {
-  if (args.length === 0) return m.record.length
+  if (args.length === 0) return [...m.record].length
   if (args[0].type === 'var') {
     const v = getVar(m, args[0].name)
     if (v instanceof Map) return v.size
-    return toStr(v, m).length
+    return [...toStr(v, m)].length
   }
-  return str(m, args[0]).length
+  return [...str(m, args[0])].length
 }
 
 function index(m, args) {
   let s = str(m, args[0])
   let t = str(m, args[1])
   if (ignoreCase(m)) { s = s.toLowerCase(); t = t.toLowerCase() }
-  return s.indexOf(t) + 1
+  const at = s.indexOf(t)
+  return at < 0 ? 0 : Array.from(s.slice(0, at)).length + 1
 }
 
 function close(m, args) {

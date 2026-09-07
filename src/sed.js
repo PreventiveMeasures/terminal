@@ -12,7 +12,7 @@
 // reason: surface it on demand, don't advertise it.
 
 import { parseArgs } from './parse.js'
-import { err, okWith, readInputs, splitLines } from './util.js'
+import { err, okWith, readInputs } from './util.js'
 import { unsupported } from './unsupported.js'
 
 const SCRIPT = /^(\d+)(?:,(\d+))?p$/u
@@ -39,10 +39,10 @@ export function sed(stdin, tokens, ctx) {
   // line that falls at position 5 of the concatenation). Crucially,
   // GNU doesn't merge bytes across the file boundary: a file with
   // no trailing newline still ends a line at EOF, so the next file's
-  // first line starts cleanly. splitLines per input + flatMap mirrors
+  // first line starts cleanly. Splitting each input separately mirrors
   // that — joining raw `content` would merge unterminated last lines
   // into the next file's first.
-  const lines = r.inputs.flatMap((input) => splitLines(input.content))
+  const lines = r.inputs.flatMap((input) => input.content.match(/[^\n]*\n|[^\n]+$/gu) ?? [])
   // sed semantics: for each input line in order, for each command
   // in script order, run it. So with `-n '1,3p;2,4p'` on lines 1-4,
   // lines 2 and 3 print TWICE — matched by both ranges. Matches GNU.
@@ -52,10 +52,13 @@ export function sed(stdin, tokens, ctx) {
   for (let i = 0; i < lines.length; i++) {
     const lineNum = i + 1
     for (const { start, end } of ranges) {
-      if (lineNum >= start && lineNum <= end) out.push(lines[i])
+      if (lineNum >= start && lineNum <= end) {
+        if (out.length && !out.at(-1).endsWith('\n')) out.push('\n')
+        out.push(lines[i])
+      }
     }
   }
-  return okWith(out.length > 0 ? out.join('\n') + '\n' : '', r)
+  return { ...okWith(out.join(''), r), exitCode: r.failed ? 2 : 0 }
 }
 
 // Split the script on `;` and parse each segment as an `X,Yp` (or
@@ -76,8 +79,8 @@ function parseScript(script) {
     // >= start, end >= 1 falls out. GNU treats `5,3p` as a no-op;
     // we surface the error instead to catch obvious typos.
     if (start < 1) return { error: err('sed: line numbers must be >= 1') }
-    if (end < start) return { error: err(`sed: reversed range: ${start},${end}`) }
-    ranges.push({ start, end })
+    // A numeric end before the start still prints the starting line.
+    ranges.push({ start, end: Math.max(start, end) })
   }
   return { ranges }
 }

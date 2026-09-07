@@ -17,6 +17,7 @@
 //   `"*"` and `\*` are literal asterisks, `"$d"/*.js` still globs.
 
 import { joinPath, resolve } from './fs.js'
+import { UnsupportedError } from './unsupported.js'
 import { readPosixClass } from './charclass.js'
 
 const META = /[*?[]/u
@@ -49,7 +50,7 @@ export function compileGlob(pattern, opts = {}) {
     else re += c
   }
   try {
-    return new RegExp(re + '$', opts?.ignoreCase ? 'ui' : 'u')
+    return new RegExp(re + '$', opts?.ignoreCase ? 'usi' : 'us')
   } catch {
     // A bracket expression the regex engine rejects (`[z-a]`) matches
     // nothing in bash either, so the pattern stands for its own text.
@@ -61,7 +62,7 @@ export function compileGlob(pattern, opts = {}) {
 // resolved — where a pattern bash refuses to match anything with lands.
 function literalRegex(pattern, opts) {
   const source = pattern.replace(/\\(.)/gu, '$1').replace(/[.+*?^${}()|[\]\\/]/gu, '\\$&')
-  return new RegExp('^' + source + '$', opts?.ignoreCase ? 'ui' : 'u')
+  return new RegExp('^' + source + '$', opts?.ignoreCase ? 'usi' : 'us')
 }
 
 // One bracket expression starting at the `[` at `pattern[start]`. `!`
@@ -99,6 +100,7 @@ function readBracket(pattern, start) {
   if (pattern[i] === ']') { body += '\\]'; i++; members++; rangeAt = true }
   for (; i < pattern.length && pattern[i] !== ']'; i++) {
     const c = pattern[i]
+    if (c === '[' && (pattern[i + 1] === '.' || pattern[i + 1] === '=')) throw new UnsupportedError('feature', 'glob collating or equivalence class', 'glob collating symbols and equivalence classes are not supported')
     if (c === '[' && pattern[i + 1] === ':') {
       const cls = readPosixClass(pattern, i, { unknown: 'empty' })
       if (cls) {

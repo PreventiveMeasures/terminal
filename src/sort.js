@@ -4,7 +4,7 @@
 // selected fields, with the whole line as the last-resort tiebreak.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, okWith, readContent, splitLines } from './util.js'
+import { err, joinLines, okWith, readInputs, splitLines } from './util.js'
 import { unsupported } from './unsupported.js'
 
 export function sort(stdin, tokens, ctx) {
@@ -19,13 +19,13 @@ export function sort(stdin, tokens, ctx) {
   const keys = parseKeySpecs(values.get('k') ?? [], globals)
   if (keys.error) return keys.error
   // `sort a b` orders the concatenation of all inputs, matching coreutils.
-  const r = readContent('sort', positional, stdin, ctx)
+  const r = readInputs('sort', positional, stdin, ctx)
   // Unlike cat/head/wc, sort is ALL-OR-NOTHING: GNU abandons the run on
   // the first operand it cannot read and writes nothing to stdout,
   // exiting 2. Emitting a partial sort would be worse than useless —
   // the result would look like a complete ordering of the input.
   if (r.failed) return { stdout: '', stderr: r.stderr, exitCode: 2 }
-  let lines = splitLines(r.content)
+  let lines = r.inputs.flatMap((input) => splitLines(input.content))
   const numeric = flags.has('n')
   const unique = flags.has('u')
   if (keys.specs.length > 0) return okWith(joinLines(sortByKeys(lines, keys.specs, sep, unique, globals.r)), r)
@@ -36,8 +36,8 @@ export function sort(stdin, tokens, ctx) {
     // equal-value lines (e.g. `1` and `01`) dedupe in input order.
     const decorated = lines.map((line) => ({ line, key: numericKey(line) }))
     decorated.sort(unique
-      ? (a, b) => a.key - b.key
-      : (a, b) => (a.key - b.key) || (a.line < b.line ? -1 : a.line > b.line ? 1 : 0))
+      ? (a, b) => compareNumeric(a.key, b.key)
+      : (a, b) => (compareNumeric(a.key, b.key)) || (a.line < b.line ? -1 : a.line > b.line ? 1 : 0))
     lines = decorated.map((d) => d.line)
   } else {
     // -f folds case for the comparison only; the line is emitted as it
@@ -176,7 +176,7 @@ function fieldBounds(line, sep) {
   // whereas `ann  bob` has only two. Counting runs merges those cases
   // and makes `-k3` pick the wrong span on one of them.
   const starts = [0]
-  const blank = (i) => /\s/u.test(line[i])
+  const blank = (i) => /[ \t]/u.test(line[i])
   let i = 0
   while (i < line.length) {
     while (i < line.length && blank(i)) i++
@@ -194,7 +194,7 @@ function keyOf(line, spec, sep) {
   // No end field means "to end of line"; an end past the last field
   // means the same rather than an error.
   const to = spec.end === undefined || spec.end > bounds.length ? line.length : bounds[spec.end - 1][1]
-  if (spec.b) while (from < to && /\s/u.test(line[from])) from++
+  if (spec.b) while (from < to && /[ \t]/u.test(line[from])) from++
   return line.slice(from, Math.max(from, to))
 }
 
@@ -207,7 +207,7 @@ const cmpStrings = (a, b) => a < b ? -1 : a > b ? 1 : 0
 // threaded into `globals` and then read only by parseKeySpecs, which
 // made it a silent no-op unless `-k` happened to be given too.
 function wholeLineKey(line, globals) {
-  const body = globals.b ? line.replace(/^\s+/u, '') : line
+  const body = globals.b ? line.replace(/^[ \t]+/u, '') : line
   return globals.f ? body.toUpperCase() : body
 }
 
@@ -219,7 +219,7 @@ function sortByKeys(lines, specs, sep, unique, globalReverse) {
     for (let i = 0; i < specs.length; i++) {
       const spec = specs[i]
       const [x, y] = [a.keys[i], b.keys[i]]
-      const d = spec.n ? numericKey(x) - numericKey(y)
+      const d = spec.n ? compareNumeric(numericKey(x), numericKey(y))
         : spec.f ? cmpStrings(x.toUpperCase(), y.toUpperCase())
         : cmpStrings(x, y)
       if (d !== 0) return spec.r ? -d : d
@@ -243,6 +243,20 @@ function sortByKeys(lines, specs, sep, unique, globalReverse) {
 }
 
 function numericKey(line) {
-  const m = /^[ \t]*(-?(?:\d+\.?\d*|\.\d+))/u.exec(line)
-  return m ? Number(m[1]) : 0
+  const m = /^[ \t]*(-?)(?:(\d+)(?:\.(\d*))?|\.(\d+))/u.exec(line)
+  if (!m) return '0'
+  const integer = (m[2] ?? '').replace(/^0+/u, '') || '0'
+  const fraction = (m[3] ?? m[4] ?? '').replace(/0+$/u, '')
+  const sign = m[1] && (integer !== '0' || fraction) ? '-' : ''
+  return sign + integer + (fraction ? '.' + fraction : '')
+}
+
+function compareNumeric(a, b) {
+  const an = a.startsWith('-'), bn = b.startsWith('-')
+  if (an !== bn) return an ? -1 : 1
+  const [ai, af = ''] = (an ? a.slice(1) : a).split('.')
+  const [bi, bf = ''] = (bn ? b.slice(1) : b).split('.')
+  const len = Math.max(af.length, bf.length)
+  const d = ai.length - bi.length || cmpStrings(ai, bi) || cmpStrings(af.padEnd(len, '0'), bf.padEnd(len, '0'))
+  return an ? -d : d
 }

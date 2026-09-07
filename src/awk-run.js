@@ -138,7 +138,7 @@ export function execStmts(m, stmts) {
 }
 
 function execStmt(m, s) {
-  if (++m.steps > MAX_STEPS) throw new AwkError(`execution stopped after ${MAX_STEPS} statements (infinite loop?)`)
+  if (++m.steps > MAX_STEPS) throw new AwkError(`execution stopped after ${MAX_STEPS} statements (infinite loop?)`, null, 'execution limit')
   return EXEC[s.type](m, s)
 }
 

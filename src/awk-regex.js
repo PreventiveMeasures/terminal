@@ -34,10 +34,15 @@ export class AwkRegex {
     this.anchored = null
   }
 
-  test(s) { return this.js.test(s) }
+  test(s) { this.checkLocale(s); return this.js.test(s) }
+
+  checkLocale(s) {
+    if (this.src.includes('[:') && [...s].some((c) => c.codePointAt(0) > 127)) throw new AwkError('POSIX character classes on non-ASCII input require locale support', null, 'locale-sensitive character classes')
+  }
 
   // Leftmost-longest match at or after `from`: { start, end } or null.
   search(s, from = 0) {
+    this.checkLocale(s)
     if (this.nfa === null) this.nfa = compileNfa(this.ast, this.ignoreCase)
     return search(this.nfa, s, from)
   }

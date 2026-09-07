@@ -3,6 +3,7 @@
 // modules can import without pulling in each other through the
 // registry, which would create a cycle.
 
+import { UnsupportedError } from './unsupported.js'
 import { resolve } from './fs.js'
 
 // The byte model every `-c`-style option shares. Content is a JS string
@@ -13,7 +14,14 @@ import { resolve } from './fs.js'
 // leading U+FEFF in decoded output instead of swallowing it, since
 // these are raw bytes being sliced, not a document being loaded.
 export const utf8 = new TextEncoder()
-export const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+const strictUtf8 = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true })
+export const utf8Decoder = {
+  decode(bytes) {
+    try { return strictUtf8.decode(bytes) } catch {
+      throw new UnsupportedError('feature', 'partial UTF-8 byte sequence', 'byte output that is not valid UTF-8 cannot be represented by this string-based terminal')
+    }
+  },
+}
 
 export const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0 })
 
@@ -83,6 +91,7 @@ export function readFilesFor(cmd, files, ctx, stdin = '') {
   for (const f of files) {
     // `-` is the standard input, by the convention every coreutils
     // reader follows; it keeps its name so banners can label it.
+    if (f === '/dev/null') { entries.push({ name: f, content: '', kind: 'file' }); continue }
     if (f === '/dev/stdin' && ctx.stdinFile) { entries.push({ name: f, content: stdin, kind: 'file' }); continue }
     if (f === '-' || f === '/dev/stdin') { entries.push({ name: f, content: pipe, kind: 'file', shared: true }); pipe = ''; consumeStdin(ctx); continue }
     const abs = resolve(ctx.cwd, f)

@@ -55,12 +55,14 @@
     "src/complete.js",
     "src/custom.js",
     "src/dump.js",
+    "src/echo.js",
     "src/expand.js",
     "src/extra-commands.js",
     "src/find.js",
     "src/fs.js",
     "src/glob.js",
     "src/grep.js",
+    "src/grep-pattern.js",
     "src/index.d.ts",
     "src/index.js",
     "src/lex.js",
@@ -74,6 +76,7 @@
     "src/tokenize.js",
     "src/unsupported.js",
     "src/util.js",
+    "src/word.js",
     "src/xargs.js"
   ],
   "scripts": {

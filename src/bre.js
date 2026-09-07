@@ -1,3 +1,6 @@
+import { readPosixClass } from './charclass.js'
+import { UnsupportedError } from './unsupported.js'
+
 // POSIX Basic Regular Expression → ECMAScript regex translation — the
 // dialect grep matches with by default (and under -G). A self-contained
 // transpiler with no dependency on the command layer, so it lives in
@@ -88,6 +91,11 @@ export function breToEs(pattern) {
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i]
     if (inClass) {
+      if (c === '[' && (pattern[i + 1] === '.' || pattern[i + 1] === '=')) throw new UnsupportedError('feature', 'regex collating or equivalence class', 'grep: collating and equivalence classes are not supported')
+      if (c === '[') {
+        const cls = readPosixClass(pattern, i)
+        if (cls) { out += cls.body; i = cls.end - 1; continue }
+      }
       // Inside `[...]`, escape handling mirrors the outside-class
       // branch but without SWAP / GNU-extension transforms: identity
       // escapes pass through if ES accepts them; otherwise drop the

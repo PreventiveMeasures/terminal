@@ -22,9 +22,9 @@
 // known, deliberate differences:
 //   - Strings are Unicode text, as under a UTF-8 locale: length(),
 //     substr(), index() and toupper() count and case-map characters,
-//     never bytes. Characters outside the BMP count as two.
-//   - NaN has no sign here; it always prints as `-nan` (gawk also has
-//     `+nan`). Infinities print as `+inf` / `-inf`, as in gawk.
+//     never bytes, including characters outside the BMP.
+//   - NaN formatting is diagnosed because JS does not retain its sign.
+//     Locale-sensitive classes on non-ASCII input are also diagnosed.
 //   - `for (k in a)` walks keys in insertion order; gawk's order is its
 //     hash order. Neither is specified.
 //   - ENVIRON is empty (the terminal has no environment), ARGV[0] is
@@ -62,7 +62,7 @@ export function awk(stdin, tokens, ctx) {
   } catch (e) {
     // A RangeError here is the parser's own recursion giving out on a
     // pathologically nested expression: a program we cannot compile.
-    if (e instanceof RangeError) return err(`awk: syntax error: program too deeply nested (${e.message})`)
+    if (e instanceof RangeError) return unsupported('feature', 'awk', 'parser depth limit', `awk: program too deeply nested (${e.message})`)
     if (!(e instanceof AwkError)) throw e
     const message = e.line === null ? `awk: ${e.message}` : `awk: syntax error at line ${e.line}: ${e.message}`
     // A construct gawk implements and this interpreter refuses is a gap,
@@ -98,6 +98,7 @@ export function awk(stdin, tokens, ctx) {
     // reached once the program runs. The result is built by hand here
     // (output already produced still has to survive), so the note is
     // attached to it rather than coming from `unsupported`.
+    if (e instanceof RangeError) gap = { detail: 'runtime limit', message: `awk: ${e.message}` }
     if (e.gap) gap = { detail: e.gap, message: `awk: ${e.message}` }
   }
   const result = { stdout: m.out.join(''), stderr: m.errOut.join(''), exitCode }

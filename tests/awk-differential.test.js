@@ -66,7 +66,7 @@ function runMine(c) {
   const operands = c.operands ?? (c.input !== undefined && !c.stdin ? ['in.txt'] : [])
   const argv = [...(c.args ?? []), '-f', 'prog.awk', ...operands].map((a) => `'${a}'`).join(' ')
   const r = createTerminal(files).run(`${c.stdin ? 'cat in.txt | ' : ''}awk ${argv}`)
-  return { out: r.stdout, err: r.stderr, code: r.exitCode }
+  return { out: r.stdout, err: r.stderr, code: r.exitCode, gaps: r.unsupported }
 }
 
 const sorted = (s) => s.split('\n').sort().join('\n')
@@ -80,6 +80,12 @@ function check(c) {
   }
   if (c.expect === 'locale' || c.expect === 'nansign') return
   const ref = runGawk(c)
+  if (mine.gaps.some((gap) => gap.detail === 'signed NaN')) {
+    assert.match(ref.out, /nan/iu, 'only NaN formatting may take this diagnostic path')
+    assert.notEqual(mine.code, 0)
+    assert.match(mine.err, /signed NaN/u)
+    return
+  }
   const label = JSON.stringify(c.prog).slice(0, 160)
   assert.equal(mine.code !== 0, ref.code !== 0, `${label}: gawk exit ${ref.code}, terminal exit ${mine.code} (${mine.err.split('\n')[0]})`)
   if (c.expect === 'sorted') assert.equal(sorted(mine.out), sorted(ref.out), label)

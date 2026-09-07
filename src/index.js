@@ -45,8 +45,8 @@ import { backtickGap, readExpansion } from './lex.js'
 import { parseLine, refusedWrite } from './parse.js'
 import { DEFAULT_REGISTRY, createRegistry } from './registry.js'
 import { SHELL_GAPS } from './shell-builtins.js'
-import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
-import { err, ok } from './util.js'
+import { UnsupportedError, createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
+import { err } from './util.js'
 import { complete } from './complete.js'
 
 export function createTerminal(sources, opts = {}) {
@@ -75,14 +75,19 @@ export function createTerminal(sources, opts = {}) {
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
   const ctx = {
     cwd, fs, user: opts.user ?? 'user', home: '/', registry,
-    vars: new Map(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinLeft: '',
+    vars: new BindingMap(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinLeft: '',
     unsupported: createUnsupportedFeed(),
   }
   // Commands like `xargs` need to invoke other commands. Exposing
   // `dispatch` on ctx (rather than reaching for the registry at the
   // command site) keeps lookup in one place, and lets command
   // modules stay free of back-references into index.js.
-  ctx.dispatch = (name, tokens, stdin) => dispatch(name, tokens, stdin, ctx)
+  ctx.dispatch = (name, tokens, stdin) => {
+    const saved = { stdinLeft: ctx.stdinLeft, stdinFile: ctx.stdinFile, loopDepth: ctx.loopDepth }
+    ctx.stdinFile = false
+    ctx.loopDepth = 0
+    try { return isolated(ctx, () => dispatch(name, tokens, stdin, ctx)) } finally { Object.assign(ctx, saved) }
+  }
   // `which` looks up names against the registries to print a fake
   // `/usr/bin/<name>` path.
   ctx.hasCommand = registry.has
@@ -147,8 +152,7 @@ function safeRun(line, ctx) {
   const feed = createUnsupportedFeed()
   ctx.unsupported = feed
   try {
-    const trimmed = line.trim()
-    const r = trimmed === '' ? ok() : runSteps(parseLine(trimmed), ctx, { text: '' })
+    const r = runSteps(parseLine(line), ctx, { text: '' })
     return finish(r, ctx, feed)
   } catch (e) {
     const note = unsupportedNote(e)
@@ -225,7 +229,7 @@ function runPipeline(stages, ctx, stream) {
     const first = i === 0
     const io = resolveRedirs(stage, ctx, first ? stream.text : pipe, first && ctx.stdinFile)
     const run = () => (io.error ? failedStage(stage, ctx, io.error) : stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx, io.stdin) : runStage(stage, ctx, io.stdin))
-    const result = withStreams(io, ctx, () => (stages.length > 1 ? isolated(ctx, run) : run()))
+    const result = withStreams(io, ctx, () => (shellResult(ctx, () => stages.length > 1 ? isolated(ctx, run) : run())))
     if (first && io.inherited) stream.text = ctx.stdinLeft
     const errText = io.warnings + result.stderr
     let stageOut = ''
@@ -262,36 +266,50 @@ function resolveRedirs(stage, ctx, stdin, stdinFile) {
   let file = stdinFile
   let inherited = true
   const done = (error) => ({ error, fds, stdin: input, stdinFile: file, inherited, warnings: warnings.join('') })
-  for (const r of stage.redirs) {
-    if (r.op === 'dup') {
-      if (fds[r.toFd] === 'closed') return done(err(`error: ${r.toFd}: Bad file descriptor`))
-      fds[r.fd] = fds[r.toFd]
-    } else if (r.op === 'close') fds[r.fd] = 'closed'
-    else if (r.op === 'to') {
-      const t = r.target === undefined ? expandRedirect(r.word, ctx, warnings) : { value: r.target }
-      if (t.error) return done(err(`error: ${t.error}`))
-      const dest = t.value === '/dev/null' ? 'null' : t.value === '/dev/stdout' ? fds[1] : t.value === '/dev/stderr' ? fds[2] : null
-      if (dest === null) {
-        const e = refusedWrite(r.label, t.value)
-        ctx.unsupported.add(unsupportedNote(e))
-        return done(err(`error: ${e.message}`))
+  try {
+    for (const r of stage.redirs) {
+      if (r.op === 'dup') {
+        if (fds[r.toFd] === 'closed') return done(err(`error: ${r.toFd}: Bad file descriptor`))
+        fds[r.fd] = fds[r.toFd]
+      } else if (r.op === 'close') fds[r.fd] = 'closed'
+      else if (r.op === 'to') {
+        const t = r.target === undefined ? expandRedirect(r.word, ctx, warnings) : { value: r.target }
+        if (t.error) return done(err(`error: ${t.error}`))
+        const dest = t.value === '/dev/null' ? 'null' : t.value === '/dev/stdout' ? fds[1] : t.value === '/dev/stderr' ? fds[2] : null
+        if (dest === null) {
+          const e = refusedWrite(r.label, t.value)
+          ctx.unsupported.add(unsupportedNote(e))
+          return done(err(`error: ${e.message}`))
+        }
+        if (dest === 'closed') return done(err(`error: ${t.value}: No such file or directory`))
+        fds[r.fd] = dest
+        if (r.both) fds[2] = dest
+      } else if (r.op === 'text') { input = r.expand ? expandScalar(heredocWord(r.body), ctx, warnings) : r.body; file = false; inherited = false }
+      // A here-string is expanded but neither split nor globbed (bash).
+      else if (r.op === 'herestring') { input = expandScalar(r.word, ctx, warnings) + '\n'; file = false; inherited = false }
+      else {
+        const t = expandRedirect(r.word, ctx, warnings)
+        const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, input)
+        if (read.error) return done(read.error)
+        input = read.content
+        inherited = false
+        if (t.value !== '/dev/stdin') file = t.value !== '/dev/null'
       }
-      if (dest === 'closed') return done(err(`error: ${t.value}: No such file or directory`))
-      fds[r.fd] = dest
-      if (r.both) fds[2] = dest
-    } else if (r.op === 'text') { input = r.expand ? expandScalar(heredocWord(r.body), ctx, warnings) : r.body; file = false; inherited = false }
-    // A here-string is expanded but neither split nor globbed (bash).
-    else if (r.op === 'herestring') { input = expandScalar(r.word, ctx, warnings) + '\n'; file = false; inherited = false }
-    else {
-      const t = expandRedirect(r.word, ctx, warnings)
-      const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, input)
-      if (read.error) return done(read.error)
-      input = read.content
-      inherited = false
-      if (t.value !== '/dev/stdin') file = t.value !== '/dev/null'
     }
-  }
+  } catch (e) { return done(shellFailure(ctx, e)) }
   return done()
+}
+
+// Expansion errors belong to the failing stage: earlier output and later
+// pipeline stages survive, and redirections may silence only stderr.
+function shellFailure(ctx, e) {
+  const note = unsupportedNote(e)
+  if (note) ctx.unsupported.add(note)
+  return err(`error: ${reason(e)}`, 1)
+}
+
+function shellResult(ctx, fn) {
+  try { return fn() } catch (e) { return shellFailure(ctx, e) }
 }
 
 // A stage whose redirect failed. Nothing runs — except that a command
@@ -385,6 +403,7 @@ function runStage(stage, ctx, stdin) {
 // A Map that remembers which names were bound while `bound` is set.
 class BindingMap extends Map {
   set(name, value) {
+    if (['CDPATH', 'GLOBIGNORE', 'GLOBSORT', 'BASH_COMPAT', 'POSIXLY_CORRECT'].includes(name) || ((name === 'LANG' || name.startsWith('LC_')) && value !== 'C' && value !== 'POSIX' && value !== '')) throw new UnsupportedError('feature', name, `shell variable ${name} is not supported with this value`)
     this.bound?.add(name)
     return super.set(name, value)
   }
@@ -403,13 +422,13 @@ function withTemporaries(assigns, ctx, warnings, fn) {
   const temps = new Set(assigns.map((a) => a.name))
   const inner = new BindingMap(outer)
   ctx.vars = inner
-  for (const a of assigns) inner.set(a.name, expandScalar(a.word, ctx, warnings, true))
-  inner.bound = new Set()
   try {
+    for (const a of assigns) inner.set(a.name, expandScalar(a.word, ctx, warnings, true))
+    inner.bound = new Set()
     return fn()
   } finally {
     ctx.vars = outer
-    for (const [name, value] of inner) if (!temps.has(name) || inner.bound.has(name)) outer.set(name, value)
+    for (const [name, value] of inner) if (!temps.has(name) || inner.bound?.has(name)) outer.set(name, value)
     for (const name of outer.keys()) if (!inner.has(name) && !temps.has(name)) outer.delete(name)
   }
 }
@@ -477,7 +496,7 @@ function runGroup(stage, ctx, stdin) {
 // across thrown errors.
 function isolated(ctx, fn) {
   const saved = { cwd: ctx.cwd, lastExit: ctx.lastExit, vars: ctx.vars }
-  ctx.vars = new Map(saved.vars)
+  ctx.vars = new BindingMap(saved.vars)
   try {
     return fn()
   } finally {

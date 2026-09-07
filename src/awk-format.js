@@ -10,6 +10,8 @@
 // modifier are accepted and ignored, as gawk does in the C locale. A
 // `%` conversion (`%%`, or `%5%`) is a percent sign; an unknown
 // conversion stays literal text.
+import { AwkError } from './awk-common.js'
+
 const SPEC = /^%([-+ 0#']*)(\d+|\*)?'?(?:\.(\d+|\*)?)?[hlL]?(.)?/su
 const CONVERSIONS = 'diouxXeEfFgGcs'
 
@@ -70,7 +72,8 @@ const isUpper = (conv) => conv === 'X' || conv === 'E' || conv === 'G' || conv =
 export function formatNumeric(value, spec) {
   const { conv } = spec
   if (!Number.isFinite(value)) {
-    const body = Number.isNaN(value) ? 'nan' : 'inf'
+    if (Number.isNaN(value)) throw new AwkError('formatting signed NaN is not supported', null, 'signed NaN')
+    const body = 'inf'
     const text = (value < 0 || Number.isNaN(value) ? '-' : '+') + body
     return isUpper(conv) ? text.toUpperCase() : text
   }

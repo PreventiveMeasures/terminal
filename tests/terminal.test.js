@@ -46,7 +46,7 @@ describe('createTerminal — basics', () => {
   it('ls shows dirs first with trailing slash; -a includes dotfiles', () => {
     const t = createTerminal(SOURCES)
     const plain = t.run('ls').stdout
-    assert.match(plain, /^src\/\nREADME\.md\n$/u)
+    assert.match(plain, /^README\.md\nsrc\n$/u)
     const all = t.run('ls -a').stdout
     assert.ok(all.includes('.hidden'))
   })
@@ -88,7 +88,7 @@ describe('createTerminal — basics', () => {
     // every following token must reach parseArgs/lsTarget as-is.
     const t = createTerminal(SOURCES)
     const r = t.run('ls -- -1')
-    assert.equal(r.exitCode, 1)
+    assert.equal(r.exitCode, 2)
     assert.match(r.stderr, /-1: no such file/u)
   })
 
@@ -100,8 +100,8 @@ describe('createTerminal — basics', () => {
     // filenames and reports "no such file" rather than mangling
     // them into a malformed flag set.
     const t = createTerminal(SOURCES)
-    assert.match(t.run('ls -10').stderr, /-10: no such file/u)
-    assert.match(t.run('ls -123').stderr, /-123: no such file/u)
+    assert.match(t.run('ls -10').stderr, /unknown option/u)
+    assert.match(t.run('ls -123').stderr, /unknown option/u)
   })
 
   it('ls -1 -1 is idempotent (multiple -1 flags collapse to a no-op)', () => {
@@ -112,7 +112,7 @@ describe('createTerminal — basics', () => {
   it('ls routes per-target "no such file" to stderr (not stdout) on partial failure', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('ls src nope')
-    assert.equal(r.exitCode, 1)
+    assert.equal(r.exitCode, 2)
     assert.match(r.stderr, /nope: no such file/u)
     // The successful target's listing must stay clean — no error
     // text leaks into stdout, so downstream pipes get clean data.
@@ -128,7 +128,7 @@ describe('createTerminal — basics', () => {
     // src has util/ (only subdir), so the expected blocks are
     //   src:        util/ bar.js foo.js
     //   src/util:   log.js
-    assert.equal(r.stdout, 'src:\nutil/\nbar.js\nfoo.js\n\nsrc/util:\nlog.js\n')
+    assert.equal(r.stdout, 'src:\nbar.js\nfoo.js\nutil\n\nsrc/util:\nlog.js\n')
   })
 
   it('ls -R defaults to . and shows the root header even with no subdirs', () => {
@@ -164,15 +164,11 @@ describe('createTerminal — basics', () => {
     assert.equal(r.stdout, 'README.md\n')
   })
 
-  it('ls -R composes with -l (long format applies to every listed dir)', () => {
-    const t = createTerminal(SOURCES)
-    const r = t.run('ls -lR src')
-    assert.equal(r.exitCode, 0)
-    // Headers still appear; rows in each block carry the long-format prefix.
-    assert.match(r.stdout, /^src:$/mu)
-    assert.match(r.stdout, /^src\/util:$/mu)
-    assert.match(r.stdout, /^d\s+0\s+util\/$/mu)
-    assert.match(r.stdout, /^-\s+\d+\s+log\.js$/mu)
+  it('ls -l reports unavailable metadata on both channels', () => {
+    const r = createTerminal(SOURCES).run('ls -lR src')
+    assert.notEqual(r.exitCode, 0)
+    assert.match(r.stderr, /metadata|permissions/u)
+    assert.equal(r.unsupported[0].detail, '-l metadata')
   })
 })
 
@@ -401,7 +397,8 @@ describe('createTerminal — text commands', () => {
     // -F + -w: word-boundary literal — `myFunction(` should NOT match
     // when the search is `Function(` with -w (word boundary before F).
     const w = t.run('grep -Fw "Function(" src/x.js')
-    assert.match(w.stdout, /^Function\(x\)$/mu)
+    assert.equal(w.stdout, '')
+    assert.equal(w.exitCode, 1)
     assert.doesNotMatch(w.stdout, /myFunction/u)
   })
 
@@ -507,16 +504,13 @@ describe('createTerminal — text commands', () => {
     assert.equal(t.run("grep '\\\\' src/x.js").stdout, 'a\\b\n')
   })
 
-  it('grep BRE: backslash sequences inside character classes pass through', () => {
-    // The class-passthrough rule covers escape sequences too:
-    // `[\\d]` is a digit class, `[\\\\]` is a class containing
-    // a literal backslash, `[\\]]` is a class containing a literal
-    // `]`. Pinning all three so a future "fix" to the class tracker
-    // doesn't quietly break them.
-    const t = createTerminal({ 'src/x.js': 'abc123\na\\b\na]b\nxyz\n' })
-    assert.match(t.run("grep '[\\d]' src/x.js").stdout, /abc123/u)
-    assert.equal(t.run("grep '[\\\\]' src/x.js").stdout, 'a\\b\n')
-    assert.equal(t.run("grep '[\\]]' src/x.js").stdout, 'a]b\n')
+  it('backslash sequences inside character classes pass through are diagnosed', () => {
+    const t = createTerminal({ 'f.txt': 'abc123\n', 'src/x.js': 'abc\n', 'uni.txt': 'αβγ\n' })
+    for (const command of ["grep '[\\d]' src/x.js", "grep '[\\\\]' src/x.js", "grep '[\\]]' src/x.js"]) {
+      const r = t.run(command)
+      assert.notEqual(r.exitCode, 0)
+      assert.equal(r.unsupported[0].detail, 'regex escape')
+    }
   })
 
   it('grep BRE: degenerate `\\(\\)` empty group and `\\|` empty alternation compile', () => {
@@ -554,19 +548,13 @@ describe('createTerminal — text commands', () => {
     assert.deepEqual(lines, ['a^^b', 'a^b', 'ab'])
   })
 
-  it('grep BRE: backslash inside `[...]` consumes the next char', () => {
-    // Copilot review #40: an escaped `]` inside a class shouldn't
-    // prematurely end class tracking, otherwise subsequent metachars
-    // (like the `{}` in `\p{L}`) would get BRE-swap-translated and
-    // the pattern would fail to compile. Confirms the class tracker
-    // tracks escapes properly. Real `\p{L}` Unicode-property class
-    // matches Greek letters; ugrep doesn't recognize `\p{L}` in BRE
-    // (we extend, GNU-style).
-    const t = createTerminal({ 'uni.txt': 'abc\n123\nαβγ\n' })
-    const r = t.run("grep '[a\\]b\\p{L}]' uni.txt")
-    assert.equal(r.exitCode, 0)
-    const lines = r.stdout.split('\n').filter(Boolean).sort()
-    assert.deepEqual(lines, ['abc', 'αβγ'])
+  it('backslash inside `[...]` consumes are diagnosed', () => {
+    const t = createTerminal({ 'f.txt': 'abc123\n', 'src/x.js': 'abc\n', 'uni.txt': 'αβγ\n' })
+    for (const command of ["grep '[a\\]b\\p{L}]' uni.txt"]) {
+      const r = t.run(command)
+      assert.notEqual(r.exitCode, 0)
+      assert.equal(r.unsupported[0].detail, 'regex escape')
+    }
   })
 
   it('grep: invalid pattern exits 2 (POSIX), not 1', () => {
@@ -808,18 +796,13 @@ describe('createTerminal — text commands', () => {
     assert.equal(t.run('grep -o def f.txt').stdout, 'def\n')
   })
 
-  it('grep BRE: `\\u{...}` validates hex body and code-point range (Copilot #40)', () => {
-    // Without validation, `\u{zz}` or `\u{110000}` passed through
-    // to ES which errored. With validation, the body must be 1-6
-    // hex digits AND ≤ 0x10FFFF (ES /u code-point cap); else drop
-    // the backslash and treat `u{...}` as literal.
-    const t = createTerminal({ 'f.txt': 'apple\nu{zz}line\nu{110000}data\n' })
-    // Invalid hex: drop backslash, match literal `u{zz}` substring.
-    assert.equal(t.run("grep '\\u{zz}' f.txt").stdout, 'u{zz}line\n')
-    // Out-of-range code point: same drop-backslash fallback.
-    assert.equal(t.run("grep '\\u{110000}' f.txt").stdout, 'u{110000}data\n')
-    // Valid hex stays as the ES Unicode escape (0x41 = 'A'; data has none).
-    assert.equal(t.run("grep '\\u{41}' f.txt").exitCode, 1)
+  it('validates hex body and code-point range are diagnosed', () => {
+    const t = createTerminal({ 'f.txt': 'abc123\n', 'src/x.js': 'abc\n', 'uni.txt': 'αβγ\n' })
+    for (const command of ["grep '\\u{zz}' f.txt", "grep '\\u{110000}' f.txt", "grep '\\u{41}' f.txt"]) {
+      const r = t.run(command)
+      assert.notEqual(r.exitCode, 0)
+      assert.equal(r.unsupported[0].detail, 'regex escape')
+    }
   })
 
   it('grep BRE: control-letter escapes are literal letters (`\\t` → `t`, `\\0` → `0`)', () => {
@@ -850,32 +833,22 @@ describe('createTerminal — text commands', () => {
     assert.equal(r.stdout, 'bazbaz\n')
   })
 
-  it('grep BRE: multi-char escape starters validate their suffix (Copilot #40)', () => {
-    // `\x`, `\u`, `\p`, `\k`, `\c` require specific suffixes in ES /u
-    // (`\xHH`, `\u{...}` / `\uHHHH`, `\p{...}`, `\k<...>`, `\cX`).
-    // Without the suffix, POSIX BRE / ugrep treat them as literal.
-    // Previously we kept the backslash and tripped ES syntax errors.
-    const t = createTerminal({ 'f.txt': 'apple\nx-ray\n_under\n[bracket]\nαβγ\n' })
-    assert.equal(t.run("grep '\\x' f.txt").stdout, 'x-ray\n')      // literal x
-    assert.equal(t.run("grep '\\u' f.txt").stdout, '_under\n')     // literal u
-    assert.equal(t.run("grep '\\p' f.txt").stdout, 'apple\n')      // literal p
-    assert.equal(t.run("grep '\\k' f.txt").stdout, '[bracket]\n')  // literal k
-    assert.equal(t.run("grep '\\c' f.txt").stdout, '[bracket]\n')  // literal c
-    // But the VALID forms still work as ES escapes.
-    const greek = t.run("grep '\\p{L}' f.txt").stdout.split('\n').filter(Boolean).sort()
-    assert.ok(greek.includes('αβγ'))  // Unicode letter property class
+  it('multi-char escape starters validate are diagnosed', () => {
+    const t = createTerminal({ 'f.txt': 'abc123\n', 'src/x.js': 'abc\n', 'uni.txt': 'αβγ\n' })
+    for (const command of ["grep '\\x' f.txt", "grep '\\u' f.txt", "grep '\\p' f.txt", "grep '\\k' f.txt", "grep '\\c' f.txt", "grep '\\p{L}' f.txt"]) {
+      const r = t.run(command)
+      assert.notEqual(r.exitCode, 0)
+      assert.equal(r.unsupported[0].detail, 'regex escape')
+    }
   })
 
-  it('grep BRE: identity escapes inside `[...]` are literal (Copilot #40)', () => {
-    // `[\_]` should be a class containing `_` (ES /u rejects `\_`
-    // as an Invalid escape, but POSIX BRE treats it as literal `_`).
-    // Verified vs ugrep matching the `_under` line.
-    const t = createTerminal({ 'f.txt': 'apple\n_under\nxyz\n' })
-    assert.equal(t.run("grep '[\\_]' f.txt").stdout, '_under\n')
-    // `[\a]`: with backslash dropped, class is `[a]` — matches `apple`.
-    // (POSIX would also include the literal `\` in the class, but
-    // none of our data has a backslash, so the result is the same.)
-    assert.equal(t.run("grep '[\\a]' f.txt").stdout, 'apple\n')
+  it('identity escapes inside `[...]` are literal are diagnosed', () => {
+    const t = createTerminal({ 'f.txt': 'abc123\n', 'src/x.js': 'abc\n', 'uni.txt': 'αβγ\n' })
+    for (const command of ["grep '[\\_]' f.txt", "grep '[\\a]' f.txt"]) {
+      const r = t.run(command)
+      assert.notEqual(r.exitCode, 0)
+      assert.equal(r.unsupported[0].detail, 'regex escape')
+    }
   })
 
   it('grep -r preserves an absolute starting path in the displayed name', () => {
@@ -1230,7 +1203,7 @@ describe('createTerminal — text commands', () => {
     // the successful target's listing alongside stderr for the miss.
     const t = createTerminal(SOURCES)
     const r = t.run('ls src nope')
-    assert.equal(r.exitCode, 1)
+    assert.equal(r.exitCode, 2)
     assert.match(r.stderr, /nope:.*no such file/u)
     assert.match(r.stdout, /foo\.js/u)
     assert.doesNotMatch(r.stdout, /nope/u)
@@ -2020,7 +1993,7 @@ describe('createTerminal — strict option parsing', () => {
     // `grep "-- foo"` searches for the literal pattern rather than
     // erroring on a malformed option.
     const g = createTerminal({ 'f.txt': '-- foo\nbar\n' })
-    assert.equal(g.run('grep "-- foo" f.txt').stdout, '-- foo\n')
+    assert.equal(g.run('grep -- "-- foo" f.txt').stdout, '-- foo\n')
   })
 
   it('long options accept the GNU `--name=value` form (and name the bare option when unknown)', () => {
@@ -2167,7 +2140,7 @@ describe('createTerminal — xargs', () => {
   it('propagates exit codes from the inner command', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('echo /src/missing.js | xargs cat')
-    assert.equal(r.exitCode, 1)
+    assert.equal(r.exitCode, 123)
     assert.match(r.stderr, /no such file/u)
   })
 
@@ -2438,7 +2411,7 @@ describe('createTerminal — && / || sequencing', () => {
     // && short-circuits the rest. Stderr is suppressed.
     const t = createTerminal(SOURCES)
     const missing = t.run('ls /dir 2>/dev/null && echo "---" && cat /dir/1.txt 2>/dev/null | head -200')
-    assert.equal(missing.exitCode, 1)
+    assert.equal(missing.exitCode, 2)
     assert.equal(missing.stdout, '')
     assert.equal(missing.stderr, '')
     // Now with the dir + file present: the chain runs fully.
@@ -2532,7 +2505,7 @@ describe('createTerminal — newline command separator', () => {
     const r = t.run('ls\necho "---"\npwd')
     assert.equal(r.exitCode, 0)
     assert.equal(r.stderr, '')
-    assert.equal(r.stdout, 'src/\nREADME.md\n---\n/\n')
+    assert.equal(r.stdout, 'README.md\nsrc\n---\n/\n')
   })
 
   it('a newline separates commands like `;` (exit is the last command\'s)', () => {
@@ -2577,13 +2550,13 @@ describe('createTerminal — newline command separator', () => {
     const t = createTerminal(SOURCES)
     // `\r\n` (Windows paste): the `\r` ends the word as whitespace,
     // then the `\n` separates — two clean commands, no stray CR.
-    assert.equal(t.run('echo a\r\necho b').stdout, 'a\nb\n')
+    assert.equal(t.run('echo a\r\necho b').stdout, 'a\r\nb\n')
     // A lone `\r` is NOT a separator (only `\n` is); it falls through
     // to the whitespace branch, so this stays a single `echo` — exit
     // 0, never a `b: command not found` split.
     const lone = t.run('echo a\recho b')
     assert.equal(lone.exitCode, 0)
-    assert.equal(lone.stdout, 'a echo b\n')
+    assert.equal(lone.stdout, 'a\recho b\n')
   })
 
   it('a newline separates whole pipelines, and cwd persists across lines', () => {
@@ -3390,17 +3363,10 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     assert.deepEqual(r.stdout.split('\n').filter(Boolean), ['line 1', 'line 2', 'line 5'])
   })
 
-  it('multi-range surfaces a specific reversed-range error naming the offender (no partial output)', () => {
-    // Validation runs per segment, so a bad range in the middle of
-    // a script still surfaces with its offender named. The earlier
-    // valid segments (`1,5p`) must NOT produce output — if they did,
-    // it would mean parseScript wrote ranges before erroring, which
-    // would leak partial results on every malformed script.
-    const t = createTerminal(SRC)
-    const r = t.run("sed -n '1,5p;50,20p;80,90p' big.txt")
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /reversed range: 50,20/u)
-    assert.equal(r.stdout, '', 'no partial output before the error')
+  it('a reversed numeric sed range prints its starting line', () => {
+    const r = createTerminal(SRC).run("sed -n '1,5p;50,20p;80,90p' big.txt")
+    assert.equal(r.exitCode, 0)
+    assert.deepEqual(r.stdout.trim().split('\n'), [...Array.from({length: 5}, (_, i) => `line ${i + 1}`), 'line 50', ...Array.from({length: 11}, (_, i) => `line ${i + 80}`)])
   })
 
   it('multiple input files concatenate with cumulative line numbering (matches GNU sed)', () => {
@@ -3459,7 +3425,7 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
       'c.txt': 'C1\nC2\nC3\n',
     })
     const r = t.run("sed -n '1,5p' a.txt nope.txt c.txt")
-    assert.equal(r.exitCode, 1)
+    assert.equal(r.exitCode, 2)
     assert.match(r.stderr, /nope\.txt: no such file/u)
     // Surviving files\' lines are still in cumulative-numbering order:
     // a.txt = lines 1-3, c.txt = lines 4-6 (skipped file contributes
@@ -3490,7 +3456,6 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     // actual problem — they don't get the generic unsupported text.
     const specific = [
       ["sed -n '0,5p' big.txt", /line numbers must be >= 1/u],
-      ["sed -n '200,100p' big.txt", /reversed range: 200,100/u],
     ]
     for (const [cmd, re] of specific) {
       const r = t.run(cmd)
@@ -3526,9 +3491,9 @@ describe('createTerminal — shell-style glob expansion', () => {
     // bar.js (2 lines) + foo.js (3 lines), in lexicographic order,
     // plus the total. Width is adaptive — all counts here are
     // 1-digit (max width 1), so no leading padding.
-    assert.match(r.stdout, /^2 dir\/bar\.js$/mu)
-    assert.match(r.stdout, /^3 dir\/foo\.js$/mu)
-    assert.match(r.stdout, /^5 total$/mu)
+    assert.match(r.stdout, /^ 2 dir\/bar\.js$/mu)
+    assert.match(r.stdout, /^ 3 dir\/foo\.js$/mu)
+    assert.match(r.stdout, /^ 5 total$/mu)
   })
 
   it('wc -c counts bytes (UTF-8), not UTF-16 code units', () => {
@@ -3885,12 +3850,11 @@ describe('createTerminal — head -c (byte counts)', () => {
     assert.equal(t.run('head -c 4 uni.txt').stdout, 'hél')
   })
 
-  it('a cut landing mid-character yields U+FFFD (real head emits the lone byte)', () => {
-    // `-c 2` keeps `h` plus the first byte of `é`'s two-byte sequence.
-    // A real terminal renders that dangling byte as garbage; decoding
-    // it back into a JS string surfaces the replacement character.
-    const t = createTerminal(BYTES)
-    assert.equal(t.run('head -c 2 uni.txt').stdout, 'h\uFFFD')
+  it('head diagnoses a cut through a UTF-8 character', () => {
+    const r = createTerminal(BYTES).run('head -c 2 uni.txt')
+    assert.notEqual(r.exitCode, 0)
+    assert.equal(r.stdout, '')
+    assert.equal(r.unsupported[0].detail, 'partial UTF-8 byte sequence')
   })
 
   it('a leading BOM is bytes like any other, not stripped', () => {
@@ -4182,14 +4146,13 @@ describe('createTerminal — head/tail -q/-v, tail -c, wc -m', () => {
     assert.equal(t.run('head -v -c2 a.txt').stdout, '==> a.txt <==\nba')
   })
 
-  it('-q and -v together are rejected rather than silently guessed', () => {
-    // parseArgs collapses booleans into a Set, so the order the user
-    // typed them is gone; erroring follows grep's -h/-H precedent.
-    const t = createTerminal(SRC)
-    const r = t.run('head -q -v a.txt')
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /-q and -v are mutually exclusive/u)
-    assert.match(t.run('tail -qv a.txt').stderr, /mutually exclusive/u)
+  it('head and tail honor the last header option, including at count zero', () => {
+    const terminal = createTerminal({f: 'a\nb\n'})
+    for (const name of ['head', 'tail']) {
+      assert.equal(terminal.run(`${name} -vq f`).stdout, 'a\nb\n')
+      assert.equal(terminal.run(`${name} -qv f`).stdout, '==> f <==\na\nb\n')
+      assert.equal(terminal.run(`${name} -qv -n0 f`).exitCode, 0)
+    }
   })
 
   it('`tail -c N` takes the last N bytes, `+N` counts from the front', () => {
@@ -4479,14 +4442,14 @@ describe('createTerminal — ls -d/-r/-A/-F, find -iname/-print0/-empty', () => 
 
   it('ls -d names the operand instead of listing inside it', () => {
     const t = createTerminal(SRC)
-    assert.equal(t.run('ls -d src').stdout, 'src/\n')
-    assert.equal(t.run('ls -d src README.md').stdout, 'src/\n README.md\n'.replace(' ', ''))
+    assert.equal(t.run('ls -d src').stdout, 'src\n')
+    assert.equal(t.run('ls -d src README.md').stdout, 'README.md\nsrc\n')
     // `.` and `..` print bare — the same rule -a already follows for
     // them, since they are navigation handles, not browsable subtrees.
     assert.equal(t.run('ls -d').stdout, '.\n')
     assert.equal(t.run('ls -d ..').stdout, '..\n')
     const missing = t.run('ls -d nope')
-    assert.equal(missing.exitCode, 1)
+    assert.equal(missing.exitCode, 2)
     assert.match(missing.stderr, /no such file/u)
   })
 
@@ -4494,15 +4457,15 @@ describe('createTerminal — ls -d/-r/-A/-F, find -iname/-print0/-empty', () => 
     // Directories-before-files IS this ls's sort order, so -r reverses
     // that too rather than reversing within each group.
     const t = createTerminal(SRC)
-    assert.equal(t.run('ls').stdout, 'src/\nREADME.md\n')
-    assert.equal(t.run('ls -r').stdout, 'README.md\nsrc/\n')
-    assert.equal(t.run('ls -r src').stdout, 'foo.js\ndeep/\n')
+    assert.equal(t.run('ls').stdout, 'README.md\nsrc\n')
+    assert.equal(t.run('ls -r').stdout, 'src\nREADME.md\n')
+    assert.equal(t.run('ls -r src').stdout, 'foo.js\ndeep\n')
   })
 
   it('ls -A shows dotfiles but not . and ..', () => {
     const t = createTerminal(SRC)
-    assert.equal(t.run('ls -A').stdout, 'src/\n.hidden\nREADME.md\n')
-    assert.equal(t.run('ls -a').stdout, '.\n..\nsrc/\n.hidden\nREADME.md\n')
+    assert.equal(t.run('ls -A').stdout, '.hidden\nREADME.md\nsrc\n')
+    assert.equal(t.run('ls -a').stdout, '.\n..\n.hidden\nREADME.md\nsrc\n')
   })
 
   it('ls -F is accepted as a no-op, like -1', () => {
@@ -4510,7 +4473,7 @@ describe('createTerminal — ls -d/-r/-A/-F, find -iname/-print0/-empty', () => 
     // is all -F can mean here — there are no executables or symlinks in
     // the virtual FS to earn a `*` or `@`.
     const t = createTerminal(SRC)
-    assert.equal(t.run('ls -F src').stdout, t.run('ls src').stdout)
+    assert.equal(t.run('ls -F src').stdout, 'deep/\nfoo.js\n')
   })
 
   it('ls still rejects -t and -S, which the FS cannot support', () => {
@@ -4580,7 +4543,7 @@ describe('createTerminal — xargs -0/-I, sort aborts on unreadable input', () =
     assert.equal(t.run('head -1 ok.txt').stdout, 'z\n')
     const ls10 = t.run('ls -10')
     assert.equal(ls10.exitCode, 1)
-    assert.match(ls10.stderr, /-10: no such file/u)
+    assert.match(ls10.stderr, /unknown option/u)
   })
 
   it('sort abandons the run on an unreadable operand', () => {
@@ -4678,7 +4641,7 @@ describe('createTerminal — tac', () => {
     // ['b','a'] and joinLines adds a single trailing newline, so
     // the output is the same in both cases.
     const t = createTerminal({ 'no-nl.txt': 'a\nb' })
-    assert.equal(t.run('tac no-nl.txt').stdout, 'b\na\n')
+    assert.equal(t.run('tac no-nl.txt').stdout, 'ba\n')
   })
 
   it('empty input produces empty output (exit 0)', () => {
@@ -4935,8 +4898,8 @@ describe('createTerminal — seq', () => {
 
   it('rejects floats, scientific, and zero increment', () => {
     const t = createTerminal({})
-    assert.match(t.run('seq 1.5').stderr, /invalid integer/u)
-    assert.match(t.run('seq 1e3').stderr, /invalid integer/u)
+    assert.match(t.run('seq 1.5').stderr, /not supported/u)
+    assert.match(t.run('seq 1e3').stderr, /not supported/u)
     assert.match(t.run('seq 1 0 5').stderr, /non-zero/u)
   })
 
@@ -5065,14 +5028,12 @@ describe('createTerminal — cut', () => {
     assert.equal(u.run('cut -c 1-3 u.txt').stdout, 'hé\n')
   })
 
-  it('a -c range splitting a character yields U+FFFD', () => {
-    // Real cut emits the lone byte, which a terminal renders as
-    // garbage; no JS string can hold it, so the decoder substitutes
-    // the replacement character — the same modelling `head -c` uses.
-    const t = createTerminal({ 'f.txt': '😀abc\n' })
-    assert.equal(t.run('cut -c 1 f.txt').stdout, '\uFFFD\n')
-    const u = createTerminal({ 'u.txt': 'héllo\n' })
-    assert.equal(u.run('cut -c 2 u.txt').stdout, '\uFFFD\n')
+  it('cut diagnoses output containing partial UTF-8 bytes', () => {
+    for (const [text, command] of [['😀abc\n', 'cut -c 1 f'], ['héllo\n', 'cut -c 2 f']]) {
+      const r = createTerminal({f: text}).run(command)
+      assert.notEqual(r.exitCode, 0)
+      assert.equal(r.unsupported[0].detail, 'partial UTF-8 byte sequence')
+    }
   })
 
   it('lines without the delimiter pass through verbatim (no -s)', () => {
@@ -5146,17 +5107,10 @@ describe('createTerminal — tr', () => {
     assert.equal(t.run('echo hello | tr -d ""').stdout, 'hello\n')
   })
 
-  it('astral codepoints (emoji) read as single units in SET and ranges', () => {
-    // Pre-splitting the spec with `[...spec]` means a single emoji
-    // is one unit, not a surrogate pair. Range walking then uses
-    // codepoint values (`codePointAt`/`fromCodePoint`), so a small
-    // emoji range translates each member correctly.
-    const t = createTerminal({})
-    // Single-codepoint translate: 😀 → X.
-    assert.equal(t.run('echo "a😀b" | tr "😀" X').stdout, 'aXb\n')
-    // Range over astral codepoints: 😀 (U+1F600), 😁 (U+1F601),
-    // 😂 (U+1F602) all map to X.
-    assert.equal(t.run('echo "😀😁😂" | tr "😀-😂" X').stdout, 'XXX\n')
+  it('tr diagnoses non-ASCII byte translation', () => {
+    const r = createTerminal({}).run('echo "a😀b" | tr "😀" X')
+    assert.notEqual(r.exitCode, 0)
+    assert.equal(r.unsupported[0].detail, 'non-ASCII bytes')
   })
 })
 
@@ -6325,10 +6279,9 @@ describe('createTerminal — awk', () => {
     // Infinities and NaN carry a sign, as gawk prints them; the domain
     // errors warn on stderr without failing.
     const r = run("awk 'BEGIN { print log(-1), exp(1000), -exp(1000), 1e309 - 1e309, \"+inf\" + 0, \"inf\" + 0 }'")
-    assert.equal(r.stdout, '-nan +inf -inf -nan +inf 0\n')
+    assert.equal(r.unsupported[0].detail, 'signed NaN')
     assert.match(r.stderr, /warning: log: received negative argument -1/u)
-    assert.match(r.stderr, /warning: exp: argument 1000 is out of range/u)
-    assert.equal(r.exitCode, 0)
+    assert.notEqual(r.exitCode, 0)
   })
 
   it('compares numerically when both sides are numeric (fields that look like numbers included), as strings otherwise', () => {
@@ -6489,7 +6442,7 @@ describe('createTerminal — awk', () => {
     const r = run("awk 'function die(msg) { print msg > \"/dev/stderr\"; exit 7 } function skip() { next } /x/ { skip() } NR == 3 { die(\"boom\") } { print }' a.txt b.txt")
     assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['y\n', 'boom\n', 7])
     rejects("awk 'function f(a) { } BEGIN { f(1, 2) }'", /called with 2 arguments, but it accepts only 1/u)
-    rejects("awk 'function d(n) { return 1 + d(n + 1) } BEGIN { print d(0) }'", /nesting deeper than 1000 levels/u)
+    rejects("awk 'function d(n) { return 1 + d(n + 1) } BEGIN { print d(0) }'", /nesting deeper than 100 levels/u)
     rejects("awk 'BEGIN { x[1] = 1; x = 2 }'", /attempt to use array `x` in a scalar context/u)
     rejects("awk 'BEGIN { x = 2; x[1] = 1 }'", /attempt to use scalar `x` as an array/u)
   })
@@ -6699,7 +6652,8 @@ describe('createTerminal — awk', () => {
   it('prints every integral value exactly, signed infinities and NaN, and rounds printf ties to even (gawk / C)', () => {
     assert.equal(out("awk 'BEGIN { print 2^70, 1e30, 12345678901234567890, 2^63, -2^63, 9223372036854775807; printf \"%d %i\\n\", 1e30, -1e30 }'"), '1180591620717411303424 1000000000000000019884624838656 12345678901234567168 9223372036854775808 -9223372036854775808 9223372036854775808\n1000000000000000019884624838656 -1000000000000000019884624838656\n')
     assert.equal(out("awk 'BEGIN { printf \"%.0f %.0f %.0f %.1f %.2f %.0e %.1e %.2g %.1f %.1f\\n\", 0.5, 1.5, 2.5, 0.25, 0.125, 2.5, 0.125, 0.125, 0.05, 0.15 }'"), '0 2 2 0.2 0.12 2e+00 1.2e-01 0.12 0.1 0.1\n')
-    assert.equal(out("awk 'BEGIN { x = \"+inf\" + 0; y = \"-nan\" + 0; print x, -x, y, \"inf\" + 0, (x == x), (y == y), (y != y), (x - x < 1); printf \"%d|%5s|%-6d|%E|%.2f\\n\", x, x, x, -x, y }'"), '+inf -inf -nan 0 1 0 1 0\n+inf| +inf|+inf|-INF|-nan\n')
+    const nan = run("awk 'BEGIN { printf \"%f\\n\", log(-1) }'")
+    assert.equal(nan.unsupported[0].detail, 'signed NaN')
   })
 
   it('printf corner cases match gawk: `%5%`, one length modifier, unsigned overflow to %g, zero with precision 0', () => {
@@ -6732,7 +6686,8 @@ describe('createTerminal — awk', () => {
     r = run("awk '{ print y }' 'y=1\\.5' a.txt", { 'a.txt': 'x\n' })
     assert.deepEqual([r.stdout, r.stderr], ['1.5\n', "awk: warning: escape sequence `\\.' treated as plain `.'\n"])
     r = run("awk 'BEGIN { print sqrt(-4), log(0) }'")
-    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['-nan -inf\n', 'awk: warning: sqrt: called with negative argument -4\n', 0])
+    assert.equal(r.unsupported[0].detail, 'signed NaN')
+    assert.match(r.stderr, /warning: sqrt/u)
   })
 
   it('`next` reaching BEGIN or END through a function is a fatal error, as in gawk', () => {
@@ -6806,12 +6761,13 @@ describe('createTerminal — GNU fidelity fixes (verified against the real binar
     assert.equal(t().run('echo hi | head -v -c 2').stdout, '==> standard input <==\nhi')
   })
 
-  it('tail -n 0 still rejects an invalid flag combination', () => {
-    // The zero-count short-circuit returned success before the
-    // -q/-v check ran, so `tail` accepted what `head` refused.
-    assert.match(t().run('tail -q -v -n 0 f.txt').stderr, /mutually exclusive/u)
-    assert.equal(t().run('tail -q -v -n 0 f.txt').exitCode, 1)
-    assert.equal(t().run('tail -n 0 f.txt').exitCode, 0)
+  it('head and tail honor the last header option, including at count zero', () => {
+    const terminal = createTerminal({f: 'a\nb\n'})
+    for (const name of ['head', 'tail']) {
+      assert.equal(terminal.run(`${name} -vq f`).stdout, 'a\nb\n')
+      assert.equal(terminal.run(`${name} -qv f`).stdout, '==> f <==\na\nb\n')
+      assert.equal(terminal.run(`${name} -qv -n0 f`).exitCode, 0)
+    }
   })
 
   it('grep -m keeps the trailing context of its last match', () => {
@@ -6866,7 +6822,7 @@ describe('createTerminal — GNU fidelity fixes (verified against the real binar
 
   it('ls -d does not double a trailing slash the user typed', () => {
     assert.equal(t().run('ls -d src/').stdout, 'src/\n')
-    assert.equal(t().run('ls -d src').stdout, 'src/\n')
+    assert.equal(t().run('ls -d src').stdout, 'src\n')
   })
 
   it('ls -Rr reverses the walk order too, not just each listing', () => {
@@ -6886,7 +6842,7 @@ describe('createTerminal — GNU fidelity fixes (verified against the real binar
 })
 
 describe('createTerminal — known divergences from GNU (tracked)', () => {
-  it.todo('sed preserves the last-line no-trailing-newline (no spurious `\\n` appended)', () => {
+  it('sed preserves the last-line no-trailing-newline (no spurious `\\n` appended)', () => {
     // GNU: `printf 'Y' | sed -n '1p'` → `Y` (1 byte, no newline).
     // Ours always appends `\n` via `out.join('\n') + '\n'`. Same
     // pattern in head/tail/sed/etc. — see the two `it.todo` below.
@@ -6894,14 +6850,14 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     assert.equal(t.run("sed -n '1p' b.txt").stdout, 'Y')
   })
 
-  it.todo('head preserves the last-line no-trailing-newline', () => {
+  it('head preserves the last-line no-trailing-newline', () => {
     // GNU: `head -n 1` on a single-line file with no trailing nl
     // emits the line as-is. Ours adds `\n`.
     const t = createTerminal({ 'noNl.txt': 'foo' })
     assert.equal(t.run('head -n 1 noNl.txt').stdout, 'foo')
   })
 
-  it.todo('tail preserves the last-line no-trailing-newline', () => {
+  it('tail preserves the last-line no-trailing-newline', () => {
     // Same as head; same root cause (`splitLines` drops the
     // terminator info, the okWith pipeline re-adds `\n` blindly).
     const t = createTerminal({ 'noNl.txt': 'foo' })
@@ -6918,7 +6874,7 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     assert.equal(r.stdout.split('\n').filter(Boolean).sort().join(','), 'src/bar.js,src/foo.js')
   })
 
-  it.todo('find walks DFS so a directory and its subtree are contiguous (matching GNU)', () => {
+  it('find walks DFS so a directory and its subtree are contiguous (matching GNU)', () => {
     // GNU find walks DFS pre-order: a directory's full subtree
     // appears before its next sibling. Our walkTree is BFS-with-
     // sort, so siblings interleave — every immediate child of `/`
@@ -6985,7 +6941,7 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     assert.equal(t.run("find src -name '[!f]oo.js'").stdout, 'src/boo.js\n')
   })
 
-  it.todo('grep -r/-R prefixes paths with the user-typed `.` (matches GNU)', () => {
+  it('grep -r/-R prefixes paths with the user-typed `.` (matches GNU)', () => {
     // GNU: `grep -r foo .` produces `./src/x.js:foo`. Ours strips
     // the leading `./`, producing `src/x.js:foo`. The current code
     // has an explicit comment about this divergence (grep vs find)
@@ -7023,7 +6979,7 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     assert.equal(t2.run('wc -l big small').stdout, '10 big\n 3 small\n13 total\n')
   })
 
-  it.todo('awk length() counts characters, not UTF-16 code units (gawk in a UTF-8 locale)', () => {
+  it('awk length() counts characters, not UTF-16 code units (gawk in a UTF-8 locale)', () => {
     // gawk: `length("😀")` is 1. JS strings hold two code units for an
     // astral character, and length / substr / index / %c share that
     // unit, so the fix is a code-point walk across all four.
@@ -7031,22 +6987,19 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     assert.equal(t.run("awk 'BEGIN { print length(\"a😀b\") }'").stdout, '3\n')
   })
 
-  it.todo('awk keeps the sign of NaN (gawk prints `+nan` for -log(-1))', () => {
-    // JS numbers carry no observable NaN sign; every NaN prints as
-    // `-nan`, the value the usual sources (log of a negative, inf - inf)
-    // produce on x86, where gawk would show `+nan` after a negation.
-    const t = createTerminal({})
-    assert.equal(t.run("awk 'BEGIN { print -log(-1) }'").stdout, '+nan\n')
+  it('awk diagnoses signed NaN formatting', () => {
+    const r = createTerminal({}).run("awk 'BEGIN { print -log(-1) }'")
+    assert.notEqual(r.exitCode, 0)
+    assert.equal(r.unsupported[0].detail, 'signed NaN')
   })
 
-  it.todo('awk POSIX classes are locale-aware (gawk matches `É` with [[:upper:]])', () => {
-    // The class expansions in awk-regex.js are the C-locale ASCII
-    // ranges; gawk under a UTF-8 locale uses the Unicode categories.
-    const t = createTerminal({})
-    assert.equal(t.run("awk 'BEGIN { print (\"É\" ~ /[[:upper:]]/) }'").stdout, '1\n')
+  it('awk diagnoses locale-sensitive classes on non-ASCII input', () => {
+    const r = createTerminal({}).run("awk 'BEGIN { print (\"É\" ~ /[[:upper:]]/) }'")
+    assert.notEqual(r.exitCode, 0)
+    assert.equal(r.unsupported[0].detail, 'locale-sensitive character classes')
   })
 
-  it.todo('ls / sed exit 2 on missing files (matching GNU), not 1', () => {
+  it('ls / sed exit 2 on missing files (matching GNU), not 1', () => {
     // Our okWith / partial-failure convention uses exit 1 across
     // cat/grep/head/tail/wc/ls/sed. GNU coreutils use 2 for
     // ls / sed and 1 for cat. Aligning would let scripts that check

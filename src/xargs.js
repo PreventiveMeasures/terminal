@@ -1,89 +1,73 @@
-// `xargs`, split out from the text-command registry once its input
-// splitting grew three modes (whitespace, NUL, per-line) and two run
-// shapes (chunked, placeholder-substituted).
-
+// xargs parses its input using its own quoting rules, not shell expansion.
 import { parseArgs } from './parse.js'
 import { consumeStdin, err, ok, parseNonNegativeInt, splitLines } from './util.js'
+import { UnsupportedError, unsupported } from './unsupported.js'
 
-export // Read whitespace-separated tokens from stdin and append them as
-// extra args to CMD. With `-n N`, run CMD once per chunk of N
-// items (so `find ... | xargs -n 1 cat` cats each file separately).
-// With `-r`, skip the run entirely when stdin has no items (real
-// xargs runs CMD once with no extra args by default; `-r` matches
-// `--no-run-if-empty`). Defaults to `echo` when CMD is omitted.
-function xargs(stdin, tokens, ctx) {
+export function xargs(stdin, tokens, ctx) {
   consumeStdin(ctx)
-  // stopAtFirstPositional so flags after the inner command name
-  // (e.g. `xargs grep -n PATTERN`) belong to grep, not to xargs.
-  // Otherwise xargs greedily consumes `-n PATTERN` as its own
-  // chunk-size flag and dies on `parseNonNegativeInt('PATTERN')`.
   const { flags, values, positional } = parseArgs(tokens, {
-    short: ['r', '0'],
-    valueShort: ['n', 'I'],
-    stopAtFirstPositional: true,
+    short: ['r', '0'], valueShort: ['n', 'I'], stopAtFirstPositional: true,
   })
   const [cmd = 'echo', ...baseArgs] = positional
   const replace = values.get('I')
-  // `-0` splits on NUL, the pairing for `find -print0`, so a path with
-  // spaces survives as one item. `-I` splits on LINES instead: GNU
-  // treats each line as a single argument there, which is why
-  // `xargs -I{} echo [{}]` on `a b` prints `[a b]`, not `[a] [b]`.
-  const items = flags.has('0') ? stdin.split('\0').filter(Boolean)
-    : replace === undefined ? stdin.split(/\s+/u).filter(Boolean)
-    // A blank line yields no item at all under `-I` — GNU runs the
-    // command twice, not three times, for `a\n\nb\n`.
-    : splitLines(stdin).filter((l) => l !== '')
-  // `-I` runs the command once per item, substituting the placeholder
-  // wherever it appears in the arguments — including inside a larger
-  // word, as GNU does for `pre{} post{}`. With no items that is zero
-  // invocations, so it is checked BEFORE the run-once-anyway fallback
-  // below: substituting nothing and running the command with a literal
-  // `{}` would be worse than not running it.
-  // An empty placeholder would reach `replaceAll('', item)`, which
-  // splices the item between every character of every argument —
-  // `-I "" echo abc` would emit `xaxbxcx`. GNU refuses the invocation
-  // outright, so refuse it here rather than silently corrupting args.
-  if (replace === '') return err('xargs: -I: replacement string must not be empty')
-  if (replace !== undefined) return xargsReplace(ctx, cmd, baseArgs, items, replace)
-  if (items.length === 0) {
-    if (flags.has('r')) return ok()
-    return ctx.dispatch(cmd, baseArgs, '')
-  }
-  const n = values.has('n') ? parseNonNegativeInt(values.get('n'), 'xargs: -n') : { value: items.length }
+  const n = values.has('n') ? parseNonNegativeInt(values.get('n'), 'xargs: -n') : { value: undefined }
   if (n.error) return n.error
-  // Unlike head/tail (where -n 0 = print nothing is meaningful),
-  // xargs -n 0 has no useful interpretation: chunking by zero
-  // would either loop forever or fall back to "no chunking".
-  if (values.has('n') && n.value === 0) return err('xargs: -n: must be at least 1')
-  return xargsRun(ctx, cmd, baseArgs, items, n.value)
-}
-
-// One invocation per item, with every occurrence of the placeholder in
-// the arguments replaced by that item. Output and exit status combine
-// exactly as the chunked form's do.
-function xargsReplace(ctx, cmd, baseArgs, items, replace) {
-  let stdout = ''
-  let stderr = ''
-  let exitCode = 0
-  for (const item of items) {
-    const args = baseArgs.map((a) => a.replaceAll(replace, item))
-    const r = ctx.dispatch(cmd, args, '')
-    stdout += r.stdout
-    stderr += r.stderr
-    if (r.exitCode !== 0) exitCode = r.exitCode
+  if (n.value === 0) return err('xargs: -n: must be at least 1')
+  if (replace === '') return err('xargs: -I: replacement string must not be empty')
+  if (replace !== undefined && n.value !== undefined) return unsupported('option', 'xargs', '-I -n', 'xargs: combining replacement and chunk limits is not supported')
+  let items
+  if (flags.has('0')) {
+    items = stdin === '' ? [] : stdin.split('\0')
+    if (items.at(-1) === '') items.pop()
+  } else if (replace === undefined) items = inputWords(stdin)
+  else {
+    if (/["'\\]/u.test(stdin)) return unsupported('feature', 'xargs', '-I input quoting', 'xargs: quoted or escaped replacement lines are not supported')
+    items = splitLines(stdin).map((line) => line.replace(/^[ \t]+/u, '')).filter(Boolean)
   }
-  return { stdout, stderr, exitCode }
+  if (items.length === 0 && (flags.has('r') || replace !== undefined)) return ok()
+  const runs = []
+  if (replace === undefined) {
+    const size = n.value ?? Math.max(1, items.length)
+    if (items.length === 0) runs.push(baseArgs)
+    for (let i = 0; i < items.length; i += size) runs.push([...baseArgs, ...items.slice(i, i + size)])
+  } else {
+    for (const item of items) runs.push(baseArgs.map((a) => a.replaceAll(replace, item)))
+  }
+  return runCommands(ctx, cmd, runs)
 }
 
-function xargsRun(ctx, cmd, baseArgs, items, chunkSize) {
-  let stdout = ''
-  let stderr = ''
-  let exitCode = 0
-  for (let i = 0; i < items.length; i += chunkSize) {
-    const r = ctx.dispatch(cmd, [...baseArgs, ...items.slice(i, i + chunkSize)], '')
-    stdout += r.stdout
-    stderr += r.stderr
-    if (r.exitCode !== 0) exitCode = r.exitCode
+function inputWords(input) {
+  const words = []
+  let quote = null, started = false, word = ''
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i]
+    if (c === '\0') throw new UnsupportedError('feature', 'xargs NUL input', 'xargs: NUL input requires -0')
+    if (quote) {
+      if (c === quote) quote = null
+      else if (c === '\n') throw new Error('xargs: unmatched quote')
+      else word += c
+    } else if (c === '"' || c === "'") { quote = c; started = true }
+    else if (c === '\\') {
+      if (i + 1 >= input.length) throw new Error('xargs: trailing backslash')
+      word += input[++i]; started = true
+    } else if (c === ' ' || c === '\t' || c === '\n') {
+      if (started) words.push(word)
+      word = ''; started = false
+    } else { word += c; started = true }
+  }
+  if (quote) throw new Error('xargs: unmatched quote')
+  if (started) words.push(word)
+  return words
+}
+
+function runCommands(ctx, cmd, runs) {
+  let exitCode = 0, stderr = '', stdout = ''
+  for (const args of runs) {
+    const r = ctx.dispatch(cmd, args, '')
+    stdout += r.stdout; stderr += r.stderr
+    if (r.exitCode === 255) return { stdout, stderr: stderr + `xargs: ${cmd}: exited with status 255; aborting\n`, exitCode: 124 }
+    if (r.exitCode === 127 && !ctx.registry.has(ctx.registry.resolveCommand(cmd))) return { stdout, stderr, exitCode: 127 }
+    if (r.exitCode !== 0) exitCode = 123
   }
   return { stdout, stderr, exitCode }
 }

@@ -58,9 +58,10 @@ const VALUE_PRIMARIES = new Set(['name', 'iname', 'type', 'path', 'mindepth', 'm
 // deliberate exceptions, spelled out at their call sites.
 const isTok = (t, name) => t === '-' + name || t === '--' + name
 
-export function find(_stdin, tokens, ctx) {
+export function find(stdin, tokens, ctx) {
   const parsed = parseFindArgs(tokens)
   if (parsed.error) return parsed.error
+  if (stdin !== '' && tokens.some((t) => t === '-exec' || t === '--exec')) return unsupported('feature', 'find', '-exec stdin', 'find: passing shared standard input to -exec is not supported')
   const { starts, minDepth, maxDepth, groups, batches } = parsed
   let stdout = ''
   let stderr = ''

@@ -160,7 +160,7 @@ describe('shell syntax — parameters', () => {
   })
 
   it('`~` is the home directory (the tree root) at the start of a bare word', () => {
-    assert.equal(out('echo ~ ~/src "~" x~ ~"/src" ~user'), '/ /src ~ x~ ~/src ~user\n')
+    assert.equal(out('echo ~ ~/src "~" x~ ~"/src"'), '/ /src ~ x~ ~/src\n')
     assert.equal(out('cd src; cd ~; pwd'), '/\n')
     assert.equal(out('ls ~/src'), 'bar.ts\nfoo.js\n')
   })

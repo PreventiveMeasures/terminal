@@ -17,7 +17,10 @@
 import { basename, relativeTo, resolve } from './fs.js'
 import { parseArgs } from './parse.js'
 import { consumeStdin, err, joinLines, ok, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
-import { unsupportedFrom } from './unsupported.js'
+import { unsupported, unsupportedFrom } from './unsupported.js'
+import { AwkError } from './awk-common.js'
+import { AwkRegex } from './awk-regex.js'
+import { ereClasses, validateRegex } from './grep-pattern.js'
 import { breToEs } from './bre.js'
 import { compileGlob } from './glob.js'
 
@@ -60,10 +63,12 @@ export function grep(stdin, tokens, ctx) {
   else return usage(USAGE)
   const conflict = checkConflicts(flags)
   if (conflict) return conflict
-  const re = compilePatterns(patterns, flags)
+  let re
+  try { re = compilePatterns(patterns.flatMap((p) => p.split('\n')), flags) } catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
   if (re.error) return re.error
   const ctxLines = parseContext(values)
   if (ctxLines.error) return ctxLines.error
+  if (ctx.stdinFile && (flags.has('q') || flags.has('l') || flags.has('L') || values.has('m')) && (rest.length === 0 || rest.includes('-'))) return unsupported('feature', 'grep', 'partial stdin reads', 'grep: early termination on shared file input is not supported', 2)
   const recursive = flags.has('r') || flags.has('R')
   const filters = compileFilters(parsed)
   const r = grepInputs(recursive, stdin, rest, ctx, filters)
@@ -85,11 +90,16 @@ export function grep(stdin, tokens, ctx) {
   // `-m 0` selects nothing, and GNU emits nothing at all for it in
   // EVERY mode — including `-c`, which otherwise prints `0` for a file
   // with no matches — then exits 1.
-  const result = max.value === 0 ? noMatch()
+  let result
+  try { result = max.value === 0 ? noMatch()
     : flags.has('l') ? grepListFiles(capped, re.res, invert, false)
     : flags.has('L') ? grepListFiles(capped, re.res, invert, true)
     : flags.has('c') ? grepCount(capped, re.res, invert, showName)
     : grepRun(inputs, re.res, opts)
+  } catch (e) {
+    if (e instanceof AwkError && e.gap) return unsupported('feature', 'grep', e.gap, `grep: ${e.message}`, 2)
+    throw e
+  }
   // -q asks only whether anything matched: no stdout at all, and the
   // usual 0/1 status. An unreadable operand still forces the exit-2
   // below, matching GNU (`grep -q PAT missing` is 2, not 1).
@@ -97,7 +107,7 @@ export function grep(stdin, tokens, ctx) {
   // Unreadable file/dir operands don't abort the search: scan what we
   // can, then prepend their errors and force grep's exit-2 ("an error
   // occurred"), which outranks the 0/1 match status.
-  if (r.failed) return { stdout: result.stdout, stderr: r.stderr + result.stderr, exitCode: 2 }
+  if (r.failed && !(flags.has('q') && result.exitCode === 0)) return { stdout: result.stdout, stderr: r.stderr + result.stderr, exitCode: 2 }
   return result
 }
 
@@ -136,11 +146,11 @@ function capMatches(input, res, invert, max) {
 // silenced under -l/-L/-c, which is unsurprising.)
 function checkConflicts(flags) {
   if (flags.has('h') && flags.has('H')) {
-    return err('grep: -h and -H are mutually exclusive')
+    return unsupported('option', 'grep', '-h -H', 'grep: combining -h and -H is not supported')
   }
   const modes = ['l', 'L', 'c'].filter((f) => flags.has(f))
   if (modes.length > 1) {
-    return err(`grep: ${modes.map((f) => `-${f}`).join(' / ')} are mutually exclusive`)
+    return unsupported('option', 'grep', 'combined output modes', `grep: ${modes.map((f) => `-${f}`).join(' / ')} are mutually exclusive`)
   }
   const dialects = ['E', 'F', 'G'].filter((f) => flags.has(f))
   if (dialects.length > 1) {
@@ -166,9 +176,10 @@ function compilePatterns(patterns, flags) {
   const res = []
   const reFlags = flags.has('i') ? 'iu' : 'u'
   for (const pattern of patterns) {
+    if (!flags.has('F')) validateRegex(pattern, flags.has('E'))
     let source
     if (flags.has('F')) source = RegExp.escape(pattern)
-    else if (flags.has('E')) source = pattern
+    else if (flags.has('E')) source = ereClasses(pattern)
     else {
       const r = breToEs(pattern)
       if (r.error) return { error: err(`grep: ${r.error}`, 2) }
@@ -176,8 +187,17 @@ function compilePatterns(patterns, flags) {
     }
     // -w wraps in word-boundary anchors. Per pattern so each gets
     // its own boundary check rather than wrapping the union.
-    if (flags.has('w')) source = `\\b(?:${source})\\b`
-    try { res.push(new RegExp(source, reFlags)) } catch (e) {
+    if (flags.has('w')) source = `(?<![A-Za-z0-9_])(?:${source})(?![A-Za-z0-9_])`
+    try {
+      const re = new RegExp(source, reFlags)
+      if (flags.has('o') && !flags.has('F')) {
+        if (flags.has('w') || /\\[1-9]|\(\?/u.test(source)) return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: only-matching with backreferences, lookarounds or word constraints is not supported', 2) }
+        try { re.extent = new AwkRegex(source.replaceAll('\\b', '\\y'), flags.has('i')) } catch {
+          return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: POSIX match extent for this pattern is not supported', 2) }
+        }
+      }
+      res.push(re)
+    } catch (e) {
       // POSIX: regex syntax errors exit 2 (separate from "no match"
       // which exits 1). Dialect label tells a confused user which
       // mode was active (e.g. `grep -E "Function("` says ERE).
@@ -225,7 +245,7 @@ function pickShowName(flags, recursive, nFiles) {
 }
 
 function grepInputs(recursive, stdin, rest, ctx, filters) {
-  if (recursive) return readFilesRecursive('grep', rest.length > 0 ? rest : ['.'], ctx, filters.dir)
+  if (recursive) return readFilesRecursive('grep', rest.length > 0 ? rest : ['.'], ctx, filters.dir, rest.length === 0)
   // A `-` operand is stdin, labelled the way grep labels it.
   if (rest.length > 0) {
     const r = readFilesFor('grep', rest, ctx, stdin)
@@ -242,7 +262,7 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
 // user sees a consistent message. Displayed file names preserve
 // the user-typed prefix (`grep -r foo src` produces `src/bar.js:…`,
 // not `/src/bar.js:…`), matching GNU grep's output convention.
-function readFilesRecursive(cmd, paths, ctx, dirRes) {
+function readFilesRecursive(cmd, paths, ctx, dirRes, implicitRoot) {
   const inputs = []
   let stderr = ''
   let failed = false
@@ -255,7 +275,7 @@ function readFilesRecursive(cmd, paths, ctx, dirRes) {
     if (excludedStartDir(p, dirRes)) continue
     for (const filePath of ctx.fs.walkFiles(abs)) {
       if (excludedByDir(filePath, abs, dirRes)) continue
-      inputs.push({ name: displayName(p, abs, filePath), content: ctx.fs.readFile(filePath) })
+      inputs.push({ name: displayName(implicitRoot && p === '.' ? '' : p, abs, filePath), content: ctx.fs.readFile(filePath) })
     }
   }
   return { inputs, stderr, failed }
@@ -309,7 +329,7 @@ function excludedStartDir(operand, dirRes) {
 
 function displayName(userPath, absRoot, absFile) {
   const rel = relativeTo(absRoot, absFile)
-  if (userPath === '.') return rel
+  if (userPath === '') return rel
   return userPath.endsWith('/') ? userPath + rel : userPath + '/' + rel
 }
 
@@ -396,18 +416,25 @@ function extractMatches(line, name, lineNum, res, opts) {
   // Zero-length matches (`\b`, `\(\)`, ``) are dropped — ugrep / GNU
   // skip them in `-o`, and they'd duplicate across multi-`-e` since
   // the cursor below can't advance past a length-0 match.
-  const matches = []
-  for (const re of res) {
-    const globalRe = new RegExp(re.source, re.flags + 'g')
-    for (const m of line.matchAll(globalRe)) if (m[0].length > 0) matches.push({ index: m.index, text: m[0] })
-  }
-  matches.sort((a, b) => a.index - b.index || b.text.length - a.text.length)
   const out = []
   let cursor = 0
-  for (const m of matches) {
-    if (m.index < cursor) continue  // overlaps a previously chosen match
-    out.push(formatLine(m.text, name, lineNum, true, opts))
-    cursor = m.index + m.text.length
+  while (cursor < line.length) {
+    let best = null
+    for (const re of res) {
+      let match
+      if (re.extent) match = re.extent.search(line, cursor)
+      else {
+        const search = new RegExp(re.source, re.flags + 'g')
+        search.lastIndex = cursor
+        const m = search.exec(line)
+        match = m ? { start: m.index, end: m.index + m[0].length } : null
+      }
+      if (match && (!best || match.start < best.start || (match.start === best.start && match.end > best.end))) best = match
+    }
+    if (!best) break
+    if (best.end === best.start) { cursor = best.end + (line.codePointAt(best.end) > 0xFFFF ? 2 : 1); continue }
+    out.push(formatLine(line.slice(best.start, best.end), name, lineNum, true, opts))
+    cursor = best.end
   }
   return out
 }

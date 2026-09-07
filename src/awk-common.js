@@ -65,7 +65,7 @@ export const MAX_STEPS = 5_000_000
 
 // User-function nesting cap. Each awk-level call costs several JS
 // frames, so this stays well inside the engine's default stack.
-export const MAX_CALL_DEPTH = 1000
+export const MAX_CALL_DEPTH = 100
 
 // printf widths and precisions above this are refused rather than
 // allocated: `%1000000000d` would otherwise try to build a gigabyte

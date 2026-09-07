@@ -25,6 +25,9 @@
 // bash's 64-bit integers, counted exactly; a word whose numbers do not
 // fit stays literal, as in bash.
 
+import { concatWords as concat, sliceWord as slice } from './word.js'
+import { UnsupportedError } from './unsupported.js'
+
 const SEQ_LIMIT = 100_000
 const NUM_RANGE = /^([+-]?\d+)\.\.([+-]?\d+)(?:\.\.([+-]?\d+))?$/u
 const CHAR_RANGE = /^([A-Za-z])\.\.([A-Za-z])(?:\.\.([+-]?\d+))?$/u
@@ -33,8 +36,6 @@ const INT64_MIN = -(2n ** 63n)
 const int64 = (s) => { const n = BigInt(s); return n > INT64_MAX || n < INT64_MIN ? null : n }
 
 const maskAt = (w, i) => (w.mask === null ? '0' : w.mask[i])
-const slice = (w, a, b) => ({ value: w.value.slice(a, b), mask: w.mask === null ? null : w.mask.slice(a, b) })
-const concat = (...ws) => ({ value: ws.map((w) => w.value).join(''), mask: ws.every((w) => w.mask === null) ? null : ws.map((w) => w.mask ?? '0'.repeat(w.value.length)).join('') })
 
 // Find the leftmost balanced, unquoted `{...}` that is a comma list or
 // a sequence; expand it and recurse on each product so adjacent and
@@ -109,7 +110,7 @@ function sequence(body) {
   if (span > INT64_MAX) return null
   const step = (rawStep < 0n ? -rawStep : rawStep) || 1n
   const count = span / step + 1n
-  if (count > SEQ_LIMIT) throw new Error(`brace expansion \`{${body.value}}\` would produce ${count} words (limit ${SEQ_LIMIT})`)
+  if (count > SEQ_LIMIT) throw new UnsupportedError('feature', 'brace expansion limit', `brace expansion \`{${body.value}}\` would produce ${count} words (limit ${SEQ_LIMIT})`)
   const width = num ? padWidth(num[1], num[2]) : 0
   const out = []
   const dir = to >= from ? 1n : -1n

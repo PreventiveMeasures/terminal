@@ -4,6 +4,7 @@
 // loop and the quoting state; everything here reads at a position it
 // is handed and reports what it found.
 
+import { utf8, utf8Decoder } from './util.js'
 import { UnsupportedError } from './unsupported.js'
 
 // Shell variable names: `[A-Za-z_][A-Za-z0-9_]*`, written once. The
@@ -69,31 +70,40 @@ export const backtickGap = () => new UnsupportedError('feature', '`', 'command s
 const ANSI_SIMPLE = { a: '\u0007', b: '\b', e: '\u001B', E: '\u001B', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?' }
 
 export function decodeAnsiC(line, start) {
-  let out = ''
+  const bytes = []
+  const text = (s) => { for (const b of utf8.encode(s)) bytes.push(b) }
   let i = start
   for (; i < line.length && line[i] !== "'"; i++) {
-    if (line[i] !== '\\') { out += line[i]; continue }
+    if (line[i] !== '\\') {
+      const ch = String.fromCodePoint(line.codePointAt(i))
+      text(ch); i += ch.length - 1; continue
+    }
     const n = line[i + 1]
-    if (n === undefined) { out += '\\'; continue }
-    if (n in ANSI_SIMPLE) { out += ANSI_SIMPLE[n]; i++; continue }
+    if (n === undefined) { text('\\'); continue }
+    if (n in ANSI_SIMPLE) { text(ANSI_SIMPLE[n]); i++; continue }
     const numeric = /^(?:[0-7]{1,3}|x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8})/u.exec(line.slice(i + 1))
     if (numeric) {
       const digits = numeric[0]
-      const code = /^[0-7]/u.test(digits) ? parseInt(digits, 8) : parseInt(digits.slice(1), 16)
-      out += code <= 0x10FFFF ? String.fromCodePoint(code) : '�'
+      const octal = /^[0-7]/u.test(digits)
+      const code = octal ? parseInt(digits, 8) : parseInt(digits.slice(1), 16)
+      if (octal || digits[0] === 'x') bytes.push(code & 255)
+      else {
+        if (code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) throw new UnsupportedError('feature', 'ANSI-C Unicode escape', 'ANSI-C escapes outside Unicode scalar values are not supported')
+        text(String.fromCodePoint(code))
+      }
       i += digits.length
       continue
     }
     if (n === 'c' && line[i + 2] !== undefined && line[i + 2] !== "'") {
-      out += String.fromCodePoint(line[i + 2].toUpperCase().codePointAt(0) ^ 0x40)
+      bytes.push(line[i + 2].toUpperCase().codePointAt(0) ^ 0x40)
       i += 2
       continue
     }
-    out += '\\'
+    text('\\')
   }
   if (i >= line.length) throw new Error('unterminated single quote')
-  const nul = out.indexOf('\0')
-  return { text: nul === -1 ? out : out.slice(0, nul), end: i + 1 }
+  const nul = bytes.indexOf(0)
+  return { text: utf8Decoder.decode(Uint8Array.from(nul === -1 ? bytes : bytes.slice(0, nul))), end: i + 1 }
 }
 
 // The boundary token starting at `line[i]`, or null when the character
@@ -138,6 +148,7 @@ function readRedirect(line, i, fd) {
   if (n === '(') throw new UnsupportedError('feature', `${c}(`, `process substitution (\`${c}(…)\`) is not supported`)
   if (n === '&') return readDup(line, i + 1, fd, c === '<' ? '<&' : `${fd === 1 && c === '>' ? '' : fd}>&`)
   if (c === '<') {
+    if (n === '>') throw new UnsupportedError('feature', '<>', 'read/write file redirects are not supported')
     if (line.slice(i, i + 3) === '<<<') return { token: { kind: 'redir', fd, op: 'herestring' }, end: i + 3 }
     if (n === '<') {
       const strip = line[i + 2] === '-'
@@ -160,7 +171,7 @@ function readDup(line, ampAt, fd, label) {
   const boundary = after === undefined || /[\s|&>;()<]/u.test(after)
   if (/[0-9]/u.test(target ?? '') && boundary) return { token: { kind: 'redir', fd, op: 'dup', toFd: Number(target) }, end: ampAt + 2 }
   if (target === '-' && boundary) return { token: { kind: 'redir', fd, op: 'close' }, end: ampAt + 2 }
-  throw new Error(`redirect \`${label}\` requires a file descriptor number (or \`-\`) followed by a token boundary`)
+  throw new UnsupportedError('feature', 'redirect target', `redirect \`${label}\` requires a file descriptor number (or \`-\`) followed by a token boundary`)
 }
 
 // Here-document bodies. Called at the newline that ends the line the

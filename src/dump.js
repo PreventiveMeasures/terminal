@@ -16,6 +16,7 @@
 // `wc -c` counts — `é` is two bytes (c3 a9), each shown as `.` in any
 // ASCII gutter since they fall outside the printable 0x20–0x7e range.
 
+import { unsupported } from './unsupported.js'
 import { parseArgs } from './parse.js'
 import { err, okWith, parseNonNegativeInt, readContent, utf8 } from './util.js'
 
@@ -56,7 +57,9 @@ export function od(stdin, tokens, ctx) {
 // skip/limit.
 export function xxd(stdin, tokens, ctx) {
   const { values, positional } = parseArgs(tokens, { valueShort: ['s', 'l'] })
-  const sl = slice('xxd', positional, stdin, ctx, { skip: values.get('s'), len: values.get('l'), skipFlag: '-s', lenFlag: '-l' })
+  if (positional.length > 2) return err('xxd: too many operands')
+  if (positional.length === 2 && positional[1] !== '-') return unsupported('feature', 'xxd', 'output file', 'xxd: output files are not supported (filesystem is read-only)')
+  const sl = slice('xxd', positional.slice(0, 1), stdin, ctx, { skip: values.get('s'), len: values.get('l'), skipFlag: '-s', lenFlag: '-l' })
   if (sl.error) return sl.error
   return okWith(dump(sl.bytes, sl.start, false, XXD), sl.r)
 }
