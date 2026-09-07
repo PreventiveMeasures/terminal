@@ -78,22 +78,29 @@ export function parseLine(line) {
 // `steps`; a "loop stage" likewise carries its content in `loop.body`.
 // Their words are unreachable, but checking `.group` / `.loop` first
 // lets the same validator handle every shape.
-//
-// Redirects alone are a stage: bash's null command performs them and
-// nothing else, so `>/dev/null` is a complete command with status 0 and
-// `! </missing` reports the failure, takes status 1 from it and negates
-// that to 0. Only a stage with nothing at all — `echo a | | wc` — is the
-// empty one.
 function validateSteps(steps) {
   for (const step of steps) {
     if (step.stages.length === 0 && !step.bang) throw new Error('empty pipeline stage')
     for (const s of step.stages) {
       if (s.group) validateSteps(s.group)
       else if (s.loop) validateSteps(s.loop.body)
-      else if (s.words.length === 0 && s.assigns.length === 0 && s.redirs.length === 0) throw new Error('empty pipeline stage')
+      else if (!isCommand(s)) throw new Error('empty pipeline stage')
     }
   }
 }
+
+// Whether a stage is something bash would run: a command, an
+// assignment-only command, or the null command — redirects alone, which
+// bash performs and nothing else, so `>/dev/null` is a complete command
+// with status 0 and `! </missing` reports the failure, takes status 1
+// from it and negates that to 0. A stage with none of the three
+// (`echo a | | wc`) is the empty one.
+//
+// Consulted before `|&` contributes its own `2>&1` as well as by the
+// validator: that redirect is the operator's, not the user's, and
+// letting it land first would make the empty stage in `|& echo hi` look
+// like a null command instead of the syntax error bash reports.
+const isCommand = (s) => s.words.length > 0 || s.assigns.length > 0 || s.redirs.length > 0
 
 const newStage = () => ({ words: [], assigns: [], redirs: [] })
 const newStep = (gate) => ({ gate, stages: [], negate: false, bang: false })
@@ -170,7 +177,7 @@ function buildSteps(raw, start, end) {
     }
     if (t.kind === 'pipe' || t.kind === 'pipe_err' || t.kind === 'and' || t.kind === 'or' || t.kind === 'semi') {
       // `|&` is `2>&1 |`, applied after the stage's own redirects.
-      if (t.kind === 'pipe_err') stage.redirs.push({ fd: 2, op: 'dup', toFd: 1 })
+      if (t.kind === 'pipe_err' && isCommand(stage)) stage.redirs.push({ fd: 2, op: 'dup', toFd: 1 })
       if (!(t.kind === 'semi' && bareBang(steps.at(-1), stage))) steps.at(-1).stages.push(stage)
       stage = newStage()
       if (t.kind === 'and') steps.push(newStep('and'))

@@ -257,10 +257,36 @@ describe('shell syntax — brace and pathname expansion', () => {
     assert.equal(out('echo x[[:bogus:]]y sub/[[:bogus:]]', t), 'x[[:bogus:]]y sub/[[:bogus:]]\n')
     // A name is a class only in the `[:name:]` shape and in lower case.
     assert.equal(out('echo [[:BOGUS:]]', t), '[[:BOGUS:]]\n')
+    // An empty class must not let its neighbours fuse into a range.
+    assert.equal(out('echo [a-[:bogus:]x]', t), '[a-[:bogus:]x]\n')
     const r = t.run('echo [[:bogus:]]')
     assert.deepEqual([r.stderr, r.exitCode], ['', 0])
     // grep keeps rejecting it — that is a POSIX pattern, not a glob.
     assert.notEqual(t.run('echo b | grep "[[:bogus:]]"').exitCode, 0)
+  })
+
+  it('no POSIX class may end a range, and a `-` after one is a member', () => {
+    // fnmatch rejects a range whose end is a class, and a pattern it
+    // rejects matches nothing — even negated. Unknown and known names
+    // alike, so an empty class body can never fuse `a-` and `x` into a
+    // live `[a-x]`.
+    const t = createTerminal({ a: '', b: '', c: '', x: '', A: '', '-': '' })
+    for (const line of ['[a-[:bogus:]x]', '[a-[:alpha:]x]', '[A-[:lower:]]', '[a-[:bogus:]]', '[^a-[:bogus:]x]', '[!a-[:alpha:]x]']) {
+      assert.equal(out(`echo ${line}`, t), `${line}\n`, line)
+    }
+    // A class may sit on either side of a `-` that is a MEMBER: after
+    // one, `-` cannot open a range, so these are sets plus a hyphen.
+    assert.equal(out('echo [[:bogus:]-x]', t), '- x\n')
+    assert.equal(out('echo [[:digit:]-b]', t), '- b\n')
+    assert.equal(out('echo [[:alpha:]-[:digit:]]', t), '- A a b c x\n')
+    // An escaped `-` is a member too, so the class after it still ends
+    // no range; and the `-` closing a range cannot open the next.
+    assert.equal(out('echo [a\\-[:bogus:]x]', t), '- a x\n')
+    assert.equal(out('echo [-[:bogus:]x]', t), '- x\n')
+    assert.equal(out('echo [a-c-[:bogus:]]', t), '- a b c\n')
+    // Ordinary ranges are untouched.
+    assert.equal(out('echo [a-c]', t), 'a b c\n')
+    assert.equal(out('echo []-x]', t), 'a b c x\n')
   })
 
   it('quoted characters inside a bracket expression are members, and a bad range is literal', () => {
@@ -294,10 +320,15 @@ describe('shell syntax — redirects', () => {
     assert.equal(missing.stdout, 'rc=1\n')
     assert.match(missing.stderr, /nope: No such file or directory/u)
     assert.equal(out('! < nope 2>/dev/null; echo rc=$?', t), 'rc=0\n')
-    // A stage with nothing at all in it is still the empty one.
-    for (const line of ['echo a | | wc -l', 'echo a &&', '()', '{ }']) {
+    // A stage with nothing at all in it is still the empty one — and
+    // `|&` must not disguise one, since its `2>&1` is the operator's
+    // redirect rather than a null command the user wrote.
+    for (const line of ['echo a | | wc -l', 'echo a &&', '()', '{ }', '|& echo hi', '{ |& echo hi; }', '! |& echo hi']) {
       assert.equal(t.run(line).exitCode, 2, line)
     }
+    // `|&` after a real null command is still fine.
+    assert.equal(out('>/dev/null |& cat; echo rc=$?', t), 'rc=0\n')
+    assert.equal(out('cat nope |& wc -l', t), '1\n')
   })
 
   it('redirects apply left to right, so `2>&1 >/dev/null` keeps stderr and drops stdout', () => {
