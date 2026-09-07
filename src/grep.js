@@ -226,7 +226,11 @@ function pickShowName(flags, recursive, nFiles) {
 
 function grepInputs(recursive, stdin, rest, ctx, filters) {
   if (recursive) return readFilesRecursive('grep', rest.length > 0 ? rest : ['.'], ctx, filters.dir)
-  if (rest.length > 0) return readFilesFor('grep', rest, ctx)
+  // A `-` operand is stdin, labelled the way grep labels it.
+  if (rest.length > 0) {
+    const r = readFilesFor('grep', rest, ctx, stdin)
+    return { ...r, inputs: r.inputs.map((i) => (i.name === '-' ? { ...i, name: null } : i)) }
+  }
   return { inputs: [{ name: null, content: stdin }], stderr: '', failed: false }
 }
 

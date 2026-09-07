@@ -252,7 +252,8 @@ function takeFrom(cmd, stdin, files, ctx, pick, banner = null) {
     // an explicit `-v` (no operands means no banner otherwise). GNU
     // titles it `standard input`; interpolating the null printed a
     // literal `==> null <==`. Same convention grep uses for stdin.
-    blocks.push(showHeader ? `${i > 0 ? '\n' : ''}==> ${name ?? 'standard input'} <==\n${body}` : body)
+    const label = name === null || name === '-' ? 'standard input' : name
+    blocks.push(showHeader ? `${i > 0 ? '\n' : ''}==> ${label} <==\n${body}` : body)
   }
   return okWith(blocks.join(''), r)
 }
@@ -419,15 +420,23 @@ function uniq(stdin, tokens, ctx) {
   return okWith(joinLines(out), r)
 }
 
-// `-n` drops the trailing newline; `-e` enables backslash-escape
-// interpretation (`-E`, the default, disables it). The parser tracks
-// flags in a set, not by order, so when both `-e` and `-E` appear we
-// honor `-e` rather than bash's last-one-wins — a rare combination.
+// bash's `echo` builtin, whose option parsing is its own: a leading
+// word is an option only if it is entirely `-` followed by `n`, `e` and
+// `E` letters, and anything else — `--`, `-x`, `-n5`, a later `-n` —
+// is printed. `-n` drops the trailing newline; `-e` enables
+// backslash-escape interpretation and `-E` disables it, last one wins.
 function echo(_stdin, tokens) {
-  const { flags, positional } = parseArgs(tokens, { short: ['n', 'e', 'E'] })
-  let out = positional.join(' ')
-  let trailingNewline = !flags.has('n')
-  if (flags.has('e')) {
+  let i = 0
+  let trailingNewline = true
+  let escapes = false
+  for (; i < tokens.length && /^-[neE]+$/u.test(tokens[i]); i++) {
+    for (const c of tokens[i].slice(1)) {
+      if (c === 'n') trailingNewline = false
+      else escapes = c === 'e'
+    }
+  }
+  let out = tokens.slice(i).join(' ')
+  if (escapes) {
     const r = interpretEscapes(out)
     out = r.text
     // `\c` halts output and suppresses the trailing newline.
@@ -436,10 +445,10 @@ function echo(_stdin, tokens) {
   return ok(trailingNewline ? out + '\n' : out)
 }
 
-// Backslash escapes recognized by GNU coreutils `echo -e`. `\c` stops
-// all further output; octal `\0NNN` (up to 3 digits) and hex `\xHH`
-// (up to 2 digits) map to the matching code point. An unrecognized
-// escape keeps its backslash literal, as GNU does.
+// Backslash escapes recognized by bash's `echo -e`. `\c` stops all
+// further output; octal `\0NNN` (up to 3 digits), hex `\xHH` (up to 2
+// digits) and `\uHHHH` / `\UHHHHHHHH` map to the matching code point.
+// An unrecognized escape keeps its backslash literal, as bash does.
 function interpretEscapes(s) {
   // letter -> code point: BEL, BS, ESC, FF, LF, CR, TAB, VT, backslash.
   const simple = { a: 7, b: 8, e: 27, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92 }
@@ -455,10 +464,12 @@ function interpretEscapes(s) {
       out += String.fromCodePoint(digits === '' ? 0 : parseInt(digits, 8))
       continue
     }
-    if (c === 'x' && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) {
+    const hexLen = c === 'x' ? 2 : c === 'u' ? 4 : c === 'U' ? 8 : 0
+    if (hexLen > 0 && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) {
       let digits = ''
-      while (digits.length < 2 && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) digits += s[++i]
-      out += String.fromCodePoint(parseInt(digits, 16))
+      while (digits.length < hexLen && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) digits += s[++i]
+      const code = parseInt(digits, 16)
+      out += code <= 0x10FFFF ? String.fromCodePoint(code) : '\uFFFD'
       continue
     }
     out += '\\' + c

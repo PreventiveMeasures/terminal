@@ -60,11 +60,15 @@ export const joinLines = (lines) => lines.length === 0 ? '' : lines.join('\n') +
 // gets nothing at all. `entries` carries every operand in order with
 // that distinction as `kind`; `inputs` is the readable subset, which is
 // what every other caller wants, so this changed nothing for them.
-export function readFilesFor(cmd, files, ctx) {
+// `stdin` backs a `-` operand.
+export function readFilesFor(cmd, files, ctx, stdin = '') {
   const entries = []
   let stderr = ''
   let failed = false
   for (const f of files) {
+    // `-` is the standard input, by the convention every coreutils
+    // reader follows; it keeps its name so banners can label it.
+    if (f === '-') { entries.push({ name: '-', content: stdin, kind: 'file' }); continue }
     const abs = resolve(ctx.cwd, f)
     if (ctx.fs.isDir(abs)) {
       stderr += `${cmd}: ${f}: is a directory\n`
@@ -93,7 +97,7 @@ export function readInputs(cmd, files, stdin, ctx) {
     const only = [{ name: null, content: stdin, kind: 'file' }]
     return { inputs: only, entries: only, stderr: '', failed: false }
   }
-  return readFilesFor(cmd, files, ctx)
+  return readFilesFor(cmd, files, ctx, stdin)
 }
 
 // The concatenated-stream model: every readable input joined into one
