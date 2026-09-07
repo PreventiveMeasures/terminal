@@ -61,7 +61,11 @@ export const joinLines = (lines) => lines.length === 0 ? '' : lines.join('\n') +
 // that distinction as `kind`; `inputs` is the readable subset, which is
 // what every other caller wants, so this changed nothing for them.
 // `stdin` backs a `-` operand — the first one; a second `-` names the
-// same stream and finds it at end of file, as `cat - -` does.
+// same stream and finds it at end of file, as `cat - -` does. Such
+// entries are marked `shared` so a reader that stops short (`head`)
+// can leave the rest for the next one. `/dev/stdin` is that stream too
+// when it is a pipe; on a regular file it reopens the file from the
+// start, on its own, as the kernel does.
 export function readFilesFor(cmd, files, ctx, stdin = '') {
   const entries = []
   let stderr = ''
@@ -70,7 +74,8 @@ export function readFilesFor(cmd, files, ctx, stdin = '') {
   for (const f of files) {
     // `-` is the standard input, by the convention every coreutils
     // reader follows; it keeps its name so banners can label it.
-    if (f === '-') { entries.push({ name: '-', content: pipe, kind: 'file' }); pipe = ''; continue }
+    if (f === '/dev/stdin' && ctx.stdinFile) { entries.push({ name: f, content: stdin, kind: 'file' }); continue }
+    if (f === '-' || f === '/dev/stdin') { entries.push({ name: f, content: pipe, kind: 'file', shared: true }); pipe = ''; continue }
     const abs = resolve(ctx.cwd, f)
     if (ctx.fs.isDir(abs)) {
       stderr += `${cmd}: ${f}: is a directory\n`

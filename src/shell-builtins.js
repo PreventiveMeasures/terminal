@@ -17,19 +17,21 @@ import { unsupported } from './unsupported.js'
 // arranges by dropping `halt` at those boundaries. An argument that is
 // not a number bash can hold (a 64-bit integer) is an error that still
 // exits, with status 2, and so is more than one argument, with status
-// 1 — both as bash 5.2 behaves. BigInt keeps the modulo exact for any
-// length of digits.
+// 1 — both as bash 5.2 behaves, which checks the first argument before
+// counting them (`exit nope 1` is the numeric error) and skips a
+// leading `--`. BigInt keeps the modulo exact for any length of digits.
 const INT64_MAX = 9223372036854775807n
 const INT64_MIN = -9223372036854775808n
 
 function exit(_stdin, tokens, ctx) {
-  if (tokens.length > 1) return { stdout: '', stderr: 'exit: too many arguments\n', exitCode: 1, halt: true }
-  if (tokens.length === 0) return { stdout: '', stderr: '', exitCode: ctx.lastExit, halt: true }
-  const arg = tokens[0]
+  const args = tokens[0] === '--' ? tokens.slice(1) : tokens
+  if (args.length === 0) return { stdout: '', stderr: '', exitCode: ctx.lastExit, halt: true }
+  const arg = args[0]
   const n = /^[+-]?\d+$/u.test(arg) ? BigInt(arg) : null
   if (n === null || n > INT64_MAX || n < INT64_MIN) {
     return { stdout: '', stderr: `exit: ${arg}: numeric argument required\n`, exitCode: 2, halt: true }
   }
+  if (args.length > 1) return { stdout: '', stderr: 'exit: too many arguments\n', exitCode: 1, halt: true }
   return { stdout: '', stderr: '', exitCode: Number(((n % 256n) + 256n) % 256n), halt: true }
 }
 

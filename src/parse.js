@@ -386,11 +386,13 @@ function applyRedir(stage, raw, i) {
   }
   const target = raw[i + 1]
   if (!target || target.kind !== 'word') throw new Error(`redirect \`${label}\` requires a target`)
-  if (op.op === 'heredoc') { stage.redirs.push({ fd: 0, op: 'text', body: op.body ?? '', expand: !op.quotedDelim }); return i + 1 }
-  if (op.op === 'herestring') { stage.redirs.push({ fd: 0, op: 'herestring', word: wordOf(target) }); return i + 1 }
-  if (op.op === 'read') {
+  if (op.op === 'heredoc' || op.op === 'herestring' || op.op === 'read') {
+    // Bash opens `2<<END` or `2<f` on that descriptor, for reading; a
+    // command's write into it then fails. Only fd 0 is modeled.
     if (op.fd !== 0) throw new UnsupportedError('feature', label, `reading into file descriptor ${op.fd} (\`${label}\`) is not supported`)
-    stage.redirs.push({ fd: 0, op: 'read', word: wordOf(target) })
+    if (op.op === 'heredoc') stage.redirs.push({ fd: 0, op: 'text', body: op.body ?? '', expand: !op.quotedDelim })
+    else if (op.op === 'herestring') stage.redirs.push({ fd: 0, op: 'herestring', word: wordOf(target) })
+    else stage.redirs.push({ fd: 0, op: 'read', word: wordOf(target) })
     return i + 1
   }
   if (op.fd === 0) throw new UnsupportedError('feature', label, `writing to file descriptor 0 (\`${label}\`) is not supported`)

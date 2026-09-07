@@ -60,7 +60,9 @@ export function createTerminal(sources, opts = {}) {
   // to exist. `vars` holds `for` bindings and `NAME=value` assignments;
   // `lastExit` is `$?`; `cd` keeps `OLDPWD` in `vars`, as bash does.
   // `closed` says which of the running stage's output streams `>&-`
-  // closed, so a write into one can fail as bash's commands fail.
+  // closed, so a write into one can fail as bash's commands fail;
+  // `stdinFile` whether its standard input is a regular file (`< path`)
+  // rather than a pipe, which decides how much of it `head - -` leaves.
   //
   // `registry` rides on ctx so the engine's step/pipeline/stage
   // functions — which already thread ctx everywhere — reach the
@@ -70,7 +72,7 @@ export function createTerminal(sources, opts = {}) {
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
   const ctx = {
     cwd, fs, user: opts.user ?? 'user', home: '/', registry,
-    vars: new Map(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false },
+    vars: new Map(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false,
     unsupported: createUnsupportedFeed(),
   }
   // Commands like `xargs` need to invoke other commands. Exposing
@@ -211,9 +213,10 @@ function runPipeline(stages, ctx, initialStdin) {
   let stderr = ''
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]
-    const io = resolveRedirs(stage, ctx, stdin)
+    // The first stage inherits the enclosing input; a later one reads the pipe.
+    const io = resolveRedirs(stage, ctx, stdin, i === 0 && ctx.stdinFile)
     const run = () => (stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx, io.stdin) : runStage(stage, ctx, io.stdin))
-    const result = io.error ?? withClosed(io.fds, ctx, () => (stages.length > 1 ? isolated(ctx, run) : run()))
+    const result = io.error ?? withStreams(io, ctx, () => (stages.length > 1 ? isolated(ctx, run) : run()))
     const errText = io.warnings + result.stderr
     let stageOut = ''
     let stageErr = ''
@@ -236,13 +239,17 @@ function runPipeline(stages, ctx, initialStdin) {
 // Apply a stage's redirects in order. `fds` maps fd 1 and 2 to where
 // their text ends up (`closed` after `>&-`); `stdin` is replaced by
 // `<`, `<<` and `<<<`, and `/dev/stdin` names it as redirected so far.
-// Targets that needed expansion are checked here with the same rule
-// parse.js applied to literal ones. Duplicating a closed descriptor,
-// or opening `/dev/stdout` over one, is the error bash gives.
-function resolveRedirs(stage, ctx, stdin) {
+// `stdinFile` follows along: true once `<` opened a regular file, false
+// after a here-document or here-string (bash feeds those through a
+// pipe), unchanged by `/dev/stdin`. Targets that needed expansion are
+// checked here with the same rule parse.js applied to literal ones.
+// Duplicating a closed descriptor, or opening `/dev/stdout` over one,
+// is the error bash gives.
+function resolveRedirs(stage, ctx, stdin, stdinFile) {
   const fds = { 1: 'out', 2: 'err' }
   const warnings = []
   let input = stdin
+  let file = stdinFile
   for (const r of stage.redirs) {
     if (r.op === 'dup') {
       if (fds[r.toFd] === 'closed') return { error: err(`error: ${r.toFd}: Bad file descriptor`), fds, warnings: warnings.join('') }
@@ -260,32 +267,36 @@ function resolveRedirs(stage, ctx, stdin) {
       if (dest === 'closed') return { error: err(`error: ${t.value}: No such file or directory`), fds, warnings: warnings.join('') }
       fds[r.fd] = dest
       if (r.both) fds[2] = dest
-    } else if (r.op === 'text') input = r.expand ? expandScalar(heredocWord(r.body), ctx, warnings) : r.body
+    } else if (r.op === 'text') { input = r.expand ? expandScalar(heredocWord(r.body), ctx, warnings) : r.body; file = false }
     // A here-string is expanded but neither split nor globbed (bash).
-    else if (r.op === 'herestring') input = expandScalar(r.word, ctx, warnings) + '\n'
+    else if (r.op === 'herestring') { input = expandScalar(r.word, ctx, warnings) + '\n'; file = false }
     else {
       const t = expandRedirect(r.word, ctx, warnings)
       const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, input)
       if (read.error) return { error: read.error, fds, warnings: warnings.join('') }
       input = read.content
+      if (t.value !== '/dev/stdin') file = t.value !== '/dev/null'
     }
   }
-  return { fds, stdin: input, warnings: warnings.join('') }
+  return { fds, stdin: input, stdinFile: file, warnings: warnings.join('') }
 }
 
-// Run a stage knowing which of its output streams lead nowhere: a
-// descriptor `>&-` closed on the stage itself, or one that points
+// Run a stage knowing its streams: which of its outputs lead nowhere —
+// a descriptor `>&-` closed on the stage itself, or one that points
 // (`out` / `err`) at a stream the enclosing stage already closed, as
-// `{ echo a; }` does under `>&-`. runStage turns a write into such a
-// stream into the error bash's commands report.
-function withClosed(fds, ctx, fn) {
-  const outer = ctx.closed
-  const closedAt = (fd) => fds[fd] === 'closed' || (fds[fd] === 'out' && outer.out) || (fds[fd] === 'err' && outer.err)
+// `{ echo a; }` does under `>&-` — and whether its input is a regular
+// file. runStage turns a write into a closed stream into the error
+// bash's commands report; `head` reads the input's kind.
+function withStreams(io, ctx, fn) {
+  const outer = { closed: ctx.closed, stdinFile: ctx.stdinFile }
+  const closedAt = (fd) => io.fds[fd] === 'closed' || (io.fds[fd] === 'out' && outer.closed.out) || (io.fds[fd] === 'err' && outer.closed.err)
   ctx.closed = { out: closedAt(1), err: closedAt(2) }
+  ctx.stdinFile = io.stdinFile
   try {
     return fn()
   } finally {
-    ctx.closed = outer
+    ctx.closed = outer.closed
+    ctx.stdinFile = outer.stdinFile
   }
 }
 

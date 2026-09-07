@@ -316,6 +316,11 @@ describe('shell syntax — redirects', () => {
   it('a real file target is refused with a gap; unusual descriptors are gaps or errors as in bash', () => {
     assert.deepEqual(gaps('echo hi > out.txt'), ['feature:>'])
     assert.deepEqual(gaps('echo hi 3>/dev/null'), ['feature:3>'])
+    // Bash opens these for reading on that descriptor; only fd 0 is modeled.
+    assert.deepEqual(gaps('cat 2<<< x'), ['feature:2<<<'])
+    assert.deepEqual(gaps('cat 2<<END\nbody\nEND'), ['feature:2<<'])
+    assert.deepEqual(gaps('cat 2<a.txt'), ['feature:2<'])
+    assert.equal(out('cat 0<<< x'), 'x\n')
     assert.deepEqual(gaps('x=out.txt; echo hi > $x'), ['feature:>'])
     // `>&3` is bash's own error: nothing opened fd 3.
     const bad = term().run('echo hi >&3')
@@ -347,6 +352,14 @@ describe('shell syntax — compound commands', () => {
     const bad = term().run('exit abc; echo never')
     assert.deepEqual([bad.stdout, bad.exitCode], ['', 2])
     assert.match(bad.stderr, /numeric argument required/u)
+    // The first argument is checked before the count of them, as bash checks; `--` is skipped.
+    const first = term().run('exit nope 1')
+    assert.deepEqual([first.stderr, first.exitCode], ['exit: nope: numeric argument required\n', 2])
+    const many = term().run('exit 1 nope')
+    assert.deepEqual([many.stderr, many.exitCode], ['exit: too many arguments\n', 1])
+    for (const [line, code] of [['exit -- 3', 3], ['exit --', 0], ['exit -x', 2], ['exit -- -1 2', 1]]) {
+      assert.equal(term().run(line).exitCode, code, line)
+    }
     assert.deepEqual(gaps('exit 1'), [])
   })
 
@@ -503,6 +516,42 @@ describe('shell syntax — command conventions', () => {
     assert.equal(out('echo a | grep -c a - -'), '(standard input):1\n(standard input):0\n')
     assert.equal(out('echo a | head -n1 - -'), '==> standard input <==\na\n\n==> standard input <==\n')
     assert.equal(out("echo a | awk '{ print FILENAME, $0 }' - -"), '- a\n')
+  })
+
+  it('`/dev/stdin` names the standard input too; on a regular file it reopens from the start', () => {
+    assert.equal(out('echo hi | cat /dev/stdin'), 'hi\n')
+    assert.equal(out('echo hi | cat - /dev/stdin'), 'hi\n')
+    assert.equal(out('echo hi | cat /dev/stdin /dev/stdin'), 'hi\n')
+    assert.equal(out('echo a | grep -H a /dev/stdin'), '/dev/stdin:a\n')
+    assert.equal(out('echo a | grep -c a /dev/stdin /dev/stdin'), '/dev/stdin:1\n/dev/stdin:0\n')
+    assert.equal(out('echo a | wc -l /dev/stdin'), '1 /dev/stdin\n')
+    assert.equal(out('cat /dev/stdin /dev/stdin < b.txt'), 'B\nB\n')
+    assert.equal(out('cat - /dev/stdin < b.txt'), 'B\nB\n')
+  })
+
+  it('head leaves the standard input where GNU head leaves it for the next `-`', () => {
+    const banners = (a, b) => `==> standard input <==\n${a}\n==> standard input <==\n${b}`
+    // `-c N` on a pipe reads exactly N bytes.
+    assert.equal(out('echo -n abc | head -c 1 - -'), banners('a', 'b'))
+    assert.equal(out('echo -n abc | head -c 1 - - -'), `${banners('a', 'b')}\n==> standard input <==\nc`)
+    assert.equal(out('echo -n abc | head -qc 1 - -'), 'ab')
+    assert.equal(out('echo -n abc | head -c 5 - -'), banners('abc', ''))
+    assert.equal(out('echo -n abc | head -c 1 /dev/stdin -'), '==> /dev/stdin <==\na\n==> standard input <==\nb')
+    // `-n N` on a regular file seeks back to the end of line N; a pipe,
+    // a here-string or a here-document is read in whole buffers.
+    assert.equal(out('head -n1 - - < a.txt'), banners('x y z\n', 'hello world\n'))
+    assert.equal(out('cat a.txt | head -n1 - -'), banners('x y z\n', ''))
+    assert.equal(out('head -n1 - - <<< "x y z"'), banners('x y z\n', ''))
+    assert.equal(out('head -c 1 - - < a.txt'), banners('x', ''))
+    assert.equal(out('head -n -1 - - < a.txt'), banners('x y z\n', ''))
+    assert.equal(out('head -n1 /dev/stdin - < a.txt'), '==> /dev/stdin <==\nx y z\n\n==> standard input <==\nx y z\n')
+    // A group, a subshell and a loop hand their own input on.
+    assert.equal(out('{ head -n1 - -; } < a.txt'), banners('x y z\n', 'hello world\n'))
+    assert.equal(out('(head -n1 - -) < a.txt'), banners('x y z\n', 'hello world\n'))
+    assert.equal(out('for i in 1; do head -n1 - -; done < a.txt'), banners('x y z\n', 'hello world\n'))
+    assert.equal(out('cat a.txt | { head -n1 - -; }'), banners('x y z\n', ''))
+    // tail reads to the end.
+    assert.equal(out('echo -n abc | tail -c 1 - -'), banners('c', ''))
   })
 
   it('a value option with its argument glued on is an option, even quoted with a space', () => {

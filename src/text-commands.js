@@ -92,8 +92,29 @@ function head(stdin, tokens, ctx) {
   // head always counts from the front; the sign only decides where the
   // slice STOPS — at N, or N short of the end.
   const range = (total) => [0, count.sign === '-' ? Math.max(0, total - count.value) : count.value]
-  if (unit === 'c') return takeBytes('head', stdin, positional, ctx, range, banner)
-  return takeLines('head', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner)
+  const leftover = headLeftover(count, unit, ctx)
+  if (unit === 'c') return takeBytes('head', stdin, positional, ctx, range, banner, leftover)
+  return takeLines('head', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner, leftover)
+}
+
+// What a `-` operand leaves of the standard input for the next `-`, as
+// GNU head leaves it (checked against coreutils 9.4): `-c N` on a pipe
+// reads exactly N bytes, and `-n N` on a regular file seeks back to the
+// end of line N. Every other form reads to the end — a minus count must
+// see the end to know where to stop, `-c N` on a file takes a whole
+// buffer, and so does `-n N` on a pipe, where anything shorter than one
+// (8 KiB, not modeled) is gone with it.
+function headLeftover(count, unit, ctx) {
+  if (count.sign === '-' || unit === 'c' === Boolean(ctx.stdinFile)) return () => ''
+  if (unit === 'c') return (content) => sliceBytes(content, (total) => [Math.min(count.value, total), total])
+  return (content) => {
+    let pos = 0
+    for (let k = 0; k < count.value && pos < content.length; k++) {
+      const nl = content.indexOf('\n', pos)
+      pos = nl === -1 ? content.length : nl + 1
+    }
+    return content.slice(pos)
+  }
 }
 
 // `-v` always banners, `-q` never does, and with neither the operand
@@ -185,8 +206,8 @@ function applyDashNumberShorthand(tokens, values, positional) {
 // lines at all, and suppressing its terminator would print nothing where
 // GNU prints a newline. Branching on the array length keeps the two
 // apart (`head -n 1` of a file of blank lines is one `\n`).
-function takeLines(cmd, stdin, files, ctx, picker, banner) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => joinLines(picker(splitLines(content))), banner)
+function takeLines(cmd, stdin, files, ctx, picker, banner, leftover) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => joinLines(picker(splitLines(content))), banner, leftover)
 }
 
 // `head -c N` takes the first N BYTES of each input instead of its
@@ -194,8 +215,8 @@ function takeLines(cmd, stdin, files, ctx, picker, banner) {
 // bytes verbatim, so `head -c 3` of `hello\n` is `hel` with nothing
 // after it, and in the multi-input form it's the `\n` before the next
 // banner that ends the block.
-function takeBytes(cmd, stdin, files, ctx, range, banner) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => sliceBytes(content, range), banner)
+function takeBytes(cmd, stdin, files, ctx, range, banner, leftover) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => sliceBytes(content, range), banner, leftover)
 }
 
 // A cut can land mid-character: `head -c 1` of `é` keeps only the
@@ -235,7 +256,11 @@ function sliceBytes(content, range) {
 // GNU, whose own "first file" flag flips on the first banner WRITTEN,
 // not on the first operand tried. That same `\n` is what terminates the
 // preceding block when its chunk doesn't end in one.
-function takeFrom(cmd, stdin, files, ctx, pick, banner = null) {
+//
+// Operands that share the standard input read it in turn: each gets
+// what the one before left, which `leftover` computes (nothing, unless
+// the command stops short of the end, as `head -c N` does).
+function takeFrom(cmd, stdin, files, ctx, pick, banner = null, leftover = () => '') {
   if (banner?.error) return err(`${cmd}: ${banner.error}`)
   const r = readInputs(cmd, files, stdin, ctx)
   // `-q` / `-v` override the operand-count rule outright; `banner` is
@@ -243,8 +268,14 @@ function takeFrom(cmd, stdin, files, ctx, pick, banner = null) {
   const showHeader = banner ?? files.length > 1
   const opened = r.entries.filter((e) => e.kind !== 'missing')
   const blocks = []
+  let rest = null
   for (let i = 0; i < opened.length; i++) {
-    const { name, content, kind } = opened[i]
+    const { name, kind, shared } = opened[i]
+    let { content } = opened[i]
+    if (shared) {
+      if (rest !== null) content = rest
+      rest = leftover(content)
+    }
     // A directory yields no body at all — not even the newline an empty
     // line-pick would append — so `pick` is skipped for it entirely.
     const body = kind === 'dir' ? '' : pick(content)
