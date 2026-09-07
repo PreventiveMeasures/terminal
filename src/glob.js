@@ -2,7 +2,8 @@
 //
 // `compileGlob` / `globMatch` — basename / full-path predicate
 //   (used by find for -name and -path, where matching is per-entry
-//   against a single pattern). `*` and `?` are the only metachars;
+//   against a single pattern). `*`, `?`, and bracket expressions are
+//   metachars;
 //   `*` spans `/` in this form, matching the `-path '*/node_modules/*'`
 //   idiom. Hot-path callers compile once and reuse the RegExp;
 //   `globMatch` is the one-shot convenience.
@@ -19,11 +20,13 @@
 //   original text.
 
 import { joinPath, resolve } from './fs.js'
+import { UnsupportedError } from './unsupported.js'
 
-const META = /[*?]/u
+const META = /[*?[]/u
 
 // Compile a glob pattern to a RegExp. `*` → `.*` (no `/` exemption:
-// `*/foo/*` is the standard exclusion idiom), `?` → `.`, `\<x>` → `x`
+// `*/foo/*` is the standard exclusion idiom), `?` → `.`, bracket
+// expressions retain their usual character/range semantics, and `\<x>` → `x`
 // taken literally (so `\-foo` matches `-foo`, `\*` matches `*`),
 // other regex metacharacters escaped. Callers on hot paths (per-
 // directory scans, find's per-entry evaluation) should compile once
@@ -34,6 +37,10 @@ const META = /[*?]/u
 // first in the loop, so the `REGEX_META.test(c)` arm only sees other
 // metachars — the redundancy doesn't fire there.
 const REGEX_META = /[.+*?^${}()|[\]\\]/u
+const POSIX_CLASS_NAMES = new Set([
+  'alnum', 'alpha', 'blank', 'cntrl', 'digit', 'graph',
+  'lower', 'print', 'punct', 'space', 'upper', 'xdigit',
+])
 // `opts.ignoreCase` gives a caller case-insensitive matching (`find
 // -iname`); everything else about the translation is identical, so the
 // two spellings can never drift apart. It is an OPTIONS OBJECT rather
@@ -56,10 +63,55 @@ export function compileGlob(pattern, opts = {}) {
       i++
     } else if (c === '*') re += '.*'
     else if (c === '?') re += '.'
+    else if (c === '[') {
+      const bracket = readBracket(pattern, i)
+      if (bracket) { re += bracket.source; i = bracket.end }
+      else re += '\\['
+    }
     else if (REGEX_META.test(c)) re += '\\' + c
     else re += c
   }
   return new RegExp(re + '$', opts?.ignoreCase ? 'ui' : 'u')
+}
+
+// Translate one shell bracket expression. The closing `]` is allowed as
+// the first member (`[]a]`), and `!` / `^` in the first position negate
+// the class. An unmatched `[` remains literal, as fnmatch-style globs do.
+// Backslashes are already the glob language's quote character, so an
+// escaped class member is emitted literally rather than as regex syntax.
+// POSIX named classes, collating symbols, and equivalence classes are
+// locale-sensitive and cannot be represented faithfully with one static
+// JavaScript character class. Reject and diagnose them rather than using
+// ASCII approximations that silently miss input such as `É` under UTF-8.
+function readBracket(pattern, start) {
+  let i = start + 1
+  let negated = false
+  if (pattern[i] === '!' || pattern[i] === '^') { negated = true; i++ }
+  let body = ''
+  let members = 0
+  if (pattern[i] === ']') { body += '\\]'; i++; members++ }
+  for (; i < pattern.length && pattern[i] !== ']'; i++) {
+    const c = pattern[i]
+    if (c === '[' && pattern[i + 1] === ':') {
+      const end = pattern.indexOf(':]', i + 2)
+      if (end < 0) return null
+      const name = pattern.slice(i + 2, end)
+      if (!POSIX_CLASS_NAMES.has(name)) throw new Error(`invalid character class: ${name}`)
+      throw new UnsupportedError('feature', 'glob POSIX character class', 'locale-sensitive glob POSIX character classes are not supported')
+    }
+    if (c === '[' && (pattern[i + 1] === '.' || pattern[i + 1] === '=')) {
+      throw new UnsupportedError('feature', 'glob collating symbol', 'glob collating symbols and equivalence classes are not supported')
+    }
+    if (c === '\\' && i + 1 < pattern.length) {
+      const next = pattern[++i]
+      body += next === '-' || next === ']' || next === '\\' || next === '^' ? `\\${next}` : next
+    } else {
+      body += c === '\\' || c === ']' ? `\\${c}` : c
+    }
+    members++
+  }
+  if (i >= pattern.length || members === 0) return null
+  return { source: `[${negated ? '^' : ''}${body}]`, end: i }
 }
 
 export function globMatch(name, pattern) {

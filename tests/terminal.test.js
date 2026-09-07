@@ -6937,14 +6937,40 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     assert.ok(t.run("find . -name '*'").stdout.includes('plain'))
   })
 
-  it.todo('find -name glob supports character classes (`[fb]oo.js` matches `foo.js`)', () => {
-    // GNU shell-style glob accepts `[...]` (POSIX too). Our impl
-    // only models `*` and `?` (the glob.js header documents this).
-    // Silent miss — would benefit from either implementation or
-    // explicit rejection so users see "unsupported pattern".
+  it('find -name glob supports character classes (`[fb]oo.js` matches `foo.js`)', () => {
+    // GNU shell-style glob accepts `[...]` (POSIX too). This used to
+    // return an empty successful result: a particularly dangerous
+    // silent miss for agents narrowing a file traversal.
     const t = createTerminal({ 'src/foo.js': '', 'src/boo.js': '', 'src/bar.js': '' })
     const lines = new Set(t.run("find src -name '[fb]oo.js'").stdout.split('\n').filter(Boolean))
     assert.deepEqual(lines, new Set(['src/foo.js', 'src/boo.js']))
+    assert.equal(t.run("find src -name '[e-f]oo.js'").stdout, 'src/foo.js\n')
+    assert.equal(t.run("find src -name '[!f]oo.js'").stdout, 'src/boo.js\n')
+  })
+
+  it('argv glob expansion supports character classes and leaves unmatched `[` literal', () => {
+    const t = createTerminal({ 'a1.txt': 'a\n', 'b1.txt': 'b\n', 'c2.txt': 'c\n', '[': 'bracket\n' })
+    assert.equal(t.run('cat [ab]1.txt').stdout, 'a\nb\n')
+    assert.equal(t.run('cat [a-c][!1].txt').stdout, 'c\n')
+    assert.equal(t.run('cat [').stdout, 'bracket\n')
+  })
+
+  it('reports locale-sensitive bracket constructs instead of approximating them as ASCII', () => {
+    const t = createTerminal({ 'a1': '', 'aA': '', 'aÉ': '' })
+    for (const [pattern, detail] of [
+      ['a[[:upper:]]', 'glob POSIX character class'],
+      ['[[.a.]]', 'glob collating symbol'],
+      ['[[=a=]]', 'glob collating symbol'],
+    ]) {
+      const r = t.run(`find . -name '${pattern}' 2>/dev/null`)
+      assert.equal(r.stderr, '', pattern)
+      assert.deepEqual(r.unsupported.map((u) => [u.kind, u.command, u.detail]), [
+        ['feature', 'find', detail],
+      ], pattern)
+    }
+    const malformed = t.run("find . -name '[[:bogus:]]'")
+    assert.notEqual(malformed.exitCode, 0)
+    assert.deepEqual(malformed.unsupported, [])
   })
 
   it.todo('grep -r/-R prefixes paths with the user-typed `.` (matches GNU)', () => {
