@@ -31,7 +31,7 @@ export class AwkRegex {
     }
     this.ast = ast
     this.nfa = null
-    this.anchored = null
+    this.captureShape = captureShape(ast)
   }
 
   test(s) { this.checkLocale(s); return this.js.test(s) }
@@ -47,15 +47,29 @@ export class AwkRegex {
     return search(this.nfa, s, from)
   }
 
-  // Capture groups for a match whose extent is already known: the JS
-  // regex, anchored to exactly that span, assigns the groups. Entry 0 is
-  // the whole match; a group that did not take part is undefined.
+  // Keep the original subject for assertions and constrain the end to
+  // the NFA's match. Slicing the match would change ^, $, and boundaries.
   groups(s, start, end) {
-    if (this.anchored === null) this.anchored = new RegExp(`^(?:${this.source})$`, this.flags + 'd')
-    const m = this.anchored.exec(s.slice(start, end))
-    if (!m) return [{ text: s.slice(start, end), start, end }]
-    return m.indices.map((span, i) => (span === undefined ? undefined : { text: m[i], start: start + span[0], end: start + span[1] }))
+    if (this.captureShape.unsafe) throw new AwkError('capture extraction across repeated or alternative groups is not supported', null, 'regex capture semantics')
+    const remaining = Array.from(s.slice(end)).length
+    const re = new RegExp(`(?:${this.source})(?=.{${remaining}}(?![^]))`, this.flags + 'dy')
+    re.lastIndex = start
+    const m = re.exec(s)
+    if (!m) throw new AwkError('capture extraction for this match is not supported', null, 'regex capture semantics')
+    return m.indices.map((span, i) => (span === undefined ? undefined : { text: m[i], start: span[0], end: span[1] }))
   }
+}
+
+// JS resets captures omitted by a later repetition; GNU retains them.
+// Alternative branches containing captures also use different tie rules.
+// Extent-only operations remain supported for these patterns.
+function captureShape(node) {
+  const children = node.nodes ?? (node.node ? [node.node] : [])
+  const shapes = children.map(captureShape)
+  const groups = shapes.reduce((n, s) => n + s.groups, node.type === 'group' ? 1 : 0)
+  const nullable = node.type === 'assert' || ((node.type === 'group' || node.type === 'cat') && shapes.every((s) => s.nullable)) || (node.type === 'alt' && shapes.some((s) => s.nullable)) || (node.type === 'rep' && (node.min === 0 || shapes[0].nullable))
+  const repeated = node.type === 'rep' && (node.max === null || node.max > 1) && (groups > 1 || (groups > 0 && shapes[0].nullable))
+  return { groups, nullable, unsafe: repeated || (node.type === 'alt' && groups > 0) || shapes.some((s) => s.unsafe) }
 }
 
 export function compileRegex(src, ignoreCase = false, warn = null) {

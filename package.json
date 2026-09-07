@@ -63,6 +63,7 @@
     "src/glob.js",
     "src/grep.js",
     "src/grep-pattern.js",
+    "src/grep-output.js",
     "src/index.d.ts",
     "src/index.js",
     "src/lex.js",

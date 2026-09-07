@@ -3,8 +3,8 @@
 // `splitRecord` / `splitOn` apply the field rules. POSIX with gawk's
 // extensions:
 //   RS   `"\n"` (default) or another single character: split on it. `""`:
-//        paragraph mode — blank lines separate records and a newline is
-//        always a field separator too. Longer: a regex. RT holds the
+//        paragraph mode — blank lines separate records; single-character
+//        FS also splits at newlines. Longer: a regex. RT holds the
 //        text that ended the record.
 //   FS   `" "` (default): runs of blanks and tabs, leading/trailing ones
 //        ignored. Another single character: split on it literally, even
@@ -12,7 +12,7 @@
 //   FIELDWIDTHS / FPAT   fixed-width columns / a regex each field must
 //        match; whichever of the three was assigned last is in force.
 
-import { AwkError } from './awk-common.js'
+import { AwkError, MAX_STEPS } from './awk-common.js'
 import { unescapeAwkString } from './awk-lex.js'
 import { AwkRegex, compileRegex, splitByRegex, stepAt } from './awk-regex.js'
 import { StrNum, ignoreCase, toNum, toStr } from './awk-value.js'
@@ -81,50 +81,59 @@ export function splitOn(str, sep, paragraph, ic) {
   }
   if (sep === '') return [...str]
   if (sep.length === 1 && (!paragraph || sep === '\n')) return str.split(sep)
-  const source = sep.length === 1 ? `[${'^$.[]|()*+?{}\\'.includes(sep) ? '\\' + sep : sep}\n]` : paragraph ? `(${sep})|\n` : sep
+  if (paragraph && sep === '^') throw new AwkError('paragraph splitting with FS="^" is not supported', null, 'paragraph FS caret')
+  const source = sep.length === 1 ? `[${'^$.[]|()*+?{}\\'.includes(sep) ? '\\' + sep : sep}\n]` : sep
   return splitByRegex(str, compileRegex(source, ic))
 }
 
 // FIELDWIDTHS: blank-separated column widths, each `width` or
 // `skip:width`, with a final `*` meaning "the rest". Fields stop where
 // the record does.
-function splitWidths(str, spec) {
+export function parseWidths(spec) {
+  const items = spec.split(/[ \t]+/u).filter(Boolean)
+  return items.map((item, i) => {
+    const m = /^(?:(\+?\d+):)?(\+?\d+|\*)$/u.exec(item)
+    const skip = m?.[1] === undefined ? 0 : Number(m[1])
+    const width = m?.[2] === '*' ? 0xFFFFFFFF : Number(m?.[2])
+    if (!m || (m[1] !== undefined && skip === 0) || skip > 0xFFFFFFFF || !(width > 0 && width <= 0xFFFFFFFF) || (m[2] === '*' && i !== items.length - 1)) throw new AwkError(`invalid FIELDWIDTHS value \`${spec}'`)
+    return { skip, width }
+  })
+}
+
+function splitWidths(str, widths) {
+  const chars = [...str]
   const out = []
   let pos = 0
-  for (const item of spec.trim().split(/\s+/u)) {
-    if (item === '') continue
-    if (pos >= str.length) break
-    if (item === '*') { out.push(str.slice(pos)); break }
-    const m = /^(?:(\d+):)?(\d+)$/u.exec(item)
-    if (!m) throw new AwkError(`invalid FIELDWIDTHS value \`${spec}'`)
-    pos += Number(m[1] ?? 0)
-    if (pos >= str.length) break
-    out.push(str.slice(pos, pos + Number(m[2])))
-    pos += Number(m[2])
+  for (const { skip, width } of widths) {
+    if (pos >= chars.length) break
+    pos += skip
+    out.push(chars.slice(pos, pos + width).join(''))
+    pos += width
   }
   return out
 }
 
-// FPAT: each field is a match of the regex; an empty match is an empty
-// field that advances one character.
+// FPAT searches each remaining suffix. After a field, an immediately
+// adjacent empty match is retried one character later (the separator).
 function splitPattern(str, re) {
   const out = []
   let pos = 0
-  while (pos <= str.length) {
-    const m = re.search(str, pos)
+  while (pos < str.length) {
+    let m = re.search(str.slice(pos))
+    if (out.length > 0 && m?.end === 0) {
+      pos += stepAt(str, pos)
+      m = re.search(str.slice(pos))
+    }
     if (!m) break
-    out.push(str.slice(m.start, m.end))
-    if (m.start === m.end) {
-      if (m.end >= str.length) break
-      pos = m.end + stepAt(str, m.end)
-    } else pos = m.end
+    out.push(str.slice(pos + m.start, pos + m.end))
+    pos += m.end
   }
   return out
 }
 
 export function splitRecord(m, str) {
   const ic = ignoreCase(m)
-  if (m.fieldMode === 'FIELDWIDTHS') return splitWidths(str, toStr(m.globals.get('FIELDWIDTHS'), m))
+  if (m.fieldMode === 'FIELDWIDTHS') return splitWidths(str, m.widths)
   if (m.fieldMode === 'FPAT') return splitPattern(str, compileRegex(toStr(m.globals.get('FPAT'), m), ic, m.warn))
   return splitOn(str, toStr(m.globals.get('FS'), m), toStr(m.globals.get('RS'), m) === '', ic)
 }
@@ -136,8 +145,7 @@ export class Input {
   constructor(ctx, stdin) {
     this.ctx = ctx
     this.stdin = stdin
-    this.operands = null
-    this.idx = 0
+    this.idx = 1
     this.src = null
     this.sawFile = false
     // Set when a BEGINFILE / ENDFILE rule ran `exit`.
@@ -146,22 +154,9 @@ export class Input {
     this.readers = new Map()
   }
 
-  // The operand list comes from ARGV/ARGC at the moment input is first
-  // needed — after BEGIN, so a BEGIN block may edit them, as in gawk.
-  start(m) {
-    const argc = Math.trunc(toNum(m.globals.get('ARGC')))
-    const argv = m.globals.get('ARGV')
-    this.operands = []
-    for (let i = 1; i < argc; i++) {
-      const v = argv instanceof Map ? argv.get(String(i)) : undefined
-      this.operands.push(toStr(v, m))
-    }
-  }
-
   // The next main-input record, with NR / FNR / FILENAME / RT maintained,
   // or null once every operand is exhausted (or a file rule exited).
   next(m) {
-    if (this.operands === null) this.start(m)
     while (this.exitSignal === undefined) {
       if (this.src) {
         const r = readRecord(this.src, toStr(m.globals.get('RS'), m), ignoreCase(m))
@@ -187,9 +182,12 @@ export class Input {
   // a BEGINFILE rule sees ERRNO and says `nextfile`, gawk's idiom for
   // skipping unreadable files. A directory is skipped with a warning.
   open(m) {
-    while (this.idx < this.operands.length) {
-      const op = this.operands[this.idx++]
+    // ARGV/ARGC remain live throughout the program, including file rules.
+    while (this.idx < Math.trunc(toNum(m.globals.get('ARGC')))) {
+      if (++m.steps > MAX_STEPS) throw new AwkError('input operand scan exceeded execution limit', null, 'execution limit')
+      const op = toStr(m.globals.get('ARGV').get(String(this.idx++)), m)
       if (op === '') continue
+      m.globals.set('ARGIND', this.idx - 1)
       const asg = ASSIGNMENT.exec(op)
       if (asg) { m.assign(asg[1], new StrNum(unescapeAwkString(asg[2], m.warn))); continue }
       this.sawFile = true
@@ -264,7 +262,8 @@ export class Input {
     if (!src) {
       let text
       if (name === '/dev/null') text = ''
-      else if (name === '-' || name === '/dev/stdin') text = this.ctx.stdinFile ? this.ctx.stdinOrigin : this.stdin
+      else if (name === '-') text = this.takeStdin()
+      else if (name === '/dev/stdin') text = this.ctx.stdinFile ? this.ctx.stdinOrigin : this.takeStdin()
       else {
         const { path: abs, error } = lookup(this.ctx.cwd, name, this.ctx.fs)
         if (this.ctx.fs.isDir(abs)) { m.globals.set('ERRNO', 'Is a directory'); return { status: -1 } }

@@ -12,7 +12,7 @@
 // fill(arr)` called on a fresh name.
 
 import { AwkError, MAX_CALL_DEPTH } from './awk-common.js'
-import { splitRecord } from './awk-input.js'
+import { parseWidths, splitRecord } from './awk-input.js'
 import { compileRegex } from './awk-regex.js'
 import { StrNum, compare, ignoreCase, subscriptKey, toNum, toStr, truthy } from './awk-value.js'
 
@@ -68,6 +68,8 @@ export function setVar(m, name, v) {
   if (scope.get(name) instanceof Map) throw arrayAsScalar(name)
   if (scope === m.globals) {
     if (name === 'NF') { setNF(m, v); return }
+    if (name === 'FIELDWIDTHS') m.widths = parseWidths(toStr(v, m))
+    if (name === 'FPAT' || ((name === 'FS' || name === 'RS') && toStr(v, m).length > 1)) compileRegex(toStr(v, m), ignoreCase(m), m.warn)
     if (FIELD_MODES.has(name)) {
       m.fieldMode = name
       const info = m.globals.get('PROCINFO')

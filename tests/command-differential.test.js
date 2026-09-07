@@ -88,6 +88,28 @@ describe('grep — agent search patterns against GNU', { skip: grep === null ? '
   }
 })
 
+describe('grep — combined output modes against GNU', { skip: grep === null ? 'GNU grep is not available' : false }, () => {
+  const files = { f: 'x\ny\nx\nz\nx\n', g: 'no\n', empty: '' }
+  const selections = ['', '-v'].flatMap((invert) => ['', '-m0', '-m1'].map((limit) => [invert, limit]))
+  for (const mode of ['', '-o', '-c', '-l', '-L', '-q', '-qo', '-ql', '-qL', '-qc']) {
+    for (const [invert, limit] of selections) {
+      for (const context of ['', '-n -A1', '-n -C1']) {
+        for (const operands of ['f', 'f g', 'g f', 'missing f', 'f missing', 'empty g']) {
+          const argv = `${mode} ${invert} ${limit} ${context} x ${operands}`.split(' ').filter(Boolean)
+          it(argv.join(' '), () => {
+            for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content)
+            const ref = spawnSync(grep, argv, { cwd: dir, env, encoding: 'utf8', timeout: 5000 })
+            assert.equal(ref.error, undefined)
+            const mine = createTerminal(files).run('grep ' + argv.join(' '))
+            assert.deepEqual(mine.unsupported, [])
+            assert.deepEqual([mine.stdout, mine.exitCode, mine.stderr !== ''], [ref.stdout, ref.status, ref.stderr !== ''])
+          })
+        }
+      }
+    }
+  }
+})
+
 for (const [command, options] of Object.entries({ sort: ['', '-f', '-fu', '-nr', '-u', '-k1,1f'], uniq: ['', '-i', '-s1', '-s2', '-w1', '-w2', '-iw1'] })) {
   const binary = reference(command)
   describe(`${command} — Unicode comparison against GNU C locale`, { skip: binary === null ? `GNU ${command} is not available` : false }, () => {

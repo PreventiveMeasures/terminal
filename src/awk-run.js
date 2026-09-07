@@ -30,7 +30,7 @@ export function createMachine(program, ctx, stdin, operands) {
     ['RSTART', 0], ['RLENGTH', -1], ['ERRNO', ''], ['IGNORECASE', 0],
     ['FIELDWIDTHS', ''], ['FPAT', '[^[:space:]]+'],
     ['ENVIRON', new SystemArray('ENVIRON')], ['PROCINFO', new SystemArray('PROCINFO', [['FS', 'FS']])],
-    ['ARGC', operands.length + 1], ['ARGV', argv],
+    ['ARGC', operands.length + 1], ['ARGV', argv], ['ARGIND', 0],
   ])
   const m = {
     program, globals, frames: [], record: '', recordValue: new StrNum(''), fields: [undefined], nf: 0,

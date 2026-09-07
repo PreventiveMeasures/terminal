@@ -76,15 +76,15 @@ export function awk(stdin, tokens, ctx) {
   }
   const m = createMachine(program, ctx, stdin, source.operands)
   for (const w of program.warnings) m.warn(w)
-  if (values.has('F')) m.assign('FS', unescapeAwkString(values.get('F'), m.warn))
-  for (const asg of values.get('v') ?? []) {
-    const match = ASSIGNMENT.exec(asg)
-    if (!match) return err(`awk: -v: expected var=value but got \`${asg}\``)
-    m.assign(match[1], new StrNum(unescapeAwkString(match[2], m.warn)))
-  }
   let exitCode
   let gap = null
   try {
+    if (values.has('F')) m.assign('FS', unescapeAwkString(values.get('F'), m.warn))
+    for (const asg of values.get('v') ?? []) {
+      const match = ASSIGNMENT.exec(asg)
+      if (!match) return err(`awk: -v: expected var=value but got \`${asg}\``)
+      m.assign(match[1], new StrNum(unescapeAwkString(match[2], m.warn)))
+    }
     exitCode = runProgram(m)
   } catch (e) {
     // RangeError covers the engine's own limits (stack depth from a

@@ -52,7 +52,7 @@ function runGawk(c) {
     }
     const operands = c.operands ?? (c.input !== undefined && !c.stdin ? ['in.txt'] : [])
     const r = spawnSync('gawk', [...(c.args ?? []), '-f', 'prog.awk', ...operands], {
-      cwd: dir, input: c.stdin ? c.input ?? '' : '', env: { ...process.env, LC_ALL: 'C' }, timeout: 10000, maxBuffer: 64 << 20,
+      cwd: dir, input: c.stdin ? c.input ?? '' : '', env: { ...process.env, LC_ALL: c.locale ?? 'C' }, timeout: 10000, maxBuffer: 64 << 20,
     })
     return { out: r.stdout.toString(), err: r.stderr.toString(), code: r.status ?? -1 }
   } finally {
@@ -691,4 +691,51 @@ describe('awk — differential against gawk', { skip: SKIP }, () => {
   it('generated regex operations agree with gawk', () => { for (const c of regexCases(6, 22)) check(c) })
   it('generated printf formats agree with gawk', () => { for (const c of printfCases(6, 23)) check(c) })
   it('generated field and record splitting agrees with gawk', () => { for (const c of fieldCases(12, 24)) check(c) })
+  it('agent file selection, extraction, and replacement agree with gawk', () => {
+    const files = { f: 'one 1\ntwo 2\n', g: 'three 3\n', h: 'four 4\n' }
+    for (const action of ['delete ARGV[2]', 'ARGV[2]="h"', 'ARGC=2', 'ARGV[ARGC++]="h"', 'ARGIND=8', 'ARGV[2]="x=7"']) {
+      check({ prog: `NR==1 {${action}} {print ARGIND,FILENAME,NR,FNR,$0} END {print ARGIND,x}`, files, operands: ['f', 'g'] })
+    }
+    for (const stage of ['BEGIN', 'BEGINFILE', 'ENDFILE']) {
+      check({ prog: `${stage} {print ARGIND,FILENAME; if(FILENAME=="f") delete ARGV[2]} {print ARGIND,$0}`, files, operands: ['f', 'g'] })
+    }
+    const fields = '{print NF; for(i=1;i<=NF;i++) print "[" $i "]"}'
+    for (const widths of ['1 2 *', '1:1 1 *', '2:*', '+1 +2', '0 2', '2 0', '* 2', '1 rubbish', '', '0:2', '1:0', '4294967295', '4294967296']) {
+      for (const input of ['a\n', 'abcd\n', '\n']) {
+        check({ prog: `BEGIN {FIELDWIDTHS=${JSON.stringify(widths)};print "begin"} ${fields}`, input })
+      }
+    }
+    for (const pattern of ['a*', 'a?', 'a+', '.*', '[^,]*', '[0-9]*', '^|a', '', '([^,]*)|("[^"]*")']) {
+      for (const input of ['abc\n', 'aba\n', ',a,,b,\n', '\n', 'a,"b,c",,d,\n']) {
+        check({ prog: `BEGIN {FPAT=${JSON.stringify(pattern)}} ${fields}`, input })
+      }
+    }
+    for (const replacement of ['\\q', '\\&', '\\\\', '\\1', '\\0', '\\\\q', '\\\\&', '\\\\\\&', '\\\\\\\\']) {
+      for (const fn of ['sub', 'gsub', 'gensub']) {
+        const call = fn === 'gensub' ? `print gensub(/(a)/,${JSON.stringify(replacement)},"g",s)` : `n=${fn}(/a/,${JSON.stringify(replacement)},s); print n,s`
+        check({ prog: `BEGIN {s="aba";${call}}` })
+      }
+    }
+    for (const separator of [':', '[,:]', '-', '\\', '\n']) {
+      check({ prog: `BEGIN {RS="";FS=${JSON.stringify(separator)}} ${fields}`, input: 'a:b\nc,d\n\n' })
+    }
+    for (const [pattern, input] of [['(\\Ba)(b)', 'xab'], ['(a|ab)', 'xab!'], ['(a)(\\n)', 'a\nb']]) {
+      check({ prog: `BEGIN {match(${JSON.stringify(input)},/${pattern}/,a); for(i=0;i<=2;i++) print a[i],a[i,"start"],a[i,"length"]}` })
+    }
+    for (const alias of ['-', '/dev/stdin']) {
+      check({ prog: `BEGIN {getline x < "${alias}"; print x} {print}`, input: 'one\ntwo\n', stdin: true })
+    }
+  })
+  it('Unicode field widths and captures agree with gawk in a UTF-8 locale', (t) => {
+    const locale = ['C.UTF-8', 'en_US.UTF-8'].find((candidate) => {
+      const r = spawnSync('gawk', ['BEGIN {print length("😀")}'], { env: { ...process.env, LC_ALL: candidate }, encoding: 'utf8' })
+      return r.status === 0 && r.stdout === '1\n'
+    })
+    if (!locale) { t.skip('no UTF-8 locale available to gawk'); return }
+    for (const widths of ['1 2 *', '1:1 1 *', '2:*', '3 1', '1 1 1 1']) {
+      check({ locale, prog: `BEGIN {FIELDWIDTHS="${widths}"} {print NF;for(i=1;i<=NF;i++) print "[" $i "]"}`, input: '😀ab\n é😀x\n' })
+    }
+    check({ locale, prog: 'BEGIN {FPAT="[^,]*"} {print NF;for(i=1;i<=NF;i++) print "[" $i "]"}', input: ',😀,,é,\n' })
+    check({ locale, prog: 'BEGIN {match("😀ab!",/(a|ab)/,a); print a[1],a[1,"start"],a[1,"length"]}' })
+  })
 })

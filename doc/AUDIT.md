@@ -43,7 +43,7 @@ including when stderr is redirected or piped away.
 
 ## Validation
 
-- 2,087 tests passed, with zero failures, skips, or TODOs.
+- 3,225 tests passed, with zero failures, skips, or TODOs.
 - The suite includes a native command differential matrix and the existing GNU
   AWK differential tests. Reference versions: coreutils 9.5, grep 3.11, gawk 5.2.2.
 - `npm run lint` and `git diff --check` pass.
@@ -90,3 +90,41 @@ The added tests include 292 strict native GNU comparisons and focused agent
 workflow regressions. Strict comparisons require the behavior to work and do
 not accept an unsupported diagnostic as a substitute for the expected output.
 The audit remains under `doc/` and is excluded from the npm package.
+
+## Third pass: agent extraction and search combinations
+
+This pass starts from `3e8b0c9` and focuses on silently incorrect extraction.
+
+- AWK `FPAT` no longer creates phantom fields after nonempty matches or for
+  empty records. CSV patterns preserve empty columns, and anchors apply to the
+  remaining suffix as in GNU awk. `FIELDWIDTHS` counts Unicode characters,
+  preserves an empty field when a skip reaches the record end, supports `N:*`,
+  and validates the entire specification at assignment time. Invalid `FS`,
+  `RS`, and `FPAT` regex assignments also fail before subsequent statements.
+- AWK consults live `ARGV` and `ARGC` when opening each operand, so record and
+  file rules can remove, replace, or append remaining files. `ARGIND` reports
+  the current operand index. Repeatedly extending the operand list is subject
+  to the existing execution limit.
+- AWK `sub`/`gsub` follow GNU replacement backslash rules; `gensub` removes
+  escapes before ordinary replacement characters. Named `getline` consumes
+  shared input rather than replaying it to the main input loop or later shell
+  commands. Regular-file `/dev/stdin` aliases retain the GNU/Linux reopening
+  behavior documented above.
+- Capture extraction keeps the full subject while constraining the match span,
+  preserving assertions and Unicode offsets. Capture shapes whose repeated or
+  alternative groups cannot be reproduced with JS capture rules fail with an
+  unsupported diagnostic. Operations needing only the whole match remain
+  supported. A trailing `gensub` replacement backslash and paragraph `FS="^"`
+  are likewise diagnosed rather than silently following a different behavior.
+- Grep `-o -v` preserves matching context substrings and group separators,
+  including groups with no printed match text. Quiet searches retain errors
+  from earlier operands and stop before later operands after success. `-m0`
+  avoids consuming stdin; `-L -m0` still lists readable files, including binary
+  files, and reports unreadable operands. Output formatting moved into
+  `src/grep-output.js`, which is included in the package allowlist.
+
+Validation adds 1,080 strict GNU grep combinations, 137 GNU awk comparisons
+(including UTF-8 fields and captures), and focused extraction regressions.
+New unsupported cases are checked with stderr hidden through a pipeline to
+ensure their structured diagnostics survive. The package dry run contains
+49 files, every runtime module, and no audit documentation.

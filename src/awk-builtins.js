@@ -17,13 +17,17 @@ const str = (m, node) => toStr(evalExpr(m, node), m)
 const num = (m, node) => toNum(evalExpr(m, node))
 const FIELD0 = { type: 'field', index: { type: 'num', value: 0 } }
 
-// `\&` is a literal ampersand and `\\` a backslash; a bare `&` is the
-// matched text. Any other backslash stays.
+// GNU's default sub/gsub rules preserve backslashes except for the
+// special runs before '&', and a run of four becomes two backslashes.
 function expandReplacement(repl, matched) {
   let out = ''
   for (let i = 0; i < repl.length; i++) {
     const c = repl[i]
-    if (c === '\\' && (repl[i + 1] === '&' || repl[i + 1] === '\\')) { out += repl[++i]; continue }
+    if (c === '\\') {
+      if (repl[i + 1] === '\\' && repl[i + 2] === '\\' && (repl[i + 3] === '&' || repl[i + 3] === '\\')) { out += '\\' + repl[i + 3]; i += 3; continue }
+      if (repl[i + 1] === '\\' && repl[i + 2] === '&') { out += '\\' + matched; i += 2; continue }
+      if (repl[i + 1] === '&') { out += '&'; i++; continue }
+    }
     out += c === '&' ? matched : c
   }
   return out
@@ -45,11 +49,11 @@ function expandGroups(repl, groups) {
   let out = ''
   for (let i = 0; i < repl.length; i++) {
     const c = repl[i]
+    if (c === '\\' && i + 1 === repl.length) throw new AwkError('gensub with a trailing replacement backslash is not supported', null, 'gensub trailing backslash')
     if (c === '\\' && i + 1 < repl.length) {
       const d = repl[++i]
       if (d >= '0' && d <= '9') out += groups[Number(d)]?.text ?? ''
-      else if (d === '&' || d === '\\') out += d
-      else out += '\\' + d
+      else out += d
       continue
     }
     out += c === '&' ? groups[0].text : c
@@ -69,7 +73,11 @@ function gensub(m, args) {
     if (which < 1) { m.warn(`gensub: third argument \`${howStr}' treated as 1`); which = 1 }
   }
   const s = args[3] ? str(m, args[3]) : m.record
-  return substituteAll(s, re, (start, end, nth) => (global || nth === which ? expandGroups(repl, re.groups(s, start, end)) : null), global ? 'global' : 'nth').out
+  const captures = /(?:^|[^\\])(?:\\\\)*\\[1-9]/u.test(repl)
+  return substituteAll(s, re, (start, end, nth) => {
+    if (!global && nth !== which) return null
+    return expandGroups(repl, captures ? re.groups(s, start, end) : [{ text: s.slice(start, end) }])
+  }, global ? 'global' : 'nth').out
 }
 
 function match(m, args) {
