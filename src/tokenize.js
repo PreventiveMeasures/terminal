@@ -192,8 +192,10 @@ function skipComment(st) {
 }
 
 // An unquoted line feed terminates the current command. Emit a `semi`
-// so it parses identically to `;` downstream — but only where it
-// actually separates two commands: `NEWLINE_ABSORB` swallows breaks
+// so it parses identically to `;` downstream — flagged `newline`, for
+// the one place the two differ: after `{` and `do`, which the parser
+// recognizes and the tokenizer cannot. Only a break that actually
+// separates two commands is emitted: `NEWLINE_ABSORB` swallows those
 // that are leading, doubled (blank lines), or follow a `|` / `&&` /
 // `||` / `(` continuation. A line that opened here-documents first
 // hands the following lines to them.
@@ -204,6 +206,6 @@ function newline(st) {
     st.heredocs = []
   }
   const prev = st.tokens.at(-1)
-  if (prev && !NEWLINE_ABSORB.has(prev.kind)) st.tokens.push({ kind: 'semi' })
+  if (prev && !NEWLINE_ABSORB.has(prev.kind)) st.tokens.push({ kind: 'semi', newline: true })
   st.i++
 }

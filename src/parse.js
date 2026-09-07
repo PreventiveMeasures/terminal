@@ -234,7 +234,7 @@ function commandWord(t, raw, i, steps, stage, end) {
     return { next: i + 1 }
   }
   if (v === '{') {
-    const inner = buildSteps(raw, i + 1, '}')
+    const inner = buildSteps(raw, skipNewlines(raw, i + 1), '}')
     stage.group = inner.steps
     stage.isolate = false
     return { next: inner.consumed }
@@ -259,10 +259,8 @@ function commandWord(t, raw, i, steps, stage, end) {
 // word list up to a `;` (or newline), then `do`, then the body up to
 // `done`. Stricter than bash in one place — `for f; do …; done`, which
 // iterates the positional parameters, is refused since there are none
-// to iterate — and more lenient in one: a `;` right after `do` is
-// accepted where bash allows only a newline, because the tokenizer
-// has already turned newlines into `;`. Exactly one separator is
-// skipped at each boundary, so `;;` is an error here as in bash.
+// to iterate. Exactly one separator is skipped at each boundary, so
+// `;;` is an error here as in bash; after `do`, only newlines.
 function parseFor(raw, start) {
   let i = start
   const nameTok = raw[i]
@@ -296,14 +294,21 @@ function parseFor(raw, start) {
     if (i >= raw.length) throw new Error('for: missing `do`')
     throw new Error(`for: expected \`do\`, got \`${tokenLabel(raw[i])}\``)
   }
-  i = skipSemi(raw, i + 1)
-  const body = buildSteps(raw, i, 'done')
+  const body = buildSteps(raw, skipNewlines(raw, i + 1), 'done')
   return { loop: { name, words, body: body.steps }, consumed: body.consumed }
 }
 
-// Index past one `;` at `i`, if there is one — a newline in the source.
+// Index past one `;` at `i`, if there is one — or a newline in the source.
 function skipSemi(raw, i) {
   return raw[i]?.kind === 'semi' ? i + 1 : i
+}
+
+// Index past the newlines at `i`: after `{` and `do`, bash's grammar
+// allows any number of them (a `{` on a line of its own) but no `;`,
+// so `{ ;echo hi; }` still fails as in bash — as an empty stage.
+function skipNewlines(raw, i) {
+  while (raw[i]?.kind === 'semi' && raw[i].newline) i++
+  return i
 }
 
 // The unquoted word `value`, as opposed to a quoted spelling of it.

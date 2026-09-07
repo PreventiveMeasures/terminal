@@ -2938,10 +2938,11 @@ describe('createTerminal — `for` loops', () => {
     assert.equal(pasted.exitCode, 0)
     assert.equal(pasted.stdout, '== a\n3:int foo1_bar;\n== b\n')
     assert.equal(pasted.stdout, oneLine.stdout)
-    // One `;` after `do` (what a `do⏎` becomes after tokenizing) and a
-    // trailing `;` after `done` are tolerated, and `in` may open its
-    // own line. Doubled separators are errors, as in bash.
-    assert.equal(t.run('for f in a; do; echo $f; done;').stdout, 'a\n')
+    // A trailing `;` after `done` is tolerated, and `in` may open its
+    // own line. A `;` right after `do` (only a newline may follow it)
+    // and doubled separators are errors, as in bash.
+    assert.equal(t.run('for f in a; do echo $f; done;').stdout, 'a\n')
+    assert.equal(t.run('for f in a; do; echo $f; done').exitCode, 2)
     assert.equal(t.run('for f\nin a b\ndo\necho $f\ndone').stdout, 'a\nb\n')
     assert.match(t.run('for f in a;; do echo $f; done').stderr, /for: unexpected `;;` in word list/u)
   })

@@ -213,7 +213,6 @@ function lookup(name, ctx, warnings) {
   if (name === 'PWD') return { value: ctx.cwd }
   if (name === 'HOME') return { value: ctx.home }
   if (name === 'USER' || name === 'LOGNAME') return { value: ctx.user }
-  if (name === 'OLDPWD' && ctx.oldpwd !== null) return { value: ctx.oldpwd }
   report(ctx, warnings, `$${name}`, `warning: $${name} is unset (this shell has no environment variables; only \`for\` bindings and \`NAME=value\` assignments)`)
   return { value: '' }
 }

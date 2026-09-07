@@ -14,22 +14,26 @@ function pwd(_stdin, tokens, ctx) {
   return ok(ctx.cwd + '\n')
 }
 
-// `cd` alone goes home (the tree root here), `cd -` back to the previous
-// directory and prints it, as bash does; the two failure messages are
-// bash's, capitalized as bash prints them.
+// `cd` alone goes home (the tree root here); `cd -` goes to `$OLDPWD`
+// and prints that value, as bash does — the variable is the shell's,
+// so an assignment or `unset` of it steers the next `cd -`, and a
+// successful change sets it (and refreshes an assigned `PWD`). `cd ''`
+// is a no-op. The failure messages are bash's, capitalized as bash
+// prints them.
 function cd(_stdin, tokens, ctx) {
   const { positional } = parseArgs(tokens)
   if (positional.length > 1) return err('cd: too many arguments')
   let target = positional[0] ?? homeOf(ctx)
   if (target === '-') {
-    if (ctx.oldpwd === null) return err('cd: OLDPWD not set')
-    target = ctx.oldpwd
+    if (!ctx.vars.has('OLDPWD')) return err('cd: OLDPWD not set')
+    target = ctx.vars.get('OLDPWD')
   }
-  if (target === '') return ok()
+  const printed = positional[0] === '-' ? target + '\n' : ''
+  if (target === '') return ok(printed)
   const abs = resolve(ctx.cwd, target)
   if (!ctx.fs.isDir(abs)) return err(`cd: ${target}: ${ctx.fs.isFile(abs) ? 'Not a directory' : 'No such file or directory'}`)
-  const printed = positional[0] === '-' ? abs + '\n' : ''
-  ctx.oldpwd = ctx.cwd
+  ctx.vars.set('OLDPWD', ctx.cwd)
+  if (ctx.vars.has('PWD')) ctx.vars.set('PWD', abs)
   ctx.cwd = abs
   return ok(printed)
 }

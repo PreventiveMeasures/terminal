@@ -295,12 +295,31 @@ describe('shell syntax — compound commands', () => {
     assert.equal(out('! false; echo $?'), '0\n')
     assert.equal(out('! true; echo $?'), '1\n')
     assert.equal(out('! ! true; echo $?'), '0\n')
+    // An `exit` keeps its status under `!`; a subshell's status is negated.
+    assert.equal(term().run('! exit 3').exitCode, 3)
+    assert.equal(term().run('! exit 0').exitCode, 0)
+    assert.equal(term().run('! { exit 3; }').exitCode, 3)
+    assert.equal(term().run('! (exit 3)').exitCode, 0)
+    assert.equal(term().run('! exit 3 | cat').exitCode, 1)
+    assert.equal(out('for i in 1 2; do ! break; echo $i; done; echo $?'), '1\n')
     assert.equal(out('! cat nope 2>/dev/null && echo negated'), 'negated\n')
     assert.equal(out('{ echo a; echo b; } | cat'), 'a\nb\n')
     assert.equal(out('{ cd src; }; pwd'), '/src\n')
     assert.equal(out('(cd src); pwd'), '/\n')
     assert.match(term().run('{ echo a }').stderr, /unmatched `\{`/u)
     assert.match(term().run('}').stderr, /syntax error near unexpected token `\}`/u)
+  })
+
+  it('a block may open on a line of its own: newlines after `{` and `do`, but no `;`', () => {
+    assert.equal(out('{\necho hi\n}'), 'hi\n')
+    assert.equal(out('{\n\necho hi\n\n}'), 'hi\n')
+    assert.equal(out('{\necho hi; }'), 'hi\n')
+    assert.equal(out('(\necho hi\n)'), 'hi\n')
+    assert.equal(out('for i in 1 2\ndo\n\necho $i\ndone'), '1\n2\n')
+    assert.equal(out('for i in 1 2; do\necho $i\ndone'), '1\n2\n')
+    for (const line of ['{ ;echo hi; }', '( ; echo hi )', 'for i in 1; do ; echo $i; done']) {
+      assert.equal(term().run(line).exitCode, 2, line)
+    }
   })
 
   it('syntax errors exit 2, as bash exits', () => {
@@ -342,6 +361,27 @@ describe('shell syntax — subshell boundaries and redirect operands', () => {
 
   it('a subshell restores OLDPWD along with the cwd', () => {
     assert.equal(out('cd src; (cd /); cd -; pwd'), '/\n/\n')
+    assert.equal(out('cd src; (OLDPWD=/src); cd -; pwd'), '/\n/\n')
+  })
+
+  it('every pipeline stage sees the `$?` from before the pipeline', () => {
+    assert.equal(out('false; { true; } | echo $?'), '1\n')
+    assert.equal(out('false; (true) | echo $?'), '1\n')
+    assert.equal(out('false; for i in 1; do true; done | echo $?'), '1\n')
+    assert.equal(out('false; ( { true; } | echo $? )'), '1\n')
+    assert.equal(out('false; { true; } | cat; echo $?'), '0\n')
+    assert.equal(out('(false); echo $?'), '1\n')
+  })
+
+  it('warnings from expanding a redirect operand follow fd 2', () => {
+    const silenced = term().run('cat <<< $NOPE 2>/dev/null')
+    assert.equal(silenced.stderr, '')
+    assert.equal(silenced.stdout, '\n')
+    assert.deepEqual(silenced.unsupported.map((u) => u.detail), ['$NOPE'])
+    const swapped = term().run('cat <<< $NOPE 2>&1 >/dev/null')
+    assert.equal(swapped.stderr, '')
+    assert.match(swapped.stdout, /^warning: \$NOPE is unset/u)
+    assert.match(term().run('cat <<< $NOPE').stderr, /^warning: \$NOPE is unset/u)
   })
 
   it('a quoted `$@` is no argument at all; `$*` is one empty argument', () => {
@@ -410,5 +450,22 @@ describe('shell syntax — command conventions', () => {
     assert.match(term().run('cd nope').stderr, /^cd: nope: No such file or directory/u)
     assert.match(term().run('cd a b').stderr, /too many arguments/u)
     assert.match(term().run('cd -').stderr, /OLDPWD not set/u)
+  })
+
+  it('cd: `-` is `$OLDPWD`, the shell variable, which `cd` sets and an assignment steers', () => {
+    const t = term()
+    assert.equal(out('OLDPWD=/src; cd -; pwd', t), '/src\n/src\n')
+    assert.equal(out('cd /; cd src; OLDPWD=/; cd -; pwd; cd -; pwd', t), '/\n/\n/src\n/src\n')
+    assert.equal(out('cd /; cd src; cd ..; echo $OLDPWD; cd -; echo $OLDPWD', t), '/src\n/src\n/\n')
+    assert.equal(out('cd /; OLDPWD=src; cd -; pwd', t), 'src\n/src\n')
+    assert.equal(out('cd /; export OLDPWD=/src; cd -; pwd', t), '/src\n/src\n')
+    assert.equal(out('cd /; OLDPWD=; cd -; pwd', t), '\n/\n')
+    assert.equal(out('cd src; cd nope; echo $OLDPWD'), '/\n')
+    const unsetVar = term().run('cd src; unset OLDPWD; cd -')
+    assert.match(unsetVar.stderr, /^cd: OLDPWD not set/u)
+    assert.equal(unsetVar.exitCode, 1)
+    assert.match(term().run('OLDPWD=/nope; cd -').stderr, /^cd: \/nope: No such file or directory/u)
+    // An assigned PWD is refreshed by the next change, as bash refreshes it.
+    assert.equal(out('PWD=/zzz; pwd; echo $PWD; cd src; echo $PWD'), '/\n/zzz\n/src\n')
   })
 })

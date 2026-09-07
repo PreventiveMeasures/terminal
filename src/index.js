@@ -58,7 +58,7 @@ export function createTerminal(sources, opts = {}) {
   // `user` is whoami's source of truth. `home` is what `~`, `$HOME` and
   // a bare `cd` resolve to: the tree root, the one directory guaranteed
   // to exist. `vars` holds `for` bindings and `NAME=value` assignments;
-  // `lastExit` is `$?`; `oldpwd` backs `cd -`.
+  // `lastExit` is `$?`; `cd` keeps `OLDPWD` in `vars`, as bash does.
   //
   // `registry` rides on ctx so the engine's step/pipeline/stage
   // functions — which already thread ctx everywhere — reach the
@@ -68,7 +68,7 @@ export function createTerminal(sources, opts = {}) {
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
   const ctx = {
     cwd, fs, user: opts.user ?? 'user', home: '/', registry,
-    vars: new Map(), lastExit: 0, oldpwd: null, loopDepth: 0,
+    vars: new Map(), lastExit: 0, loopDepth: 0,
     unsupported: createUnsupportedFeed(),
   }
   // Commands like `xargs` need to invoke other commands. Exposing
@@ -165,7 +165,10 @@ const finish = (r, ctx, feed) => ({ stdout: r.stdout, stderr: r.stderr, exitCode
 // steps that DO run are concatenated; skipped steps contribute
 // nothing. The overall exit code is from the LAST step that
 // actually ran, and `$?` tracks it step by step. An `exit`, or a
-// `break` / `continue` bound for an enclosing loop, ends the list.
+// `break` / `continue` bound for an enclosing loop, ends the list. `!`
+// negates a status, but not the one an `exit` asked for: `! exit 3`
+// exits 3, as in bash (a negated `break` does report 1, also as in
+// bash).
 //
 // `initialStdin` is only meaningful for subshell groups and loop
 // bodies: when a `(...)` or a `for` appears in a pipeline (`echo hi |
@@ -184,7 +187,7 @@ function runSteps(steps, ctx, initialStdin) {
     const r = runPipeline(step.stages, ctx, i === 0 ? initialStdin : '')
     stdout += r.stdout
     stderr += r.stderr
-    exitCode = step.negate ? (r.exitCode === 0 ? 1 : 0) : r.exitCode
+    exitCode = step.negate && !r.halt ? (r.exitCode === 0 ? 1 : 0) : r.exitCode
     ctx.lastExit = exitCode
     if (r.halt || r.control) return { stdout, stderr, exitCode, halt: r.halt, control: r.control }
   }
@@ -194,7 +197,9 @@ function runSteps(steps, ctx, initialStdin) {
 // Each stage's output is routed by the redirects it carries: its
 // stdout goes wherever fd 1 points after applying them left to right,
 // its stderr wherever fd 2 points — the pipe / caller's stdout (`out`),
-// the caller's stderr (`err`), or nowhere. Mid-pipeline failure isn't
+// the caller's stderr (`err`), or nowhere. The warnings raised while
+// expanding its redirect operands are stderr text like any other (the
+// diagnostic feed keeps its entry either way). Mid-pipeline failure isn't
 // fatal — real shells keep going and surface the last stage's exit
 // code. Every stage of a multi-stage pipeline runs in a subshell, as in
 // bash: a `cd`, an assignment or an `exit` there reaches nothing
@@ -207,12 +212,13 @@ function runPipeline(stages, ctx, initialStdin) {
     const io = resolveRedirs(stage, ctx, stdin)
     const run = () => (stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx, io.stdin) : runStage(stage, ctx, io.stdin))
     const result = io.error ? io.error : stages.length > 1 ? isolated(ctx, run) : run()
+    const errText = io.warnings + result.stderr
     let stageOut = ''
-    let stageErr = io.warnings
+    let stageErr = ''
     if (io.fds[1] === 'out') stageOut += result.stdout
     else if (io.fds[1] === 'err') stageErr += result.stdout
-    if (io.fds[2] === 'out') stageOut += result.stderr
-    else if (io.fds[2] === 'err') stageErr += result.stderr
+    if (io.fds[2] === 'out') stageOut += errText
+    else if (io.fds[2] === 'err') stageErr += errText
     stderr += stageErr
     if (i === stages.length - 1) {
       const r = { stdout: stageOut, stderr, exitCode: result.exitCode }
@@ -347,17 +353,20 @@ function runGroup(stage, ctx, stdin) {
   return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }
 }
 
-// Run `fn` as a subshell would: on a copy of the variables, with the
-// working directory and `OLDPWD` put back afterwards. The try/finally
-// keeps the restore safe across thrown errors.
+// Run `fn` as a subshell would: on a copy of the variables (`OLDPWD`
+// among them), with the working directory and `$?` put back afterwards
+// — every stage of `false; { true; } | echo $?` sees the status from
+// before the pipeline, as in bash; the caller records the pipeline's
+// own status once it returns. The try/finally keeps the restore safe
+// across thrown errors.
 function isolated(ctx, fn) {
-  const saved = { cwd: ctx.cwd, oldpwd: ctx.oldpwd, vars: ctx.vars }
+  const saved = { cwd: ctx.cwd, lastExit: ctx.lastExit, vars: ctx.vars }
   ctx.vars = new Map(saved.vars)
   try {
     return fn()
   } finally {
     ctx.cwd = saved.cwd
-    ctx.oldpwd = saved.oldpwd
+    ctx.lastExit = saved.lastExit
     ctx.vars = saved.vars
   }
 }
