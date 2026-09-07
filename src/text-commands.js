@@ -105,7 +105,8 @@ function head(stdin, tokens, ctx) {
 // buffer, and so does `-n N` on a pipe, where anything shorter than one
 // (8 KiB, not modeled) is gone with it.
 function headLeftover(count, unit, ctx) {
-  if (count.sign === '-' || unit === 'c' === Boolean(ctx.stdinFile)) return () => ''
+  const file = Boolean(ctx.stdinFile)
+  if (count.sign === '-' || (unit === 'c' && file) || (unit === 'n' && !file)) return () => ''
   if (unit === 'c') return (content) => sliceBytes(content, (total) => [Math.min(count.value, total), total])
   return (content) => {
     let pos = 0
