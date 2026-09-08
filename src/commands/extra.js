@@ -165,7 +165,7 @@ function tr(stdin, tokens, ctx) {
   if (squeeze && !del && positional.length === 2) return unsupported('feature', 'tr', 'translate and squeeze', 'tr: combined translation and squeezing is not supported')
   const want = (del || squeeze) ? 1 : 2
   if (positional.length !== want) return usage('tr [-c] SET1 SET2  |  tr [-c] -d SET  |  tr [-c] -s SET')
-  if (/[^\x00-\x7F]/u.test(stdin + positional.join(''))) return unsupported('feature', 'tr', 'non-ASCII bytes', 'tr: translation of non-ASCII bytes is not supported')
+  if (/\P{ASCII}/u.test(stdin + positional.join(''))) return unsupported('feature', 'tr', 'non-ASCII bytes', 'tr: translation of non-ASCII bytes is not supported')
   if (positional.some((s) => /\[[:.=]|\[[^\]]*\*/u.test(s))) return unsupported('feature', 'tr', 'set expressions', 'tr: character classes, equivalence classes and repetition expressions are not supported')
   if (positional.some((s) => /\\[0-7]{2}|\\[1-7abfrv]/u.test(s))) return unsupported('feature', 'tr', 'set escapes', 'tr: these set escape sequences are not supported')
   if (positional.some((s) => /(?:^|[^\\])(?:\\\\)*\\$/u.test(s))) return unsupported('feature', 'tr', 'trailing backslash', 'tr: an unescaped trailing backslash in a set is not supported')

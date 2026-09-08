@@ -30,7 +30,7 @@ export function routeOutput(result, io, ctx) {
     ctx.unsupported.add(unsupportedNote(r))
   }
   const events = []
-  let stdout = '', stderr = ''
+  let stderr = '', stdout = ''
   const initial = io.warnings ? [{ fd: 2, text: io.warnings }] : []
   for (const e of [...initial, ...eventsOf(r)]) {
     const dest = io.fds[e.fd]
@@ -50,4 +50,3 @@ export function writeError(name, r, ctx) {
   if (status === 0) return { ...r, stdout: '' }
   return { ...r, stdout: '', stderr: r.stderr + `${name}: write error: Bad file descriptor\n`, exitCode: status }
 }
-

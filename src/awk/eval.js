@@ -62,7 +62,7 @@ export function setVar(m, name, v) {
 
 export function getArray(m, name) {
   const origin = scopeOf(m, name)
-  let scope = origin, key = name, value = scope.get(key)
+  let key = name, scope = origin, value = scope.get(key)
   const referred = isRef(value)
   while (isRef(value)) {
     scope = value.scope; key = value.name

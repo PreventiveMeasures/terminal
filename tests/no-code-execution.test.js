@@ -113,7 +113,7 @@ describe('no JS execution — source', () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8'))
     const packaged = pkg.files.filter((file) => file.endsWith('.js')).sort()
     assert.deepEqual(files.map((file) => 'src/' + file), packaged)
-    for (const dir of ['awk', 'commands', 'shell']) assert.ok(files.some((file) => file.startsWith(dir + '/')), dir)
+    for (const subdir of ['awk', 'commands', 'shell']) assert.ok(files.some((file) => file.startsWith(subdir + '/')), subdir)
   })
 
   for (const file of files) {

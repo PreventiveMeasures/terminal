@@ -18,7 +18,7 @@ export function readRecord(src, rs, ic) {
   const { text } = src
   if (src.pos >= text.length) return null
   if (rs === '') return readParagraph(src)
-  let start, end
+  let end, start
   if (rs.length === 1) {
     const at = text.indexOf(rs, src.pos)
     start = at === -1 ? text.length : at

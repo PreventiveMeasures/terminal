@@ -165,7 +165,7 @@ export function readHeredocBodies(line, newlineAt, pending) {
   for (const h of pending) {
     const lines = []
     while (i <= line.length) {
-      let text = '', end
+      let end, text = ''
       for (;;) {
         end = line.indexOf('\n', i)
         const stop = end === -1 ? line.length : end

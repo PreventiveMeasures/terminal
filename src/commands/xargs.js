@@ -28,9 +28,10 @@ export function xargs(stdin, tokens, ctx) {
   const size = replace === undefined ? n.value ?? Math.max(1, items.length) : 1
   let exitCode = 0, stderr = '', stdout = ''
   for (let i = 0; i < Math.max(1, items.length); i += size) {
+    const item = items[i]
     const args = replace === undefined
       ? [...baseArgs, ...items.slice(i, i + size)]
-      : baseArgs.map((arg) => arg.replaceAll(replace, items[i]))
+      : baseArgs.map((arg) => arg.replaceAll(replace, item))
     const r = ctx.dispatch(cmd, args, '')
     stdout += r.stdout; stderr += r.stderr
     if (r.exitCode === 255) return { stdout, stderr: stderr + 'xargs: ' + cmd + ': exited with status 255; aborting\n', exitCode: 124 }

@@ -23,7 +23,7 @@ for (const [name, body] of Object.entries(POSIX_CLASSES)) {
   const re = new RegExp(`[${body}]`, 'u')
   const ranges = []
   for (let code = 0; code < 128; code++) {
-    if (!re.test(String.fromCharCode(code))) continue
+    if (!re.test(String.fromCodePoint(code))) continue
     const last = ranges.at(-1)
     if (last && last[1] === code - 1) last[1] = code
     else ranges.push([code, code])

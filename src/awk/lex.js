@@ -78,7 +78,8 @@ export function tokenize(src, warn = null) {
       else push(src[j] === '(' ? 'funcname' : 'name', word)
       continue
     }
-    const op = OPERATORS.find((o) => src.startsWith(o, i))
+    const at = i
+    const op = OPERATORS.find((o) => src.startsWith(o, at))
     if (c === '@') throw new AwkError('typed regexes, indirect calls and source directives are not supported', line, '@ extensions')
     if (!op) throw new AwkError(`unexpected character \`${c}\``, line)
     push('punct', op); i += op.length
