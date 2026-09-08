@@ -16,8 +16,8 @@ export function complete(line, ctx, reg) {
   const commandPosition = before === ''
   const command = commandPosition ? '' : reg.resolveCommand(before.split(/\s+/u)[0])
   const head = line.slice(0, segStart + wordStart)
-  // `cat|gr` completes to `cat| grep`; preserve existing spacing otherwise.
-  const sep = pipe && head.endsWith('|') ? ' ' : ''
+  // Append a space after a bare pipe without inserting one into a typed word.
+  const sep = pipe && word === '' && head.endsWith('|') ? ' ' : ''
   return completeWord(word, commandPosition, pipe, command, ctx, reg).map((w) => head + sep + w)
 }
 
