@@ -66,6 +66,18 @@ b "@a/double";
     cwd: '/workspace/nested',
     stdout: '',
   },
+  ...[
+    ['ordinary lines', 'a\nb\n', ' a\n b\n'],
+    ['blank lines', '\na\n\n', ' \n a\n \n'],
+    ['an unterminated final line', 'a\nb', ' a\n b'],
+    ['empty input', '', ''],
+  ].map(([inputKind, input, stdout]) => ({
+    purpose: `the exact sed prefix substitution handles ${inputKind}`,
+    command: "cat input | sed 's/^/ /'",
+    files: { input },
+    cwd: '/',
+    stdout,
+  })),
 ]
 
 describe('grep and sed — logged package-count pipeline', () => {
