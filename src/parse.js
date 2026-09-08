@@ -221,6 +221,7 @@ function buildSteps(raw, start, end) {
 // and `name() { … }` function definitions.
 function openParen(raw, i, stage) {
   const next = raw[i + 1]
+  if (stage.words.length <= 1 && raw[i].wordAdjacent && raw[i - 1]?.kind === 'word' && /^[A-Za-z_][A-Za-z0-9_]*\+?=$/u.test(raw[i - 1].value)) throw new UnsupportedError('feature', 'array assignment', 'shell array assignments are not supported')
   if (next?.kind === 'paren_open' && next.adjacent && commandPosition(stage)) {
     throw new UnsupportedError('feature', '((', 'arithmetic evaluation (`((…))`) is not supported')
   }

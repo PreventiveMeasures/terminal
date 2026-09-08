@@ -71,6 +71,7 @@ export function tokenize(line) {
     if (c === '\n') { newline(st); continue }
     if (isBlank(c)) { flush(st); st.i++; continue }
     const op = readOperator(line, st.i, !st.inToken)
+    if (op?.token.kind === 'paren_open') op.token.wordAdjacent = st.inToken
     if (op) { flush(st); emit(st, op.token); st.i = op.end; continue }
     put(st, c, '0')
     st.i++

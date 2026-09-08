@@ -164,7 +164,7 @@ function evalPredicate(p, entry, ctx) {
   // only come from a code bug.
   if (p.kind === 'group') return runPredicates(p.groups, entry, ctx)
   if (p.kind === 'true') return matchedOnly(true)
-  if (p.kind === 'type') return matchedOnly(p.value === 'f' ? entry.kind === 'file' : entry.kind === 'dir')
+  if (p.kind === 'type') return matchedOnly(p.value.split(',').includes(entry.kind === 'file' ? 'f' : 'd'))
   if (p.kind === 'name' || p.kind === 'iname') return matchedOnly(p.re.test(entry.path.replace(/\/+$/u, '').split('/').at(-1) || '/'))
   // Always true. On a directory it also records the path so walkTree
   // skips the subtree; on a file it is a no-op that still reports true,

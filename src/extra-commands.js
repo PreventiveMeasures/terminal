@@ -53,7 +53,7 @@ function seq(_stdin, tokens) {
   const nums = []
   for (const t of positional) {
     if (!/^[+-]?\d+$/u.test(t)) {
-      if (Number.isFinite(Number(t)) && t.trim() !== '') return unsupported('feature', 'seq', 'non-integer operands', 'seq: fractional and exponential operands are not supported')
+      if ((Number.isFinite(Number(t)) && t.trim() !== '') || /^[+-]?inf(?:inity)?$/iu.test(t)) return unsupported('feature', 'seq', 'non-integer operands', 'seq: non-integer operands are not supported')
       return err(`seq: invalid integer: ${t}`)
     }
     nums.push(BigInt(t))
@@ -200,6 +200,7 @@ function parseCutList(spec) {
   const ranges = []
   for (const part of spec.split(/[, \t]/u)) {
     if (part === '') return { error: err(`cut: empty list item in \`${spec}\``) }
+    if ((part.match(/\d+/gu) ?? []).some((n) => BigInt(n) > 18446744073709551615n)) return { error: err(`cut: offset is too large: ${part}`) }
     if (/^\d+$/u.test(part)) {
       const n = Number(part)
       if (n < 1) return { error: err('cut: list items must be >= 1') }
@@ -207,9 +208,7 @@ function parseCutList(spec) {
       continue
     }
     const range = part.match(/^(\d*)-(\d*)$/u)
-    if (!range || (range[1] === '' && range[2] === '')) {
-      return { error: err(`cut: invalid list item: ${part}`) }
-    }
+    if (!range || (range[1] === '' && range[2] === '')) return { error: err(`cut: invalid list item: ${part}`) }
     const start = range[1] === '' ? 1 : Number(range[1])
     const end = range[2] === '' ? Number.POSITIVE_INFINITY : Number(range[2])
     if (start < 1) return { error: err('cut: list items must be >= 1') }

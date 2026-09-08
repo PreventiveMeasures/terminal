@@ -10,7 +10,7 @@
 // modifier are accepted and ignored, as gawk does in the C locale. A
 // `%` conversion (`%%`, or `%5%`) is a percent sign; an unknown
 // conversion stays literal text.
-import { AwkError } from './awk-common.js'
+import { AwkError, MAX_FIELD_WIDTH } from './awk-common.js'
 
 const SPEC = /^%([-+ 0#']*)(\d+|\*)?'?(?:\.(\d+|\*)?)?[hlL]?(.)?/su
 const CONVERSIONS = 'diouxXeEfFgGcs'
@@ -21,8 +21,10 @@ export function parseFormat(fmt) {
   for (let i = 0; i < fmt.length; i++) {
     if (fmt[i] !== '%') { lit += fmt[i]; continue }
     if (fmt[i + 1] === '%') { lit += '%'; i++; continue }
+    if (/^%[^a-zA-Z%]*\$/u.test(fmt.slice(i))) throw new AwkError('positional printf arguments are not supported', null, 'positional format arguments')
     const m = SPEC.exec(fmt.slice(i))
     const conv = m[4]
+    if (conv === 'a' || conv === 'A') throw new AwkError('hexadecimal floating-point formats are not supported', null, 'hexadecimal float format')
     if (conv === '%') { lit += '%'; i += m[0].length - 1; continue }
     if (conv === undefined || !CONVERSIONS.includes(conv)) {
       // `%` at the very end, or `%y`: printed as typed.
@@ -55,7 +57,8 @@ export function parseFormat(fmt) {
 // `zeroOk`.
 export function padField(prefix, body, spec, zeroOk) {
   const width = spec.width ?? 0
-  const missing = width - prefix.length - body.length
+  if (width > MAX_FIELD_WIDTH) throw new AwkError('format width exceeds the output limit', null, 'format size limit')
+  const missing = width - prefix.length - [...body].length
   if (missing <= 0) return prefix + body
   if (spec.minus) return prefix + body + ' '.repeat(missing)
   if (spec.zero && zeroOk) return prefix + '0'.repeat(missing) + body
@@ -70,6 +73,7 @@ const isUpper = (conv) => conv === 'X' || conv === 'E' || conv === 'G' || conv =
 // sign, follow the conversion's case, and take no width — exactly what
 // gawk prints for them.
 export function formatNumeric(value, spec) {
+  if (spec.precision > MAX_FIELD_WIDTH) throw new AwkError('format precision exceeds the output limit', null, 'format size limit')
   const { conv } = spec
   if (!Number.isFinite(value)) {
     if (Number.isNaN(value)) throw new AwkError('formatting signed NaN is not supported', null, 'signed NaN')
@@ -122,7 +126,8 @@ const MAX_FLOAT_PRECISION = 100
 
 function formatFloat(value, spec) {
   const { conv } = spec
-  const prec = Math.min(spec.precision ?? 6, MAX_FLOAT_PRECISION)
+  if (spec.precision > MAX_FLOAT_PRECISION) throw new AwkError(`floating-point precision above ${MAX_FLOAT_PRECISION} is not supported`, null, 'float precision limit')
+  const prec = spec.precision ?? 6
   const negative = value < 0 || Object.is(value, -0)
   const abs = Math.abs(value)
   let body

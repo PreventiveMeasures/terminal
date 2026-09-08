@@ -38,11 +38,11 @@
 //     a temporary), and `a[1][2]` (arrays of arrays) is refused.
 
 import { AwkError } from './awk-common.js'
-import { markUnsupported, unsupported } from './unsupported.js'
+import { markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from './unsupported.js'
 import { unescapeAwkString } from './awk-lex.js'
 import { parseProgram } from './awk-parse.js'
 import { createMachine, runProgram } from './awk-run.js'
-import { StrNum } from './awk-value.js'
+import { StrNum, byteLocale, checkText } from './awk-value.js'
 import { lookup } from './fs.js'
 import { parseArgs } from './parse.js'
 import { err, usage } from './util.js'
@@ -58,11 +58,13 @@ export function awk(stdin, tokens, ctx) {
   if (source.error) return source.error
   let program
   try {
+    checkText({ byteLocale: byteLocale(ctx) }, source.text)
     program = parseProgram(source.text)
   } catch (e) {
     // A RangeError here is the parser's own recursion giving out on a
     // pathologically nested expression: a program we cannot compile.
     if (e instanceof RangeError) return unsupported('feature', 'awk', 'parser depth limit', `awk: program too deeply nested (${e.message})`)
+    if (unsupportedNote(e)) return unsupportedFrom(e, 'awk', `awk: ${e.message}`)
     if (!(e instanceof AwkError)) throw e
     const message = e.line === null ? `awk: ${e.message}` : `awk: syntax error at line ${e.line}: ${e.message}`
     // A construct gawk implements and this interpreter refuses is a gap,
@@ -91,7 +93,8 @@ export function awk(stdin, tokens, ctx) {
     // pathologically nested expression, or a string grown past its
     // maximum) — reported like any other fatal error rather than as a
     // crash of the terminal.
-    if (!(e instanceof AwkError) && !(e instanceof RangeError)) throw e
+    const note = unsupportedNote(e)
+    if (!(e instanceof AwkError) && !(e instanceof RangeError) && !note) throw e
     m.errOut.push(`awk: ${e.message}\n`)
     exitCode = 2
     // Same rule as the parse-time catch, for the gaps that can only be
@@ -100,6 +103,7 @@ export function awk(stdin, tokens, ctx) {
     // attached to it rather than coming from `unsupported`.
     if (e instanceof RangeError) gap = { detail: 'runtime limit', message: `awk: ${e.message}` }
     if (e.gap) gap = { detail: e.gap, message: `awk: ${e.message}` }
+    if (note) gap = { detail: note.detail, message: `awk: ${e.message}` }
   }
   const result = { stdout: m.out.join(''), stderr: m.errOut.join(''), exitCode }
   return gap === null ? result : markUnsupported(result, 'feature', 'awk', gap.detail, gap.message)

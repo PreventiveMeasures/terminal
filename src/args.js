@@ -72,7 +72,7 @@ export function parseArgs(tokens, schema = {}) {
       const eq = t.indexOf('=')
       const name = eq === -1 ? t.slice(2) : t.slice(2, eq)
       const inlineVal = eq === -1 ? null : t.slice(eq + 1)
-      if (valueLong.has(name) || repeatable.has(name)) {
+      if (valueLong.has(name) || (name.length > 1 && repeatable.has(name))) {
         const value = inlineVal ?? takeNext(tokens, ++i, `--${name}`)
         addValue(values, repeatable, name, value)
         order.push({ name, value })

@@ -185,7 +185,7 @@ function checkConflicts(flags) {
   }
   const dialects = ['E', 'F', 'G'].filter((f) => flags.has(f))
   if (dialects.length > 1) {
-    return err(`grep: ${dialects.map((f) => `-${f}`).join(' / ')} are mutually exclusive`)
+    return err(`grep: ${dialects.map((f) => `-${f}`).join(' / ')} are mutually exclusive`, 2)
   }
   return null
 }

@@ -37,7 +37,7 @@ function setTest(items, negate, ignoreCase) {
 export function compileNfa(ast, ignoreCase) {
   const states = []
   const push = (s) => {
-    if (states.length >= MAX_STATES) throw new AwkError('regex too large')
+    if (states.length >= MAX_STATES) throw new AwkError('regex too large', null, 'regex state limit')
     states.push(s)
     return states.length - 1
   }

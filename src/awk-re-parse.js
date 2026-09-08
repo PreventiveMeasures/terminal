@@ -102,7 +102,7 @@ class EreParser {
         const min = m[1] === '' ? 0 : Number(m[1])
         const max = m[2] === undefined ? min : m[3] === '' ? null : Number(m[3])
         if (max !== null && max < min) this.fail(`invalid interval {${min},${max}}`)
-        if (min > MAX_INTERVAL || (max !== null && max > MAX_INTERVAL)) this.fail(`interval count above ${MAX_INTERVAL} is not supported`)
+        if (min > MAX_INTERVAL || (max !== null && max > MAX_INTERVAL)) throw new AwkError(`interval count above ${MAX_INTERVAL} is not supported`, null, 'regex interval limit')
         this.i += m[0].length
         node = { type: 'rep', node, min, max }
         continue
@@ -153,12 +153,12 @@ class EreParser {
     if (isOctal(c)) {
       let digits = c
       while (digits.length < 3 && isOctal(this.peek())) digits += this.src[this.i++]
-      return Number.parseInt(digits, 8)
+      return regexByte(digits, 8)
     }
     if (c === 'x' && isHex(this.peek())) {
       let digits = ''
       while (digits.length < 2 && isHex(this.peek())) digits += this.src[this.i++]
-      return Number.parseInt(digits, 16)
+      return regexByte(digits, 16)
     }
     if (!SYNTAX.includes(c) && warnUnknown) this.warn?.(`regexp escape sequence \`\\${c}' is not a known regexp operator`)
     const code = c.codePointAt(0)
@@ -206,6 +206,7 @@ class EreParser {
     if (c === '[' && (this.src[this.i + 1] === '.' || this.src[this.i + 1] === '=')) {
       const close = this.src.indexOf(this.src[this.i + 1] + ']', this.i + 2)
       if (close !== -1 && close > this.i + 2) {
+        if (Array.from(this.src.slice(this.i + 2, close)).length !== 1) this.fail('invalid collation character')
         const code = this.src.codePointAt(this.i + 2)
         this.i = close + 2
         return code
@@ -227,6 +228,12 @@ class EreParser {
 export function parseEre(src, warn = null) {
   const p = new EreParser(src, warn)
   return { ast: p.parse(), groups: p.groups }
+}
+
+function regexByte(digits, base) {
+  const code = Number.parseInt(digits, base)
+  if (code >= 128) throw new AwkError('non-ASCII regex byte escapes are not supported', null, 'regex byte escapes')
+  return code
 }
 
 // --- ES rendering ----------------------------------------------------

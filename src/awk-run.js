@@ -12,7 +12,7 @@ import { Input } from './awk-input.js'
 import { initialRng } from './awk-math.js'
 import { redirectMessage } from './awk-parse.js'
 import { awkSprintf } from './awk-printf.js'
-import { StrNum, compare, toNum, toOutStr, toStr, truthy } from './awk-value.js'
+import { StrNum, byteLocale, compare, toNum, toOutStr, toStr, truthy } from './awk-value.js'
 
 const BREAK = { type: 'break' }
 const CONTINUE = { type: 'continue' }
@@ -35,7 +35,7 @@ export function createMachine(program, ctx, stdin, operands) {
   const m = {
     program, globals, frames: [], record: '', recordValue: new StrNum(''), fields: [undefined], nf: 0,
     fieldMode: 'FS', out: [], errOut: [], steps: 0, exitCode: 0, ranges: [], rng: initialRng(),
-    input: new Input(ctx, stdin),
+    input: new Input(ctx, stdin), byteLocale: byteLocale(ctx),
     hasFileRules: program.beginFile.length > 0,
     // Injected so awk-eval.js and awk-input.js need no import of this
     // module or of the builtins.
@@ -238,7 +238,7 @@ function emit(m, dest, text) {
   const name = toStr(evalExpr(m, dest), m)
   if (name === '/dev/stdout') m.out.push(text)
   else if (name === '/dev/stderr') m.errOut.push(text)
-  else if (name !== '/dev/null') throw new AwkError(redirectMessage(name))
+  else if (name !== '/dev/null') throw new AwkError(redirectMessage(name), null, 'output redirection')
 }
 
 function execPrint(m, s) {

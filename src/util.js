@@ -141,22 +141,18 @@ export function readContent(cmd, files, stdin, ctx) {
 // exit 1 if any input failed, even when some files were read.
 export const okWith = (stdout, r) => ({ stdout, stderr: r.stderr, exitCode: r.failed ? 1 : 0 })
 
-// Parse a non-negative decimal count. The digits-only regex rejects
-// empty strings (`Number('')` is 0, which would otherwise sneak
-// through — relevant because the tokenizer can emit empty tokens
-// from quoted args like `head -n "" file`), whitespace,
-// sign-prefixed numbers, hex/oct/binary literals, and scientific
-// notation. The Number.isSafeInteger guard rejects values past
-// 2^53 - 1 where round-trip parsing stops being exact. Callers
-// that need a strictly positive count (e.g. xargs -n) check
-// `value === 0` themselves.
-export function parseNonNegativeInt(str, label, shown = str) {
-  if (typeof str !== 'string' || !/^\d+$/u.test(str)) {
+// GNU counts accept leading blanks and an optional plus; find requires
+// digits only. Unbounded counts saturate beyond any representable JS
+// input size, as grep/uniq/xargs do, instead of rejecting valid operands.
+// Commands with a fixed integer limit provide max. Positive-only callers
+// (e.g. xargs -n) additionally reject zero.
+export function parseNonNegativeInt(str, label, shown = str, { max = Infinity, digitsOnly = false } = {}) {
+  if (typeof str !== 'string' || !(digitsOnly ? /^\d+$/u : /^[ \t\n\r\f\v]*\+?\d+$/u).test(str)) {
     return { error: err(`${label}: invalid count: ${shown}`) }
   }
   const n = Number(str)
-  if (!Number.isSafeInteger(n)) return { error: err(`${label}: out of range: ${shown}`) }
-  return { value: n }
+  if (n > max) return { error: err(`${label}: out of range: ${shown}`) }
+  return { value: Math.min(n, Number.MAX_SAFE_INTEGER) }
 }
 
 // A count that may carry a sign, as head's and tail's `-n` / `-c` do.

@@ -11,7 +11,7 @@ import { splitOn } from './awk-input.js'
 import { MATH_BUILTINS } from './awk-math.js'
 import { awkSprintf } from './awk-printf.js'
 import { substituteAll } from './awk-regex.js'
-import { StrNum, ignoreCase, toNum, toStr, typeName } from './awk-value.js'
+import { StrNum, foldCase, ignoreCase, toNum, toStr, typeName } from './awk-value.js'
 
 const str = (m, node) => toStr(evalExpr(m, node), m)
 const num = (m, node) => toNum(evalExpr(m, node))
@@ -147,7 +147,7 @@ function length(m, args) {
 function index(m, args) {
   let s = str(m, args[0])
   let t = str(m, args[1])
-  if (ignoreCase(m)) { s = s.toLowerCase(); t = t.toLowerCase() }
+  if (ignoreCase(m)) { s = foldCase(s); t = foldCase(t) }
   const at = s.indexOf(t)
   return at < 0 ? 0 : Array.from(s.slice(0, at)).length + 1
 }
@@ -172,8 +172,8 @@ const BUILTIN = {
   gensub,
   match,
   sprintf: (m, args) => awkSprintf(m, str(m, args[0]), args.slice(1).map((a) => evalExpr(m, a))),
-  tolower: (m, args) => str(m, args[0]).toLowerCase(),
-  toupper: (m, args) => str(m, args[0]).toUpperCase(),
+  tolower: (m, args) => foldCase(str(m, args[0])),
+  toupper: (m, args) => foldCase(str(m, args[0]), true),
   close,
   fflush: () => 0,
   typeof: typeOf,

@@ -6,7 +6,7 @@
 
 import { AwkError, MAX_FIELD_WIDTH } from './awk-common.js'
 import { formatNumeric, padField, parseFormat } from './awk-format.js'
-import { StrNum, looksNumeric, toNum, toStr } from './awk-value.js'
+import { StrNum, checkText, looksNumeric, toNum, toStr } from './awk-value.js'
 
 const FORMAT_CACHE = new Map()
 
@@ -40,7 +40,7 @@ export function awkSprintf(m, fmt, args) {
       spec.precision = p < 0 ? null : p
     }
     if (spec.width > MAX_FIELD_WIDTH || spec.precision > MAX_FIELD_WIDTH) {
-      throw new AwkError(`printf: field width or precision above ${MAX_FIELD_WIDTH} is not supported`)
+      throw new AwkError(`printf: field width or precision above ${MAX_FIELD_WIDTH} is not supported`, null, 'format size limit')
     }
     out += formatOne(m, spec, take())
   }
@@ -50,10 +50,10 @@ export function awkSprintf(m, fmt, args) {
 function formatOne(m, spec, arg) {
   if (spec.conv === 's') {
     let s = toStr(arg, m)
-    if (spec.precision !== null) s = s.slice(0, spec.precision)
+    if (spec.precision !== null) s = [...s].slice(0, spec.precision).join('')
     return padField('', s, spec, false)
   }
-  if (spec.conv === 'c') return padField('', charOf(arg), spec, false)
+  if (spec.conv === 'c') return padField('', checkText(m, charOf(arg)), spec, false)
   return formatNumeric(toNum(arg), spec)
 }
 
@@ -64,7 +64,8 @@ function charOf(arg) {
   const numeric = typeof arg === 'number' || (arg instanceof StrNum && looksNumeric(arg.s))
   if (numeric) {
     const code = Math.trunc(toNum(arg))
-    return code >= 0 && code <= 0x10FFFF ? String.fromCodePoint(code) : ''
+    if (!Number.isSafeInteger(code) || code < 0 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) throw new AwkError('printf: character code outside Unicode scalar values is not supported', null, 'character code')
+    return String.fromCodePoint(code)
   }
   const s = arg instanceof StrNum ? arg.s : arg ?? ''
   return s === '' ? '\0' : String.fromCodePoint(s.codePointAt(0))

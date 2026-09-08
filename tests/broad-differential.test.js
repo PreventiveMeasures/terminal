@@ -28,7 +28,10 @@ function fixture(files) {
 }
 function compare(cmd, binary, args, files, input = '', locale = 'C') {
   fixture(files)
-  const ref = spawnSync(binary, args, { cwd: dir, env: { ...env, LC_ALL: locale }, input, encoding: 'utf8', timeout: 5000 })
+  // Keep the pipe open until all input is drained, even when the native
+  // command ignores stdin or exits early. Otherwise spawnSync can race
+  // with that exit and report EPIPE instead of the command's result.
+  const ref = spawnSync('/bin/sh', ['-c', '"$@"; reference_status=$?; cat >/dev/null; exit "$reference_status"', 'reference', binary, ...args], { cwd: dir, env: { ...env, LC_ALL: locale }, input, encoding: 'utf8', timeout: 5000 })
   assert.equal(ref.error, undefined)
   assert.equal(ref.signal, null)
   const source = `cat input | ${cmd} ${args.map(quote).join(' ')}`

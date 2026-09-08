@@ -15,7 +15,7 @@
 import { AwkError, MAX_STEPS } from './awk-common.js'
 import { unescapeAwkString } from './awk-lex.js'
 import { AwkRegex, compileRegex, splitByRegex, stepAt } from './awk-regex.js'
-import { StrNum, ignoreCase, toNum, toStr } from './awk-value.js'
+import { StrNum, checkText, ignoreCase, toNum, toStr } from './awk-value.js'
 import { lookup } from './fs.js'
 import { consumeStdin } from './util.js'
 
@@ -233,6 +233,7 @@ export class Input {
     const sig = m.fileRule('begin')
     if (isExit(sig)) { this.exitSignal = sig; this.src = null; return false }
     if (sig !== undefined && sig.type === 'nextfile') { this.closeFile(m); return false }
+    checkText(m, text)
     return true
   }
 
@@ -270,7 +271,7 @@ export class Input {
         if (error) { m.globals.set('ERRNO', error); return { status: -1 } }
         text = this.ctx.fs.readFile(abs)
       }
-      src = { text, pos: 0 }
+      src = { text: checkText(m, text), pos: 0 }
       this.readers.set(name, src)
     }
     const r = readRecord(src, toStr(m.globals.get('RS'), m), ignoreCase(m))

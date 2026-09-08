@@ -27,7 +27,7 @@ export class AwkRegex {
     try {
       this.js = new RegExp(this.source, this.flags)
     } catch (e) {
-      throw new AwkError(`invalid regex /${src}/: ${e.message}`)
+      throw new AwkError(`cannot compile regex /${src}/: ${e.message}`, null, 'regex engine limit')
     }
     this.ast = ast
     this.nfa = null
@@ -38,6 +38,7 @@ export class AwkRegex {
 
   checkLocale(s) {
     if (this.src.includes('[:') && [...s].some((c) => c.codePointAt(0) > 127)) throw new AwkError('POSIX character classes on non-ASCII input require locale support', null, 'locale-sensitive character classes')
+    if ((this.ignoreCase || /\\[sSwWyB<>]/u.test(this.src)) && /[\u0080-\u{10FFFF}]/u.test(s + this.src)) throw new AwkError('non-ASCII case folding, classes and word boundaries require locale support', null, 'locale-sensitive regex')
   }
 
   // Leftmost-longest match at or after `from`: { start, end } or null.

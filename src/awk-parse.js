@@ -322,6 +322,7 @@ function parseDelete(p) {
   if (p.accept('[')) {
     subs = parseExprList(p, {})
     p.expect(']')
+    if (p.is('[')) p.fail('arrays of arrays are not supported', 'arrays of arrays')
   }
   endSimple(p)
   return { type: 'delete', name, subs }

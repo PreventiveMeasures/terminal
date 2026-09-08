@@ -140,7 +140,6 @@ function parseKeySpecs(raw, globals) {
     const start = Number(m1[1])
     const end = m2 === undefined ? undefined : Number(m2[1])
     if (start === 0 || end === 0) return { error: err(`sort: field number is zero: ${spec}`) }
-    if (end !== undefined && end < start) return { error: err(`sort: reversed key range: ${spec}`) }
     // Any option on EITHER position suppresses the globals for this key
     // — `b` included, so `sort -r -k2b` sorts ascending.
     const own = mods.length > 0

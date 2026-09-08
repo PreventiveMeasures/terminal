@@ -10,7 +10,7 @@ export function sed(stdin, tokens, ctx) {
   const { flags, positional } = parsed
   if (positional.length === 0) return err(SED_SUBSET)
   let commands
-  try { commands = parseSedScript(positional[0]) } catch (e) { return unsupportedFrom(e, 'sed', `sed: ${e.message.replace(/^sed: /u, '')}`) }
+  try { commands = parseSedScript(positional[0]) } catch (e) { return failure(e) }
   const r = readInputs('sed', positional.slice(1), stdin, ctx)
   // Each EOF ends a record even without a final newline. Output preserves
   // that missing newline until another print needs to start a fresh line.
@@ -38,8 +38,13 @@ export function sed(stdin, tokens, ctx) {
       if (!flags.has('n')) emit(text, newline)
     }
   } catch (e) {
-    if (e.gap) return unsupported('feature', 'sed', e.gap, `sed: ${e.message}`)
-    return unsupportedFrom(e, 'sed', `sed: ${e.message.replace(/^sed: /u, '')}`)
+    return failure(e)
   }
   return { ...okWith(out.join(''), r), exitCode: r.failed ? 2 : 0 }
+}
+
+function failure(e) {
+  if (e.gap) return unsupported('feature', 'sed', e.gap, `sed: ${e.message}`)
+  if (e instanceof RangeError) return unsupported('feature', 'sed', 'regex runtime limit', `sed: ${e.message}`)
+  return unsupportedFrom(e, 'sed', `sed: ${e.message.replace(/^sed: /u, '')}`)
 }

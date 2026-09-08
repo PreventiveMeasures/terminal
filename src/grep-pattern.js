@@ -2,6 +2,7 @@ import { readPosixClass } from './charclass.js'
 import { UnsupportedError, unsupported } from './unsupported.js'
 import { err } from './util.js'
 import { AwkRegex } from './awk-regex.js'
+import { parseEre } from './awk-re-parse.js'
 import { breToEs } from './bre.js'
 import { asciiCompatible, hasUnicodeSpace } from './regex-locale.js'
 
@@ -117,6 +118,7 @@ export function compilePatterns(patterns, flags) {
       if (r.error) return { error: err(`grep: ${r.error}`, 2) }
       source = r.source
     }
+    const canonical = source
     // -w wraps in word-boundary anchors. Per pattern so each gets
     // its own boundary check rather than wrapping the union.
     if (flags.has('w')) source = `(?<![A-Za-z0-9_])(?:${source})(?![A-Za-z0-9_])`
@@ -135,6 +137,7 @@ export function compilePatterns(patterns, flags) {
       }
       res.push(re)
     } catch (e) {
+      if (gnuSyntaxGap(canonical, flags)) return { error: unsupported('feature', 'grep', 'GNU regex syntax', 'grep: this GNU regular expression cannot be represented by the JavaScript matcher', 2) }
       // POSIX: regex syntax errors exit 2 (separate from "no match"
       // which exits 1). Dialect label tells a confused user which
       // mode was active (e.g. `grep -E "Function("` says ERE).
@@ -145,6 +148,16 @@ export function compilePatterns(patterns, flags) {
     }
   }
   return { res }
+}
+
+// JS rejects several valid GNU forms: omitted interval minima, stacked
+// quantifiers and literal unmatched braces/closing brackets. Do not label
+// those failures as mistakes in the user's regex. Invalid references and
+// malformed BRE intervals remain ordinary errors.
+function gnuSyntaxGap(source, flags) {
+  if (/\\[1-9]/u.test(source)) return false
+  if (!flags.has('E') && /(?<!\\)\{(?!\d*(?:,\d*)?\})/u.test(source)) return false
+  try { parseEre(grepSource(source, true)); return true } catch (e) { return Boolean(e.gap) }
 }
 
 export function inputGap(inputs, res, invert) {

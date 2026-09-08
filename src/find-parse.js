@@ -78,7 +78,8 @@ function parsePrimary(p, level) {
     if (r.error) { p.error = r.error; return null }
     return r
   }
-  if (p.i - 1 > from) { p.error = err(`find: -not must be followed by a primary, got: ${t}`); return null }
+  if (t === ',') { p.error = unsupported('feature', 'find', 'comma operator', 'find: comma expressions are not supported'); return null }
+  if (p.i - 1 > from && !t.startsWith('-')) { p.error = err(`find: -not must be followed by a primary, got: ${t}`); return null }
   p.error = t === '--' || !t.startsWith('-') ? err(`find: paths must precede expression: ${t}`)
     : unsupported('option', 'find', t, `find: unknown option: ${t}`)
   return null
@@ -89,7 +90,7 @@ function valuePredicate(primary, value, negate, depth) {
   if (checked.error) return checked
   const pred = { kind: primary, value, negate }
   if (primary === 'mindepth' || primary === 'maxdepth') {
-    const count = parseNonNegativeInt(value, `find: -${primary}`)
+    const count = parseNonNegativeInt(value, `find: -${primary}`, value, { max: 2147483647, digitsOnly: true })
     if (count.error) return count
     depth[primary === 'mindepth' ? 'minDepth' : 'maxDepth'] = count.value
     pred.kind = 'true'
@@ -115,9 +116,14 @@ function primaryFor(token) {
 const UNMODELLED_TYPES = 'lbcps'
 
 function checkPrimary(kind, value) {
-  if (kind === 'type' && value !== 'f' && value !== 'd') {
+  if (kind === 'type') {
+    const types = value.split(',')
+    const duplicate = types.find((type, i) => types.indexOf(type) !== i)
+    if (duplicate !== undefined) return { error: err(`find: Duplicate file type '${duplicate}' in the argument list to -type.`) }
+  }
+  if (kind === 'type' && !value.split(',').every((type) => type === 'f' || type === 'd')) {
     const message = `find: -type/--type expects 'f' or 'd', got: ${value}`
-    if (value.length === 1 && UNMODELLED_TYPES.includes(value)) {
+    if (value.split(',').every((type) => type.length === 1 && ('fd' + UNMODELLED_TYPES).includes(type))) {
       return { error: unsupported('option', 'find', `-type ${value}`, message) }
     }
     return { error: err(message) }
