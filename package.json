@@ -90,7 +90,8 @@
   ],
   "scripts": {
     "lint": "oxlint -c .oxlintrc.json ./src/ ./tests/",
-    "test": "node --test --test-isolation=none ./tests/*.test.js"
+    "test": "node --test --test-isolation=none ./tests/*.test.js",
+    "test:slow": "AWK_SLOW_TESTS=1 node --test --test-isolation=none ./tests/*.test.js"
   },
   "dependencies": {},
   "devDependencies": {
