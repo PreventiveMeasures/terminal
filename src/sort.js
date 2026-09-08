@@ -4,7 +4,7 @@
 // selected fields, with the whole line as the last-resort tiebreak.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, okWith, readInputs, splitLines } from './util.js'
+import { err, joinLines, okWith, readInputs, splitLines, utf8 } from './util.js'
 import { unsupported } from './unsupported.js'
 import { compareNames as cmpStrings } from './fs.js'
 
@@ -15,12 +15,12 @@ export function sort(stdin, tokens, ctx) {
     repeatable: ['k'],
   })
   const sep = values.get('t')
-  if (sep !== undefined && [...sep].length !== 1) return err(`sort: multi-character tab \`${sep}\``)
+  if (sep !== undefined && utf8.encode(sep).length !== 1) return err(`sort: multi-character tab \`${sep}\``)
   const globals = { n: flags.has('n'), f: flags.has('f'), b: flags.has('b'), r: flags.has('r') }
   const keys = parseKeySpecs(values.get('k') ?? [], globals)
   if (keys.error) return keys.error
   // `sort a b` orders the concatenation of all inputs, matching coreutils.
-  const r = readInputs('sort', positional, stdin, ctx)
+  const r = readInputs('sort', positional, stdin, ctx, { stopOnError: true })
   // Unlike cat/head/wc, sort is ALL-OR-NOTHING: GNU abandons the run on
   // the first operand it cannot read and writes nothing to stdout,
   // exiting 2. Emitting a partial sort would be worse than useless —

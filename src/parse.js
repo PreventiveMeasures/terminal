@@ -178,7 +178,7 @@ function buildSteps(raw, start, end) {
     }
     if (t.kind === 'pipe' || t.kind === 'pipe_err' || t.kind === 'and' || t.kind === 'or' || t.kind === 'semi') {
       // `|&` is `2>&1 |`, applied after the stage's own redirects.
-      if (t.kind === 'pipe_err' && isCommand(stage)) stage.redirs.push({ fd: 2, op: 'dup', toFd: 1 })
+      if (t.kind === 'pipe_err' && (isCommand(stage) || stage.group || stage.loop)) stage.redirs.push({ fd: 2, op: 'dup', toFd: 1 })
       if (!(t.kind === 'semi' && bareBang(steps.at(-1), stage))) steps.at(-1).stages.push(stage)
       stage = newStage()
       if (t.kind === 'and') steps.push(newStep('and'))

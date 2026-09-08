@@ -1,8 +1,7 @@
 // The shell's own builtins — the ones that act on the shell rather
 // than on the file tree: `exit`, `break` / `continue`, `export` /
 // `unset`. They are dispatched like any command (so a wired command of
-// the same name still wins, and `find -exec exit ';'` merely returns a
-// status), but the engine reads two extra fields off their results:
+// the same name still wins). The engine reads two extra result fields:
 // `halt`, which ends the line, and `control`, which the enclosing `for`
 // loop consumes. index.js strips both before a result reaches the
 // caller. Hidden: shell machinery, not part of the documented command
@@ -26,7 +25,7 @@ const INT64_MIN = -9223372036854775808n
 function exit(_stdin, tokens, ctx) {
   const args = tokens[0] === '--' ? tokens.slice(1) : tokens
   if (args.length === 0) return { stdout: '', stderr: '', exitCode: ctx.lastExit, halt: true }
-  const arg = args[0]
+  const arg = args[0].replace(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/gu, '')
   const n = /^[+-]?\d+$/u.test(arg) ? BigInt(arg) : null
   if (n === null || n > INT64_MAX || n < INT64_MIN) {
     return { stdout: '', stderr: `exit: ${arg}: numeric argument required\n`, exitCode: 2, halt: true }
@@ -36,18 +35,18 @@ function exit(_stdin, tokens, ctx) {
 }
 
 // `break` / `continue` end or skip the current iteration of the
-// enclosing `for`. A count other than 1 (`break 2`) would need nested
-// loop bookkeeping this shell does not keep; outside any loop bash only
-// warns, and so does this.
+// enclosing `for`, or N enclosing loops. A subshell starts with no
+// enclosing loops; outside any loop Bash only warns, and so does this.
 function loopControl(name) {
   return (_stdin, tokens, ctx) => {
-    if (tokens.length > 1) return err(`${name}: too many arguments`)
-    if (tokens.length === 1 && tokens[0] !== '1') {
-      if (!/^\d+$/u.test(tokens[0]) || tokens[0] === '0') return err(`${name}: ${tokens[0]}: loop count out of range`)
-      return unsupported('feature', name, `${name} N`, `${name} ${tokens[0]}: only \`${name}\` (one level) is supported`)
-    }
+    const args = tokens[0] === '--' ? tokens.slice(1) : tokens
+    if (args.length > 1) return { ...err(`${name}: too many arguments`), halt: true }
+    const arg = (args[0] ?? '1').replace(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/gu, '')
+    const n = /^[+-]?\d+$/u.test(arg) ? BigInt(arg) : null
+    if (n === null || n > INT64_MAX || n < INT64_MIN) return { ...err(`${name}: ${arg}: numeric argument required`, 128), halt: true }
+    if (n <= 0) return { ...err(`${name}: ${arg}: loop count out of range`), control: ctx.loopDepth ? { type: 'break', levels: ctx.loopDepth } : undefined }
     if (ctx.loopDepth === 0) return err(`${name}: only meaningful in a \`for\` loop`, 0)
-    return { stdout: '', stderr: '', exitCode: 0, control: name }
+    return { stdout: '', stderr: '', exitCode: 0, control: { type: name, levels: Number(n > BigInt(ctx.loopDepth) ? BigInt(ctx.loopDepth) : n) } }
   }
 }
 
@@ -65,21 +64,25 @@ function exportCmd(_stdin, tokens, ctx) {
   const terminated = tokens[0] === '--'
   const operands = terminated ? tokens.slice(1) : tokens
   if (operands.length === 0 || (!terminated && operands[0] === '-p')) return unsupported('option', 'export', '-p', 'export: listing the environment is not supported (there is none)')
+  let stderr = ''
   for (const t of operands) {
     const eq = t.indexOf('=')
-    const name = eq === -1 ? t : t.slice(0, eq)
+    const append = eq > 0 && t[eq - 1] === '+'
+    const name = eq === -1 ? t : t.slice(0, append ? eq - 1 : eq)
     if (!terminated && t.startsWith('-')) return unsupported('option', 'export', t, `export: option \`${t}\` is not supported`)
-    if (!NAME.test(name)) return err(`export: \`${name}': not a valid identifier`)
-    if (eq !== -1) ctx.vars.set(name, t.slice(eq + 1))
+    if (!NAME.test(name)) { stderr += `export: \`${name}': not a valid identifier\n`; continue }
+    if (eq !== -1) ctx.vars.set(name, (append ? ctx.vars.get(name) ?? '' : '') + t.slice(eq + 1))
     else if (ctx.vars.has(name)) ctx.vars.set(name, ctx.vars.get(name))
   }
-  return ok()
+  return { stdout: '', stderr, exitCode: stderr ? 1 : 0 }
 }
 
 function unset(_stdin, tokens, ctx) {
-  for (const t of tokens) {
-    if (t.startsWith('-')) return unsupported('option', 'unset', t, `unset: option \`${t}\` is not supported`)
-    if (!NAME.test(t)) return err(`unset: \`${t}': not a valid identifier`)
+  const terminated = tokens[0] === '--' || (tokens[0] === '-v' && tokens[1] === '--')
+  const operands = tokens.slice(tokens[0] === '-v' ? (terminated ? 2 : 1) : (terminated ? 1 : 0))
+  for (const t of operands) {
+    if (!terminated && t.startsWith('-')) return unsupported('option', 'unset', t, `unset: option \`${t}\` is not supported`)
+    if (t.includes('[')) return unsupported('feature', 'unset', 'array subscript', 'unset: array subscripts are not supported')
     ctx.vars.delete(t)
   }
   return ok()

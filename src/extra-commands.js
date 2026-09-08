@@ -166,12 +166,12 @@ function cut(stdin, tokens, ctx) {
   if (hasC && flags.has('s')) return err('cut: -s is only valid with -f')
   const list = parseCutList(hasF ? values.get('f') : values.get('c'))
   if (list.error) return list.error
-  const delim = values.get('d') ?? '\t'
-  if (hasF && delim.length !== 1) return err('cut: -d delimiter must be a single character')
+  const delim = values.get('d') === '' ? '\0' : values.get('d') ?? '\t'
+  if (hasF && utf8.encode(delim).length !== 1) return err('cut: -d delimiter must be a single byte')
   const r = readInputs('cut', positional, stdin, ctx)
   const out = []
   for (const { content } of r.inputs) {
-    for (const line of splitLines(content)) {
+    for (const line of hasF && delim === '\n' ? (content === '' ? [] : [content]) : splitLines(content)) {
       // A line with no delimiter is passed through whole by default;
       // `-s` drops it instead. Only meaningful in field mode, since
       // byte mode has no delimiter to miss.
@@ -198,7 +198,7 @@ function cutBytes(line, ranges) {
 
 function parseCutList(spec) {
   const ranges = []
-  for (const part of spec.split(',')) {
+  for (const part of spec.split(/[, \t]/u)) {
     if (part === '') return { error: err(`cut: empty list item in \`${spec}\``) }
     if (/^\d+$/u.test(part)) {
       const n = Number(part)
@@ -241,8 +241,7 @@ function pickByPositions(items, ranges) {
 // modeled). Fields are re-joined with the same delimiter so the
 // output stays parseable by the same downstream cut.
 function cutFields(line, delim, ranges) {
-  const fields = line.split(delim)
-  if (fields.length === 1) return line
+  const fields = delim === '\n' ? splitLines(line) : line.split(delim)
   return pickByPositions(fields, ranges).join(delim)
 }
 
@@ -253,7 +252,6 @@ function cutFields(line, delim, ranges) {
 // SET supports `a-z` ranges and `\n` / `\t` / `\\` / `\0` escapes.
 // Complement operates on byte order; combined `-ds` is diagnosed.
 function tr(stdin, tokens, ctx) {
-  consumeStdin(ctx)
   const { flags, positional } = parseArgs(tokens, { short: ['c', 'd', 's'] })
   const del = flags.has('d')
   const squeeze = flags.has('s')
@@ -265,17 +263,19 @@ function tr(stdin, tokens, ctx) {
   if ([...stdin, ...positional.join('')].some((c) => c.codePointAt(0) > 127)) return unsupported('feature', 'tr', 'non-ASCII bytes', 'tr: translation of non-ASCII bytes is not supported')
   if (positional.some((s) => /\[[:.=]|\[[^\]]*\*/u.test(s))) return unsupported('feature', 'tr', 'set expressions', 'tr: character classes, equivalence classes and repetition expressions are not supported')
   if (positional.some((s) => /\\[0-7]{2}|\\[1-7abfrv]/u.test(s))) return unsupported('feature', 'tr', 'set escapes', 'tr: these set escape sequences are not supported')
+  if (positional.some((s) => /(?:^|[^\\])(?:\\\\)*\\$/u.test(s))) return unsupported('feature', 'tr', 'trailing backslash', 'tr: an unescaped trailing backslash in a set is not supported')
   const set1 = expandTrSet(positional[0])
   if (set1.error) return set1.error
   const members = new Set(set1.chars)
   // `-c` inverts membership rather than materialising the complement,
   // which would be every byte NOT in SET1.
   const selected = (ch) => complement !== members.has(ch)
-  if (del) return ok([...stdin].filter((c) => !selected(c)).join(''))
-  if (squeeze) return ok(squeezeChars(stdin, selected))
+  if (del) { consumeStdin(ctx); return ok([...stdin].filter((c) => !selected(c)).join('')) }
+  if (squeeze) { consumeStdin(ctx); return ok(squeezeChars(stdin, selected)) }
   const set2 = expandTrSet(positional[1])
   if (set2.error) return set2.error
   if (set2.chars.length === 0) return err('tr: SET2 must not be empty')
+  consumeStdin(ctx)
   if (complement) {
     // GNU walks the complement in byte order and pads SET2 with
     // its last character once the replacement set is exhausted.
@@ -308,7 +308,6 @@ function expandTrSet(spec) {
   }
   while (i < units.length) {
     const c = readUnit()
-    if (c === null) return { error: err('tr: trailing backslash in set') }
     if (units[i] === '-' && i + 1 < units.length) {
       i++
       const endC = readUnit()
@@ -369,7 +368,7 @@ function whoami(_stdin, tokens, ctx) {
 //   %Y %m %d %e %H %M %S %T %F %s %a %A %b %B %Z %z %n %t %%
 // Unknown specifiers pass through literally (matches GNU). Hidden
 // for the same reason as whoami — chain-friendly, not audit-facing.
-function date(_stdin, tokens) {
+function date(_stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['u'] })
   if (positional.length > 1) return err(`date: at most one +FORMAT argument is supported (got: ${positional[1]})`)
   let fmt = '%a %b %e %T %Z %Y'
@@ -377,8 +376,8 @@ function date(_stdin, tokens) {
     if (!positional[0].startsWith('+')) return usage('date [-u] [+FORMAT]')
     fmt = positional[0].slice(1)
   }
-  if (/%(?:[-_0^#0-9:EO]|[cCDgGhIjklNpPrRuUVwWxXy+])/u.test(fmt)) return unsupported('feature', 'date', 'format', 'date: this format directive or modifier is not supported')
-  return ok(formatDate(new Date(), fmt, flags.has('u')) + '\n')
+  if ((fmt.match(/%./gu) ?? []).some((s) => /%[-_0^#0-9:EOcCDgGhIjklNpPrRuUVwWxXy+]/u.test(s))) return unsupported('feature', 'date', 'format', 'date: this format directive or modifier is not supported')
+  return ok(formatDate(new Date(), fmt, flags.has('u') || ctx.vars.has('TZ')) + '\n')
 }
 
 const DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -404,6 +403,7 @@ function formatDate(d, fmt, utc) {
       case 'M': return pad(p.m)
       case 'S': return pad(p.s)
       case 'T': return `${pad(p.h)}:${pad(p.m)}:${pad(p.s)}`
+      case 'q': return String(Math.floor(p.M / 3) + 1)
       case 'F': return `${p.Y}-${pad(p.M + 1)}-${pad(p.D)}`
       case 's': return String(Math.floor(d.getTime() / 1000))
       case 'a': return DAYS_SHORT[p.w]

@@ -43,14 +43,18 @@ including when stderr is redirected or piped away.
 
 ## Validation
 
-- 3,225 tests passed, with zero failures, skips, or TODOs.
+- 4,602 tests passed in 126 suites, with zero failures, skips, or TODOs.
 - The suite includes a native command differential matrix and the existing GNU
-  AWK differential tests. Reference versions: coreutils 9.5, grep 3.11, gawk 5.2.2.
+  AWK differential tests. Reference versions: coreutils 9.5, grep 3.11, gawk 5.2.2,
+  Bash 5.2.37, findutils 4.10.0, tree 2.1.1, and the installed xxd.
+  Linux hexdump-specific behavior was checked against util-linux 2.39.3 source.
 - `npm run lint` and `git diff --check` pass.
-- `npm pack --dry-run` includes every runtime JavaScript module.
+- `npm pack --dry-run` includes 53 files, every runtime JavaScript module, and
+  no audit documentation.
 
 Run `npm test` and `npm run lint` after installing development dependencies.
-For the native comparisons, place GNU coreutils, GNU grep, and GNU awk on `PATH`.
+For the native comparisons, place GNU coreutils, GNU grep, GNU awk, Bash 5.2+,
+GNU findutils, tree 2.x, and xxd on `PATH`.
 The command matrix also discovers GNU tools with `g` prefixes. Native comparison
 groups skip explicitly when their reference binary is unavailable; inspect the
 test summary rather than treating a skipped comparison as a pass.
@@ -128,3 +132,85 @@ Validation adds 1,080 strict GNU grep combinations, 137 GNU awk comparisons
 New unsupported cases are checked with stderr hidden through a pipeline to
 ensure their structured diagnostics survive. The package dry run contains
 49 files, every runtime module, and no audit documentation.
+
+
+## Fourth pass: command families and shared shell state
+
+This pass starts from `d4d50e4` and expands the audit beyond AWK. New strict
+native matrices cover file boundaries, partial input failures, repeated stdin
+operands, count spellings, field delimiters, pathname selection, tree listings,
+xargs argument boundaries, shell expansion, redirects, and nested loop control.
+No native process execution was added to the runtime.
+
+### Silent-result fixes
+
+- Groups, subshells and loops preserve stdout/stderr event order through `2>&1`.
+  `|&` now applies its implicit descriptor duplication to compound commands too,
+  after their explicit redirects. When a handler returns both streams without
+  enough information to reproduce their relative order, merging them produces
+  an unsupported diagnostic instead of guessing an order.
+- Byte dumps open operands lazily, stop at a satisfied limit, and leave unread
+  shared input for later commands. They validate counts before reading. `od`
+  and `xxd` recognize octal and hexadecimal offsets. `od` skips from the current
+  input position; `xxd` and Linux hexdump use absolute seeks on shared regular
+  input. A hexdump seek on a pipe fails without consuming the pipe. Directory
+  read warnings retain hexdump's native exit-status convention.
+- Zero-length `head` avoids reading directory operands and preserves stdin.
+  From-start `tail` stops after a directory read failure. `sort` stops opening
+  inputs after its first error. Invalid `tr` and `xargs` options leave stdin
+  available for a later command. Head/tail support GNU size suffixes and exact
+  unsigned 64-bit count validation without rounding a possible string position.
+- `cut` handles an empty delimiter as NUL, newline delimiters as field separators
+  across the input, and blank-separated position lists. `cut` and `sort` reject
+  multi-byte field delimiters. `wc` distinguishes GNU Unicode word separators
+  from a byte-order mark, honors explicit C-locale word/character counting, and
+  uses the correct column width when a directory operand is present.
+- Pathname expansion preserves repeated slashes and `./` components. A reversed
+  bracket range contributes no members, including within a negated class; it
+  does not become a literal filename match in `find` or grep filename filters.
+  Find supports repeated negation, handles a leading `--` without disabling its
+  expression parser, and rejects extra embedded `{}` placeholders in batched
+  `-exec` commands.
+- `tree` uses mixed lexical ordering, hides dotfiles by default, omits directory
+  suffixes without `-F`, prints totals, and reproduces file/missing-root output.
+  `-a`, `-d`, `-F`, `-L`, and `--noreport` have native comparison coverage.
+- Nested `break N` and `continue N` affect the requested enclosing loops.
+  Subshells cannot control an outer loop. Invalid numeric/count arguments and
+  zero counts follow Bash's status and control-flow behavior. `exit` accepts
+  surrounding numeric whitespace. `export` continues after invalid identifiers
+  and supports `NAME+=value`.
+- Explicitly unset variables remain known-empty across calls and temporary
+  scopes. `unset HOME` makes bare `cd` fail, and a successful `cd` restores `PWD`.
+  Shell-only builtins are no longer presented as external executables to
+  `xargs`, `find -exec`, absolute command aliases, or `which`.
+- `xargs` correctly discards a final backslash and diagnoses NUL input without
+  `-0`, including replacement mode. Date formatting handles literal percent
+  sequences, quarter numbers, and UTC assignments. Grep retains its unsupported
+  marker when it prepends an earlier operand error.
+
+### Explicit limits added or clarified
+
+Unsupported diagnostics now cover unmodeled combined stream ordering,
+locale-dependent glob matching of non-ASCII names, parenthesized find
+expressions, legacy od offset operands, ambiguous/unsupported dump count
+spellings, hexdump hyphen operands and counts beyond exact integer precision,
+skipping across an unreadable directory, tree filename escaping, trailing
+backslashes in tr sets, and unmodeled shell behavior assignments such as PATH,
+RANDOM and non-UTC timezones. Each new limit has coverage with stderr hidden
+through a pipeline, so an agent still receives the structured diagnostic.
+
+### Command coverage in this pass
+
+| Surface | Verification |
+| --- | --- |
+| `cat`, `head`, `tail`, `wc`, `sort`, `nl`, `cut`, `tac`, `od` | Strict GNU comparisons across unterminated/blank input, file boundaries, failures, and shared stdin |
+| `xxd`, `hexdump` | Count/offset matrices and shared-reader regressions; Linux-specific hexdump source review |
+| `ls`, `find`, `tree` | Native traversal/name matrices; find sibling order compared as an unordered record multiset because its order is unspecified |
+| `xargs`, `tr` | Argument/byte-set probes, strict xargs matrices, consumption and diagnostic regressions |
+| `grep`, `awk`, `uniq`, `sed`, `seq` | Existing strict native/extraction suites rerun; grep diagnostic-marker regression added |
+| `basename`, `dirname`, `pwd`, `cd`, `which`, `whoami`, `date` | Source review and lexical/navigation/identity tests; targeted native path probes and timezone/format regressions |
+| `echo`, `true`, `false`, `:`, shell builtins | Native shell comparisons for expansion, gates, descriptors, scopes and loop control |
+
+The native comparisons deliberately require supported behavior to match; an
+unsupported result does not count as a successful comparison. Separate tests
+exercise diagnosed limits. The audit remains in `doc/`, outside the npm package.

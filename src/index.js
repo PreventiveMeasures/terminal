@@ -43,11 +43,12 @@ import { createFs, lookup, resolve } from './fs.js'
 import { expandRedirect, expandScalar, expandWords } from './expand.js'
 import { backtickGap, readExpansion } from './lex.js'
 import { parseLine, refusedWrite } from './parse.js'
-import { DEFAULT_REGISTRY, createRegistry } from './registry.js'
-import { SHELL_GAPS } from './shell-builtins.js'
-import { UnsupportedError, createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
+import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
+import { BindingMap } from './bindings.js'
+import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
 import { err } from './util.js'
 import { complete } from './complete.js'
+import { eventsOf, routeOutput, unorderedOutput, writeError } from './shell-output.js'
 
 export function createTerminal(sources, opts = {}) {
   const fs = createFs(sources)
@@ -87,11 +88,11 @@ export function createTerminal(sources, opts = {}) {
     ctx.stdinFile = false
     ctx.stdinOrigin = null
     ctx.loopDepth = 0
-    try { return isolated(ctx, () => dispatch(name, tokens, stdin, ctx)) } finally { Object.assign(ctx, saved) }
+    try { return isolated(ctx, () => dispatch(name, tokens, stdin, ctx, true)) } finally { Object.assign(ctx, saved) }
   }
   // `which` looks up names against the registries to print a fake
   // `/usr/bin/<name>` path.
-  ctx.hasCommand = registry.has
+  ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)
   if (!fs.isDir(ctx.cwd)) throw new Error(`createTerminal: cwd is not a directory: ${ctx.cwd}`)
   return {
     run: (line) => safeRun(line, ctx),
@@ -100,9 +101,10 @@ export function createTerminal(sources, opts = {}) {
   }
 }
 
-function dispatch(name, tokens, stdin, ctx) {
+function dispatch(name, tokens, stdin, ctx, external = false) {
   const reg = ctx.registry
   const resolved = reg.resolveCommand(name)
+  if ((external || name !== resolved) && reg.shellOnly(resolved)) return record(ctx, unsupported('command', name, name, `${name}: shell builtin cannot be invoked as an external command`, 127), resolved)
   const cmd = reg.commands[resolved] ?? reg.hidden[resolved]
   if (!cmd) return record(ctx, unknownCommand(name, reg), resolved)
   try {
@@ -193,6 +195,8 @@ function runSteps(steps, ctx, stream) {
   let stderr = ''
   let exitCode = 0
   let signal = {}
+  const events = []
+  let unordered = false
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
     if (step.gate === 'and' && exitCode !== 0) continue
@@ -200,12 +204,13 @@ function runSteps(steps, ctx, stream) {
     const r = runPipeline(step.stages, ctx, stream)
     stdout += r.stdout
     stderr += r.stderr
+    events.push(...eventsOf(r)); unordered ||= unorderedOutput(r)
     exitCode = step.negate && !r.halt ? (r.exitCode === 0 ? 1 : 0) : r.exitCode
     ctx.lastExit = exitCode
     if (r.halt || r.control) { signal = { halt: r.halt, control: r.control }; break }
   }
   ctx.stdinLeft = stream.text
-  return { stdout, stderr, exitCode, ...signal }
+  return { stdout, stderr, exitCode, events, unordered, ...signal }
 }
 
 // Each stage's output is routed by the redirects it carries: its
@@ -225,6 +230,8 @@ function runSteps(steps, ctx, stream) {
 function runPipeline(stages, ctx, stream) {
   let pipe = ''
   let stderr = ''
+  const events = []
+  let unordered = false
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]
     const first = i === 0
@@ -232,20 +239,16 @@ function runPipeline(stages, ctx, stream) {
     const run = () => (io.error ? failedStage(stage, ctx, io.error) : stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx, io.stdin) : runStage(stage, ctx, io.stdin))
     const result = withStreams(io, ctx, () => (shellResult(ctx, () => stages.length > 1 ? isolated(ctx, run) : run())))
     if (first && io.inherited) stream.text = ctx.stdinLeft
-    const errText = io.warnings + result.stderr
-    let stageOut = ''
-    let stageErr = ''
-    if (io.fds[1] === 'out') stageOut += result.stdout
-    else if (io.fds[1] === 'err') stageErr += result.stdout
-    if (io.fds[2] === 'out') stageOut += errText
-    else if (io.fds[2] === 'err') stageErr += errText
-    stderr += stageErr
+    const routed = routeOutput(result, io, ctx)
+    stderr += routed.stderr
+    unordered ||= routed.unordered
     if (i === stages.length - 1) {
-      const r = { stdout: stageOut, stderr, exitCode: result.exitCode }
+      const r = { stdout: routed.stdout, stderr, exitCode: routed.exitCode, events: [...events, ...routed.events], unordered }
       if (stages.length === 1) { r.halt = result.halt; r.control = result.control }
       return r
     }
-    pipe = stageOut
+    events.push(...routed.events.filter((e) => e.fd === 2))
+    pipe = routed.stdout
   }
   return { stdout: '', stderr, exitCode: 0 }
 }
@@ -402,16 +405,7 @@ function runStage(stage, ctx, stdin) {
   let r = withTemporaries(stage.assigns, ctx, warnings, () => dispatch(argv[0], argv.slice(1), stdin, ctx))
   if (ctx.closed.out && r.stdout !== '') r = writeError(argv[0], r, ctx)
   const prefix = stderr + warnings.join('')
-  return prefix === '' ? r : { ...r, stderr: prefix + r.stderr }
-}
-
-// A Map that remembers which names were bound while `bound` is set.
-class BindingMap extends Map {
-  set(name, value) {
-    if (['CDPATH', 'GLOBIGNORE', 'GLOBSORT', 'BASH_COMPAT', 'POSIXLY_CORRECT'].includes(name) || ((name === 'LANG' || name.startsWith('LC_')) && value !== 'C' && value !== 'POSIX' && value !== '')) throw new UnsupportedError('feature', name, `shell variable ${name} is not supported with this value`)
-    this.bound?.add(name)
-    return super.set(name, value)
-  }
+  return prefix === '' ? r : { ...r, stderr: prefix + r.stderr, events: [{ fd: 2, text: prefix }, ...eventsOf(r)], unordered: unorderedOutput(r) }
 }
 
 // Run `fn` with the stage's prefix assignments in force: each value
@@ -434,20 +428,8 @@ function withTemporaries(assigns, ctx, warnings, fn) {
   } finally {
     ctx.vars = outer
     for (const [name, value] of inner) if (!temps.has(name) || inner.bound?.has(name)) outer.set(name, value)
-    for (const name of outer.keys()) if (!inner.has(name) && !temps.has(name)) outer.delete(name)
+    for (const name of inner.unsetNames) if (!temps.has(name)) outer.delete(name)
   }
-}
-
-// What a command does when its stdout is closed, as the real ones do
-// (checked against the binaries and bash's builtins): most report
-// `write error: Bad file descriptor` and exit 1; these exit otherwise,
-// and two never notice.
-const WRITE_ERROR_STATUS = new Map([['ls', 2], ['grep', 2], ['sort', 2], ['xxd', 3], ['sed', 4], ['xargs', 123], ['hexdump', 0], ['tree', 0]])
-
-function writeError(name, r, ctx) {
-  const status = WRITE_ERROR_STATUS.get(ctx.registry.resolveCommand(name)) ?? 1
-  if (status === 0) return { ...r, stdout: '' }
-  return { ...r, stdout: '', stderr: r.stderr + `${name}: write error: Bad file descriptor\n`, exitCode: status }
 }
 
 // `for NAME in WORDS; do BODY; done`. The word list expands when the
@@ -466,6 +448,8 @@ function runLoop(loop, ctx, stdin) {
   let stdout = ''
   let stderr = expanded.stderr
   let exitCode = 0
+  const events = expanded.stderr ? [{ fd: 2, text: expanded.stderr }] : []
+  let unordered = false
   const stream = { text: stdin }
   ctx.loopDepth++
   try {
@@ -474,14 +458,16 @@ function runLoop(loop, ctx, stdin) {
       const r = runSteps(loop.body, ctx, stream)
       stdout += r.stdout
       stderr += r.stderr
+      events.push(...eventsOf(r)); unordered ||= unorderedOutput(r)
       exitCode = r.exitCode
-      if (r.halt) return { stdout, stderr, exitCode, halt: true }
-      if (r.control === 'break') break
+      if (r.halt) return { stdout, stderr, exitCode, events, unordered, halt: true }
+      if (r.control?.levels > 1) return { stdout, stderr, exitCode, events, unordered, control: { ...r.control, levels: r.control.levels - 1 } }
+      if (r.control?.type === 'break') break
     }
   } finally {
     ctx.loopDepth--
   }
-  return { stdout, stderr, exitCode }
+  return { stdout, stderr, exitCode, events, unordered }
 }
 
 // A subshell: an `exit` or a `break` inside it ends the subshell alone.
@@ -490,7 +476,7 @@ function runGroup(stage, ctx, stdin) {
   const stream = { text: stdin }
   if (!stage.isolate) return runSteps(stage.group, ctx, stream)
   const r = isolated(ctx, () => runSteps(stage.group, ctx, stream))
-  return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }
+  return { ...r, halt: false, control: undefined }
 }
 
 // Run `fn` as a subshell would: on a copy of the variables (`OLDPWD`
@@ -500,22 +486,12 @@ function runGroup(stage, ctx, stdin) {
 // own status once it returns. The try/finally keeps the restore safe
 // across thrown errors.
 function isolated(ctx, fn) {
-  const saved = { cwd: ctx.cwd, lastExit: ctx.lastExit, vars: ctx.vars }
+  const saved = { cwd: ctx.cwd, lastExit: ctx.lastExit, vars: ctx.vars, loopDepth: ctx.loopDepth }
   ctx.vars = new BindingMap(saved.vars)
+  ctx.loopDepth = 0
   try {
     return fn()
   } finally {
-    ctx.cwd = saved.cwd
-    ctx.lastExit = saved.lastExit
-    ctx.vars = saved.vars
+    Object.assign(ctx, saved)
   }
-}
-
-// `command` and `detail` coincide here — the name as typed is both who
-// failed and what was missing — which keeps the entry shape uniform
-// across all three kinds rather than leaving a hole for this one.
-function unknownCommand(name, reg) {
-  const gap = SHELL_GAPS.get(name)
-  if (gap !== undefined) return unsupported('feature', name, name, `${name}: ${gap}`, 127)
-  return unsupported('command', name, name, `${name}: command not found. Available: ${reg.known}`, 127)
 }

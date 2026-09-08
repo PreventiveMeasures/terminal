@@ -388,12 +388,12 @@ describe('run().unsupported — shell constructs', () => {
     }
   })
 
-  it('classifies multi-level loop control, which nested `for` loops make reachable', () => {
-    // `break` and `continue` work; a level count does not.
+  it('supports multi-level loop control in nested for loops', () => {
+    // Counts larger than the nesting depth target the outermost loop.
     assert.deepEqual(detailsOf('for f in a b; do break; done'), [])
-    assert.deepEqual(detailsOf('for f in a b; do for g in c; do break 2; done; done'), ['break N'])
-    assert.deepEqual(detailsOf('for f in a b; do continue 2; done'), ['continue N'])
-    assert.equal(t().run('for f in a b; do break 2; done').unsupported[0].kind, 'feature')
+    assert.deepEqual(detailsOf('for f in a b; do for g in c; do break 2; done; done'), [])
+    assert.deepEqual(detailsOf('for f in a b; do continue 2; done'), [])
+    assert.equal(t().run('for f in a b; do break 2; done').exitCode, 0)
   })
 
   it('leaves reserved words alone anywhere but command position', () => {

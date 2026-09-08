@@ -1374,34 +1374,20 @@ describe('createTerminal — find / tree / path', () => {
 
   it('find rejects malformed -not usage', () => {
     const t = createTerminal(SOURCES)
-    for (const cmd of ['find -not /src', 'find /src -not -not -name "*.js"', 'find /src -not']) {
+    for (const cmd of ['find -not /src', 'find /src -not']) {
       const r = t.run(cmd)
       assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
       assert.match(r.stderr, /-not/u)
     }
   })
 
-  it('find: `--` ends primary normalization; a literal `-name` after it stays a path', () => {
-    // Without the terminator guard, `-name` after `--` would be
-    // rewritten to `--name`, swallowing the next token as a glob.
-    // With the guard, `-name` stays a positional — find then tries
-    // to start from a path called `-name`, which doesn't exist.
+  it('find accepts a leading -- without disabling expression parsing', () => {
     const t = createTerminal(SOURCES)
-    const r = t.run('find -- -name')
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /-name: no such file or directory/u)
-  })
-
-  it('find: `-maxdepth` after `--` is a path, not the maxdepth option', () => {
-    // -maxdepth is extracted in a pre-pass (before primary normalization),
-    // so the `--` terminator has to be honored there too — otherwise
-    // `find -- -maxdepth 1` would set maxDepth=1 instead of treating
-    // both tokens as start paths.
-    const t = createTerminal(SOURCES)
-    const r = t.run('find -- -maxdepth 1')
-    assert.notEqual(r.exitCode, 0)
-    assert.doesNotMatch(r.stderr, /-maxdepth requires/u)
-    assert.match(r.stderr, /-maxdepth: no such file or directory/u)
+    const incomplete = t.run('find -- -name')
+    assert.notEqual(incomplete.exitCode, 0)
+    assert.match(incomplete.stderr, /-name requires a value/u)
+    assert.deepEqual(t.run('find -- -maxdepth 1'), t.run('find -maxdepth 1'))
+    assert.deepEqual(t.run('find /src -not -not -name "*.js"'), t.run('find /src -name "*.js"'))
   })
 
   it('find -name accepts `--` as the literal glob value (POSIX getopt convention)', () => {
@@ -1803,7 +1789,7 @@ describe('createTerminal — find / tree / path', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('tree /src')
     assert.match(r.stdout, /foo\.js/u)
-    assert.match(r.stdout, /util\//u)
+    assert.match(r.stdout, /util\n/u)
     assert.match(r.stdout, /log\.js/u)
   })
 
@@ -1811,10 +1797,10 @@ describe('createTerminal — find / tree / path', () => {
     const t = createTerminal(SOURCES)
     const missing = t.run('tree /nope')
     assert.notEqual(missing.exitCode, 0)
-    assert.match(missing.stderr, /No such file or directory/u)
+    assert.equal(missing.stdout, '/nope  [error opening dir]\n\n0 directories, 0 files\n')
     const onFile = t.run('tree src/foo.js')
-    assert.notEqual(onFile.exitCode, 0)
-    assert.match(onFile.stderr, /not a directory/u)
+    assert.equal(onFile.exitCode, 0)
+    assert.equal(onFile.stdout, 'src/foo.js  [error opening dir]\n\n0 directories, 1 file\n')
   })
 
   it('basename and dirname handle root, trailing slash, and unrooted names (matches coreutils)', () => {
@@ -3265,14 +3251,14 @@ describe('createTerminal — count validation', () => {
     const t = createTerminal(SOURCES)
     assert.match(t.run('head -n +x src/foo.js').stderr, /invalid count: \+x/u)
     assert.match(t.run('tail -n -x src/foo.js').stderr, /invalid count: -x/u)
-    assert.match(t.run('head -n +9007199254740992 src/foo.js').stderr, /out of range: \+9007199254740992/u)
+    assert.match(t.run('head -n +18446744073709551616 src/foo.js').stderr, /out of range: \+18446744073709551616/u)
   })
 
-  it('out-of-safe-range counts are rejected', () => {
+  it('counts outside the unsigned 64-bit range are rejected', () => {
     const t = createTerminal(SOURCES)
-    // 2^53 = 9007199254740992 is exactly the smallest unsafe positive
-    // integer for Number.isSafeInteger.
-    const r = t.run('head -n 9007199254740992 src/foo.js')
+    // Counts use unsigned 64-bit arithmetic even beyond JS safe integers.
+    // 2^64 is the first value GNU head rejects.
+    const r = t.run('head -n 18446744073709551616 src/foo.js')
     assert.notEqual(r.exitCode, 0)
     assert.match(r.stderr, /out of range/u)
   })
@@ -5039,7 +5025,7 @@ describe('createTerminal — cut', () => {
     // Reversed range.
     assert.match(t.run('cut -c 5-2 f.txt').stderr, /reversed range/u)
     // Multi-char delim.
-    assert.match(t.run('cut -d ,, -f 1 f.txt').stderr, /single character/u)
+    assert.match(t.run('cut -d ,, -f 1 f.txt').stderr, /single byte/u)
   })
 
   it('composes naturally in a pipeline', () => {

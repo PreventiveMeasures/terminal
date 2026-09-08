@@ -147,8 +147,8 @@ function parseFindArgs(tokens) {
 // POSIX find: zero or more start paths come first, then the
 // expression. Once an expression token appears (primary or operator),
 // any later positional is rejected — paths can't be interleaved
-// with primaries. `--` ends primary recognition; trailing tokens
-// after it are paths.
+// with primaries. A leading `--` is accepted, but does not disable
+// expression parsing; elsewhere it is an unknown predicate.
 //
 // The `--` check sits AFTER the primary-with-value branch so
 // `-name --` consumes the literal `--` as the glob value, matching
@@ -159,7 +159,6 @@ function walkExprTokens(tokens) {
   const groups = [[]]
   const starts = []
   let pendingNot = false
-  let afterTerminator = false
   let seenExpr = false
   // Tracks an explicit boolean operator (`-a` / `-o`) that hasn't
   // yet been balanced by a primary. Holds the operator string so
@@ -174,10 +173,9 @@ function walkExprTokens(tokens) {
   const batches = []
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
-    if (afterTerminator) { starts.push(t); continue }
+    if (t === '(' || t === ')') return { error: unsupported('feature', 'find', 'expression grouping', 'find: parenthesized expressions are not supported') }
     if (t === '-not' || t === '!') {
-      if (pendingNot) return { error: err('find: `-not` cannot precede another `-not`') }
-      pendingNot = true; seenExpr = true; continue
+      pendingNot = !pendingNot; expectingRhs = '!'; seenExpr = true; continue
     }
     if (t === '-a' || isTok(t, 'and')) {
       if (pendingNot) return { error: err('find: `-not` must be followed by a primary') }
@@ -230,12 +228,15 @@ function walkExprTokens(tokens) {
       pendingNot = false; expectingRhs = null; seenExpr = true; i++
       continue
     }
-    if (t === '--') { afterTerminator = true; continue }
+    if (t === '--') {
+      if (i !== 0) return { error: err('find: unknown predicate: --') }
+      continue
+    }
     if (pendingNot) return { error: err(`find: \`-not\` must be followed by a primary, got: ${t}`) }
     // Anything else that starts with `-` is an unknown option,
     // not a path. Reject so a typo (`find -X /src`) surfaces here
     // rather than as a "no such file or directory: -X" lower down.
-    if (t.startsWith('-') && t !== '-' && !/^-\d/u.test(t)) {
+    if (t.startsWith('-') && t !== '-') {
       return { error: unsupported('option', 'find', t, `find: unknown option: ${t}`) }
     }
     if (seenExpr) return { error: err(`find: paths must precede expression: ${t}`) }
@@ -311,7 +312,7 @@ function consumeExec(tokens, i, pendingNot) {
     // check `find … -exec echo {} {} +` would pass the leading `{}`
     // through literally — confusing and inconsistent with GNU's
     // rejection of the same input.
-    if (execTokens.slice(0, -1).includes('{}')) {
+    if (execTokens.slice(0, -1).some((t) => t.includes('{}'))) {
       return { error: err('find: -exec ... +: only one instance of `{}` is supported') }
     }
     // -not on the batch form is incoherent: the predicate is treated

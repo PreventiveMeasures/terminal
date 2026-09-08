@@ -121,7 +121,7 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
     for (const inp of r.inputs) {
       if (inp.name !== null && !includedByName(basename(inp.name), filters.name)) continue
       const gap = inputGap([inp], res, invert)
-      if (gap) return { ...gap, stderr: stderr + gap.stderr }
+      if (gap) { gap.stderr = stderr + gap.stderr; return gap }
       if (splitLines(inp.content).some((line) => anyMatch(res, line) !== invert)) return { stdout: '', stderr, exitCode: 0 }
     }
   }

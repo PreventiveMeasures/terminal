@@ -216,6 +216,7 @@ function lookup(name, ctx, warnings) {
     return { literal: true }
   }
   if (ctx.vars.has(name)) return { value: ctx.vars.get(name) }
+  if (ctx.vars.unsetNames.has(name)) return { value: '' }
   if (name === 'PWD') return { value: ctx.cwd }
   if (name === 'HOME') return { value: ctx.home }
   if (name === 'USER' || name === 'LOGNAME') return { value: ctx.user }

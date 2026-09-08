@@ -4,7 +4,6 @@ import { consumeStdin, err, ok, parseNonNegativeInt, splitLines } from './util.j
 import { UnsupportedError, unsupported } from './unsupported.js'
 
 export function xargs(stdin, tokens, ctx) {
-  consumeStdin(ctx)
   const { flags, values, positional } = parseArgs(tokens, {
     short: ['r', '0'], valueShort: ['n', 'I'], stopAtFirstPositional: true,
   })
@@ -15,6 +14,8 @@ export function xargs(stdin, tokens, ctx) {
   if (n.value === 0) return err('xargs: -n: must be at least 1')
   if (replace === '') return err('xargs: -I: replacement string must not be empty')
   if (replace !== undefined && n.value !== undefined) return unsupported('option', 'xargs', '-I -n', 'xargs: combining replacement and chunk limits is not supported')
+  consumeStdin(ctx)
+  if (!flags.has('0') && stdin.includes('\0')) return unsupported('feature', 'xargs', 'NUL input', 'xargs: NUL input requires -0')
   let items
   if (flags.has('0')) {
     items = stdin === '' ? [] : stdin.split('\0')
@@ -48,7 +49,7 @@ function inputWords(input) {
       else word += c
     } else if (c === '"' || c === "'") { quote = c; started = true }
     else if (c === '\\') {
-      if (i + 1 >= input.length) throw new Error('xargs: trailing backslash')
+      if (i + 1 >= input.length) break
       word += input[++i]; started = true
     } else if (c === ' ' || c === '\t' || c === '\n') {
       if (started) words.push(word)

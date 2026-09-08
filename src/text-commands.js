@@ -70,6 +70,7 @@ function head(stdin, tokens, ctx) {
   const count = parseSignedCount(values.get(unit) ?? '10', `head: -${unit}`)
   if (count.error) return count.error
   const banner = bannerMode(flags, order)
+  if (count.value === 0 && count.sign !== '-') return takeFrom('head', stdin, positional, ctx, () => '', banner, (content) => content, { noRead: true })
   // head always counts from the front; the sign only decides where the
   // slice STOPS — at N, or N short of the end.
   const range = (total) => [0, count.sign === '-' ? Math.max(0, total - count.value) : count.value]
@@ -134,8 +135,8 @@ function tail(stdin, tokens, ctx) {
   if (n.sign === '+') {
     // From position N, 1-based, so `+1` and `+0` are the whole input.
     const range = (total) => [Math.min(total, Math.max(0, n.value - 1)), total]
-    if (unit === 'c') return takeBytes('tail', stdin, positional, ctx, range, banner)
-    return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner)
+    if (unit === 'c') return takeBytes('tail', stdin, positional, ctx, range, banner, undefined, { stopOnDir: true })
+    return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner, undefined, { stopOnDir: true })
   }
   // A zero count short-circuits the whole command: GNU tail returns
   // success before opening anything, so there are no banners, no
@@ -166,8 +167,8 @@ function dashNumberShorthand(tokens) {
 // lines at all, and suppressing its terminator would print nothing where
 // GNU prints a newline. Branching on the array length keeps the two
 // apart (`head -n 1` of a file of blank lines is one `\n`).
-function takeLines(cmd, stdin, files, ctx, picker, banner, leftover) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => picker(content.match(/[^\n]*\n|[^\n]+$/gu) ?? []).join(''), banner, leftover)
+function takeLines(cmd, stdin, files, ctx, picker, banner, leftover, readOptions) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => picker(content.match(/[^\n]*\n|[^\n]+$/gu) ?? []).join(''), banner, leftover, readOptions)
 }
 
 // `head -c N` takes the first N BYTES of each input instead of its
@@ -175,8 +176,8 @@ function takeLines(cmd, stdin, files, ctx, picker, banner, leftover) {
 // bytes verbatim, so `head -c 3` of `hello\n` is `hel` with nothing
 // after it, and in the multi-input form it's the `\n` before the next
 // banner that ends the block.
-function takeBytes(cmd, stdin, files, ctx, range, banner, leftover) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => sliceBytes(content, range), banner, leftover)
+function takeBytes(cmd, stdin, files, ctx, range, banner, leftover, readOptions) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => sliceBytes(content, range), banner, leftover, readOptions)
 }
 
 // Output must remain valid UTF-8: partial bytes cannot cross a string
@@ -216,9 +217,9 @@ function sliceBytes(content, range) {
 // one before left, which `leftover` computes (nothing, unless the
 // command stops short of the end, as `head -c N` does), and what the
 // last one leaves is the next command's.
-function takeFrom(cmd, stdin, files, ctx, pick, banner = null, leftover = () => '') {
+function takeFrom(cmd, stdin, files, ctx, pick, banner = null, leftover = () => '', readOptions) {
   if (banner?.error) return err(`${cmd}: ${banner.error}`)
-  const r = readInputs(cmd, files, stdin, ctx)
+  const r = readInputs(cmd, files, stdin, ctx, readOptions)
   // `-q` / `-v` override the operand-count rule outright; `banner` is
   // null when neither was given.
   const showHeader = banner ?? files.length > 1
@@ -258,7 +259,7 @@ function wc(stdin, tokens, ctx) {
   // beside its error, because the open succeeded. A missing path gets
   // no row at all.
   for (const { name, content } of r.entries.filter((e) => e.kind !== 'missing')) {
-    const counts = wcCounts(content)
+    const counts = wcCounts(content, ctx)
     rows.push({ counts, name })
     total.l += counts.l; total.w += counts.w; total.m += counts.m; total.c += counts.c
   }
@@ -274,7 +275,7 @@ function wc(stdin, tokens, ctx) {
 function wcColumnWidth(which, inputs, operands, stdinFile) {
   if (operands <= 1 && Object.values(which).filter(Boolean).length === 1) return 1
   let bytes = 0
-  let width = 1
+  let width = inputs.entries.some((e) => e.kind === 'dir') ? 7 : 1
   for (const input of inputs.inputs) {
     if ((input.name === null || input.shared) && !stdinFile) width = 7
     else bytes += utf8.encode(input.content).length
@@ -293,15 +294,16 @@ function pickWcFlags(flags) {
 
 // `-c` is bytes, `-m` characters. They differ only on multibyte input:
 // `héllo\n` is 7 bytes but 6 characters. GNU's `-m` follows the locale
-// and collapses onto `-c` under a C locale; this terminal models UTF-8
-// throughout (as `-c` and `head -c` already do), so `-m` counts code
-// points — spreading an astral character across two UTF-16 units would
+// and collapses onto `-c` under an explicitly selected C locale. By
+// default this terminal models UTF-8, so `-m` counts code points — spreading an astral character across two UTF-16 units would
 // count an emoji twice, hence the iterator rather than `.length`.
-function wcCounts(content) {
+function wcCounts(content, ctx) {
+  const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG')
+  const cLocale = locale === 'C' || locale === 'POSIX'
   return {
     l: (content.match(/\n/gu) ?? []).length,
-    w: (content.match(/\S+/gu) ?? []).length,
-    m: [...content].length,
+    w: (content.match(cLocale ? /[^\t\n\v\f\r ]+/gu : /[^\t\n\v\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u2060\u3000]+/gu) ?? []).length,
+    m: cLocale ? utf8.encode(content).length : [...content].length,
     c: utf8.encode(content).length,
   }
 }

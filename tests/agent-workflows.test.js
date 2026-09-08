@@ -182,7 +182,9 @@ describe('agent workflows — silent option and metadata gaps', () => {
     check("echo 'é' | grep -F 'é'", 'é\n')
     check("echo 'é' | grep '^é$'", 'é\n')
   })
-  it('virtual bin aliases apply export assignment expansion consistently', () => {
-    check('x="a b"; /usr/bin/export y=$x; echo "$y"', 'a b\n')
+  it('virtual bin aliases do not invent executables for shell-only builtins', () => {
+    const r = createTerminal(FILES).run('x="a b"; /usr/bin/export y=$x')
+    assert.equal(r.exitCode, 127)
+    assert.equal(r.unsupported[0].command, '/usr/bin/export')
   })
 })

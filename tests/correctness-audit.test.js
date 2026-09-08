@@ -60,8 +60,12 @@ describe('correctness audit — shell expansion and diagnostics', () => {
     gap("echo -e '\\xff'", 'partial UTF-8 byte sequence')
   })
   it('nested command dispatch does not change the enclosing shell', () => {
-    check("find src -maxdepth 0 -exec cd src ';'; pwd", '/\n')
-    check('echo src | xargs cd; pwd', '/\n')
+    const find = createTerminal(FILES).run("find src -maxdepth 0 -exec cd src ';'; pwd")
+    assert.equal(find.stdout, '/\n')
+    assert.equal(find.unsupported[0].command, 'cd')
+    const external = createTerminal(FILES).run('echo src | xargs cd; pwd')
+    assert.equal(external.stdout, '/\n')
+    assert.equal(external.unsupported[0].command, 'cd')
   })
   it('reports unsupported shell state and expansion constructs', () => {
     gap('IFS=:; x=a:b; echo $x', 'IFS')

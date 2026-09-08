@@ -3,8 +3,9 @@
 // tokens through parseArgs with a strict schema so unknown flags
 // fail fast instead of being silently dropped.
 
-import { compareNames, joinPath, lookup, resolve } from './fs.js'
+import { compareNames, lookup, resolve } from './fs.js'
 import { unsupported } from './unsupported.js'
+import { tree } from './tree.js'
 import { find } from './find.js'
 import { homeOf } from './expand.js'
 import { parseArgs } from './parse.js'
@@ -24,6 +25,7 @@ function pwd(_stdin, tokens, ctx) {
 function cd(_stdin, tokens, ctx) {
   const { positional } = parseArgs(tokens)
   if (positional.length > 1) return err('cd: too many arguments')
+  if (!positional.length && ctx.vars.unsetNames.has('HOME')) return err('cd: HOME not set')
   let target = positional[0] ?? homeOf(ctx)
   if (target === '-') {
     if (!ctx.vars.has('OLDPWD')) return err('cd: OLDPWD not set')
@@ -35,7 +37,7 @@ function cd(_stdin, tokens, ctx) {
   if (error) return err(`cd: ${target}: ${error}`)
   if (!ctx.fs.isDir(abs)) return err(`cd: ${target}: ${ctx.fs.isFile(abs) ? 'Not a directory' : 'No such file or directory'}`)
   ctx.vars.set('OLDPWD', ctx.cwd)
-  if (ctx.vars.has('PWD')) ctx.vars.set('PWD', abs)
+  ctx.vars.set('PWD', abs)
   ctx.cwd = abs
   return ok(printed)
 }
@@ -77,51 +79,6 @@ function ls(_stdin, tokens, ctx) {
     }
   }
   return { stdout: blocks.length ? blocks.join('\n\n') + '\n' : '', stderr: errors.length ? errors.join('\n') + '\n' : '', exitCode: errors.length ? 2 : 0 }
-}
-
-function tree(_stdin, tokens, ctx) {
-  const { positional } = parseArgs(tokens)
-  if (positional.length > 1) return unsupported('feature', 'tree', 'multiple roots', 'tree: multiple roots are not supported')
-  const start = positional[0] ?? '.'
-  const { path: startAbs, error } = lookup(ctx.cwd, start, ctx.fs)
-  if (error) return err(`tree: ${start}: ${error}`)
-  if (!ctx.fs.isDir(startAbs)) return err(`tree: ${start}: not a directory`)
-  const out = [start]
-  treeWalk(ctx.fs, startAbs, out)
-  return ok(out.join('\n') + '\n')
-}
-
-// Iterative pre-order walk via an explicit frame stack. Matches the
-// shape a naive recursive walk would produce, but stays safe on
-// bundles with thousands of nested segments — the recursive form
-// could overflow the JS call stack the same way `ensureDir` did
-// before its iterative rewrite.
-function treeWalk(fs, root, out) {
-  const stack = [{ dir: root, prefix: '', items: dirItemsFor(fs, root), i: 0 }]
-  while (stack.length > 0) {
-    const frame = stack.at(-1)
-    if (frame.i >= frame.items.length) { stack.pop(); continue }
-    const { n, isDir } = frame.items[frame.i]
-    const last = frame.i === frame.items.length - 1
-    out.push(frame.prefix + (last ? '└── ' : '├── ') + n + (isDir ? '/' : ''))
-    frame.i++
-    if (!isDir) continue
-    const childDir = joinPath(frame.dir, n)
-    stack.push({
-      dir: childDir,
-      prefix: frame.prefix + (last ? '    ' : '│   '),
-      items: dirItemsFor(fs, childDir),
-      i: 0,
-    })
-  }
-}
-
-function dirItemsFor(fs, dir) {
-  const { dirs, files } = fs.listDir(dir)
-  return [
-    ...dirs.map((n) => ({ n, isDir: true })),
-    ...files.map((n) => ({ n, isDir: false })),
-  ]
 }
 
 // `basename PATH [SUFFIX]` strips SUFFIX from the end of the result, the
