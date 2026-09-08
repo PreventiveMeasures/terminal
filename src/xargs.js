@@ -67,7 +67,7 @@ function runCommands(ctx, cmd, runs) {
     const r = ctx.dispatch(cmd, args, '')
     stdout += r.stdout; stderr += r.stderr
     if (r.exitCode === 255) return { stdout, stderr: stderr + `xargs: ${cmd}: exited with status 255; aborting\n`, exitCode: 124 }
-    if (r.exitCode === 127 && !ctx.registry.has(ctx.registry.resolveCommand(cmd))) return { stdout, stderr, exitCode: 127 }
+    if (r.exitCode === 127 && !ctx.hasCommand(ctx.registry.resolveCommand(cmd))) return { stdout, stderr, exitCode: 127 }
     if (r.exitCode !== 0) exitCode = 123
   }
   return { stdout, stderr, exitCode }
