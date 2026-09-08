@@ -48,10 +48,10 @@ describe('run().unsupported — the case it exists for', () => {
   })
 
   it('reports gaps hit through find -exec and xargs, two levels down', () => {
-    // `';'` rather than the GNU-canonical `\;`: this shell parser does
-    // not honor backslash escapes outside quotes, a pre-existing
-    // limitation with its own todo test in terminal.test.js.
+    // Quoted and backslash-escaped semicolons both reach find as a
+    // literal terminator; the nested command's diagnostic must survive.
     assert.deepEqual(details("find . -name '*.js' -exec frobnicate {} ';' 2>/dev/null"), ['frobnicate'])
+    assert.deepEqual(details(String.raw`find . -name '*.js' -exec frobnicate {} \; 2>/dev/null`), ['frobnicate'])
     assert.deepEqual(details("find . -name '*.js' -exec frobnicate {} + 2>/dev/null"), ['frobnicate'])
     assert.deepEqual(details('echo hi | xargs frobnicate 2>/dev/null'), ['frobnicate'])
   })

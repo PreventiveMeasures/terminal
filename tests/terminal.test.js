@@ -6676,18 +6676,9 @@ describe('createTerminal — awk', () => {
   })
 })
 
-// Known divergences from GNU/POSIX surfaced by the audit pass. Each
-// `it.todo` carries a concrete spec body that fails on current
-// behavior — when someone fixes the underlying issue, the todo
-// starts passing and they flip `it.todo` → `it`. GNU expectations
-// pinned by side-by-side runs against `/usr/bin/{find,sed,grep,ls,
-// head,tail,wc}` (coreutils 9.x, find 4.9, sed 4.9).
-//
-// Deferred because each requires changes beyond the file(s) where
-// the symptom appears: trailing-newline tracking needs splitLines/
-// readInputs to carry the source's terminator status, the `\;`
-// idiom needs the shell parser to honor backslash-escapes outside
-// quotes, walkTree order is shared by find/grep/ls, etc.
+// Regression tests for GNU/POSIX divergences fixed during the audit:
+// trailing-newline preservation, escaped find terminators, traversal
+// order and text processing. Expectations were checked against GNU tools.
 describe('createTerminal — GNU fidelity fixes (verified against the real binaries)', () => {
   const SRC = {
     'f.txt': 'a\nhit\nb\nc\nhit\nd\n',
