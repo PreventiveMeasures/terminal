@@ -71,7 +71,15 @@ export function compileNfa(ast, ignoreCase) {
     return cur
   }
   const start = comp(ast, push({ op: 'match' }))
-  return { states, start, gen: new Int32Array(states.length).fill(-1), stamp: 0 }
+  // A nonempty ASCII character chain has one fixed extent. Compile the full
+  // NFA first so even these patterns retain the normal state-limit diagnostic.
+  let literal = '', pc = start
+  while (states[pc].op === 'char' && states[pc].codes.length === 1 && states[pc].codes[0] < 128) {
+    literal += String.fromCodePoint(states[pc].codes[0])
+    pc = states[pc].next
+  }
+  if (states[pc].op !== 'match' || literal === '') literal = null
+  return { states, start, literal, gen: new Int32Array(states.length).fill(-1), stamp: 0 }
 }
 
 function codeBefore(str, at) {
@@ -101,6 +109,10 @@ function consumes(s, code) {
 // The leftmost-longest match of `nfa` in `str` at or after `from`, as
 // { start, end } (code unit offsets, end exclusive), or null.
 export function search(nfa, str, from) {
+  if (nfa.literal !== null && Number.isInteger(from) && from >= 0 && from <= str.length && !Object.is(from, -0)) {
+    const start = str.indexOf(nfa.literal, from)
+    return start < 0 ? null : { start, end: start + nfa.literal.length }
+  }
   const { states, gen } = nfa
   const n = str.length
   // Follow epsilon edges from `pc`, adding the consuming states reached
@@ -108,8 +120,9 @@ export function search(nfa, str, from) {
   // generation: the first arrival wins, and lists are kept in start
   // order, so that is the thread with the earliest start. Flat pc/start
   // pairs avoid allocating a thread object for every state and character.
+  const stack = []
   const add = (list, pc0, start, at, stamp) => {
-    const stack = [pc0]
+    stack.push(pc0)
     while (stack.length > 0) {
       const pc = stack.pop()
       if (gen[pc] === stamp) continue

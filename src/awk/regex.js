@@ -24,6 +24,7 @@ export class AwkRegex {
     }
     this.ast = ast
     this.nfa = null
+    this.capture = null
     this.captureShape = captureShape(ast)
   }
 
@@ -45,10 +46,17 @@ export class AwkRegex {
   // the NFA's match. Slicing the match would change ^, $, and boundaries.
   groups(s, start, end) {
     if (this.captureShape.unsafe) throw new AwkError('capture extraction across repeated or alternative groups is not supported', null, 'regex capture semantics')
-    const remaining = Array.from(s.slice(end)).length
-    const re = new RegExp(`(?:${this.source})(?=.{${remaining}}(?![^]))`, this.flags + 'dy')
-    re.lastIndex = start
-    const m = re.exec(s)
+    const capture = this.capture ??= new RegExp(this.source, this.flags + 'dy')
+    capture.lastIndex = start
+    let m = capture.exec(s)
+    // The native match usually has the requested extent. POSIX alternatives
+    // can be longer; constrain those matches without slicing their context.
+    if (!m || m.index !== start || start + m[0].length !== end) {
+      const remaining = Array.from(s.slice(end)).length
+      const re = new RegExp(`(?:${this.source})(?=.{${remaining}}(?![^]))`, this.flags + 'dy')
+      re.lastIndex = start
+      m = re.exec(s)
+    }
     if (!m) throw new AwkError('capture extraction for this match is not supported', null, 'regex capture semantics')
     return m.indices.map((span, i) => (span === undefined ? undefined : { text: m[i], start: span[0], end: span[1] }))
   }

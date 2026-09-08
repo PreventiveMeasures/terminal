@@ -4,6 +4,25 @@ import { joinLines, ok, splitLines } from '../util.js'
 export const anyMatch = (res, line) => res.some((re) => re.test(line))
 export const noMatch = () => ({ stdout: '', stderr: '', exitCode: 1 })
 
+// Stop at the selection limit without splitting the unvisited suffix.
+// A final newline ends its line; it does not create another empty line.
+export function countMatches(content, res, invert, max) {
+  let count = 0
+  if (max === Infinity) {
+    // Native splitting is faster for uncapped counts across many small files.
+    for (const line of splitLines(content)) if (anyMatch(res, line) !== invert) count++
+    return count
+  }
+  let start = 0
+  while (start < content.length && count < max) {
+    let end = content.indexOf('\n', start)
+    if (end < 0) end = content.length
+    if (anyMatch(res, content.slice(start, end)) !== invert) count++
+    start = end + 1
+  }
+  return count
+}
+
 // Default mode: print matching lines, optionally with context.
 // Context-line prefix uses `-` as the field separator (e.g.
 // `file-12-content`); matches use `:`. `--` separates non-adjacent
@@ -27,6 +46,7 @@ function grepFileBlock(lines, res, name, opts, out) {
   let selected = 0
   let owedAfter = 0
   for (let i = 0; i < lines.length; i++) {
+    if (selected === max && owedAfter === 0) break
     const hit = anyMatch(res, lines[i]) !== invert
     const capped = max !== undefined && selected >= max
     if (hit && !capped) {
@@ -89,11 +109,7 @@ export function grepSummary(inputs, res, { mode, invert, showName, max = Infinit
   let anySelected = false
   const limit = mode === 'c' ? max : Math.min(1, max)
   for (const { name, content, recursive } of inputs) {
-    let count = 0
-    for (const line of splitLines(content)) {
-      if (count === limit) break
-      if (anyMatch(res, line) !== invert) count++
-    }
+    const count = countMatches(content, res, invert, limit)
     if (count > 0) anySelected = true
     const label = name ?? '(standard input)'
     if (mode === 'c') out.push((showName ?? recursive) ? label + ':' + count : String(count))

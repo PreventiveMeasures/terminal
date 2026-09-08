@@ -87,9 +87,11 @@ export function createFs(sources) {
   }
   const childMap = new Map([['/', { dirs: [], files: [] }]])
   for (const f of files.keys()) {
-    const parent = dirname(f)
+    // File keys are already normalized, so split without normalizing again.
+    const split = f.lastIndexOf('/')
+    const parent = f.slice(0, split) || '/'
     ensureDir(childMap, parent)
-    childMap.get(parent).files.push(basename(f))
+    childMap.get(parent).files.push(f === '/' ? '/' : f.slice(split + 1))
   }
   for (const entry of childMap.values()) {
     entry.dirs.sort(compareNames)
@@ -121,9 +123,15 @@ export function* walkTree(fs, root, maxDepth = Number.POSITIVE_INFINITY, shouldD
     yield entry
     if (entry.kind !== 'dir' || entry.depth >= maxDepth || !shouldDescend(entry.path)) continue
     const { dirs, files } = fs.listDir(entry.path)
-    const children = [...dirs.map((name) => ({ name, kind: 'dir' })), ...files.map((name) => ({ name, kind: 'file' }))]
-    children.sort((a, b) => compareNames(a.name, b.name))
-    for (const child of children.toReversed()) stack.push({ path: joinPath(entry.path, child.name), kind: child.kind, depth: entry.depth + 1 })
+    // Both lists are sorted. Push in reverse order, files first on a tie,
+    // so a colliding directory and its descendants are visited before the file.
+    let dirIndex = dirs.length - 1
+    let fileIndex = files.length - 1
+    while (dirIndex >= 0 || fileIndex >= 0) {
+      const isDir = fileIndex < 0 || (dirIndex >= 0 && compareNames(dirs[dirIndex], files[fileIndex]) > 0)
+      const name = isDir ? dirs[dirIndex--] : files[fileIndex--]
+      stack.push({ path: joinPath(entry.path, name), kind: isDir ? 'dir' : 'file', depth: entry.depth + 1 })
+    }
   }
 }
 
@@ -138,11 +146,12 @@ function ensureDir(map, path) {
   let p = path
   while (p !== '/' && !map.has(p)) {
     toCreate.push(p)
-    p = dirname(p)
+    p = p.slice(0, p.lastIndexOf('/')) || '/'
   }
   for (let i = toCreate.length - 1; i >= 0; i--) {
     const child = toCreate[i]
     map.set(child, { dirs: [], files: [] })
-    map.get(dirname(child)).dirs.push(basename(child))
+    const split = child.lastIndexOf('/')
+    map.get(child.slice(0, split) || '/').dirs.push(child.slice(split + 1))
   }
 }
