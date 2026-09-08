@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
-import { rmSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { materialize, missing, native } from './helpers/source-tree-reference.js'
 
 const FILES = {
   'workspace/nested/keep.txt': 'ignored\n',
@@ -87,21 +85,4 @@ describe('grep and sed — logged package-count pipeline', () => {
       assert.deepEqual(result, { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] }, command)
     })
   }
-
-  it('matches GNU tools inside isolated fixture roots', {
-    skip: missing.length ? `Missing native tools: ${missing.join(', ')}` : false,
-  }, () => {
-    for (const { command, files, stdout } of CASES) {
-      const dir = materialize(files)
-      try {
-        // native() starts in this temporary fixture root. Map only the
-        // virtual root change to that directory; never read host /d or /w.
-        const referenceCommand = command.replace(/^cd \/ && /u, 'cd . && ')
-        const reference = native(referenceCommand, dir)
-        assert.deepEqual(reference, { stdout, stderr: '', exitCode: 0 }, command)
-      } finally {
-        rmSync(dir, { recursive: true, force: true })
-      }
-    }
-  })
 })

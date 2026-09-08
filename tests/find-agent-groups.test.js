@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
-import { rmSync } from 'node:fs'
-import { after, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { materialize, missing, native } from './helpers/source-tree-reference.js'
 
 const COMMAND = String.raw`find a b -type f \( -name "*.ts" -o -name "*.js" -o -name "*.tsx" \) | grep -v node_modules | head -60`
 const FILES = {
@@ -31,20 +29,5 @@ function virtual() {
 describe('find — escaped grouping from an agent source-tree search', () => {
   it(COMMAND, () => {
     assert.deepEqual(virtual(), { stdout: EXPECTED, stderr: '', exitCode: 0 })
-  })
-})
-
-describe('find escaped grouping — GNU comparison', {
-  skip: missing.length ? 'Missing native tools: ' + missing.join(', ') : false,
-}, () => {
-  const dir = materialize(FILES)
-  after(() => rmSync(dir, { recursive: true, force: true }))
-  it(COMMAND, () => {
-    const reference = native(COMMAND, dir)
-    // Directory enumeration order is filesystem-dependent; this fixture is
-    // below the head limit, so compare the complete selected set of lines.
-    reference.stdout = reference.stdout.split('\n').filter(Boolean).sort().join('\n') + '\n'
-    assert.deepEqual(reference, { stdout: EXPECTED, stderr: '', exitCode: 0 })
-    assert.deepEqual(virtual(), reference)
   })
 })

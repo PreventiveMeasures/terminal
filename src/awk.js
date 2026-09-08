@@ -18,8 +18,7 @@
 // warnings (a dubious escape sequence, log of a negative number, ...)
 // go to stderr without affecting the status.
 //
-// Verified against gawk 5.2.1 by tests/awk-differential.test.js. The
-// known, deliberate differences:
+// The known, deliberate differences from gawk:
 //   - Strings are Unicode text, as under a UTF-8 locale: length(),
 //     substr(), index() and toupper() count and case-map characters,
 //     never bytes, including characters outside the BMP.

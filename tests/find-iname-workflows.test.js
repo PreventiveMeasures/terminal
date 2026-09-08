@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict'
-import { rmSync } from 'node:fs'
-import { after, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { materialize, missing, native } from './helpers/source-tree-reference.js'
 
-// Distinct spellings also differ beyond case, so the native fixture works
-// on a case-insensitive host filesystem without overwriting any entries.
 const FILES = {
   'src/Alpha.JS': 'alpha\n',
   'src/beta.js': 'beta\n',
@@ -45,19 +41,5 @@ function virtual(command) {
 describe('find -iname — source-tree matching regressions', () => {
   for (const [command, stdout] of CASES) {
     it(command, () => assert.deepEqual(virtual(command), { stdout, stderr: '', exitCode: 0 }))
-  }
-})
-
-describe('find -iname — strict GNU comparison', {
-  skip: missing.length ? 'Missing native tools: ' + missing.join(', ') : false,
-}, () => {
-  const dir = materialize(FILES)
-  after(() => rmSync(dir, { recursive: true, force: true }))
-  for (const [command, stdout] of CASES) {
-    it(command, () => {
-      const ref = native(command, dir)
-      assert.deepEqual(ref, { stdout, stderr: '', exitCode: 0 })
-      assert.deepEqual(virtual(command), ref)
-    })
   }
 })

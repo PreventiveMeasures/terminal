@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict'
-import { rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { after, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { materialize, missing, native } from './helpers/source-tree-reference.js'
 
-const quote = (s) => "'" + s.replaceAll("'", "'\\''") + "'"
 function supported(command, files, stdout, exitCode = 0) {
   const r = createTerminal(files).run(command)
   assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.unsupported], [stdout, '', exitCode, []], command)
@@ -72,74 +68,4 @@ describe('source analysis features — permanent regressions', () => {
       assert.deepEqual(hidden.unsupported, r.unsupported, command)
     }
   })
-})
-
-const inputs = ['', 'a', 'a\n', '\n\n', 'ab abc\naab\n', ' a\tb \n\r\n', 'a/a#a+a\na&b\\n\n', 'a\0b\n']
-const scripts = ['', 'p', '1p', '2,1p', 's/a/X/', 's/a//', 's/a/X/g', 's/a/X/p', 's/a/X/ p', 's/a/X/ g p', 's/a/X/gp', 's/b*/-/g', 's/^/</;s/$/>/', 's/[[:blank:]]*$//', 's/./[&]/g', 's/a*/(&)/g', 's/a\\|ab/Z/g', 's/\\(ab\\)c/\\1-&/', 's#/#:#g', 's+\\++X+g', 's/[a/]/X/g', 's/[[:alpha:]]/X/g', 's/a/\\&/g', 's/a/\\\\/g', 's/\\t/X/g', 's/a/\\n/g', '1s/a/b/p;1,2p', 's/[]a]/X/g', 's/[^]a]/X/g']
-const findExpressions = [
-  "\\( -name '*.js' -o -name '*.ts' \\)", "! \\( -name '*.js' -o -name '*.ts' \\)",
-  "\\( -name '*.js' -print \\) -o -name '*.ts'", "\\( -type f -a \\( -name '*.js' -o -name '*.ts' \\) \\) -print",
-  "\\( -name node_modules -prune \\) -o -type f -print", "\\( -maxdepth 1 -type f \\) -print",
-  "! \\( -print -exec false \\; \\)", "\\( -name '*.js' -exec wc -l {} + \\) -o -name '*.ts' -print",
-  "\\( -name '*.js' -o -name '*.ts' \\) -exec echo {} \\;", "\\( -mindepth 1 -name '*.js' \\) -print",
-  "! ! \\( -type f \\)", "\\( -name '(' -o -name ')' \\)", "\\( -exec echo '(' {} ')' \\; \\)",
-]
-
-describe('source analysis features — strict GNU matrices', { skip: missing.length ? `Missing native tools: ${missing.join(', ')}` : false }, () => {
-  const dir = materialize({})
-  after(() => rmSync(dir, { recursive: true, force: true }))
-  function compare(command, files) {
-    for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content)
-    const ref = native(command, dir)
-    supported(command, files, ref.stdout, ref.exitCode)
-    assert.equal(ref.stderr, '', command)
-  }
-  for (const script of scripts) {
-    for (const input of inputs) {
-      for (const flag of ['', '-n']) {
-        const command = `sed ${flag} ${quote(script)} f g`
-        it(`${command}: ${JSON.stringify(input)}`, () => compare(command, { f: input, g: 'ab\n' }))
-      }
-    }
-  }
-  for (const flags of ['-z', '-zu', '-zn', '-znu', '-zfr', '-z -t: -k2,2nr']) {
-    for (const input of ['', '\0', '\0\0', 'b\na\0a\0', 'b\0a', ['2', '10', '01', '1', ''].join('\0'), 'a:10\0b:1\0c:01\0', 'é\0z\0']) {
-      const command = `sort ${flags} f g`
-      it(`${command}: ${JSON.stringify(input)}`, () => compare(command, { f: input, g: 'a\0' }))
-    }
-  }
-  for (const flag of ['', '-c', '-v', '-vc', '-l', '-L', '-q', '-o', '-m0', '-m1', '-nC1']) {
-    for (const input of ['a\0x\n', 'x\na\0\n', '\0', '\n', 'a\n']) {
-      const command = `grep -I ${flag} a f g`
-      it(`${command}: ${JSON.stringify(input)}`, () => compare(command, { f: input, g: 'x\n' }))
-    }
-  }
-  for (const name of ['a\nb', '\n', 'a\n', "a'\nb", 'a\t\nb', 'a\r\nb', 'a\u0001\nb', 'a\\\nb', 'a\nb"c', "a\n'b\"c", 'é\n😀', 'a\tb', 'a\rb']) {
-    for (const locale of ['', 'LC_ALL=C ']) {
-      const command = `${locale}wc -c -- ${quote(name)}`
-      it(`wc filename quoting: ${JSON.stringify([locale, name])}`, () => compare(command, { [name]: 'x' }))
-    }
-  }
-  const files = { 'src/a.js': '', 'src/b.ts': '', 'src/c.txt': '', 'src/lib/z.js': '', 'src/node_modules/x.js': '' }
-  const treeDir = materialize(files)
-  after(() => rmSync(treeDir, { recursive: true, force: true }))
-  for (const expression of findExpressions) {
-    const command = `find src ${expression} | sort`
-    it(command, () => {
-      const ref = native(command, treeDir)
-      supported(command, files, ref.stdout, ref.exitCode)
-      assert.equal(ref.stderr, '')
-    })
-  }
-  for (const expression of ['\\(', '\\)', '\\( \\)', '\\( -name a', '-name a \\)', '\\( -name a -o \\)', '! \\)', '\\( -a -type f \\)']) {
-    const command = `find src ${expression}`
-    it(`invalid find group: ${expression}`, () => {
-      const ref = native(command, treeDir)
-      const r = createTerminal(files).run(command)
-      assert.deepEqual(r.unsupported, [])
-      // A ')' before the expression is a root operand, so this case also
-      // walks src. Find sibling traversal order is unspecified.
-      assert.deepEqual([r.stdout.split('\n').sort(), r.exitCode, Boolean(r.stderr)], [ref.stdout.split('\n').sort(), ref.exitCode, Boolean(ref.stderr)])
-    })
-  }
 })

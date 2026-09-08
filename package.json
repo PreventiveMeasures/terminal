@@ -90,7 +90,7 @@
   ],
   "scripts": {
     "lint": "oxlint -c .oxlintrc.json ./src/ ./tests/",
-    "test": "node --test ./tests/*.test.js"
+    "test": "node --test --test-isolation=none ./tests/*.test.js"
   },
   "dependencies": {},
   "devDependencies": {

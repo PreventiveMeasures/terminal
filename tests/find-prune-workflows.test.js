@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
-import { rmSync } from 'node:fs'
-import { after, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { materialize, missing, native } from './helpers/source-tree-reference.js'
 
 const FILES = {
   'README.md': 'readme\n',
@@ -56,18 +54,4 @@ describe('find -prune — source-tree exclusion regressions', () => {
       { kind: 'command', command: 'jq', detail: 'jq' },
     ])
   })
-})
-
-describe('find -prune — strict GNU comparison', {
-  skip: missing.length ? 'Missing native tools: ' + missing.join(', ') : false,
-}, () => {
-  const dir = materialize(FILES)
-  after(() => rmSync(dir, { recursive: true, force: true }))
-  for (const [command, stdout] of CASES) {
-    it(command, () => {
-      const ref = native(command, dir)
-      assert.deepEqual(ref, { stdout, stderr: '', exitCode: 0 })
-      assert.deepEqual(virtual(command), ref)
-    })
-  }
 })

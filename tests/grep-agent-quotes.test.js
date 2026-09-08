@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { rmSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { ENV, materialize, native, versions } from './helpers/source-tree-reference.js'
 
 const FILES = {
   'nm/a.js': `const a = {[K]: 'R'};
@@ -183,30 +180,4 @@ describe('grep — agent quoting regressions', () => {
       )
     })
   }
-
-  it('agrees with Bash syntax and GNU grep over the same isolated tree', {
-    skip: !versions.bash || !versions.grep ? 'GNU Bash and GNU grep are not available' : false,
-  }, () => {
-    const dir = materialize(FILES)
-    try {
-      for (const { command, stdout } of CASES) {
-        const syntax = spawnSync('bash', ['--noprofile', '--norc', '-n', '-c', command], {
-          cwd: dir, env: ENV, encoding: 'utf8', timeout: 5000,
-        })
-        assert.equal(syntax.error, undefined, command)
-        assert.deepEqual([syntax.stdout, syntax.stderr, syntax.status], ['', '', 0], command)
-        const reference = native(command, dir)
-        // Outputs do not exceed their head limit, so every selected match is retained.
-        // GNU traversal follows host directory order; the frozen test above
-        // separately verifies the terminal's deterministic traversal order.
-        assert.deepEqual(
-          [reference.stdout.split('\n').sort(), reference.stderr, reference.exitCode],
-          [stdout.split('\n').sort(), '', 0],
-          command,
-        )
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
 })

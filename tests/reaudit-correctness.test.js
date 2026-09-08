@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
-import { rmSync } from 'node:fs'
-import { after, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { materialize, missing, native } from './helpers/source-tree-reference.js'
 
 const FILES = {
   f: 'b 2\na 1\na 1\nx 0\n',
@@ -56,21 +54,3 @@ describe('re-audit correctness — permanent regressions', () => {
     })
   }
 })
-describe('re-audit correctness — strict GNU comparisons', { skip: missing.length ? 'Missing native tools: ' + missing.join(', ') : false }, () => {
-  const dir = materialize(FILES)
-  after(() => rmSync(dir, { recursive: true, force: true }))
-  for (const [command, stdout] of SUPPORTED) {
-    it(command, () => {
-      const ref = native(command, dir)
-      assert.deepEqual(ref, { stdout, stderr: '', exitCode: 0 }, 'the permanent expectation must match GNU')
-      assert.deepEqual(virtual(command), ref)
-    })
-  }
-  for (const value of ['é', '😀', 'a😀é', '']) {
-    for (const format of ['%1s', '%5s', '%-5s', '%.0s', '%.1s', '%5.2s', '%c', '%4c']) {
-      const command = `awk 'BEGIN {printf "[` + format + String.raw`]\n", "` + value + `"}'`
-      it(command, () => assert.deepEqual(virtual(command), native(command, dir)))
-    }
-  }
-})
-

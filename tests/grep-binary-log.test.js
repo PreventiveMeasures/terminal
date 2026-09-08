@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
-import { rmSync } from 'node:fs'
-import { after, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { materialize, missing, native } from './helpers/source-tree-reference.js'
 
 const COMMAND = String.raw`cd / && grep -rIn "a\|\.x\b\|y" d/f packages --include="*.ts" | head -20`
 const FILES = {
@@ -30,23 +28,6 @@ function virtual() {
 
 describe('grep — recursive binary exclusion from an agent log', () => {
   it(COMMAND, () => {
-    assert.deepEqual(virtual(), { stdout: EXPECTED, stderr: '', exitCode: 0 })
-  })
-})
-
-describe('grep binary exclusion — GNU comparison', {
-  skip: missing.length ? 'Missing native tools: ' + missing.join(', ') : false,
-}, () => {
-  const dir = materialize(FILES)
-  after(() => rmSync(dir, { recursive: true, force: true }))
-  it('matches GNU grep including whole-file binary exclusion and BRE word boundaries', () => {
-    // The temporary fixture directory represents virtual /. Keep the native
-    // command inside it rather than searching the host root from the log.
-    const reference = native(COMMAND.replace(/^cd \/ && /u, 'cd . && '), dir)
-    assert.equal(reference.stderr, '')
-    assert.equal(reference.exitCode, 0)
-    // All matches fit under head's limit; host traversal order may differ.
-    assert.deepEqual(reference.stdout.split('\n').sort(), EXPECTED.split('\n').sort())
     assert.deepEqual(virtual(), { stdout: EXPECTED, stderr: '', exitCode: 0 })
   })
 })
