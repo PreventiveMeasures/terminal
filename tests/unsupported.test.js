@@ -98,10 +98,10 @@ describe('run().unsupported — what counts as a gap', () => {
     assert.equal(gaps('sleep 1 &')[0].kind, 'feature')
   })
 
-  it('kind `feature`: sed funnels every way out of its subset into one entry', () => {
-    // An unknown flag, a missing -n, and a regex address are all the
-    // same "this is not a real sed" to a caller deciding whether to use it.
-    for (const line of ["sed -e s/a/b/ f.txt", "sed '1,2p' f.txt", "sed -n 's/a/b/' f.txt"]) {
+  it('kind `feature`: sed reports unsupported scripts and flags', () => {
+    // Unknown flags, regex addresses, and unmodeled sed commands
+    // retain a structured diagnostic alongside stderr.
+    for (const line of ["sed -e s/a/b/ f.txt", "sed -n '/a/p' f.txt", "sed -n 'd' f.txt"]) {
       assert.deepEqual(details(line), ['script'], line)
       assert.equal(gaps(line)[0].command, 'sed')
     }

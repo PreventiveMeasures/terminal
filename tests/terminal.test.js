@@ -1909,7 +1909,6 @@ describe('createTerminal — strict option parsing', () => {
     'tail --bogus',
     'wc -z',
     'wc -lz',
-    'sort -z',
     'sort --bogus',
     'uniq -z',
     'ls -z',
@@ -3417,22 +3416,17 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
 
   it('rejects anything outside the narrow subset (single canonical message)', () => {
     const t = createTerminal(SRC)
-    // Everything in this group should hit the same "only -n 'X[,Y]p'"
-    // message — including unknown flags (which would otherwise
-    // surface as parseArgs's generic "unknown option" error).
+    // Unmodeled scripts and flags retain the subset diagnostic.
     const unsupportedCases = [
       'sed',                                // no args
-      "sed '1,5p' big.txt",                 // missing -n
-      "sed -n 's/foo/bar/g' big.txt",       // substitution
       "sed -n '/foo/p' big.txt",            // regex address
-      "sed -n '1,5p;s/a/b/' big.txt",       // mixing range with non-range
       "sed -i -n '1,2p' big.txt",           // unsupported flag
       "sed -e '1p' big.txt",                // unsupported flag
     ]
     for (const cmd of unsupportedCases) {
       const r = t.run(cmd)
       assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
-      assert.match(r.stderr, /only `-n 'X\[,Y\]p'`/u, `${cmd}: expected canonical message`)
+      assert.match(r.stderr, /only numeric print addresses/u, `${cmd}: expected canonical message`)
     }
     // These hit specific (non-canonical) errors that name the
     // actual problem — they don't get the generic unsupported text.
@@ -6092,7 +6086,7 @@ describe('createTerminal — GNU-match regression guards', () => {
     assert.equal(t.run("echo -e 'a\\tb'").stdout, 'a\tb\n')
     assert.equal(t.run("echo -e 'a\\nb'").stdout, 'a\nb\n')
     assert.equal(t.run("echo -e 'a\\\\b'").stdout, 'a\\b\n')
-    assert.equal(t.run("echo -e 'a\\0b'").stdout, 'a b\n')
+    assert.equal(t.run("echo -e 'a\\0b'").stdout, 'a\0b\n')
     assert.equal(t.run('echo -e a\\tb').stdout, 'atb\n')
     // -E (or no flag) is the inverse: backslashes pass through.
     assert.equal(t.run("echo -E 'a\\tb'").stdout, 'a\\tb\n')

@@ -1,0 +1,252 @@
+[
+  {
+    "id": 1,
+    "purpose": "Locate the tree root",
+    "command": "pwd"
+  },
+  {
+    "id": 2,
+    "purpose": "List top-level entries including dotfiles",
+    "command": "ls -AF"
+  },
+  {
+    "id": 3,
+    "purpose": "Inspect the first two directory levels",
+    "command": "tree -a -L 2"
+  },
+  {
+    "id": 4,
+    "purpose": "Inventory every file",
+    "command": "find . -type f -print | sort"
+  },
+  {
+    "id": 5,
+    "purpose": "Inventory JavaScript and TypeScript sources and tests",
+    "command": "find src tests -type f \\( -name '*.js' -o -name '*.ts' \\) -print | sort"
+  },
+  {
+    "id": 6,
+    "purpose": "Inventory files while pruning dependencies",
+    "command": "find . -type d -name node_modules -prune -o -type f -print | sort"
+  },
+  {
+    "id": 7,
+    "purpose": "Find empty source files",
+    "command": "find src -type f -empty -print | sort"
+  },
+  {
+    "id": 8,
+    "purpose": "Rank JavaScript files by line count",
+    "command": "find src -type f -name '*.js' -exec wc -l {} + | sort -nr"
+  },
+  {
+    "id": 9,
+    "purpose": "Measure JavaScript file sizes with NUL-safe filenames",
+    "command": "find src -type f -name '*.js' -print0 | sort -z | xargs -0 -r wc -c"
+  },
+  {
+    "id": 10,
+    "purpose": "Read package metadata",
+    "command": "cat package.json"
+  },
+  {
+    "id": 11,
+    "purpose": "Read the entry point header",
+    "command": "head -n 40 src/index.js"
+  },
+  {
+    "id": 12,
+    "purpose": "Read the entry point footer",
+    "command": "tail -n 20 src/index.js"
+  },
+  {
+    "id": 13,
+    "purpose": "Read a specific entry point range",
+    "command": "sed -n '20,60p' src/index.js"
+  },
+  {
+    "id": 14,
+    "purpose": "Read a numbered source range",
+    "command": "nl -ba src/index.js | sed -n '15,35p'"
+  },
+  {
+    "id": 15,
+    "purpose": "Inspect tabs, CRLF, and other nonprinting bytes",
+    "command": "cat -A src/index.js"
+  },
+  {
+    "id": 16,
+    "purpose": "Inspect the first 64 source bytes",
+    "command": "xxd -l 64 src/index.js"
+  },
+  {
+    "id": 17,
+    "purpose": "Inspect a three-byte prefix",
+    "command": "head -c 3 src/index.js | od"
+  },
+  {
+    "id": 18,
+    "purpose": "Find outstanding work markers",
+    "command": "grep -rInE 'TODO|FIXME|XXX' src tests | sort"
+  },
+  {
+    "id": 19,
+    "purpose": "Find environment-variable accesses",
+    "command": "grep -rInF 'process.env' src | sort"
+  },
+  {
+    "id": 20,
+    "purpose": "Find exported declarations",
+    "command": "grep -rInE 'export[[:space:]]+(default|const|function|class)' src | sort"
+  },
+  {
+    "id": 21,
+    "purpose": "Find imports and re-exports",
+    "command": "grep -rInE '^(import|export).*from' src | sort"
+  },
+  {
+    "id": 22,
+    "purpose": "Find CommonJS dependency loads",
+    "command": "grep -rInE 'require\\(' src | sort"
+  },
+  {
+    "id": 23,
+    "purpose": "Find dynamic code evaluation references",
+    "command": "grep -rInE '(eval|Function)[[:space:]]*\\(' src | sort"
+  },
+  {
+    "id": 24,
+    "purpose": "Find child-process execution references",
+    "command": "grep -rInE '(exec|spawn)(Sync)?[[:space:]]*\\(' src | sort"
+  },
+  {
+    "id": 25,
+    "purpose": "Find prototype-related code",
+    "command": "grep -rInF '__proto__' src | sort"
+  },
+  {
+    "id": 26,
+    "purpose": "Find network endpoints and fetch calls",
+    "command": "grep -rInE '(https?://|fetch\\()' src | sort"
+  },
+  {
+    "id": 27,
+    "purpose": "Find console logging",
+    "command": "grep -rInE 'console\\.(log|warn|error)' src | sort"
+  },
+  {
+    "id": 28,
+    "purpose": "Find explicit error throws",
+    "command": "grep -rInE 'throw[[:space:]]+new[[:space:]]+Error' src | sort"
+  },
+  {
+    "id": 29,
+    "purpose": "Find catch clauses",
+    "command": "grep -rInE 'catch[[:space:]]*\\(' src | sort"
+  },
+  {
+    "id": 30,
+    "purpose": "Find test and suite declarations",
+    "command": "grep -rInE '(it|test|describe)[[:space:]]*\\(' tests | sort"
+  },
+  {
+    "id": 31,
+    "purpose": "Read context around the public entry point",
+    "command": "grep -n -C 2 'createTerminal' src/index.js"
+  },
+  {
+    "id": 32,
+    "purpose": "Search production JS while excluding colocated tests",
+    "command": "grep -rIn --include='*.js' --exclude='*.test.js' 'TODO' src | sort"
+  },
+  {
+    "id": 33,
+    "purpose": "List files containing outstanding work",
+    "command": "grep -rIl 'TODO' src | sort"
+  },
+  {
+    "id": 34,
+    "purpose": "List files without outstanding work",
+    "command": "grep -rIL 'TODO' src | sort"
+  },
+  {
+    "id": 35,
+    "purpose": "Rank per-file outstanding-work counts",
+    "command": "grep -rIc 'TODO' src | sort -t: -k2,2nr"
+  },
+  {
+    "id": 36,
+    "purpose": "Detect the package module mode",
+    "command": "grep -q '\"type\": \"module\"' package.json && echo esm || echo other"
+  },
+  {
+    "id": 37,
+    "purpose": "Count repeated JSON key spellings",
+    "command": "grep -oE '\"[^\"]+\"[[:space:]]*:' package.json | sort | uniq -c | sort -nr"
+  },
+  {
+    "id": 38,
+    "purpose": "Rank identifier spellings immediately before opening parentheses",
+    "command": "grep -rIhoE '[A-Za-z_][A-Za-z0-9_]*\\(' src | sort | uniq -c | sort -nr | head -n 20"
+  },
+  {
+    "id": 39,
+    "purpose": "Extract module specifiers from single-line imports",
+    "command": "grep -rIh '^import ' src | awk -F \"[\\\"']\" '{print $2}' | sort -u"
+  },
+  {
+    "id": 40,
+    "purpose": "Summarize JavaScript files by second path component",
+    "command": "find src -type f -name '*.js' -print | awk -F/ '{print $2}' | sort | uniq -c | sort -nr"
+  },
+  {
+    "id": 41,
+    "purpose": "Find source lines longer than 100 characters",
+    "command": "awk 'length($0)>100 {printf \"%s:%d:%d\\n\", FILENAME,FNR,length($0)}' src/*.js | sort"
+  },
+  {
+    "id": 42,
+    "purpose": "Count blank source lines",
+    "command": "awk 'NF==0 {blank++} END {print blank+0}' src/*.js"
+  },
+  {
+    "id": 43,
+    "purpose": "Summarize source records and characters excluding newlines",
+    "command": "awk '{lines++; chars+=length($0)} END {printf \"lines=%d chars=%d\\n\", lines,chars}' src/*.js"
+  },
+  {
+    "id": 44,
+    "purpose": "Count outstanding work by source filename",
+    "command": "awk '/TODO/ {count[FILENAME]++} END {for (file in count) print count[file],file}' src/*.js | sort -nr"
+  },
+  {
+    "id": 45,
+    "purpose": "Inspect source with trailing blanks removed",
+    "command": "sed 's/[[:blank:]]*$//' src/index.js | cat -A"
+  },
+  {
+    "id": 46,
+    "purpose": "Find duplicated source lines",
+    "command": "sort src/index.js | uniq -d"
+  },
+  {
+    "id": 47,
+    "purpose": "Count case-insensitive repeated work-marker lines",
+    "command": "grep -rIh 'TODO' src | sort -f | uniq -ci | sort -nr"
+  },
+  {
+    "id": 48,
+    "purpose": "Search safely sorted NUL-delimited filenames",
+    "command": "find src -type f -name '*.js' -print0 | sort -z | xargs -0 -r grep -nH -e TODO -e FIXME"
+  },
+  {
+    "id": 49,
+    "purpose": "Preview each top-level JavaScript source",
+    "command": "for f in src/*.js; do echo \"=== $f ===\"; head -n 3 \"$f\"; done"
+  },
+  {
+    "id": 50,
+    "purpose": "Read a header then continue the same file stream",
+    "command": "{ head -n 5; echo '--- remainder ---'; cat; } < src/index.js"
+  }
+]

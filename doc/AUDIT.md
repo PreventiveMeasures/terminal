@@ -214,3 +214,52 @@ through a pipeline, so an agent still receives the structured diagnostic.
 The native comparisons deliberately require supported behavior to match; an
 unsupported result does not count as a successful comparison. Separate tests
 exercise diagnosed limits. The audit remains in `doc/`, outside the npm package.
+
+## Fifth pass: 50 source-tree analysis workflows
+
+The catalog in [SOURCE_TREE_COMMANDS.md](SOURCE_TREE_COMMANDS.md) was selected
+before implementing this pass's fixes. All 50 workflows now match exact native
+stdout, stderr, and exit status on ordinary, edge-case, and sparse source trees,
+and on a current snapshot of this repository's source/tests. Unsupported results
+fail these workflow comparisons, including diagnostics hidden by a pipeline.
+
+The permanent tests contain 150 saved native results, plus 200 live comparisons
+when the native references are installed. A required-native mode prevents a test
+run from silently skipping the reference tools. Baseline regeneration imports
+only fixture data and invokes native tools; it never calls the emulator.
+
+### Behavior added and corrected
+
+- `find` supports nested parentheses, group negation, precedence, short-circuit
+  actions, pruning, depth options, and batched commands. Its parser is separated
+  from traversal. A closing parenthesis before expression parsing is a root
+  operand, matching GNU. Malformed grouping still fails normally.
+- `sort -z` sorts NUL-delimited records, preserving embedded newlines and empty
+  records, including field keys, numeric ordering, folding and deduplication.
+- `grep -I` retains binary operands for `-L` and `-c` while selecting no lines,
+  including under `-v`. Excluded files and `-m0` avoid binary-content inspection.
+  NUL detection after the first 96 KiB is diagnosed: GNU may already have emitted
+  matches, and the virtual runtime cannot reproduce its later read boundaries.
+- ASCII code-search patterns can run over Unicode comments and strings when
+  their accepted matches do not depend on encoded character widths. A structural
+  check retains diagnostics for unmodeled width-sensitive, case, word, and locale
+  semantics. Fixed-string word constraints now receive that guard too.
+- `sed` supports numeric print addresses and BRE substitutions with longest
+  matches, `g`/`p`, captures, `&`, alternate delimiters, selected replacement
+  escapes, and ordered scripts. Missing record terminators remain distinct from
+  newlines inserted by substitutions. Whitespace before substitution flags does
+  not turn those flags into unconditional print commands. Unmodeled operations,
+  captures and locale behavior remain diagnosed.
+- `wc` uses GNU filename quoting for newline-containing operands, preventing
+  apparent extra output records. It handles control runs, quotes, backslashes,
+  UTF-8 text, and explicit C-locale byte escaping.
+- An existing test's literal NUL was changed to the equivalent `\0` source
+  escape, keeping its test value unchanged and the source file readable as text.
+
+Focused strict native matrices cover substitutions, NUL sorting, binary grep
+modes, filename quoting, and grouped find expressions. Saved regressions also
+verify diagnostic mirroring with stderr redirected away.
+
+Validation: 5,576 tests in 132 suites pass, with zero failures, skips or TODOs;
+lint and diff whitespace checks pass. The npm dry run contains 57 files, including
+all 55 runtime files, and excludes `doc/` and `tests/`.

@@ -4,13 +4,13 @@
 // selected fields, with the whole line as the last-resort tiebreak.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, okWith, readInputs, splitLines, utf8 } from './util.js'
+import { err, okWith, readInputs, utf8 } from './util.js'
 import { unsupported } from './unsupported.js'
 import { compareNames as cmpStrings } from './fs.js'
 
 export function sort(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, {
-    short: ['n', 'r', 'u', 'f', 'b'],
+    short: ['n', 'r', 'u', 'f', 'b', 'z'],
     valueShort: ['t'],
     repeatable: ['k'],
   })
@@ -26,10 +26,17 @@ export function sort(stdin, tokens, ctx) {
   // exiting 2. Emitting a partial sort would be worse than useless —
   // the result would look like a complete ordering of the input.
   if (r.failed) return { stdout: '', stderr: r.stderr, exitCode: 2 }
-  let lines = r.inputs.flatMap((input) => splitLines(input.content))
+  const delimiter = flags.has('z') ? '\0' : '\n'
+  const joinRecords = (records) => records.length ? records.join(delimiter) + delimiter : ''
+  let lines = r.inputs.flatMap(({ content }) => {
+    if (content === '') return []
+    const records = content.split(delimiter)
+    if (content.endsWith(delimiter)) records.pop()
+    return records
+  })
   const numeric = flags.has('n')
   const unique = flags.has('u')
-  if (keys.specs.length > 0) return okWith(joinLines(sortByKeys(lines, keys.specs, sep, unique, globals.r)), r)
+  if (keys.specs.length > 0) return okWith(joinRecords(sortByKeys(lines, keys.specs, sep, unique, globals.r)), r)
   if (numeric) {
     // -n orders by each line's leading numeric value. Equal values keep
     // input order (stable sort); without -u the whole line breaks the
@@ -66,7 +73,7 @@ export function sort(stdin, tokens, ctx) {
     })
   }
   if (flags.has('r')) lines.reverse()
-  return okWith(joinLines(lines), r)
+  return okWith(joinRecords(lines), r)
 }
 
 // GNU `sort -n`: a line's value is its leading numeric prefix — optional

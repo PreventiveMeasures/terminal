@@ -1,0 +1,923 @@
+{
+  "versions": {
+    "bash": "GNU bash, version 5.2.37(1)-release (aarch64-apple-darwin25.6.0)",
+    "awk": "GNU Awk 5.2.2",
+    "grep": "grep (GNU grep) 3.11",
+    "find": "find (GNU findutils) 4.10.0",
+    "xargs": "xargs (GNU findutils) 4.10.0",
+    "sed": "sed (GNU sed) 4.9",
+    "sort": "sort (GNU coreutils) 9.5",
+    "wc": "wc (GNU coreutils) 9.5",
+    "od": "od (GNU coreutils) 9.5",
+    "tree": "tree v2.1.1 © 1996 - 2023 by Steve Baker, Thomas Moore, Francesc Rocher, Florian Sesser, Kyosuke Tokoro"
+  },
+  "locale": "en_US.UTF-8; LC_COLLATE=C",
+  "trees": {
+    "ordinary": [
+      {
+        "id": 1,
+        "stdout": "/\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 2,
+        "stdout": ".gitignore\nREADME.md\nnode_modules/\npackage.json\nsrc/\ntests/\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 3,
+        "stdout": ".\n├── .gitignore\n├── README.md\n├── node_modules\n│   └── dependency\n├── package.json\n├── src\n│   ├── config.js\n│   ├── empty.js\n│   ├── index.js\n│   ├── lib\n│   ├── parser.js\n│   └── types.ts\n└── tests\n    ├── parser.test.js\n    └── types.test.ts\n\n6 directories, 10 files\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 4,
+        "stdout": "./.gitignore\n./README.md\n./node_modules/dependency/index.js\n./package.json\n./src/config.js\n./src/empty.js\n./src/index.js\n./src/lib/helper.js\n./src/parser.js\n./src/types.ts\n./tests/parser.test.js\n./tests/types.test.ts\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 5,
+        "stdout": "src/config.js\nsrc/empty.js\nsrc/index.js\nsrc/lib/helper.js\nsrc/parser.js\nsrc/types.ts\ntests/parser.test.js\ntests/types.test.ts\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 6,
+        "stdout": "./.gitignore\n./README.md\n./package.json\n./src/config.js\n./src/empty.js\n./src/index.js\n./src/lib/helper.js\n./src/parser.js\n./src/types.ts\n./tests/parser.test.js\n./tests/types.test.ts\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 7,
+        "stdout": "src/empty.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 8,
+        "stdout": " 33 total\n 27 src/index.js\n  4 src/parser.js\n  1 src/lib/helper.js\n  1 src/config.js\n  0 src/empty.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 9,
+        "stdout": " 33 src/config.js\n  0 src/empty.js\n821 src/index.js\n 25 src/lib/helper.js\n 75 src/parser.js\n954 total\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 10,
+        "stdout": "{\n  \"name\": \"example\",\n  \"type\": \"module\",\n  \"scripts\": { \"test\": \"node --test\" },\n  \"nested\": { \"name\": \"child\" }\n}\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 11,
+        "stdout": "import { parse } from \"./parser.js\";\nimport './config.js';\nexport { helper } from \"./lib/helper.js\";\n\n// TODO: validate options\nexport function createTerminal(input) {\n  const mode = process.env.MODE;\n  try {\n    console.log(\"https://example.test/api\");\n    return parse(input);\n  } catch (error) {\n    console.error(error);\n    throw new Error(\"bad input\");\n  }\n}\n\n// FIXME: remove legacy loader\nconst legacy = require(\"legacy\");\n// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\nconst object = { __proto__: null };\nfetch(\"https://example.test/data\");\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";\n// TODO: shared concern\n// todo: shared concern\n// TODO: shared concern\n\nexport const version = 1;  \n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 12,
+        "stdout": "  try {\n    console.log(\"https://example.test/api\");\n    return parse(input);\n  } catch (error) {\n    console.error(error);\n    throw new Error(\"bad input\");\n  }\n}\n\n// FIXME: remove legacy loader\nconst legacy = require(\"legacy\");\n// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\nconst object = { __proto__: null };\nfetch(\"https://example.test/data\");\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";\n// TODO: shared concern\n// todo: shared concern\n// TODO: shared concern\n\nexport const version = 1;  \n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 13,
+        "stdout": "const object = { __proto__: null };\nfetch(\"https://example.test/data\");\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";\n// TODO: shared concern\n// todo: shared concern\n// TODO: shared concern\n\nexport const version = 1;  \n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 14,
+        "stdout": "    15\t}\n    16\t\n    17\t// FIXME: remove legacy loader\n    18\tconst legacy = require(\"legacy\");\n    19\t// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\n    20\tconst object = { __proto__: null };\n    21\tfetch(\"https://example.test/data\");\n    22\tconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";\n    23\t// TODO: shared concern\n    24\t// todo: shared concern\n    25\t// TODO: shared concern\n    26\t\n    27\texport const version = 1;  \n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 15,
+        "stdout": "import { parse } from \"./parser.js\";$\nimport './config.js';$\nexport { helper } from \"./lib/helper.js\";$\n$\n// TODO: validate options$\nexport function createTerminal(input) {$\n  const mode = process.env.MODE;$\n  try {$\n    console.log(\"https://example.test/api\");$\n    return parse(input);$\n  } catch (error) {$\n    console.error(error);$\n    throw new Error(\"bad input\");$\n  }$\n}$\n$\n// FIXME: remove legacy loader$\nconst legacy = require(\"legacy\");$\n// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");$\nconst object = { __proto__: null };$\nfetch(\"https://example.test/data\");$\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";$\n// TODO: shared concern$\n// todo: shared concern$\n// TODO: shared concern$\n$\nexport const version = 1;  $\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 16,
+        "stdout": "00000000: 696d 706f 7274 207b 2070 6172 7365 207d  import { parse }\n00000010: 2066 726f 6d20 222e 2f70 6172 7365 722e   from \"./parser.\n00000020: 6a73 223b 0a69 6d70 6f72 7420 272e 2f63  js\";.import './c\n00000030: 6f6e 6669 672e 6a73 273b 0a65 7870 6f72  onfig.js';.expor\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 17,
+        "stdout": "0000000 066551 000160\n0000003\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 18,
+        "stdout": "src/index.js:17:// FIXME: remove legacy loader\nsrc/index.js:23:// TODO: shared concern\nsrc/index.js:25:// TODO: shared concern\nsrc/index.js:5:// TODO: validate options\nsrc/parser.js:2:  // TODO: validate input\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 19,
+        "stdout": "src/index.js:7:  const mode = process.env.MODE;\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 20,
+        "stdout": "src/config.js:1:export default { mode: \"test\" };\nsrc/index.js:27:export const version = 1;  \nsrc/index.js:6:export function createTerminal(input) {\nsrc/lib/helper.js:1:export const helper = 1;\nsrc/parser.js:1:export function parse(input) {\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 21,
+        "stdout": "src/index.js:1:import { parse } from \"./parser.js\";\nsrc/index.js:3:export { helper } from \"./lib/helper.js\";\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 22,
+        "stdout": "src/index.js:18:const legacy = require(\"legacy\");\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 23,
+        "stdout": "src/index.js:19:// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 24,
+        "stdout": "src/index.js:19:// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 25,
+        "stdout": "src/index.js:20:const object = { __proto__: null };\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 26,
+        "stdout": "src/index.js:21:fetch(\"https://example.test/data\");\nsrc/index.js:9:    console.log(\"https://example.test/api\");\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 27,
+        "stdout": "src/index.js:12:    console.error(error);\nsrc/index.js:9:    console.log(\"https://example.test/api\");\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 28,
+        "stdout": "src/index.js:13:    throw new Error(\"bad input\");\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 29,
+        "stdout": "src/index.js:11:  } catch (error) {\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 30,
+        "stdout": "tests/parser.test.js:1:describe(\"parser\", () => {\ntests/parser.test.js:2:  it(\"works\", () => {});\ntests/types.test.ts:1:test(\"types\", () => {});\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 31,
+        "stdout": "4-\n5-// TODO: validate options\n6:export function createTerminal(input) {\n7-  const mode = process.env.MODE;\n8-  try {\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 32,
+        "stdout": "src/index.js:23:// TODO: shared concern\nsrc/index.js:25:// TODO: shared concern\nsrc/index.js:5:// TODO: validate options\nsrc/parser.js:2:  // TODO: validate input\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 33,
+        "stdout": "src/index.js\nsrc/parser.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 34,
+        "stdout": "src/config.js\nsrc/empty.js\nsrc/lib/helper.js\nsrc/types.ts\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 35,
+        "stdout": "src/index.js:3\nsrc/parser.js:1\nsrc/config.js:0\nsrc/empty.js:0\nsrc/lib/helper.js:0\nsrc/types.ts:0\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 36,
+        "stdout": "esm\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 37,
+        "stdout": "      2 \"name\":\n      1 \"type\":\n      1 \"test\":\n      1 \"scripts\":\n      1 \"nested\":\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 38,
+        "stdout": "      2 parse(\n      1 spawnSync(\n      1 require(\n      1 log(\n      1 fetch(\n      1 exec(\n      1 eval(\n      1 error(\n      1 createTerminal(\n      1 Function(\n      1 Error(\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 39,
+        "stdout": "./config.js\n./parser.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 40,
+        "stdout": "      1 parser.js\n      1 lib\n      1 index.js\n      1 empty.js\n      1 config.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 41,
+        "stdout": "src/index.js:22:150\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 42,
+        "stdout": "3\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 43,
+        "stdout": "lines=32 chars=897\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 44,
+        "stdout": "3 src/index.js\n1 src/parser.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 45,
+        "stdout": "import { parse } from \"./parser.js\";$\nimport './config.js';$\nexport { helper } from \"./lib/helper.js\";$\n$\n// TODO: validate options$\nexport function createTerminal(input) {$\n  const mode = process.env.MODE;$\n  try {$\n    console.log(\"https://example.test/api\");$\n    return parse(input);$\n  } catch (error) {$\n    console.error(error);$\n    throw new Error(\"bad input\");$\n  }$\n}$\n$\n// FIXME: remove legacy loader$\nconst legacy = require(\"legacy\");$\n// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");$\nconst object = { __proto__: null };$\nfetch(\"https://example.test/data\");$\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";$\n// TODO: shared concern$\n// todo: shared concern$\n// TODO: shared concern$\n$\nexport const version = 1;$\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 46,
+        "stdout": "\n// TODO: shared concern\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 47,
+        "stdout": "      2 // TODO: shared concern\n      1 // TODO: validate options\n      1   // TODO: validate input\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 48,
+        "stdout": "src/index.js:5:// TODO: validate options\nsrc/index.js:17:// FIXME: remove legacy loader\nsrc/index.js:23:// TODO: shared concern\nsrc/index.js:25:// TODO: shared concern\nsrc/parser.js:2:  // TODO: validate input\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 49,
+        "stdout": "=== src/config.js ===\nexport default { mode: \"test\" };\n=== src/empty.js ===\n=== src/index.js ===\nimport { parse } from \"./parser.js\";\nimport './config.js';\nexport { helper } from \"./lib/helper.js\";\n=== src/parser.js ===\nexport function parse(input) {\n  // TODO: validate input\n  return input;\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 50,
+        "stdout": "import { parse } from \"./parser.js\";\nimport './config.js';\nexport { helper } from \"./lib/helper.js\";\n\n// TODO: validate options\n--- remainder ---\nexport function createTerminal(input) {\n  const mode = process.env.MODE;\n  try {\n    console.log(\"https://example.test/api\");\n    return parse(input);\n  } catch (error) {\n    console.error(error);\n    throw new Error(\"bad input\");\n  }\n}\n\n// FIXME: remove legacy loader\nconst legacy = require(\"legacy\");\n// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\nconst object = { __proto__: null };\nfetch(\"https://example.test/data\");\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";\n// TODO: shared concern\n// todo: shared concern\n// TODO: shared concern\n\nexport const version = 1;  \n",
+        "stderr": "",
+        "exitCode": 0
+      }
+    ],
+    "edges": [
+      {
+        "id": 1,
+        "stdout": "/\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 2,
+        "stdout": ".hidden\npackage.json\nsrc/\ntests/\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 3,
+        "stdout": ".\n├── .hidden\n├── package.json\n├── src\n│   ├── -leading.js\n│   ├── empty.js\n│   ├── index.js\n│   ├── nested\n│   ├── quote'name.js\n│   ├── space name.js\n│   └── é.js\n└── tests\n    ├── empty.test.ts\n    └── example.test.js\n\n4 directories, 10 files\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 4,
+        "stdout": "./.hidden\n./package.json\n./src/-leading.js\n./src/empty.js\n./src/index.js\n./src/nested/blank.js\n./src/nested/bytes.bin\n./src/quote'name.js\n./src/space name.js\n./src/é.js\n./tests/empty.test.ts\n./tests/example.test.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 5,
+        "stdout": "src/-leading.js\nsrc/empty.js\nsrc/index.js\nsrc/nested/blank.js\nsrc/quote'name.js\nsrc/space name.js\nsrc/é.js\ntests/empty.test.ts\ntests/example.test.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 6,
+        "stdout": "./.hidden\n./package.json\n./src/-leading.js\n./src/empty.js\n./src/index.js\n./src/nested/blank.js\n./src/nested/bytes.bin\n./src/quote'name.js\n./src/space name.js\n./src/é.js\n./tests/empty.test.ts\n./tests/example.test.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 7,
+        "stdout": "src/empty.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 8,
+        "stdout": " 35 total\n 27 src/index.js\n  2 src/space name.js\n  2 src/quote'name.js\n  2 src/nested/blank.js\n  1 src/é.js\n  1 src/-leading.js\n  0 src/empty.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 9,
+        "stdout": " 14 src/-leading.js\n  0 src/empty.js\n842 src/index.js\n  2 src/nested/blank.js\n 42 src/quote'name.js\n 46 src/space name.js\n 16 src/é.js\n962 total\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 10,
+        "stdout": "{\n  \"name\": \"unicode\",\n  \"type\": \"module\",\n  \"description\": \"café 😀\"\n}",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 11,
+        "stdout": "import { parse } from \"./parser.js\";\r\nimport './config.js';\r\nexport { helper } from \"./lib/helper.js\";\r\n\r\n// TODO: café 😀\r\nexport function createTerminal(input) {\r\n  const mode = process.env.MODE;\r\n  try {\r\n    console.log(\"https://example.test/api\");\r\n    return parse(input);\r\n  } catch (error) {\r\n    console.error(error);\r\n    throw new Error(\"bad input\");\r\n  }\r\n}\r\n\r\n// FIXME: remove legacy loader\r\nconst legacy = require(\"legacy\");\r\n// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\r\nconst object = { __proto__: null };\r\nfetch(\"https://example.test/data\");\r\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";\r\n// TODO: shared concern\r\n// todo: shared concern\r\n// TODO: shared concern\r\n\r\nexport const version = 1;  \r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 12,
+        "stdout": "  try {\r\n    console.log(\"https://example.test/api\");\r\n    return parse(input);\r\n  } catch (error) {\r\n    console.error(error);\r\n    throw new Error(\"bad input\");\r\n  }\r\n}\r\n\r\n// FIXME: remove legacy loader\r\nconst legacy = require(\"legacy\");\r\n// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\r\nconst object = { __proto__: null };\r\nfetch(\"https://example.test/data\");\r\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";\r\n// TODO: shared concern\r\n// todo: shared concern\r\n// TODO: shared concern\r\n\r\nexport const version = 1;  \r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 13,
+        "stdout": "const object = { __proto__: null };\r\nfetch(\"https://example.test/data\");\r\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";\r\n// TODO: shared concern\r\n// todo: shared concern\r\n// TODO: shared concern\r\n\r\nexport const version = 1;  \r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 14,
+        "stdout": "    15\t}\r\n    16\t\r\n    17\t// FIXME: remove legacy loader\r\n    18\tconst legacy = require(\"legacy\");\r\n    19\t// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\r\n    20\tconst object = { __proto__: null };\r\n    21\tfetch(\"https://example.test/data\");\r\n    22\tconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";\r\n    23\t// TODO: shared concern\r\n    24\t// todo: shared concern\r\n    25\t// TODO: shared concern\r\n    26\t\r\n    27\texport const version = 1;  \r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 15,
+        "stdout": "import { parse } from \"./parser.js\";^M$\nimport './config.js';^M$\nexport { helper } from \"./lib/helper.js\";^M$\n^M$\n// TODO: cafM-CM-) M-pM-^_M-^XM-^@^M$\nexport function createTerminal(input) {^M$\n  const mode = process.env.MODE;^M$\n  try {^M$\n    console.log(\"https://example.test/api\");^M$\n    return parse(input);^M$\n  } catch (error) {^M$\n    console.error(error);^M$\n    throw new Error(\"bad input\");^M$\n  }^M$\n}^M$\n^M$\n// FIXME: remove legacy loader^M$\nconst legacy = require(\"legacy\");^M$\n// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");^M$\nconst object = { __proto__: null };^M$\nfetch(\"https://example.test/data\");^M$\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";^M$\n// TODO: shared concern^M$\n// todo: shared concern^M$\n// TODO: shared concern^M$\n^M$\nexport const version = 1;  ^M$\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 16,
+        "stdout": "00000000: 696d 706f 7274 207b 2070 6172 7365 207d  import { parse }\n00000010: 2066 726f 6d20 222e 2f70 6172 7365 722e   from \"./parser.\n00000020: 6a73 223b 0d0a 696d 706f 7274 2027 2e2f  js\";..import './\n00000030: 636f 6e66 6967 2e6a 7327 3b0d 0a65 7870  config.js';..exp\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 17,
+        "stdout": "0000000 066551 000160\n0000003\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 18,
+        "stdout": "src/-leading.js:1:// TODO: dash\nsrc/index.js:17:// FIXME: remove legacy loader\r\nsrc/index.js:23:// TODO: shared concern\r\nsrc/index.js:25:// TODO: shared concern\r\nsrc/index.js:5:// TODO: café 😀\r\nsrc/quote'name.js:2:// FIXME: quote\nsrc/space name.js:1:// TODO: spaces\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 19,
+        "stdout": "src/index.js:7:  const mode = process.env.MODE;\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 20,
+        "stdout": "src/index.js:27:export const version = 1;  \r\nsrc/index.js:6:export function createTerminal(input) {\r\nsrc/space name.js:2:export const label = \"café\";\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 21,
+        "stdout": "src/index.js:1:import { parse } from \"./parser.js\";\r\nsrc/index.js:3:export { helper } from \"./lib/helper.js\";\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 22,
+        "stdout": "src/index.js:18:const legacy = require(\"legacy\");\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 23,
+        "stdout": "src/index.js:19:// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 24,
+        "stdout": "src/index.js:19:// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 25,
+        "stdout": "src/index.js:20:const object = { __proto__: null };\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 26,
+        "stdout": "src/index.js:21:fetch(\"https://example.test/data\");\r\nsrc/index.js:9:    console.log(\"https://example.test/api\");\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 27,
+        "stdout": "src/index.js:12:    console.error(error);\r\nsrc/index.js:9:    console.log(\"https://example.test/api\");\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 28,
+        "stdout": "src/index.js:13:    throw new Error(\"bad input\");\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 29,
+        "stdout": "src/index.js:11:  } catch (error) {\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 30,
+        "stdout": "tests/example.test.js:1:test(\"unicode café\", () => {});\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 31,
+        "stdout": "4-\r\n5-// TODO: café 😀\r\n6:export function createTerminal(input) {\r\n7-  const mode = process.env.MODE;\r\n8-  try {\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 32,
+        "stdout": "src/-leading.js:1:// TODO: dash\nsrc/index.js:23:// TODO: shared concern\r\nsrc/index.js:25:// TODO: shared concern\r\nsrc/index.js:5:// TODO: café 😀\r\nsrc/space name.js:1:// TODO: spaces\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 33,
+        "stdout": "src/-leading.js\nsrc/index.js\nsrc/space name.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 34,
+        "stdout": "src/empty.js\nsrc/nested/blank.js\nsrc/nested/bytes.bin\nsrc/quote'name.js\nsrc/é.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 35,
+        "stdout": "src/index.js:3\nsrc/-leading.js:1\nsrc/space name.js:1\nsrc/empty.js:0\nsrc/nested/blank.js:0\nsrc/nested/bytes.bin:0\nsrc/quote'name.js:0\nsrc/é.js:0\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 36,
+        "stdout": "esm\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 37,
+        "stdout": "      1 \"type\":\n      1 \"name\":\n      1 \"description\":\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 38,
+        "stdout": "      1 spawnSync(\n      1 require(\n      1 parse(\n      1 log(\n      1 fetch(\n      1 exec(\n      1 eval(\n      1 error(\n      1 createTerminal(\n      1 Function(\n      1 Error(\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 39,
+        "stdout": "./config.js\n./parser.js\n./space name.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 40,
+        "stdout": "      1 é.js\n      1 space name.js\n      1 quote'name.js\n      1 nested\n      1 index.js\n      1 empty.js\n      1 -leading.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 41,
+        "stdout": "src/index.js:22:151\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 42,
+        "stdout": "0\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 43,
+        "stdout": "lines=33 chars=922\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 44,
+        "stdout": "3 src/index.js\n1 src/space name.js\n1 src/-leading.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 45,
+        "stdout": "import { parse } from \"./parser.js\";^M$\nimport './config.js';^M$\nexport { helper } from \"./lib/helper.js\";^M$\n^M$\n// TODO: cafM-CM-) M-pM-^_M-^XM-^@^M$\nexport function createTerminal(input) {^M$\n  const mode = process.env.MODE;^M$\n  try {^M$\n    console.log(\"https://example.test/api\");^M$\n    return parse(input);^M$\n  } catch (error) {^M$\n    console.error(error);^M$\n    throw new Error(\"bad input\");^M$\n  }^M$\n}^M$\n^M$\n// FIXME: remove legacy loader^M$\nconst legacy = require(\"legacy\");^M$\n// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");^M$\nconst object = { __proto__: null };^M$\nfetch(\"https://example.test/data\");^M$\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";^M$\n// TODO: shared concern^M$\n// todo: shared concern^M$\n// TODO: shared concern^M$\n^M$\nexport const version = 1;  ^M$\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 46,
+        "stdout": "\r\n// TODO: shared concern\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 47,
+        "stdout": "      2 // TODO: shared concern\r\n      1 // TODO: spaces\n      1 // TODO: dash\n      1 // TODO: café 😀\r\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 48,
+        "stdout": "src/-leading.js:1:// TODO: dash\nsrc/index.js:5:// TODO: café 😀\r\nsrc/index.js:17:// FIXME: remove legacy loader\r\nsrc/index.js:23:// TODO: shared concern\r\nsrc/index.js:25:// TODO: shared concern\r\nsrc/quote'name.js:2:// FIXME: quote\nsrc/space name.js:1:// TODO: spaces\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 49,
+        "stdout": "=== src/-leading.js ===\n// TODO: dash\n=== src/empty.js ===\n=== src/index.js ===\nimport { parse } from \"./parser.js\";\r\nimport './config.js';\r\nexport { helper } from \"./lib/helper.js\";\r\n=== src/quote'name.js ===\nimport './space name.js';\n// FIXME: quote\n=== src/space name.js ===\n// TODO: spaces\nexport const label = \"café\";\n=== src/é.js ===\n// Unicode path\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 50,
+        "stdout": "import { parse } from \"./parser.js\";\r\nimport './config.js';\r\nexport { helper } from \"./lib/helper.js\";\r\n\r\n// TODO: café 😀\r\n--- remainder ---\nexport function createTerminal(input) {\r\n  const mode = process.env.MODE;\r\n  try {\r\n    console.log(\"https://example.test/api\");\r\n    return parse(input);\r\n  } catch (error) {\r\n    console.error(error);\r\n    throw new Error(\"bad input\");\r\n  }\r\n}\r\n\r\n// FIXME: remove legacy loader\r\nconst legacy = require(\"legacy\");\r\n// eval(input); Function(input); spawnSync(\"tool\"); exec(\"tool\");\r\nconst object = { __proto__: null };\r\nfetch(\"https://example.test/data\");\r\nconst longLine = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";\r\n// TODO: shared concern\r\n// todo: shared concern\r\n// TODO: shared concern\r\n\r\nexport const version = 1;  \r\n",
+        "stderr": "",
+        "exitCode": 0
+      }
+    ],
+    "sparse": [
+      {
+        "id": 1,
+        "stdout": "/\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 2,
+        "stdout": "package.json\nsrc/\ntests/\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 3,
+        "stdout": ".\n├── package.json\n├── src\n│   ├── index.js\n│   └── types.ts\n└── tests\n    └── empty.test.js\n\n3 directories, 4 files\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 4,
+        "stdout": "./package.json\n./src/index.js\n./src/types.ts\n./tests/empty.test.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 5,
+        "stdout": "src/index.js\nsrc/types.ts\ntests/empty.test.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 6,
+        "stdout": "./package.json\n./src/index.js\n./src/types.ts\n./tests/empty.test.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 7,
+        "stdout": "src/index.js\nsrc/types.ts\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 8,
+        "stdout": "0 src/index.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 9,
+        "stdout": "0 src/index.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 10,
+        "stdout": "{\"name\":\"minimal\"}\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 11,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 12,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 13,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 14,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 15,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 16,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 17,
+        "stdout": "0000000\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 18,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 19,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 20,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 21,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 22,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 23,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 24,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 25,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 26,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 27,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 28,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 29,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 30,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 31,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 1
+      },
+      {
+        "id": 32,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 33,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 34,
+        "stdout": "src/index.js\nsrc/types.ts\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 35,
+        "stdout": "src/index.js:0\nsrc/types.ts:0\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 36,
+        "stdout": "other\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 37,
+        "stdout": "      1 \"name\":\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 38,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 39,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 40,
+        "stdout": "      1 index.js\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 41,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 42,
+        "stdout": "0\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 43,
+        "stdout": "lines=0 chars=0\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 44,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 45,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 46,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 47,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 48,
+        "stdout": "",
+        "stderr": "",
+        "exitCode": 123
+      },
+      {
+        "id": 49,
+        "stdout": "=== src/index.js ===\n",
+        "stderr": "",
+        "exitCode": 0
+      },
+      {
+        "id": 50,
+        "stdout": "--- remainder ---\n",
+        "stderr": "",
+        "exitCode": 0
+      }
+    ]
+  }
+}

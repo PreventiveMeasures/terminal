@@ -16,8 +16,8 @@
 
 import { basename, lookup, relativeTo } from './fs.js'
 import { parseArgs } from './parse.js'
-import { consumeStdin, err, joinLines, parseNonNegativeInt, readFilesFor, splitLines, usage } from './util.js'
-import { unsupported, unsupportedFrom } from './unsupported.js'
+import { consumeStdin, err, joinLines, parseNonNegativeInt, readFilesFor, splitLines, usage, utf8 } from './util.js'
+import { UnsupportedError, unsupported, unsupportedFrom } from './unsupported.js'
 import { AwkError } from './awk-common.js'
 import { compilePatterns, inputGap } from './grep-pattern.js'
 import { compileGlob } from './glob.js'
@@ -27,14 +27,14 @@ import { anyMatch, grepCount, grepListFiles, grepRun } from './grep-output.js'
 // both makes the conditional explicit — bare `[PATTERN]` would read
 // as if `grep [PATH...]` (no pattern at all) were valid, which it
 // isn't.
-const FLAGS = '[-i] [-v] [-n] [-r|-R] [-w] [-o] [-E|-F|-G] [-l] [-L] [-c] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
+const FLAGS = '[-i] [-I] [-v] [-n] [-r|-R] [-w] [-o] [-E|-F|-G] [-l] [-L] [-c] [-q] [-m N] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
 const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} -e PATTERN ... [PATH...]`
 
 // -R is GNU's "dereference-recursive" — distinct from -r because it
 // follows symlinks. The virtual FS has no symlink concept, so the two
 // degenerate to the same traversal here; -R is accepted as an alias
 // so muscle-memory invocations don't trip over an "unknown option".
-const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'h', 'H', 'o', 'E', 'F', 'G', 'q']
+const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'h', 'H', 'o', 'E', 'F', 'G', 'q', 'I']
 const VALUE_SHORTS = ['A', 'B', 'C', 'm']
 
 export function grep(stdin, tokens, ctx) {
@@ -74,13 +74,14 @@ export function grep(stdin, tokens, ctx) {
   if (max.value !== 0 && ctx.stdinFile && (flags.has('q') || flags.has('l') || flags.has('L') || values.has('m')) && (rest.length === 0 || rest.includes('-'))) return unsupported('feature', 'grep', 'partial stdin reads', 'grep: early termination on shared file input is not supported', 2)
   const recursive = flags.has('r') || flags.has('R')
   const filters = compileFilters(parsed)
+  filters.ignoreBinary = flags.has('I') && max.value !== 0
   if (flags.has('q')) return grepQuiet(stdin, rest, ctx, recursive, filters, re.res, flags.has('v'))
   const r = grepInputs(recursive, stdin, rest, ctx, filters)
   if (max.value === 0) consumeStdin(ctx, stdin)
   // include/exclude apply to every file input — named operands AND
   // recursively-discovered files — matching GNU; stdin (name===null) is
   // exempt. exclude-dir already pruned directories inside grepInputs.
-  const inputs = r.inputs.filter((inp) => inp.name === null || includedByName(basename(inp.name), filters.name))
+  const inputs = r.inputs.filter((inp) => inp.name === null || includedByName(basename(inp.name), filters.name)).map((inp) => textInput(inp, filters))
   const gap = max.value === 0 ? null : inputGap(inputs, re.res, flags.has('v'))
   if (gap) return gap
   const showName = pickShowName(flags, rest.length)
@@ -118,14 +119,26 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
     stderr += r.stderr
     failed ||= r.failed
     if (paths.includes('-') || (paths.includes('/dev/stdin') && !ctx.stdinFile)) stdin = ''
-    for (const inp of r.inputs) {
-      if (inp.name !== null && !includedByName(basename(inp.name), filters.name)) continue
+    for (const input of r.inputs) {
+      if (input.name !== null && !includedByName(basename(input.name), filters.name)) continue
+      const inp = textInput(input, filters)
       const gap = inputGap([inp], res, invert)
       if (gap) { gap.stderr = stderr + gap.stderr; return gap }
       if (splitLines(inp.content).some((line) => anyMatch(res, line) !== invert)) return { stdout: '', stderr, exitCode: 0 }
     }
   }
   return { stdout: '', stderr, exitCode: failed ? 2 : 1 }
+}
+
+// Retain the operand for -L and -c, but binary input selects no lines,
+// including under -v. Removing just the NUL-containing line loses data.
+function textInput(input, filters) {
+  if (!filters.ignoreBinary || !input.content.includes('\0')) return input
+  // GNU's initial 96 KiB read detects NUL before matching that buffer.
+  // Later discovery may retain earlier output, counts, or a quiet success;
+  // buffer growth and read boundaries are not represented by this runtime.
+  if (utf8.encode(input.content.slice(0, input.content.indexOf('\0'))).length >= 96 * 1024) throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
+  return { ...input, content: '' }
 }
 
 // `-m N` stops reading a file after N selected lines. GNU applies it

@@ -8,6 +8,7 @@
 import { unsupported } from './unsupported.js'
 import { echo } from './echo.js'
 import { parseArgs } from './parse.js'
+import { formatWc } from './wc-format.js'
 import { consumeStdin, err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
 import { awk } from './awk.js'
 import { grep } from './grep.js'
@@ -269,7 +270,7 @@ function wc(stdin, tokens, ctx) {
   // head/tail banners and grep's name prefix already follow.
   if (positional.length > 1) rows.push({ counts: total, name: 'total' })
   const width = wcColumnWidth(which, r, positional.length, ctx.stdinFile)
-  return okWith(joinLines(rows.map((row) => formatWc(row.counts, row.name, which, width))), r)
+  return okWith(joinLines(rows.map((row) => formatWc(row.counts, row.name, which, width, ctx))), r)
 }
 
 function wcColumnWidth(which, inputs, operands, stdinFile) {
@@ -306,15 +307,6 @@ function wcCounts(content, ctx) {
     m: cLocale ? utf8.encode(content).length : [...content].length,
     c: utf8.encode(content).length,
   }
-}
-
-function formatWc(counts, name, which, width) {
-  const parts = []
-  if (which.l) parts.push(String(counts.l).padStart(width))
-  if (which.w) parts.push(String(counts.w).padStart(width))
-  if (which.m) parts.push(String(counts.m).padStart(width))
-  if (which.c) parts.push(String(counts.c).padStart(width))
-  return parts.join(' ') + (name ? ' ' + name : '')
 }
 
 // Collapse adjacent duplicate lines from stdin. Flags compose:

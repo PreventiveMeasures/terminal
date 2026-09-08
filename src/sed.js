@@ -1,107 +1,45 @@
-// Narrow, hidden command. Implements only the line-range slice
-// form that auditors reach for when they want to read a specific
-// chunk of a long file: `sed -n 'X,Yp' FILE` (single range), or
-// `sed -n 'X1,Y1p;X2,Y2p;…' FILE` (semicolon-separated multi-range,
-// useful for extracting non-contiguous slices in one pass).
-// Multiple FILE arguments concatenate with cumulative line
-// numbering — `sed -n '5p' a.txt b.txt` selects from the joined
-// stream, matching GNU. Anything else (substitution, regex
-// addresses, multiple scripts, in-place edits, etc.) errors with
-// a one-line message — we don't pretend to be a real sed. Kept
-// out of the user-facing command list in index.js for the same
-// reason: surface it on demand, don't advertise it.
-
+// A read-only sed subset with cumulative line numbers across operands.
 import { parseArgs } from './parse.js'
 import { err, okWith, readInputs } from './util.js'
-import { unsupported } from './unsupported.js'
-
-const SCRIPT = /^(\d+)(?:,(\d+))?p$/u
+import { unsupported, unsupportedFrom } from './unsupported.js'
+import { SED_SUBSET, parseSedScript, substituteLine } from './sed-script.js'
 
 export function sed(stdin, tokens, ctx) {
-  // parseArgs throws on unknown flags (`-i`, `-e`, …). Anything
-  // outside the narrow subset should funnel into one canonical
-  // error — `sed -i -n '1,2p' file` shouldn't surface a generic
-  // "unknown option: -i" that hints at flag support we don't have.
   let parsed
-  try { parsed = parseArgs(tokens, { short: ['n'] }) } catch { return notSupported() }
+  try { parsed = parseArgs(tokens, { short: ['n'] }) } catch { return unsupported('feature', 'sed', 'script', SED_SUBSET) }
   const { flags, positional } = parsed
-  if (positional.length === 0) return incomplete()
-  if (!flags.has('n')) return notSupported()
-  const parsedScript = parseScript(positional[0])
-  if (parsedScript.error) return parsedScript.error
-  const { ranges } = parsedScript
-  if (ranges.length === 0) return notSupported()
-  const files = positional.slice(1)
-  const r = readInputs('sed', files, stdin, ctx)
-  // Multi-file: GNU concatenates the inputs into one virtual stream
-  // with CUMULATIVE line numbering (`sed -n '5p' a.txt b.txt` prints
-  // the 5th line of `a.txt` if a.txt has >= 5 lines, otherwise the
-  // line that falls at position 5 of the concatenation). Crucially,
-  // GNU doesn't merge bytes across the file boundary: a file with
-  // no trailing newline still ends a line at EOF, so the next file's
-  // first line starts cleanly. Splitting each input separately mirrors
-  // that — joining raw `content` would merge unterminated last lines
-  // into the next file's first.
+  if (positional.length === 0) return err(SED_SUBSET)
+  let commands
+  try { commands = parseSedScript(positional[0]) } catch (e) { return unsupportedFrom(e, 'sed', `sed: ${e.message.replace(/^sed: /u, '')}`) }
+  const r = readInputs('sed', positional.slice(1), stdin, ctx)
+  // Each EOF ends a record even without a final newline. Output preserves
+  // that missing newline until another print needs to start a fresh line.
   const lines = r.inputs.flatMap((input) => input.content.match(/[^\n]*\n|[^\n]+$/gu) ?? [])
-  // sed semantics: for each input line in order, for each command
-  // in script order, run it. So with `-n '1,3p;2,4p'` on lines 1-4,
-  // lines 2 and 3 print TWICE — matched by both ranges. Matches GNU.
-  // Out-of-range starts/ends just don't fire (sed prints nothing
-  // past EOF without complaining).
   const out = []
-  for (let i = 0; i < lines.length; i++) {
-    const lineNum = i + 1
-    for (const { start, end } of ranges) {
-      if (lineNum >= start && lineNum <= end) {
-        if (out.length && !out.at(-1).endsWith('\n')) out.push('\n')
-        out.push(lines[i])
+  let missingNewline = false
+  const emit = (text, newline) => {
+    if (missingNewline) out.push('\n')
+    out.push(text + newline)
+    // A newline introduced by s/// is part of the pattern space, not
+    // its record terminator. GNU still separates the next output record.
+    missingNewline = newline === ''
+  }
+  try {
+    for (let i = 0; i < lines.length; i++) {
+      const newline = lines[i].endsWith('\n') ? '\n' : ''
+      let text = newline ? lines[i].slice(0, -1) : lines[i]
+      for (const command of commands) {
+        if (i + 1 < command.start || i + 1 > command.end) continue
+        if (command.kind === 'p') { emit(text, newline); continue }
+        const result = substituteLine(text, command)
+        text = result.out
+        if (result.count && command.print) emit(text, newline)
       }
+      if (!flags.has('n')) emit(text, newline)
     }
+  } catch (e) {
+    if (e.gap) return unsupported('feature', 'sed', e.gap, `sed: ${e.message}`)
+    return unsupportedFrom(e, 'sed', `sed: ${e.message.replace(/^sed: /u, '')}`)
   }
   return { ...okWith(out.join(''), r), exitCode: r.failed ? 2 : 0 }
-}
-
-// Split the script on `;` and parse each segment as an `X,Yp` (or
-// `Xp`) command. Empty segments are silently skipped so leading,
-// trailing, or doubled `;` don't blow up — GNU is lenient here and
-// callers occasionally template the separator (e.g. joining a
-// dynamic list of ranges).
-function parseScript(script) {
-  const ranges = []
-  for (const seg of script.split(';')) {
-    if (seg === '') continue
-    const m = SCRIPT.exec(seg)
-    if (!m) return { error: notSupported() }
-    const start = Number(m[1])
-    const end = m[2] === undefined ? start : Number(m[2])
-    // `\d+` matches "0", so the start-must-be-positive check is
-    // explicit rather than regex-implicit. Once start >= 1 and end
-    // >= start, end >= 1 falls out. GNU treats `5,3p` as a no-op;
-    // we surface the error instead to catch obvious typos.
-    if (start < 1) return { error: err('sed: line numbers must be >= 1') }
-    // A numeric end before the start still prints the starting line.
-    ranges.push({ start, end: Math.max(start, end) })
-  }
-  return { ranges }
-}
-
-const NARROW = "sed: only `-n 'X[,Y]p'` (optionally `;`-joined into multi-range scripts) is supported"
-
-// Every way out of the narrow subset funnels here, so the diagnostic
-// feed gets one entry naming the whole gap rather than one per symptom
-// — an unknown flag, a missing `-n`, and a regex address are all the
-// same "this is not a real sed" as far as a caller deciding whether to
-// reach for it is concerned.
-function notSupported() {
-  return unsupported('feature', 'sed', 'script', NARROW)
-}
-
-// The same canonical message, but NOT a gap. With no script operand at
-// all the invocation is merely incomplete — GNU fails on bare `sed` and
-// on `sed -n` too — so stderr keeps the one message this command always
-// gives, while the diagnostic feed stays quiet. A caller told the
-// terminal lacks a feature would go looking for a workaround that does
-// not exist, when it simply omitted an argument.
-function incomplete() {
-  return err(NARROW)
 }

@@ -161,7 +161,6 @@ describe('broad audit — fields, names and traversal', () => {
 describe('broad audit — unsupported constructs remain visible to agents', () => {
   const cases = [
     ['cat f missing 2>&1', 'combined output ordering'],
-    ['find . \\( -name a \\)', 'expression grouping'],
     ["find . -name '?'", 'non-ASCII glob matching'],
     ['xxd -s-2 f', '-s -2'],
     ['od f 10', 'legacy offset operand'],
