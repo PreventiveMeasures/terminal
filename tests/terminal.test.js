@@ -5361,12 +5361,37 @@ describe('createTerminal — complete: full-line contract', () => {
     // Caller does NOT need to tokenize — each result string can be
     // set directly as the new input.
     assert.deepEqual(t.complete('gre'), ['grep'])
-    // Pipe completion auto-inserts a space when the user didn't.
-    assert.deepEqual(t.complete('cat|gre'), ['cat| grep'])
+    // A partially typed pipe target keeps the original prefix.
+    assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])
     assert.deepEqual(t.complete('cat foo | gre'), ['cat foo | grep'])
     assert.deepEqual(t.complete('  echo hi ; gre'), ['  echo hi ; grep'])
     assert.deepEqual(t.complete('cat foo | /usr/bin/gre'), ['cat foo | /usr/bin/grep'])
     assert.deepEqual(t.complete('echo bar && cat ./src/f'), ['echo bar && cat ./src/foo.js'])
+  })
+
+  it('pipe completions extend the exact typed prefix for ghost-text suggestions', () => {
+    const t = createTerminal(SOURCES)
+    const cases = [
+      ['cat|gre', ['p']],
+      ['cat |gre', ['p']],
+      [' \tcat|gre', ['p']],
+      ['cat|\tgre', ['p']],
+      ['cat|  gre', ['p']],
+      ['cat|grep TODO|he', ['ad', 'xdump']],
+      ['cat|grep TODO |/bin/he', ['ad', 'xdump']],
+      ['cat|grep', ['']],
+      ['cat|grep TODO|head', ['']],
+    ]
+    for (const bin of ['/usr/local/bin/', '/usr/bin/', '/bin/', '/sbin/']) {
+      cases.push(['cat|' + bin + 'gre', ['p']], ['cat|' + bin + 'grep', ['']])
+    }
+    for (const [input, suffixes] of cases) {
+      const variants = t.complete(input)
+      for (const variant of variants) {
+        assert.ok(variant.startsWith(input), `${JSON.stringify(variant)} must extend ${JSON.stringify(input)}`)
+      }
+      assert.deepEqual(variants.map((variant) => variant.slice(input.length)), suffixes, input)
+    }
   })
 
   it('leading whitespace and inline tabs survive verbatim', () => {
@@ -5599,10 +5624,10 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete(' | l'), [])
   })
 
-  it('`|` without surrounding whitespace still pipe-filters and inserts a space', () => {
+  it('`|` without surrounding whitespace preserves typed targets and spaces empty ones', () => {
     const t = createTerminal({})
-    // Auto-inserted space sits between the `|` and the completion.
-    assert.deepEqual(t.complete('cat|gre'), ['cat| grep'])
+    // Existing target text stays adjacent to the pipe.
+    assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])
     // ls is non-pipeable even when the user squishes the pipe in.
     assert.deepEqual(t.complete('cat|l'), [])
     // Empty trailing word: full pipe set, each glued to `cat| ` with a space.
@@ -5702,9 +5727,9 @@ describe('createTerminal — complete: corner cases', () => {
     assert.ok(t.complete('cat |  ').includes('cat |  grep'))
   })
 
-  it('auto-inserts a space after `|` when one is missing', () => {
+  it('inserts a space after a bare `|` but preserves a typed target', () => {
     const t = createTerminal({})
-    // The two cases the user called out directly.
+    // An empty target may add a separating space.
     assert.deepEqual(t.complete('cat 1 |'), [
       'cat 1 | grep', 'cat 1 | head', 'cat 1 | tail', 'cat 1 | wc',
       'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs', 'cat 1 | awk',
@@ -5715,13 +5740,13 @@ describe('createTerminal — complete: corner cases', () => {
       'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs', 'cat 1 | awk',
       'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | hexdump', 'cat 1 | cat',
     ])
-    // Partial pipe-target word: space goes between `|` and the word.
-    assert.deepEqual(t.complete('cat |gre'), ['cat | grep'])
-    assert.deepEqual(t.complete('cat|gre'), ['cat| grep'])
+    // A partial target is extended without inserting text before it.
+    assert.deepEqual(t.complete('cat |gre'), ['cat |grep'])
+    assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])
     // Bare `|` at the very start of a line: same treatment.
     assert.ok(t.complete('|').includes('| grep'))
-    // Bin-prefix completion after a no-space pipe gets the space too.
-    assert.deepEqual(t.complete('cat|/usr/bin/gre'), ['cat| /usr/bin/grep'])
+    // Bin-prefixed targets preserve their complete typed prefix too.
+    assert.deepEqual(t.complete('cat|/usr/bin/gre'), ['cat|/usr/bin/grep'])
   })
 
   it('space insertion is single-pipe-only — `||` / `&&` / `;` stay verbatim', () => {
@@ -5783,9 +5808,8 @@ describe('createTerminal — complete: corner cases', () => {
 
   it('separators without surrounding whitespace still split', () => {
     const t = createTerminal(SOURCES)
-    // `;` / `&&` / `||` are preserved verbatim — no spaces inserted.
-    // Single `|` is the exception: pipe completion auto-inserts a space.
-    assert.deepEqual(t.complete('cat|gre'), ['cat| grep'])
+    // Separators and the partial target are preserved verbatim.
+    assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])
     assert.deepEqual(t.complete('cat;gre'), ['cat;grep'])
     assert.deepEqual(t.complete('a||b||gre'), ['a||b||grep'])
     assert.deepEqual(t.complete('a&&b&&gre'), ['a&&b&&grep'])
