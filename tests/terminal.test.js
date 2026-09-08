@@ -4459,6 +4459,24 @@ describe('createTerminal — ls -d/-r/-A/-F, find -iname/-print0/-empty', () => 
     assert.equal(t.run('find ft -iname "FOO*"').stdout, 'ft/Foo.JS\n')
   })
 
+  it('find -iname combines case-insensitive exclusions and file matching without diagnostics', () => {
+    const t = createTerminal({ 'src/index.JS': 'main\n', 'src/other.txt': 'other\n', 'NODE_MODULES/dep.js': 'excluded\n' })
+    assert.deepEqual(t.run('find . -iname node_modules -prune -o -type f -iname "*.js" -print'), {
+      stdout: './src/index.JS\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+    })
+  })
+
+  it('find -iname mirrors unsupported Unicode case matching despite stderr suppression', () => {
+    const t = createTerminal({ 'café.txt': 'unicode\n' })
+    const r = t.run('find . -iname "CAFÉ.TXT" 2>/dev/null | cat')
+    assert.equal(r.stdout, '')
+    assert.equal(r.stderr, '')
+    assert.equal(r.exitCode, 0)
+    assert.deepEqual(r.unsupported.map(({ kind, command, detail }) => ({ kind, command, detail })), [
+      { kind: 'feature', command: 'find', detail: 'non-ASCII glob matching' },
+    ])
+  })
+
   it('find -print0 terminates with NUL instead of a newline', () => {
     const t = createTerminal(FT)
     assert.equal(t.run('find ft -name "*.js" -print0').stdout, 'ft/sub/bar.js\0')

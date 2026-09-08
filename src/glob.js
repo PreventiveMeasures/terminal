@@ -38,22 +38,42 @@ export function compileGlob(pattern, opts = {}) {
     const c = pattern[i]
     if (c === '\\' && i + 1 < pattern.length) {
       const next = pattern[i + 1]
-      re += REGEX_META.test(next) ? '\\' + next : next
+      re += literal(next, opts.ignoreCase)
       i++
     } else if (c === '*') re += '.*'
     else if (c === '?') re += '.'
     else if (c === '[') {
-      const bracket = readBracket(pattern, i)
+      const bracket = readBracket(pattern, i, opts.ignoreCase)
       if (bracket?.voided) return /^(?!)$/u
       if (bracket) { re += bracket.source; i = bracket.end } else re += '\\['
-    } else if (REGEX_META.test(c)) re += '\\' + c
-    else re += c
+    } else re += literal(c, opts.ignoreCase)
   }
   try {
-    return checkedGlob(new RegExp(re + '$', opts?.ignoreCase ? 'usi' : 'us'), pattern, opts)
+    return checkedGlob(new RegExp(re + '$', 'us'), pattern, opts)
   } catch {
     return /^(?!)$/u
   }
+}
+
+function literal(c, ignoreCase) {
+  if (ignoreCase && /[a-zA-Z]/u.test(c)) return `[${c.toLowerCase()}${c.toUpperCase()}]`
+  return REGEX_META.test(c) ? '\\' + c : c
+}
+
+// fnmatch folds literals and ranges, but tests POSIX classes against the
+// original character: -iname '[[:upper:]]*' still requires an uppercase
+// initial. Build the ASCII union explicitly so negation and mixed classes
+// keep that distinction without a regex-wide `i` flag. checkedGlob rejects
+// non-ASCII case matching before this matcher can silently drop a name.
+function foldedBracket(body, classes, negated) {
+  const ordinary = new RegExp(`[${body}]`, 'ui')
+  const named = new RegExp(`[${classes}]`, 'u')
+  let members = ''
+  for (let code = 0; code < 128; code++) {
+    const c = String.fromCodePoint(code)
+    if (ordinary.test(c) || named.test(c)) members += '\\x' + code.toString(16).padStart(2, '0')
+  }
+  return `[${negated ? '^' : ''}${members}]`
 }
 
 // Bracket ranges, question marks and case folding depend on the locale for
@@ -90,11 +110,12 @@ function checkedGlob(re, pattern, opts) {
 // range may start here, `openRange` that one is waiting for its end —
 // which is also what stops an empty class body from fusing its
 // neighbours into `[a-x]`.
-function readBracket(pattern, start) {
+function readBracket(pattern, start, ignoreCase = false) {
   let i = start + 1
   let negated = false
   if (pattern[i] === '!' || pattern[i] === '^') { negated = true; i++ }
   let body = ''
+  let classes = ''
   let members = 0
   let rangeAt = false
   let openRange = false
@@ -108,7 +129,8 @@ function readBracket(pattern, start) {
       const cls = readPosixClass(pattern, i, { unknown: 'empty' })
       if (cls) {
         if (openRange) voided = true
-        body += cls.body
+        if (ignoreCase) classes += cls.body
+        else body += cls.body
         i = cls.end - 1
         members++
         rangeAt = false
@@ -135,7 +157,7 @@ function readBracket(pattern, start) {
   }
   if (i >= pattern.length || members === 0) return null
   if (voided) return { voided: true, end: i }
-  return { source: `[${negated ? '^' : ''}${body}]`, end: i }
+  return { source: ignoreCase ? foldedBracket(body, classes, negated) : `[${negated ? '^' : ''}${body}]`, end: i }
 }
 
 export function globMatch(name, pattern) {
