@@ -1,10 +1,5 @@
-// POSIX bracket-expression classes (`[:alpha:]` and friends) as regex
-// class bodies, for the places that translate shell or POSIX patterns
-// into ECMAScript regexes: globs (glob.js), grep's BRE/ERE (bre.js) and
-// tr's SET syntax. The C-locale ASCII definitions, which is what every
-// GNU tool here matches under LC_ALL=C and what a source tree needs.
-// `word` is GNU's `\w` (letters, digits, underscore) and not a POSIX
-// class; it is here for the regex translators.
+// C-locale POSIX character classes shared by regex, glob, and tr parsers.
+// 'word' is a GNU extension for letters, digits, and underscore.
 export const POSIX_CLASSES = {
   __proto__: null,
   alpha: 'A-Za-z',
@@ -22,14 +17,22 @@ export const POSIX_CLASSES = {
   word: '0-9A-Za-z_',
 }
 
-// The `[:name:]` at `s[i]` (which must be `[`), as `{ body, end }` with
-// `end` the index just past the closing `:]`, or null when it is not a
-// class. An unknown name is reported, as the GNU tools reject it —
-// except under `{ unknown: 'empty' }`, which returns it with no members
-// instead. That is what shell globbing needs: glibc's fnmatch reads an
-// unknown class and simply matches nothing for it, where grep fails the
-// pattern (see readBracket). An OPTIONS OBJECT rather than a positional
-// flag for the reason compileGlob gives.
+// ERE matching consumes numeric ranges; derive them from the same class bodies.
+export const POSIX_RANGES = { __proto__: null }
+for (const [name, body] of Object.entries(POSIX_CLASSES)) {
+  const re = new RegExp(`[${body}]`, 'u')
+  const ranges = []
+  for (let code = 0; code < 128; code++) {
+    if (!re.test(String.fromCharCode(code))) continue
+    const last = ranges.at(-1)
+    if (last && last[1] === code - 1) last[1] = code
+    else ranges.push([code, code])
+  }
+  POSIX_RANGES[name] = ranges
+}
+
+// Read [:name:] and return its regex body and ending offset.
+// Glob parsing treats unknown classes as empty sets; other callers reject them.
 export function readPosixClass(s, i, opts = {}) {
   const m = /^\[:([a-z]+):\]/u.exec(s.slice(i))
   if (!m) return null

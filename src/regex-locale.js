@@ -2,7 +2,7 @@
 // Literal ASCII atoms cannot split an encoded character. Unbounded wildcard
 // stars can span it without counting its width. A wildcard plus additionally
 // needs literal ASCII delimiters, so two pluses cannot split one character.
-import { parseEre } from './awk-re-parse.js'
+import { parseEre } from './awk/re-parse.js'
 
 const asciiSet = (n) => n.type === 'set' && n.items.every(([, hi]) => hi < 128)
 const wildcard = (n) => n.type === 'any' || (asciiSet(n) && n.negate)
