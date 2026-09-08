@@ -112,7 +112,7 @@ export function compilePatterns(patterns, flags) {
     try {
       const re = new RegExp(flags.has('F') ? source : grepSource(source), reFlags)
       re.localeSensitive = flags.has('i') || flags.has('w') || (!flags.has('F') && localeSensitive(source))
-      re.asciiCompatible = !flags.has('i') && !flags.has('w') && asciiCompatible(grepSource(source, true), pattern)
+      re.asciiCompatible = re.localeSensitive && !flags.has('i') && !flags.has('w') && asciiCompatible(grepSource(source, true), pattern)
       re.spaceClass = /\[:(?:space|blank):\]|\\[sS]/u.test(pattern)
       re.unicodePattern = /[\u0080-\u{10FFFF}]/u.test(pattern)
       re.binaryLiteral = flags.has('F') || !/[\\.^$*+?()[\]{}|]/u.test(source)
@@ -150,8 +150,10 @@ export function inputGap(inputs, res, invert) {
   // A literal absent from a binary file is still safely a non-match.
   // Regex anchors and classes can see NUL boundaries differently in GNU.
   if (inputs.some((inp) => inp.content.includes('\0') && (invert || res.some((re) => !re.binaryLiteral || re.test(inp.content))))) return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
-  const unicode = inputs.some((inp) => /[\u0080-\u{10FFFF}]/u.test(inp.content))
-  const unicodeSpace = inputs.some((inp) => hasUnicodeSpace(inp.content))
-  if (res.some((re) => re.localeSensitive && (unicode || re.unicodePattern) && (!re.asciiCompatible || (re.spaceClass && unicodeSpace)))) return unsupported('feature', 'grep', 'non-ASCII regex semantics', 'grep: locale-sensitive regular expression matching on non-ASCII input is not supported', 2)
+  const localePatterns = res.filter((re) => re.localeSensitive && (!re.asciiCompatible || re.spaceClass))
+  if (localePatterns.length === 0) return null
+  const unicode = localePatterns.some((re) => !re.unicodePattern) && inputs.some((inp) => /[\u0080-\u{10FFFF}]/u.test(inp.content))
+  const unicodeSpace = localePatterns.some((re) => re.asciiCompatible && re.spaceClass) && inputs.some((inp) => hasUnicodeSpace(inp.content))
+  if (localePatterns.some((re) => (unicode || re.unicodePattern) && (!re.asciiCompatible || (re.spaceClass && unicodeSpace)))) return unsupported('feature', 'grep', 'non-ASCII regex semantics', 'grep: locale-sensitive regular expression matching on non-ASCII input is not supported', 2)
   return null
 }

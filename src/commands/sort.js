@@ -126,6 +126,12 @@ const foldCase = (s) => s.replace(/[a-z]/gu, (c) => c.toUpperCase())
 function sortByKeys(lines, specs, sep, unique, globalReverse) {
   // Share field boundaries between keys and normalize before comparing records.
   const wholeLine = specs.every((spec) => spec.start === 1 && spec.end === undefined)
+  if (wholeLine && specs.length === 1 && !specs[0].n && !specs[0].f && !specs[0].b) {
+    // UTF-16 and code-point order coincide when no record has astral characters.
+    lines.sort(lines.some((line) => /[\u{10000}-\u{10FFFF}]/u.test(line)) ? cmpStrings : undefined)
+    if (specs[0].r) lines.reverse()
+    return unique ? lines.filter((line, i) => i === 0 || line !== lines[i - 1]) : lines
+  }
   const decorated = lines.map((line) => {
     const bounds = wholeLine ? [[0, line.length]] : fieldBounds(line, sep)
     return {
@@ -165,9 +171,12 @@ function numericKey(line) {
   return { integer, fraction, negative: m?.[1] === '-' && (integer !== '0' || fraction !== '') }
 }
 
+// Numeric components contain only ASCII digits, so UTF-16 order is sufficient.
+const cmpDigits = (a, b) => a < b ? -1 : a > b ? 1 : 0
+
 function compareNumeric(a, b) {
   if (a.negative !== b.negative) return a.negative ? -1 : 1
   // With trailing zeroes removed, fractional prefixes compare without padding.
-  const d = a.integer.length - b.integer.length || cmpStrings(a.integer, b.integer) || cmpStrings(a.fraction, b.fraction)
+  const d = a.integer.length - b.integer.length || cmpDigits(a.integer, b.integer) || cmpDigits(a.fraction, b.fraction)
   return a.negative ? -d : d
 }

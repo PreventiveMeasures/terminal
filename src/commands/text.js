@@ -69,8 +69,10 @@ function headTail(cmd, stdin, tokens, ctx) {
   }
   const pick = (content) => {
     if (unit === 'c') return sliceBytes(content, range)
-    const lines = lineRecords(content)
-    return lines.slice(...range(lines.length)).join('')
+    const fromEnd = isHead ? count.sign === '-' : !fromStart
+    const n = isHead || fromEnd ? count.value : Math.max(0, count.value - 1)
+    const boundary = lineBoundary(content, n, fromEnd)
+    return isHead ? content.slice(0, boundary) : content.slice(boundary)
   }
   const leftover = isHead ? headLeftover(count, unit, ctx) : undefined
   return takeFrom(cmd, stdin, positional, ctx, pick, banner, leftover, !isHead && fromStart ? { stopOnDir: true } : undefined)
@@ -81,14 +83,27 @@ function headTail(cmd, stdin, tokens, ctx) {
 function headLeftover(count, unit, ctx) {
   if (count.sign === '-' || (unit === 'n' && !ctx.stdinFile)) return () => ''
   if (unit === 'c') return (content) => sliceBytes(content, (total) => [Math.min(count.value, total), total])
-  return (content) => {
-    let pos = 0
-    for (let k = 0; k < count.value && pos < content.length; k++) {
-      const nl = content.indexOf('\n', pos)
-      pos = nl === -1 ? content.length : nl + 1
+  return (content) => content.slice(lineBoundary(content, count.value))
+}
+
+// A final newline terminates a record; it does not add an empty last record.
+function lineBoundary(content, count, fromEnd = false) {
+  if (fromEnd) {
+    if (count === 0) return content.length
+    let pos = content.length - Number(content.endsWith('\n'))
+    for (let k = 0; k < count; k++) {
+      if (pos <= 0) return 0
+      pos = content.lastIndexOf('\n', pos - 1)
+      if (pos < 0) return 0
     }
-    return content.slice(pos)
+    return pos + 1
   }
+  let pos = 0
+  for (let k = 0; k < count && pos < content.length; k++) {
+    const nl = content.indexOf('\n', pos)
+    pos = nl === -1 ? content.length : nl + 1
+  }
+  return pos
 }
 
 // Only the first argument admits GNU's obsolete -NUM form. Rewrite it
@@ -142,6 +157,7 @@ function wc(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c', 'm'] })
   const which = pickWcFlags(flags)
   const r = readInputs('wc', positional, stdin, ctx)
+  const needsWidth = positional.length > 1 || Object.values(which).filter(Boolean).length > 1
   // GNU aligns multi-column or multi-operand output using file sizes,
   // reserving seven columns when an input is a pipe of unknown size.
   const rows = []
@@ -149,24 +165,23 @@ function wc(stdin, tokens, ctx) {
   // A directory is a row of zeros — GNU's `wc -l dir` prints `0 dir`
   // beside its error, because the open succeeded. A missing path gets
   // no row at all.
-  for (const { name, content } of r.entries.filter((e) => e.kind !== 'missing')) {
-    const counts = wcCounts(content, ctx)
-    rows.push({ counts, name })
+  for (const { name, content, kind, shared } of r.entries.filter((e) => e.kind !== 'missing')) {
+    const counts = wcCounts(content, ctx, which, needsWidth)
+    rows.push({ counts, name, kind, shared })
     total.l += counts.l; total.w += counts.w; total.m += counts.m; total.c += counts.c
   }
   // Totals depend on named operands, even when some or all could not be read.
+  const width = needsWidth ? wcColumnWidth(rows, ctx.stdinFile) : 1
   if (positional.length > 1) rows.push({ counts: total, name: 'total' })
-  const width = wcColumnWidth(which, r, positional.length, ctx.stdinFile)
   return okWith(joinLines(rows.map((row) => formatWc(row.counts, row.name, which, width, ctx))), r)
 }
 
-function wcColumnWidth(which, inputs, operands, stdinFile) {
-  if (operands <= 1 && Object.values(which).filter(Boolean).length === 1) return 1
+function wcColumnWidth(rows, stdinFile) {
   let bytes = 0
-  let width = inputs.entries.some((e) => e.kind === 'dir') ? 7 : 1
-  for (const input of inputs.inputs) {
-    if ((input.name === null || input.shared) && !stdinFile) width = 7
-    else bytes += utf8.encode(input.content).length
+  let width = 1
+  for (const { name, kind, shared, counts } of rows) {
+    if (kind === 'dir' || ((name === null || shared) && !stdinFile)) width = 7
+    else bytes += counts.c
   }
   return Math.max(width, String(bytes).length)
 }
@@ -178,14 +193,14 @@ function pickWcFlags(flags) {
 }
 
 // Character counts use code points in UTF-8 mode and bytes in an explicit C locale.
-function wcCounts(content, ctx) {
+function wcCounts(content, ctx, which, needsWidth) {
   const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG')
   const cLocale = locale === 'C' || locale === 'POSIX'
-  const bytes = utf8.encode(content).length
+  const bytes = which.c || needsWidth || (which.m && cLocale) ? utf8.encode(content).length : 0
   return {
-    l: (content.match(/\n/gu) ?? []).length,
-    w: (content.match(cLocale ? /[^\t\n\v\f\r ]+/gu : /[^\t\n\v\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u2060\u3000]+/gu) ?? []).length,
-    m: cLocale ? bytes : [...content].length,
+    l: which.l ? (content.match(/\n/gu) ?? []).length : 0,
+    w: which.w ? (content.match(cLocale ? /[^\t\n\v\f\r ]+/gu : /[^\t\n\v\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u2060\u3000]+/gu) ?? []).length : 0,
+    m: which.m ? cLocale ? bytes : content.length - (content.match(/[\u{10000}-\u{10FFFF}]/gu) ?? []).length : 0,
     c: bytes,
   }
 }
@@ -224,6 +239,11 @@ function uniq(stdin, tokens, ctx) {
   // Apply field skipping, byte skipping, then byte width; emit the original line.
   const norm = (line) => {
     const rest = skipFields.value > 0 ? dropFields(line, skipFields.value) : line
+    if (skipChars.value === 0 && width.value === undefined) {
+      // UTF-8 replaces lone surrogates, and byte case folding is ASCII-only.
+      const text = rest.toWellFormed()
+      return ignoreCase ? text.replace(/[A-Z]/gu, (c) => c.toLowerCase()) : text
+    }
     const bytes = utf8.encode(rest).subarray(skipChars.value, width.value === undefined ? undefined : skipChars.value + width.value)
     // Keys may contain partial UTF-8: compare bytes without decoding or
     // emitting them. GNU uniq's -s/-w and C case folding operate on bytes.

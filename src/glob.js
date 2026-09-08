@@ -7,6 +7,7 @@ import { UnsupportedError } from './unsupported.js'
 import { readPosixClass } from './charclass.js'
 
 const META = /[*?[]/u
+const NON_ASCII = /\P{ASCII}/u
 const REGEX_META = /[.+*?^${}()|[\]\\/]/u
 
 // Escape regex syntax while translating shell wildcards. Keep options in an
@@ -58,9 +59,14 @@ function foldedBracket(body, classes, negated) {
 // Bracket ranges, question marks and case folding depend on the locale for
 // multibyte names. Literal UTF-8 names and ordinary star patterns are exact.
 function checkedGlob(re, pattern, opts) {
+  const localeSensitive = /[?[]/u.test(pattern)
+  const nonAsciiPattern = NON_ASCII.test(pattern)
   return { test(name) {
-    if ((/[?[]/u.test(pattern) || opts.ignoreCase) && [...name + (opts.ignoreCase ? pattern : '')].some((c) => c.codePointAt(0) > 127)) {
-      throw new UnsupportedError('feature', 'non-ASCII glob matching', 'locale-dependent glob matching of non-ASCII names is not supported')
+    if (localeSensitive || opts.ignoreCase) {
+      const ignoreCase = opts.ignoreCase
+      if (NON_ASCII.test(name) || (ignoreCase && nonAsciiPattern)) {
+        throw new UnsupportedError('feature', 'non-ASCII glob matching', 'locale-dependent glob matching of non-ASCII names is not supported')
+      }
     }
     return re.test(name)
   } }

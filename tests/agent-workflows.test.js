@@ -151,6 +151,17 @@ describe('agent workflows — deduplication and ordering', () => {
     check('ls names', '\uE000\n😀\n')
     check('echo names/*', 'names/\uE000 names/😀\n')
   })
+  it('whole-line sort keys preserve Unicode ordering and deduplication with either record separator', () => {
+    for (const delimiter of ['\n', '\0']) {
+      const files = { records: ['😀', 'é', '\uE000', 'a', '😀', 'a'].join(delimiter) + delimiter }
+      const ascending = ['a', 'é', '\uE000', '😀']
+      for (const key of ['', '-k1']) {
+        const mode = delimiter === '\0' ? '-zu' : '-u'
+        check(`sort ${mode} ${key} records`, ascending.join(delimiter) + delimiter, 0, files)
+        check(`sort ${mode} -r ${key} records`, ascending.toReversed().join(delimiter) + delimiter, 0, files)
+      }
+    }
+  })
 })
 
 describe('agent workflows — silent option and metadata gaps', () => {

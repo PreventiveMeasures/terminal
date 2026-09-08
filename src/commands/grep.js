@@ -2,12 +2,12 @@
 
 import { basename, lookup, relativeTo } from '../fs.js'
 import { parseArgs } from '../args.js'
-import { consumeStdin, err, parseNonNegativeInt, readFilesFor, readInputs, splitLines, usage, utf8 } from '../util.js'
+import { consumeStdin, err, parseNonNegativeInt, readFilesFor, readInputs, usage, utf8 } from '../util.js'
 import { UnsupportedError, unsupported, unsupportedFrom } from '../unsupported.js'
 import { AwkError } from '../awk/common.js'
 import { compilePatterns, inputGap } from './grep-pattern.js'
 import { compileGlob } from '../glob.js'
-import { anyMatch, grepRun, grepSummary, noMatch } from './grep-output.js'
+import { countMatches, grepRun, grepSummary, noMatch } from './grep-output.js'
 
 const FLAGS = '[-i] [-I] [-v] [-n] [-r|-R] [-w] [-o] [-E|-F|-G] [-l] [-L] [-c] [-q] [-m N] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
 const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} -e PATTERN ... [PATH...]`
@@ -45,7 +45,9 @@ export function grep(stdin, tokens, ctx) {
   const r = grepInputs(recursive, stdin, rest, ctx, filters)
   if (counts.max === 0) consumeStdin(ctx, stdin)
   // Filename filters apply to named and recursively discovered files, but not stdin.
-  const inputs = r.inputs.filter((inp) => inp.name === null || includedByName(basename(inp.name), filters.name)).map((inp) => textInput(inp, filters))
+  let inputs = r.inputs
+  if (filters.name.length > 0) inputs = inputs.filter((inp) => inp.name === null || includedByName(basename(inp.name), filters.name))
+  if (filters.ignoreBinary) inputs = inputs.map((inp) => textInput(inp, filters))
   const gap = counts.max === 0 ? null : inputGap(inputs, re.res, flags.has('v'))
   if (gap) return gap
   const showName = pickShowName(flags, rest.length)
@@ -75,11 +77,11 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
     failed ||= r.failed
     if (paths.includes('-') || (paths.includes('/dev/stdin') && !ctx.stdinFile)) stdin = ''
     for (const input of r.inputs) {
-      if (input.name !== null && !includedByName(basename(input.name), filters.name)) continue
+      if (filters.name.length > 0 && input.name !== null && !includedByName(basename(input.name), filters.name)) continue
       const inp = textInput(input, filters)
       const gap = inputGap([inp], res, invert)
       if (gap) { gap.stderr = stderr + gap.stderr; return gap }
-      if (splitLines(inp.content).some((line) => anyMatch(res, line) !== invert)) return { stdout: '', stderr, exitCode: 0 }
+      if (countMatches(inp.content, res, invert, 1) > 0) return { stdout: '', stderr, exitCode: 0 }
     }
   }
   return { stdout: '', stderr, exitCode: failed ? 2 : 1 }
