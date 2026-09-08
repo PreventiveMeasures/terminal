@@ -76,7 +76,6 @@ const COMMAND_GAPS = [
   [String.raw`grep -E 'a{,2}' f`, 'GNU regex syntax'],
   [String.raw`grep -wE 'a{,2}' f`, 'GNU regex syntax'],
   [String.raw`grep -E 'a{z}' f`, 'GNU regex syntax'],
-  [String.raw`grep -E 'a++' f`, 'GNU regex syntax'],
   [String.raw`grep -E '{1}' f`, 'GNU regex syntax'],
   [String.raw`grep 'a\{,2\}' f`, 'GNU regex syntax'],
   [String.raw`awk 'BEGIN {print "\😀"}'`, 'non-ASCII string escape'],

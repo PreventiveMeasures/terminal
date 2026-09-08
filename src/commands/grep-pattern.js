@@ -1,4 +1,4 @@
-import { readPosixClass } from '../charclass.js'
+import { checkInterval, readPosixClass, validateBracket } from '../charclass.js'
 import { UnsupportedError, unsupported } from '../unsupported.js'
 import { err } from '../util.js'
 import { AwkRegex } from '../awk/regex.js'
@@ -77,8 +77,71 @@ export function grepSource(source, extent = false) {
   return out
 }
 
+const ERE_INTERVAL = /^\{(\d+)(?:,(\d*))?\}/u
+const BRE_INTERVAL = /^\\\{(\d+)(?:,(\d*))?\\\}/u
+
+// GNU rejects an interval bound above RE_DUP_MAX outright. ECMAScript
+// accepts any bound, so the limit is ours to enforce.
+function intervalBounds(pattern, i, extended) {
+  const m = (extended ? ERE_INTERVAL : BRE_INTERVAL).exec(pattern.slice(i))
+  if (m) checkInterval(Number(m[1]), m[2] === undefined || m[2] === '' ? undefined : Number(m[2]))
+}
+
+// End of the bracket expression opening at `start`, honouring the escapes
+// the translators emit inside a class.
+function classEnd(source, start) {
+  let i = start + 1
+  if (source[i] === '^') i++
+  for (; i < source.length; i++) {
+    if (source[i] === '\\') { i++; continue }
+    if (source[i] === ']') return i
+  }
+  return source.length - 1
+}
+
+// POSIX stacks quantifiers: `a+?` is `(a+)?`, which matches the empty
+// string, and `a+*` is `(a+)*`. ECMAScript reads `+?` as a lazy `+` and
+// rejects `+*` outright, so wrap each quantified unit to restore GNU's
+// reading. Groups wrap whole, and a third quantifier wraps the second.
+export function posixQuantifiers(source) {
+  let out = ''
+  let unit = -1        // where the last quantifiable unit starts in `out`
+  let quantified = false
+  const groups = []
+  const atom = () => { unit = out.length; quantified = false }
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]
+    if (c === '\\') { atom(); out += c + (source[++i] ?? ''); continue }
+    if (c === '[') {
+      const end = classEnd(source, i)
+      atom()
+      out += source.slice(i, end + 1)
+      i = end
+      continue
+    }
+    if (c === '(') { groups.push(out.length); unit = -1; quantified = false; out += c; continue }
+    if (c === ')') { out += c; unit = groups.pop() ?? -1; quantified = false; continue }
+    // Nothing quantifiable precedes an alternation branch or an anchor.
+    if (c === '|' || c === '^' || c === '$') { out += c; unit = -1; quantified = false; continue }
+    const interval = c === '{' ? ERE_INTERVAL.exec(source.slice(i)) : null
+    if (c === '*' || c === '+' || c === '?' || interval) {
+      const text = interval ? interval[0] : c
+      if (quantified && unit >= 0) out = out.slice(0, unit) + '(?:' + out.slice(unit) + ')'
+      out += text
+      quantified = true
+      i += text.length - 1
+      continue
+    }
+    atom()
+    out += c
+  }
+  return out
+}
+
 // These constructs have different meanings in ECMAScript and GNU grep.
 // Refuse them rather than letting the JS engine silently pick a dialect.
+// Bracket expressions and interval bounds are checked here, on the
+// pattern as written, so BRE and ERE get the same diagnostics.
 export function validateRegex(pattern, extended) {
   let bracket = false
   for (let i = 0; i < pattern.length; i++) {
@@ -87,8 +150,12 @@ export function validateRegex(pattern, extended) {
       const next = pattern[++i]
       if (next === undefined) throw new Error('trailing backslash')
       if (bracket || (next && 'dDxXuUpPkKcC'.includes(next))) throw new UnsupportedError('feature', 'regex escape', 'grep: this regex escape is not supported with GNU semantics')
-    } else if (c === '[') bracket = true
-    else if (c === ']') bracket = false
+      if (!extended && !bracket && next === '{') intervalBounds(pattern, i - 1, false)
+    } else if (c === '[') {
+      if (!bracket) validateBracket(pattern, i)
+      bracket = true
+    } else if (c === ']') bracket = false
+    else if (extended && c === '{' && !bracket) intervalBounds(pattern, i, true)
     else if (extended && c === '(' && pattern[i + 1] === '?') throw new UnsupportedError('feature', 'regex extension', 'grep: ECMAScript group extensions are not supported in ERE')
   }
 }
@@ -115,7 +182,12 @@ export function compilePatterns(patterns, flags) {
     if (word) source = `(?<![A-Za-z0-9_])(?:${source})(?![A-Za-z0-9_])`
     if (whole) source = `^(?:${source})$`
     try {
-      const re = new RegExp(flags.has('F') || flags.has('P') ? source : grepSource(source), reFlags)
+      // The boolean matcher needs POSIX quantifier stacking spelled out
+      // for ECMAScript; the extent matcher below parses ERE itself and
+      // already reads those the way GNU does, so it takes `source` as is.
+      // `-P` selects the ECMAScript reading, where `a+?` really is lazy,
+      // so the rewrite is ERE's alone.
+      const re = new RegExp(flags.has('F') || flags.has('P') ? source : grepSource(flags.has('E') ? posixQuantifiers(source) : source), reFlags)
       re.pcre = flags.has('P')
       re.localeSensitive = flags.has('i') || word || (!flags.has('F') && localeSensitive(canonical)) || (re.pcre && /\\[dD]/u.test(canonical))
       // The ASCII proof understands POSIX patterns, not PCRE escapes/classes.

@@ -761,13 +761,12 @@ describe('createTerminal — text commands', () => {
   it('grep BRE: trailing `\\` inside class errors cleanly (Copilot #40)', () => {
     // `grep '[\' file` is unterminated; previously surfaced as
     // V8's noisy "Invalid regular expression: /[\/u: \ at end".
-    // Now reports the same clean "trailing backslash" message used
-    // for the outside-class case. Both ugrep and GNU treat the
-    // unterminated class as a syntax error (exit 2).
+    // The bracket expression is now validated before translation, so
+    // this reports what GNU reports for the same input, word for word.
     const t = createTerminal({ 'f.txt': 'hi\n' })
     const r = t.run("grep '[\\' f.txt")
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /trailing backslash/u)
+    assert.match(r.stderr, /Unmatched \[, \[\^, \[:, \[\., or \[=/u)
     assert.doesNotMatch(r.stderr, /Invalid regular expression/u)
   })
 
