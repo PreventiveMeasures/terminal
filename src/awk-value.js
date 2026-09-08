@@ -13,6 +13,7 @@
 //              awk-eval.js; the scalar helpers below reject it)
 
 import { AwkError } from './awk-common.js'
+import { compareNames } from './fs.js'
 import { formatNumeric, parseFormat } from './awk-format.js'
 
 export class StrNum {
@@ -63,21 +64,18 @@ export function toNum(v) {
 const FORMAT_CACHE = new Map()
 
 export function numToStr(n, fmt) {
-  if (Number.isNaN(n)) return '-nan'
+  if (Number.isNaN(n)) throw new AwkError('formatting signed NaN is not supported', null, 'signed NaN')
   if (!Number.isFinite(n)) return n < 0 ? '-inf' : '+inf'
   if (Number.isInteger(n)) return Math.abs(n) < 2 ** 53 ? String(n) : BigInt(n).toString()
-  let spec = FORMAT_CACHE.get(fmt)
-  if (spec === undefined) {
+  let pieces = FORMAT_CACHE.get(fmt)
+  if (pieces === undefined) {
     if (FORMAT_CACHE.size > 64) FORMAT_CACHE.clear()
-    const pieces = parseFormat(fmt).filter((piece) => typeof piece !== 'string')
-    // A CONVFMT that is not a single numeric conversion is a user error
-    // gawk tolerates loosely; fall back to the default rather than guess.
-    spec = pieces.length === 1 && 'diouxXeEfFgG'.includes(pieces[0].conv) && pieces[0].width !== '*' && pieces[0].precision !== '*'
-      ? pieces[0]
-      : parseFormat('%.6g')[0]
-    FORMAT_CACHE.set(fmt, spec)
+    pieces = parseFormat(fmt)
+    const specs = pieces.filter((piece) => typeof piece !== 'string')
+    if (specs.length > 1 || specs.some((spec) => !'diouxXeEfFgG'.includes(spec.conv) || spec.width === '*' || spec.precision === '*')) throw new AwkError('this numeric conversion format is not supported', null, 'numeric conversion format')
+    FORMAT_CACHE.set(fmt, pieces)
   }
-  return formatNumeric(n, spec)
+  return pieces.map((piece) => typeof piece === 'string' ? piece : formatNumeric(n, piece)).join('')
 }
 
 const fmtOf = (v) => (typeof v === 'string' ? v : v instanceof StrNum ? v.s : '%.6g')
@@ -86,11 +84,28 @@ export const convfmt = (m) => fmtOf(m.globals.get('CONVFMT'))
 export const ofmt = (m) => fmtOf(m.globals.get('OFMT'))
 
 export function toStr(v, m) {
-  if (typeof v === 'string') return v
-  if (v instanceof StrNum) return v.s
+  if (typeof v === 'string') return checkText(m, v)
+  if (v instanceof StrNum) return checkText(m, v.s)
   if (typeof v === 'number') return numToStr(v, convfmt(m))
   if (v === undefined) return ''
   throw arrayInScalar()
+}
+
+export function byteLocale(ctx) {
+  return ['C', 'POSIX'].includes(ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG'))
+}
+
+export function checkText(m, text) {
+  if (m.byteLocale && /[\u0080-\u{10FFFF}]/u.test(text)) throw new AwkError('non-ASCII AWK text in a byte locale is not supported', null, 'byte locale text')
+  return text
+}
+
+export function foldCase(text, upper = false) {
+  return [...text].map((char) => {
+    const mapped = upper ? char.toUpperCase() : char.toLowerCase()
+    if ([...mapped].length !== 1) throw new AwkError('Unicode case expansion is not supported', null, 'Unicode case mapping')
+    return mapped
+  }).join('')
 }
 
 // `print` converts numbers with OFMT rather than CONVFMT; otherwise the
@@ -116,8 +131,8 @@ export function compare(a, b, m) {
   }
   let s = toStr(a, m)
   let t = toStr(b, m)
-  if (ignoreCase(m)) { s = s.toLowerCase(); t = t.toLowerCase() }
-  return s < t ? -1 : s > t ? 1 : 0
+  if (ignoreCase(m)) { s = foldCase(s); t = foldCase(t) }
+  return compareNames(s, t)
 }
 
 // Truth: a number is true when non-zero, a string when non-empty, and a

@@ -9,10 +9,11 @@
 //
 // Predicate model: a list of OR-groups; each group is a list of
 // AND-ed predicates. `-a` is the implicit default; `-o` starts a
-// new group; `-not` / `!` flips the next predicate. `-mindepth` /
-// `-maxdepth` aren't predicates — they're global walker options
-// extracted up front: `-maxdepth` caps walkTree's descent, while
-// `-mindepth` filters which visited entries are reported.
+// new group; parentheses nest groups as a primary, and `-not` / `!`
+// flips the next primary. `-mindepth` /
+// `-maxdepth` are globally effective walker options that evaluate to
+// true in the expression. They are parsed in place to preserve the
+// interpretation of option-looking patterns and child arguments.
 //
 // Actions (`-print`, `-exec`) are predicates like any other — they
 // just have output as a side effect. That's what makes GNU's
@@ -23,7 +24,7 @@
 //
 // `-print` is always-true and emits the path. `-exec` is variadic
 // (token list up to `;` or `+`), so it's parsed inline in
-// walkExprTokens rather than going through primaryFor. The `;`
+// the expression parser rather than going through primaryFor. The `;`
 // form dispatches per match and the exit code drives the
 // predicate's boolean. The `+` form collects paths during the walk
 // and dispatches once after, treating the predicate as always-true
@@ -41,26 +42,14 @@
 // — so only the single-dash forms are portable. Everything else in
 // this file is checked against 4.9 and matches.
 
-import { basename, relativeTo, resolve, walkTree } from './fs.js'
-import { compileGlob } from './glob.js'
-import { err, parseNonNegativeInt } from './util.js'
+import { lookup, relativeTo, walkTree } from './fs.js'
+import { parseFindArgs } from './find-parse.js'
 import { unsupported } from './unsupported.js'
 
-// `primaryFor` consumes the next token as the value for anything in
-// here — hence the name, matching grep.js's SHORT_FLAGS/VALUE_SHORTS
-// split. Valueless tokens must stay out: adding `empty` here would
-// make `find / -empty -type f` swallow `-type` as its value.
-const VALUE_PRIMARIES = new Set(['name', 'iname', 'type', 'path', 'mindepth', 'maxdepth'])
-
-// The single spelling test for the double-dash aliases described
-// above. One helper rather than a hand-written pair per token, so the
-// aliases can't drift apart as tokens are added — `-a` / `-o` are the
-// deliberate exceptions, spelled out at their call sites.
-const isTok = (t, name) => t === '-' + name || t === '--' + name
-
-export function find(_stdin, tokens, ctx) {
+export function find(stdin, tokens, ctx) {
   const parsed = parseFindArgs(tokens)
   if (parsed.error) return parsed.error
+  if (stdin !== '' && tokens.some((t) => t === '-exec' || t === '--exec')) return unsupported('feature', 'find', '-exec stdin', 'find: passing shared standard input to -exec is not supported')
   const { starts, minDepth, maxDepth, groups, batches } = parsed
   let stdout = ''
   let stderr = ''
@@ -78,13 +67,13 @@ export function find(_stdin, tokens, ctx) {
   // forms regardless.
   let exitCode = 0
   for (const start of starts) {
-    const startAbs = resolve(ctx.cwd, start)
-    if (!ctx.fs.isDir(startAbs) && !ctx.fs.isFile(startAbs)) {
+    const { path: startAbs, error } = lookup(ctx.cwd, start, ctx.fs)
+    if (error) {
       // GNU continues past a missing/unreadable start: surface the
       // error, leave exit non-zero, but keep walking the remaining
       // starts. Aborting early would drop earlier-walks' output —
       // which `find src nope` did until this fix.
-      stderr += `find: ${start}: no such file or directory\n`
+      stderr += `find: ${start}: ${error.toLowerCase()}\n`
       exitCode = 1
       continue
     }
@@ -122,250 +111,10 @@ export function find(_stdin, tokens, ctx) {
   return { stdout, stderr, exitCode }
 }
 
-function parseFindArgs(tokens) {
-  const filtered = stripDepthOpts(tokens)
-  if (filtered.error) return filtered
-  const r = walkExprTokens(filtered.tokens, filtered.minDepth, filtered.maxDepth)
-  if (r.error) return r
-  // No action named → POSIX appends `-print` to the whole expression.
-  // GNU wraps it (`( expr ) -print`); appending per-group is
-  // equivalent under short-circuit AND — a group only reaches its
-  // trailing print when the group matched, and the first matching
-  // group short-circuits the rest, so each entry still prints once.
-  //
-  // Suppression is tree-wide, which is an important footgun:
-  // `find . -name '*.js' -o -name '*.md' -exec echo md {} ';'` prints
-  // ONLY the md echoes, never the bare .js paths. The .js group
-  // doesn't include an action, but the tree's implicit -print is
-  // gone, so its matches go unreported. Matches POSIX / GNU (verified
-  // against /usr/bin/find 4.9); the fix is to spell the action out on
-  // the other group: `... -name '*.js' -print -o -name '*.md' -exec …`.
-  if (!r.hasAction) for (const g of r.groups) g.push({ kind: 'print', negate: false })
-  return r
-}
-
-// Extract `-mindepth N` / `-maxdepth N` (and `--` long forms) first.
-// They're walker-global options, not predicates — `-maxdepth` prunes
-// the descent, `-mindepth` gates the output, and both want N up front
-// rather than threaded through the predicate tree. The `--` terminator
-// is checked AFTER the depth branch so `-maxdepth --` surfaces the
-// friendlier "invalid count" rather than "requires a value" — matches
-// POSIX getopt's "value-taking option consumes the next token
-// regardless" rule.
-function stripDepthOpts(tokens) {
-  const out = []
-  let minDepth = 0
-  let maxDepth = Number.POSITIVE_INFINITY
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i]
-    const opt = isTok(t, 'mindepth') ? 'mindepth' : isTok(t, 'maxdepth') ? 'maxdepth' : null
-    if (opt) {
-      if (i + 1 >= tokens.length) return { error: err(`find: -${opt} requires a value`) }
-      const r = parseNonNegativeInt(tokens[i + 1], `find: -${opt}`)
-      if (r.error) return r
-      if (opt === 'mindepth') minDepth = r.value
-      else maxDepth = r.value
-      i++
-      continue
-    }
-    if (t === '--') {
-      out.push(...tokens.slice(i))
-      break
-    }
-    out.push(t)
-  }
-  return { tokens: out, minDepth, maxDepth }
-}
-
-// Walk the remaining tokens building OR-groups of AND-ed predicates.
-// POSIX find: zero or more start paths come first, then the
-// expression. Once an expression token appears (primary or operator),
-// any later positional is rejected — paths can't be interleaved
-// with primaries. `--` ends primary recognition; trailing tokens
-// after it are paths.
-//
-// The `--` check sits AFTER the primary-with-value branch so
-// `-name --` consumes the literal `--` as the glob value, matching
-// POSIX getopt's "value-taking option consumes the next token
-// regardless" rule. Pre-splitting on `--` would break that.
-function walkExprTokens(tokens, minDepth, maxDepth) {
-  const groups = [[]]
-  const starts = []
-  let pendingNot = false
-  let afterTerminator = false
-  let seenExpr = false
-  // Tracks an explicit boolean operator (`-a` / `-o`) that hasn't
-  // yet been balanced by a primary. Holds the operator string so
-  // the error can name it; cleared when a primary is consumed.
-  let expectingRhs = null
-  // Both are maintained at the push sites below rather than by a
-  // second pass over `groups`, so the invariant stays next to the
-  // code that can break it: a new action kind has to declare itself
-  // here, or the implicit -print silently comes back. `batches`
-  // holds the `+`-mode predicates find() dispatches after the walk.
-  let hasAction = false
-  const batches = []
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i]
-    if (afterTerminator) { starts.push(t); continue }
-    if (t === '-not' || t === '!') {
-      if (pendingNot) return { error: err('find: `-not` cannot precede another `-not`') }
-      pendingNot = true; seenExpr = true; continue
-    }
-    if (t === '-a' || isTok(t, 'and')) {
-      if (pendingNot) return { error: err('find: `-not` must be followed by a primary') }
-      if (expectingRhs) return { error: err(`find: \`${expectingRhs}\` with no right-hand expression`) }
-      if (groups.at(-1).length === 0) return { error: err('find: `-a` with no left-hand expression') }
-      expectingRhs = '-a'; seenExpr = true; continue
-    }
-    if (t === '-o' || isTok(t, 'or')) {
-      if (pendingNot) return { error: err('find: `-not` must be followed by a primary') }
-      if (expectingRhs) return { error: err(`find: \`${expectingRhs}\` with no right-hand expression`) }
-      if (groups.at(-1).length === 0) return { error: err('find: `-o` with no left-hand expression') }
-      groups.push([]); expectingRhs = '-o'; seenExpr = true; continue
-    }
-    // Valueless action: always true, emits the path (see evalPredicate).
-    if (isTok(t, 'print') || isTok(t, 'print0')) {
-      groups.at(-1).push({ kind: isTok(t, 'print0') ? 'print0' : 'print', negate: pendingNot })
-      hasAction = true
-      pendingNot = false; expectingRhs = null; seenExpr = true
-      continue
-    }
-    // `-prune` is TRUE and, on a directory, stops the descent. It is
-    // deliberately NOT counted as an action: GNU still applies the
-    // implicit `-print` when the expression contains nothing else, so
-    // `find . -name node_modules -prune` prints what it pruned.
-    if (isTok(t, 'prune')) {
-      groups.at(-1).push({ kind: 'prune', negate: pendingNot })
-      pendingNot = false; expectingRhs = null; seenExpr = true
-      continue
-    }
-    if (isTok(t, 'empty')) {
-      groups.at(-1).push({ kind: 'empty', negate: pendingNot })
-      pendingNot = false; expectingRhs = null; seenExpr = true
-      continue
-    }
-    if (isTok(t, 'exec')) {
-      const parsed = consumeExec(tokens, i, pendingNot)
-      if (parsed.error) return parsed
-      groups.at(-1).push(parsed.pred)
-      hasAction = true
-      if (parsed.pred.mode === 'batch') batches.push(parsed.pred)
-      pendingNot = false; expectingRhs = null; seenExpr = true; i = parsed.nextI
-      continue
-    }
-    const primary = primaryFor(t)
-    if (primary !== null) {
-      if (i + 1 >= tokens.length) return { error: err(`find: ${t} requires a value`) }
-      const value = tokens[i + 1]
-      const checked = checkPrimary(primary, value)
-      if (checked.error) return checked
-      // Compile the glob regex once at parse time so the walker
-      // doesn't recompile it for every directory entry — large
-      // trees with `-name '*.js'` are the common case.
-      const pred = { kind: primary, value, negate: pendingNot }
-      // `-iname` is `-name` with a case-insensitive glob; compiling it
-      // here keeps the matcher a single `re.test` either way.
-      if (primary === 'name' || primary === 'path') pred.re = compileGlob(value)
-      if (primary === 'iname') pred.re = compileGlob(value, { ignoreCase: true })
-      groups.at(-1).push(pred)
-      pendingNot = false; expectingRhs = null; seenExpr = true; i++
-      continue
-    }
-    if (t === '--') { afterTerminator = true; continue }
-    if (pendingNot) return { error: err(`find: \`-not\` must be followed by a primary, got: ${t}`) }
-    // Anything else that starts with `-` is an unknown option,
-    // not a path. Reject so a typo (`find -X /src`) surfaces here
-    // rather than as a "no such file or directory: -X" lower down.
-    if (t.startsWith('-') && t !== '-' && !/^-\d/u.test(t)) {
-      return { error: unsupported('option', 'find', t, `find: unknown option: ${t}`) }
-    }
-    if (seenExpr) return { error: err(`find: paths must precede expression: ${t}`) }
-    starts.push(t)
-  }
-  if (pendingNot) return { error: err('find: trailing `-not` with no primary') }
-  if (expectingRhs) return { error: err(`find: \`${expectingRhs}\` with no right-hand expression`) }
-  return { starts: starts.length > 0 ? starts : ['.'], minDepth, maxDepth, groups, hasAction, batches }
-}
-
-function primaryFor(token) {
-  // -mindepth / -maxdepth are stripped before we get here; never treat
-  // them as primaries even if one slips through.
-  if (/^--?(?:min|max)depth$/u.test(token)) return null
-  if (token.startsWith('--') && VALUE_PRIMARIES.has(token.slice(2))) return token.slice(2)
-  if (token.startsWith('-') && VALUE_PRIMARIES.has(token.slice(1))) return token.slice(1)
-  return null
-}
-
-// The file types GNU find knows that this one cannot represent: the
-// virtual FS has only regular files and the directories implied by
-// them, so there is nothing to match a symlink, device, FIFO, or
-// socket against. They are a GAP rather than a bad value — `find . -type
-// l` is a working GNU invocation — and separating them from a genuine
-// typo like `-type q` is the difference between telling a caller "this
-// terminal cannot do that" and "you mistyped".
-const UNMODELLED_TYPES = 'lbcps'
-
-function checkPrimary(kind, value) {
-  if (kind === 'type' && value !== 'f' && value !== 'd') {
-    const message = `find: -type/--type expects 'f' or 'd', got: ${value}`
-    if (value.length === 1 && UNMODELLED_TYPES.includes(value)) {
-      return { error: unsupported('option', 'find', `-type ${value}`, message) }
-    }
-    return { error: err(message) }
-  }
-  return {}
-}
-
-// Consume the variadic `-exec CMD ARG... ;` or `-exec CMD ARG... {} +`
-// starting at tokens[i] (the `-exec`/`--exec` itself). Returns the
-// built predicate and the index of the terminator (caller advances
-// past it). `+` form requires `{}` as the last argument — POSIX is
-// strict here; GNU is too. The collector array lives on the predicate
-// so multiple `+` invocations each keep their own batch.
-function consumeExec(tokens, i, pendingNot) {
-  let j = i + 1
-  while (j < tokens.length && tokens[j] !== ';' && tokens[j] !== '+') j++
-  // The canonical GNU form `find ... -exec CMD \;` doesn't work in
-  // our shell: backslash-escaping outside quotes isn't honored, so
-  // `\;` parses as the sequential-step separator before find ever
-  // sees it. Quote the `;` literally — `';'` or `";"` — instead.
-  // The hint is folded into the missing-terminator error because
-  // that's the symptom users hit.
-  if (j >= tokens.length) return { error: err("find: -exec: missing terminator (`;` or `+`); use `';'` (quoted) — bare `\\;` is consumed by the shell as a step separator") }
-  if (j === i + 1) return { error: err('find: -exec: requires a command') }
-  const execTokens = tokens.slice(i + 1, j)
-  const mode = tokens[j] === ';' ? 'each' : 'batch'
-  if (mode === 'batch') {
-    if (execTokens.at(-1) !== '{}') {
-      return { error: err('find: -exec ... +: `{}` must be the last argument before `+`') }
-    }
-    // POSIX/GNU: only one `{}` is allowed in `+` form. Without this
-    // check `find … -exec echo {} {} +` would pass the leading `{}`
-    // through literally — confusing and inconsistent with GNU's
-    // rejection of the same input.
-    if (execTokens.slice(0, -1).includes('{}')) {
-      return { error: err('find: -exec ... +: only one instance of `{}` is supported') }
-    }
-    // -not on the batch form is incoherent: the predicate is treated
-    // as always-true during the walk (a real filter would need to know
-    // the outcome before all paths are collected), so negating it
-    // would either drop every match silently or run the batched
-    // command anyway. Reject up front rather than pick a surprising
-    // semantic.
-    if (pendingNot) {
-      return { error: unsupported('feature', 'find', '-not -exec ... +', 'find: `-not -exec ... +` is not supported (the `+` form has no meaningful negation)') }
-    }
-  }
-  const pred = { kind: 'exec', mode, cmd: execTokens[0], args: execTokens.slice(1), negate: pendingNot }
-  if (mode === 'batch') pred.collected = []
-  return { pred, nextI: j }
-}
-
 // Top-level evaluation: OR across groups, AND within. With no
 // predicates at all (`find /`), the group holds just the implicit
-// -print, so everything is reported. Returns only {stdout, stderr}:
-// the expression's boolean is purely internal, since printing is an
+// -print, so everything is reported. Returns {matched, stdout, stderr}:
+// the expression's boolean also feeds enclosing groups. Printing is an
 // action and find's exit code never reflects whether anything
 // matched. OR/AND short-circuit, so an action only runs
 // when its position in the boolean tree is reached — that is what
@@ -389,9 +138,9 @@ function runPredicates(groups, entry, ctx) {
     }
     // First matching group wins — the remaining groups' actions must
     // not fire, which is why `-print -o -print` emits one line, not two.
-    if (groupMatched) break
+    if (groupMatched) return { matched: true, stdout, stderr }
   }
-  return { stdout, stderr }
+  return { matched: false, stdout, stderr }
 }
 
 function evalOne(p, entry, ctx) {
@@ -413,8 +162,10 @@ function evalPredicate(p, entry, ctx) {
   // the end returns undefined and crashes the caller's destructure,
   // which IS the right failure mode for a contract violation that can
   // only come from a code bug.
-  if (p.kind === 'type') return matchedOnly(p.value === 'f' ? entry.kind === 'file' : entry.kind === 'dir')
-  if (p.kind === 'name' || p.kind === 'iname') return matchedOnly(p.re.test(basename(entry.path)))
+  if (p.kind === 'group') return runPredicates(p.groups, entry, ctx)
+  if (p.kind === 'true') return matchedOnly(true)
+  if (p.kind === 'type') return matchedOnly(p.value.split(',').includes(entry.kind === 'file' ? 'f' : 'd'))
+  if (p.kind === 'name' || p.kind === 'iname') return matchedOnly(p.re.test(entry.path.replace(/\/+$/u, '').split('/').at(-1) || '/'))
   // Always true. On a directory it also records the path so walkTree
   // skips the subtree; on a file it is a no-op that still reports true,
   // which is what makes `-name X -prune -o -print` exclude X itself.
@@ -422,10 +173,13 @@ function evalPredicate(p, entry, ctx) {
     if (entry.kind === 'dir') entry.prune.add(entry.abs)
     return matchedOnly(true)
   }
-  // A file is empty when it has no content. A DIRECTORY can never be
-  // empty in this FS: it exists only because some file lives under it,
-  // so `-empty` simply never matches one.
-  if (p.kind === 'empty') return matchedOnly(entry.kind === 'file' && ctx.fs.readFile(entry.abs) === '')
+  // Derived directories contain files, but the root of an empty source
+  // map is an existing empty directory and must match too.
+  if (p.kind === 'empty') {
+    if (entry.kind === 'file') return matchedOnly(ctx.fs.readFile(entry.abs) === '')
+    const { dirs, files } = ctx.fs.listDir(entry.abs)
+    return matchedOnly(dirs.length + files.length === 0)
+  }
   if (p.kind === 'path') return matchedOnly(p.re.test(entry.path))
   // Always true, output as the side effect. `-not -print` inverts
   // only the boolean (in evalOne) — the line is emitted either way.

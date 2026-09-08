@@ -5,33 +5,45 @@
 // `dispatch()` in `index.js`, which formats them as
 // `${name}: ${message}` and returns an exit-1 stderr result.
 
+import { unsupported } from './unsupported.js'
+import { echo } from './echo.js'
 import { parseArgs } from './parse.js'
+import { formatWc } from './wc-format.js'
 import { consumeStdin, err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from './util.js'
 import { awk } from './awk.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
 import { xargs } from './xargs.js'
 
-// `-n` numbers every line, `-b` only the non-blank ones (and wins when
-// both are given, as in GNU). `-s` squeezes runs of blank lines to one.
-// The display flags mark otherwise invisible characters: `-E` ends each
-// line with `$`, `-T` shows tabs as `^I`, and `-A` is both (GNU's `-A`
-// is `-vET`, and `-e` is `-vE`; the `-v` part, escaping other
-// non-printables, has nothing to escape in this virtual FS's text).
+// cat displays actual UTF-8 bytes with -v; numbering uses the original
+// lines so marking an empty line with -E never makes -b count it.
 function cat(stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['n', 'b', 's', 'E', 'T', 'A', 'e'] })
+  const { flags, positional } = parseArgs(tokens, { short: ['n', 'b', 's', 'v', 'E', 'T', 'A', 'e', 't'] })
   const r = readContent('cat', positional, stdin, ctx)
   const showEnds = flags.has('E') || flags.has('A') || flags.has('e')
-  const showTabs = flags.has('T') || flags.has('A')
-  let content = r.content
-  // Order matters and follows GNU: squeeze first, so numbering counts
-  // the lines that actually survive, then mark, then number — a `$`
-  // belongs after the text but inside the numbered line.
-  if (flags.has('s')) content = squeezeBlankLines(content)
-  if (showEnds || showTabs) content = markInvisible(content, showEnds, showTabs)
-  if (flags.has('b')) content = numberLines(content, true)
-  else if (flags.has('n')) content = numberLines(content, false)
-  return okWith(content, r)
+  const showTabs = flags.has('T') || flags.has('A') || flags.has('t')
+  const visible = flags.has('v') || flags.has('A') || flags.has('e') || flags.has('t')
+  const content = flags.has('s') ? squeezeBlankLines(r.content) : r.content
+  let n = 0
+  const out = (content.match(/[^\n]*\n|[^\n]+$/gu) ?? []).map((raw) => {
+    const ended = raw.endsWith('\n')
+    let line = ended ? raw.slice(0, -1) : raw
+    const prefix = (flags.has('b') ? line !== '' : flags.has('n')) ? `${String(++n).padStart(6)}\t` : ''
+    if (visible) line = [...utf8.encode(line)].map((b) => visibleByte(b, showTabs)).join('')
+    else {
+      if (showTabs) line = line.replaceAll('\t', '^I')
+      if (showEnds && ended && line.endsWith('\r')) line = line.slice(0, -1) + '^M'
+    }
+    return prefix + line + (ended ? (showEnds ? '$\n' : '\n') : '')
+  }).join('')
+  return okWith(out, r)
+}
+
+function visibleByte(b, tabs) {
+  if (b === 9) return tabs ? '^I' : '\t'
+  if (b >= 128) return 'M-' + visibleByte(b - 128, true)
+  if (b < 32) return '^' + String.fromCodePoint(b + 64)
+  return b === 127 ? '^?' : String.fromCodePoint(b)
 }
 
 // Collapse every run of two or more blank lines into a single one.
@@ -47,35 +59,6 @@ function squeezeBlankLines(content) {
   return out.join('\n') + trailing
 }
 
-// `-E` appends `$` at end of line, `-T` renders a tab as the two
-// characters `^I`. Both are applied per line so the `$` lands after any
-// tab marking, matching GNU's `cat -A`.
-function markInvisible(content, showEnds, showTabs) {
-  if (content === '') return ''
-  const trailing = content.endsWith('\n') ? '\n' : ''
-  const lines = (trailing ? content.slice(0, -1) : content).split('\n')
-  const mark = (l) => (showTabs ? l.replaceAll('\t', '^I') : l) + (showEnds ? '$' : '')
-  return lines.map(mark).join('\n') + trailing
-}
-
-// GNU `cat -n` numbers lines starting from 1, right-aligned in a
-// 6-wide field with a tab separator. Trailing newlines are
-// preserved so `cat -n` of a file ending in '\n' produces output
-// that also ends in '\n' (no extra blank line at the end).
-function numberLines(content, skipBlank) {
-  if (content === '') return ''
-  const trailing = content.endsWith('\n') ? '\n' : ''
-  const lines = trailing ? content.slice(0, -1).split('\n') : content.split('\n')
-  let n = 0
-  // `-b` leaves a blank line completely unprefixed — no number, no
-  // padding, unlike `nl`, which blanks the column instead. The counter
-  // only advances on the lines it numbers.
-  const number = (l) => skipBlank && l === ''
-    ? l
-    : `${String(++n).padStart(6)}\t${l}`
-  return lines.map(number).join('\n') + trailing
-}
-
 // `-n` counts lines, `-c` counts bytes; both default to 10 lines. A
 // LEADING MINUS flips the count into "all but the last N" — `head -n -1`
 // prints every line but the last, `head -c -3` every byte but the last
@@ -83,12 +66,12 @@ function numberLines(content, skipBlank) {
 // over-large minus count leaves nothing rather than going negative,
 // which is why the remainder is clamped at 0.
 function head(stdin, tokens, ctx) {
-  const { flags, values, positional, order } = parseArgs(tokens, { short: ['q', 'v'], valueShort: ['c', 'n'] })
-  applyDashNumberShorthand(tokens, values, positional)
+  const { flags, values, positional, order } = parseArgs(dashNumberShorthand(tokens), { short: ['q', 'v'], valueShort: ['c', 'n'] })
   const unit = lastCountUnit(order)
   const count = parseSignedCount(values.get(unit) ?? '10', `head: -${unit}`)
   if (count.error) return count.error
-  const banner = bannerMode(flags)
+  const banner = bannerMode(flags, order)
+  if (count.value === 0 && count.sign !== '-') return takeFrom('head', stdin, positional, ctx, () => '', banner, (content) => content, { noRead: true })
   // head always counts from the front; the sign only decides where the
   // slice STOPS — at N, or N short of the end.
   const range = (total) => [0, count.sign === '-' ? Math.max(0, total - count.value) : count.value]
@@ -105,6 +88,7 @@ function head(stdin, tokens, ctx) {
 // a pipe takes whole buffers, so anything shorter than one (8 KiB, not
 // modeled) is gone with it.
 function headLeftover(count, unit, ctx) {
+  if (count.value === 0 && count.sign !== '-') return (content) => content
   if (count.sign === '-' || (unit === 'n' && !ctx.stdinFile)) return () => ''
   if (unit === 'c') return (content) => sliceBytes(content, (total) => [Math.min(count.value, total), total])
   return (content) => {
@@ -117,13 +101,10 @@ function headLeftover(count, unit, ctx) {
   }
 }
 
-// `-v` always banners, `-q` never does, and with neither the operand
-// count decides (see `takeFrom`). GNU lets the two coexist, last one
-// winning, but parseArgs collapses booleans into a Set — so, following
-// grep's precedent for -h/-H, a line asking for both is an error rather
-// than a silent guess.
-function bannerMode(flags) {
-  if (flags.has('q') && flags.has('v')) return { error: '-q and -v are mutually exclusive' }
+// Header options share one setting; the last spelling wins, including bundles.
+function bannerMode(flags, order) {
+  const last = order.findLast((o) => o.name === 'q' || o.name === 'v')
+  if (last) return last.name === 'v'
   if (flags.has('q')) return false
   if (flags.has('v')) return true
   return null
@@ -147,17 +128,16 @@ function lastCountUnit(order) {
 // treated as `+1` (the whole file) rather than as an empty request.
 // An unsigned count, or `-N`, is the familiar last-N.
 function tail(stdin, tokens, ctx) {
-  const { flags, values, positional, order } = parseArgs(tokens, { short: ['q', 'v'], valueShort: ['c', 'n'] })
-  applyDashNumberShorthand(tokens, values, positional)
+  const { flags, values, positional, order } = parseArgs(dashNumberShorthand(tokens), { short: ['q', 'v'], valueShort: ['c', 'n'] })
   const unit = lastCountUnit(order)
   const n = parseSignedCount(values.get(unit) ?? '10', `tail: -${unit}`)
   if (n.error) return n.error
-  const banner = bannerMode(flags)
+  const banner = bannerMode(flags, order)
   if (n.sign === '+') {
     // From position N, 1-based, so `+1` and `+0` are the whole input.
     const range = (total) => [Math.min(total, Math.max(0, n.value - 1)), total]
-    if (unit === 'c') return takeBytes('tail', stdin, positional, ctx, range, banner)
-    return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner)
+    if (unit === 'c') return takeBytes('tail', stdin, positional, ctx, range, banner, undefined, { stopOnDir: true })
+    return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner, undefined, { stopOnDir: true })
   }
   // A zero count short-circuits the whole command: GNU tail returns
   // success before opening anything, so there are no banners, no
@@ -176,29 +156,11 @@ function tail(stdin, tokens, ctx) {
   return takeLines('tail', stdin, positional, ctx, (lines) => lines.slice(...range(lines.length)), banner)
 }
 
-// GNU's obsolete shorthand: `head -200 file` means `head -n 200 file`.
-// POSITION is the whole rule. GNU rewrites `-NUM` to `-n NUM` only when
-// it is the FIRST argument, so it then loses to any later count the
-// same way one `-n` loses to the next (`head -1 -c 3` prints 3 bytes,
-// `head -2 -n 1` prints 1 line); a `-NUM` anywhere else is rejected
-// outright as an "invalid trailing option". Hence the check against
-// `tokens[0]` rather than the first positional — the two forms leave
-// `positional` looking identical.
-//
-// A trailing `-NUM` is where we diverge: it stays positional and fails
-// as a missing file operand, so unlike GNU (which rejects the line
-// before opening anything) the other operands are still read and still
-// print. An error either way, but not the same error, and not the same
-// stdout.
-function applyDashNumberShorthand(tokens, values, positional) {
-  const first = tokens[0] ?? ''
-  if (!/^-\d+$/u.test(first)) return
-  // parseArgs's `^-\d/` guard routes such a token straight to
-  // `positional`, and this one led the line, so it heads that list too.
-  positional.shift()
-  // Deliberately does NOT clobber an explicit `-n`: `head -1 -n 2` is
-  // the later option's count, exactly as `lastCountUnit` resolves `-c`.
-  if (!values.has('n')) values.set('n', first.slice(1))
+// Only the first argument admits GNU's obsolete -NUM form. Rewrite it
+// before option parsing so later -n/-c retain normal last-option precedence;
+// other digit options are diagnosed, and -- still protects numeric filenames.
+function dashNumberShorthand(tokens) {
+  return /^-\d+$/u.test(tokens[0] ?? '') ? ['-n', tokens[0].slice(1), ...tokens.slice(1)] : tokens
 }
 
 // `joinLines`, not a check on the JOINED string: one selected blank line
@@ -206,8 +168,8 @@ function applyDashNumberShorthand(tokens, values, positional) {
 // lines at all, and suppressing its terminator would print nothing where
 // GNU prints a newline. Branching on the array length keeps the two
 // apart (`head -n 1` of a file of blank lines is one `\n`).
-function takeLines(cmd, stdin, files, ctx, picker, banner, leftover) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => joinLines(picker(splitLines(content))), banner, leftover)
+function takeLines(cmd, stdin, files, ctx, picker, banner, leftover, readOptions) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => picker(content.match(/[^\n]*\n|[^\n]+$/gu) ?? []).join(''), banner, leftover, readOptions)
 }
 
 // `head -c N` takes the first N BYTES of each input instead of its
@@ -215,18 +177,12 @@ function takeLines(cmd, stdin, files, ctx, picker, banner, leftover) {
 // bytes verbatim, so `head -c 3` of `hello\n` is `hel` with nothing
 // after it, and in the multi-input form it's the `\n` before the next
 // banner that ends the block.
-function takeBytes(cmd, stdin, files, ctx, range, banner, leftover) {
-  return takeFrom(cmd, stdin, files, ctx, (content) => sliceBytes(content, range), banner, leftover)
+function takeBytes(cmd, stdin, files, ctx, range, banner, leftover, readOptions) {
+  return takeFrom(cmd, stdin, files, ctx, (content) => sliceBytes(content, range), banner, leftover, readOptions)
 }
 
-// A cut can land mid-character: `head -c 1` of `é` keeps only the
-// leading byte of a two-byte sequence. No JS string can hold that lone
-// byte, so the decoder yields U+FFFD — which is also what a real
-// terminal renders for it, making this the closest a string-based model
-// gets. The cost is that a severed character comes back OUT as 3 bytes:
-// `head -c 2` of `héllo` pipes 4 bytes into `wc -c`, where GNU pipes
-// exactly 2. Only a cut mid-character is affected. Content short enough
-// to survive whole skips the round-trip entirely.
+// Output must remain valid UTF-8: partial bytes cannot cross a string
+// pipeline faithfully, so the shared decoder reports that limitation.
 function sliceBytes(content, range) {
   const bytes = utf8.encode(content)
   // `range` resolves against THIS input's byte length, so `-c -3` drops
@@ -262,9 +218,9 @@ function sliceBytes(content, range) {
 // one before left, which `leftover` computes (nothing, unless the
 // command stops short of the end, as `head -c N` does), and what the
 // last one leaves is the next command's.
-function takeFrom(cmd, stdin, files, ctx, pick, banner = null, leftover = () => '') {
+function takeFrom(cmd, stdin, files, ctx, pick, banner = null, leftover = () => '', readOptions) {
   if (banner?.error) return err(`${cmd}: ${banner.error}`)
-  const r = readInputs(cmd, files, stdin, ctx)
+  const r = readInputs(cmd, files, stdin, ctx, readOptions)
   // `-q` / `-v` override the operand-count rule outright; `banner` is
   // null when neither was given.
   const showHeader = banner ?? files.length > 1
@@ -296,24 +252,15 @@ function wc(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c', 'm'] })
   const which = pickWcFlags(flags)
   const r = readInputs('wc', positional, stdin, ctx)
-  // Collect rows first so we can compute the adaptive column width:
-  // every count is padded to the widest across ALL rows, the `total`
-  // included. `wc -l b` on a 3-line file emits `3 b`; the same on a
-  // 1234-line file emits `1234 b`; `wc -l small big` pads to the max:
-  // `   3 small\n1234 big\n1237 total`.
-  //
-  // GNU derives that width differently — from the largest count the
-  // inputs COULD produce, i.e. their byte size — so it pads `wc -l` of
-  // a 27-byte 4-line file to width 2 where this pads to 1. Widening on
-  // bytes nobody counted reads as a bug rather than alignment, so the
-  // divergence is deliberate; both keep the columns aligned.
+  // GNU aligns multi-column or multi-operand output using file sizes,
+  // reserving seven columns when an input is a pipe of unknown size.
   const rows = []
   const total = { l: 0, w: 0, m: 0, c: 0 }
   // A directory is a row of zeros — GNU's `wc -l dir` prints `0 dir`
   // beside its error, because the open succeeded. A missing path gets
   // no row at all.
   for (const { name, content } of r.entries.filter((e) => e.kind !== 'missing')) {
-    const counts = wcCounts(content)
+    const counts = wcCounts(content, ctx)
     rows.push({ counts, name })
     total.l += counts.l; total.w += counts.w; total.m += counts.m; total.c += counts.c
   }
@@ -322,19 +269,19 @@ function wc(stdin, tokens, ctx) {
   // `0 total` rather than nothing. The same operand-versus-read rule the
   // head/tail banners and grep's name prefix already follow.
   if (positional.length > 1) rows.push({ counts: total, name: 'total' })
-  const width = wcColumnWidth(rows, which)
-  return okWith(joinLines(rows.map((row) => formatWc(row.counts, row.name, which, width))), r)
+  const width = wcColumnWidth(which, r, positional.length, ctx.stdinFile)
+  return okWith(joinLines(rows.map((row) => formatWc(row.counts, row.name, which, width, ctx))), r)
 }
 
-function wcColumnWidth(rows, which) {
-  let max = 0
-  for (const { counts } of rows) {
-    if (which.l) max = Math.max(max, String(counts.l).length)
-    if (which.w) max = Math.max(max, String(counts.w).length)
-    if (which.m) max = Math.max(max, String(counts.m).length)
-    if (which.c) max = Math.max(max, String(counts.c).length)
+function wcColumnWidth(which, inputs, operands, stdinFile) {
+  if (operands <= 1 && Object.values(which).filter(Boolean).length === 1) return 1
+  let bytes = 0
+  let width = inputs.entries.some((e) => e.kind === 'dir') ? 7 : 1
+  for (const input of inputs.inputs) {
+    if ((input.name === null || input.shared) && !stdinFile) width = 7
+    else bytes += utf8.encode(input.content).length
   }
-  return max
+  return Math.max(width, String(bytes).length)
 }
 
 // `-m` sits between `-l` and `-w` in GNU's fixed output order
@@ -348,26 +295,18 @@ function pickWcFlags(flags) {
 
 // `-c` is bytes, `-m` characters. They differ only on multibyte input:
 // `héllo\n` is 7 bytes but 6 characters. GNU's `-m` follows the locale
-// and collapses onto `-c` under a C locale; this terminal models UTF-8
-// throughout (as `-c` and `head -c` already do), so `-m` counts code
-// points — spreading an astral character across two UTF-16 units would
+// and collapses onto `-c` under an explicitly selected C locale. By
+// default this terminal models UTF-8, so `-m` counts code points — spreading an astral character across two UTF-16 units would
 // count an emoji twice, hence the iterator rather than `.length`.
-function wcCounts(content) {
+function wcCounts(content, ctx) {
+  const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG')
+  const cLocale = locale === 'C' || locale === 'POSIX'
   return {
     l: (content.match(/\n/gu) ?? []).length,
-    w: (content.match(/\S+/gu) ?? []).length,
-    m: [...content].length,
+    w: (content.match(cLocale ? /[^\t\n\v\f\r ]+/gu : /[^\t\n\v\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u2060\u3000]+/gu) ?? []).length,
+    m: cLocale ? utf8.encode(content).length : [...content].length,
     c: utf8.encode(content).length,
   }
-}
-
-function formatWc(counts, name, which, width) {
-  const parts = []
-  if (which.l) parts.push(String(counts.l).padStart(width))
-  if (which.w) parts.push(String(counts.w).padStart(width))
-  if (which.m) parts.push(String(counts.m).padStart(width))
-  if (which.c) parts.push(String(counts.c).padStart(width))
-  return parts.join(' ') + (name ? ' ' + name : '')
 }
 
 // Collapse adjacent duplicate lines from stdin. Flags compose:
@@ -385,8 +324,8 @@ function formatWc(counts, name, which, width) {
 function dropFields(line, n) {
   let i = 0
   for (let f = 0; f < n && i < line.length; f++) {
-    while (i < line.length && /\s/u.test(line[i])) i++
-    while (i < line.length && !/\s/u.test(line[i])) i++
+    while (i < line.length && /[ \t]/u.test(line[i])) i++
+    while (i < line.length && !/[ \t]/u.test(line[i])) i++
   }
   return line.slice(i)
 }
@@ -396,6 +335,8 @@ function uniq(stdin, tokens, ctx) {
     short: ['c', 'd', 'u', 'i', 'D'],
     valueShort: ['f', 's', 'w'],
   })
+  if (positional.length > 2) return err(`uniq: extra operand: ${positional[2]}`)
+  if (positional.length === 2 && positional[1] !== '-') return unsupported('feature', 'uniq', 'output file', 'uniq: output files are not supported (filesystem is read-only)')
   const skipFields = parseNonNegativeInt(values.get('f') ?? '0', 'uniq: -f')
   if (skipFields.error) return skipFields.error
   const skipChars = parseNonNegativeInt(values.get('s') ?? '0', 'uniq: -s')
@@ -407,7 +348,7 @@ function uniq(stdin, tokens, ctx) {
   // GNU refuses this pair outright rather than picking a meaning:
   // "printing all duplicated lines and repeat counts is meaningless".
   if (allDups && showCount) return err('uniq: printing all duplicated lines and repeat counts is meaningless')
-  const r = readContent('uniq', positional, stdin, ctx)
+  const r = readContent('uniq', positional.slice(0, 1), stdin, ctx)
   const onlyDups = flags.has('d')
   const onlyUniques = flags.has('u')
   const ignoreCase = flags.has('i')
@@ -415,10 +356,11 @@ function uniq(stdin, tokens, ctx) {
   // then keep at most `-w`. GNU applies them in exactly that order, and
   // the key only ever decides EQUALITY — the line is emitted whole.
   const norm = (line) => {
-    let rest = skipFields.value > 0 ? dropFields(line, skipFields.value) : line
-    if (skipChars.value > 0) rest = rest.slice(skipChars.value)
-    if (width.value !== undefined) rest = rest.slice(0, width.value)
-    return ignoreCase ? rest.toLowerCase() : rest
+    const rest = skipFields.value > 0 ? dropFields(line, skipFields.value) : line
+    const bytes = utf8.encode(rest).subarray(skipChars.value, width.value === undefined ? undefined : skipChars.value + width.value)
+    // Keys may contain partial UTF-8: compare bytes without decoding or
+    // emitting them. GNU uniq's -s/-w and C case folding operate on bytes.
+    return (ignoreCase ? bytes.map((b) => b >= 65 && b <= 90 ? b + 32 : b) : bytes).join(',')
   }
   const lines = splitLines(r.content)
   const out = []
@@ -452,63 +394,6 @@ function uniq(stdin, tokens, ctx) {
   }
   flush()
   return okWith(joinLines(out), r)
-}
-
-// bash's `echo` builtin, whose option parsing is its own: a leading
-// word is an option only if it is entirely `-` followed by `n`, `e` and
-// `E` letters, and anything else — `--`, `-x`, `-n5`, a later `-n` —
-// is printed. `-n` drops the trailing newline; `-e` enables
-// backslash-escape interpretation and `-E` disables it, last one wins.
-function echo(_stdin, tokens) {
-  let i = 0
-  let trailingNewline = true
-  let escapes = false
-  for (; i < tokens.length && /^-[neE]+$/u.test(tokens[i]); i++) {
-    for (const c of tokens[i].slice(1)) {
-      if (c === 'n') trailingNewline = false
-      else escapes = c === 'e'
-    }
-  }
-  let out = tokens.slice(i).join(' ')
-  if (escapes) {
-    const r = interpretEscapes(out)
-    out = r.text
-    // `\c` halts output and suppresses the trailing newline.
-    if (r.stop) trailingNewline = false
-  }
-  return ok(trailingNewline ? out + '\n' : out)
-}
-
-// Backslash escapes recognized by bash's `echo -e`. `\c` stops all
-// further output; octal `\0NNN` (up to 3 digits), hex `\xHH` (up to 2
-// digits) and `\uHHHH` / `\UHHHHHHHH` map to the matching code point.
-// An unrecognized escape keeps its backslash literal, as bash does.
-function interpretEscapes(s) {
-  // letter -> code point: BEL, BS, ESC, FF, LF, CR, TAB, VT, backslash.
-  const simple = { a: 7, b: 8, e: 27, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92 }
-  let out = ''
-  for (let i = 0; i < s.length; i++) {
-    if (s[i] !== '\\' || i + 1 >= s.length) { out += s[i]; continue }
-    const c = s[++i]
-    if (c === 'c') return { text: out, stop: true }
-    if (c in simple) { out += String.fromCodePoint(simple[c]); continue }
-    if (c === '0') {
-      let digits = ''
-      while (digits.length < 3 && /[0-7]/u.test(s[i + 1] ?? '')) digits += s[++i]
-      out += String.fromCodePoint(digits === '' ? 0 : parseInt(digits, 8))
-      continue
-    }
-    const hexLen = c === 'x' ? 2 : c === 'u' ? 4 : c === 'U' ? 8 : 0
-    if (hexLen > 0 && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) {
-      let digits = ''
-      while (digits.length < hexLen && /[0-9a-fA-F]/u.test(s[i + 1] ?? '')) digits += s[++i]
-      const code = parseInt(digits, 16)
-      out += code <= 0x10FFFF ? String.fromCodePoint(code) : '\uFFFD'
-      continue
-    }
-    out += '\\' + c
-  }
-  return { text: out, stop: false }
 }
 
 // POSIX shell builtins: zero-arg, deterministic, useful for testing

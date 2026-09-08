@@ -139,10 +139,8 @@ export function createUnsupportedFeed() {
     // dispatcher passes the resolved name; a command reporting its own
     // gap already uses its canonical name and needs no override.
     add(entry, identity = entry.command) {
-      // NUL-joined, because the fields can contain spaces — `tr`'s
-      // detail is `-d -s` — and a space-joined key would let a
-      // different split of the same characters collide.
-      const key = `${entry.kind}\u0000${identity ?? ''}\u0000${entry.detail}`
+      // Escape each field: diagnostics can themselves contain NULs.
+      const key = JSON.stringify([entry.kind, identity, entry.detail])
       if (seen.has(key)) return
       seen.add(key)
       entries.push(Object.freeze(entry))

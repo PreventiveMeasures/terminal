@@ -348,7 +348,7 @@ describe('createTerminal — opts.commands: the io.fs view', () => {
       },
     })
     t.run('probe')
-    assert.equal(t.run('ls').stdout, 'src/\na.txt\nb.txt\n')
+    assert.equal(t.run('ls').stdout, 'a.txt\nb.txt\nsrc\n')
   })
 
   it('listDir fails in the shape a built-in would, naming the operand as typed', () => {

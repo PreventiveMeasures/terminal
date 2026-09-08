@@ -4,31 +4,39 @@
 // selected fields, with the whole line as the last-resort tiebreak.
 
 import { parseArgs } from './parse.js'
-import { err, joinLines, okWith, readContent, splitLines } from './util.js'
+import { err, okWith, readInputs, utf8 } from './util.js'
 import { unsupported } from './unsupported.js'
+import { compareNames as cmpStrings } from './fs.js'
 
 export function sort(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, {
-    short: ['n', 'r', 'u', 'f', 'b'],
+    short: ['n', 'r', 'u', 'f', 'b', 'z'],
     valueShort: ['t'],
     repeatable: ['k'],
   })
   const sep = values.get('t')
-  if (sep !== undefined && [...sep].length !== 1) return err(`sort: multi-character tab \`${sep}\``)
+  if (sep !== undefined && utf8.encode(sep).length !== 1) return err(`sort: multi-character tab \`${sep}\``)
   const globals = { n: flags.has('n'), f: flags.has('f'), b: flags.has('b'), r: flags.has('r') }
   const keys = parseKeySpecs(values.get('k') ?? [], globals)
   if (keys.error) return keys.error
   // `sort a b` orders the concatenation of all inputs, matching coreutils.
-  const r = readContent('sort', positional, stdin, ctx)
+  const r = readInputs('sort', positional, stdin, ctx, { stopOnError: true })
   // Unlike cat/head/wc, sort is ALL-OR-NOTHING: GNU abandons the run on
   // the first operand it cannot read and writes nothing to stdout,
   // exiting 2. Emitting a partial sort would be worse than useless —
   // the result would look like a complete ordering of the input.
   if (r.failed) return { stdout: '', stderr: r.stderr, exitCode: 2 }
-  let lines = splitLines(r.content)
+  const delimiter = flags.has('z') ? '\0' : '\n'
+  const joinRecords = (records) => records.length ? records.join(delimiter) + delimiter : ''
+  let lines = r.inputs.flatMap(({ content }) => {
+    if (content === '') return []
+    const records = content.split(delimiter)
+    if (content.endsWith(delimiter)) records.pop()
+    return records
+  })
   const numeric = flags.has('n')
   const unique = flags.has('u')
-  if (keys.specs.length > 0) return okWith(joinLines(sortByKeys(lines, keys.specs, sep, unique, globals.r)), r)
+  if (keys.specs.length > 0) return okWith(joinRecords(sortByKeys(lines, keys.specs, sep, unique, globals.r)), r)
   if (numeric) {
     // -n orders by each line's leading numeric value. Equal values keep
     // input order (stable sort); without -u the whole line breaks the
@@ -36,8 +44,8 @@ export function sort(stdin, tokens, ctx) {
     // equal-value lines (e.g. `1` and `01`) dedupe in input order.
     const decorated = lines.map((line) => ({ line, key: numericKey(line) }))
     decorated.sort(unique
-      ? (a, b) => a.key - b.key
-      : (a, b) => (a.key - b.key) || (a.line < b.line ? -1 : a.line > b.line ? 1 : 0))
+      ? (a, b) => compareNumeric(a.key, b.key)
+      : (a, b) => (compareNumeric(a.key, b.key)) || cmpStrings(a.line, b.line))
     lines = decorated.map((d) => d.line)
   } else {
     // -f folds case for the comparison only; the line is emitted as it
@@ -65,7 +73,7 @@ export function sort(stdin, tokens, ctx) {
     })
   }
   if (flags.has('r')) lines.reverse()
-  return okWith(joinLines(lines), r)
+  return okWith(joinRecords(lines), r)
 }
 
 // GNU `sort -n`: a line's value is its leading numeric prefix — optional
@@ -132,7 +140,6 @@ function parseKeySpecs(raw, globals) {
     const start = Number(m1[1])
     const end = m2 === undefined ? undefined : Number(m2[1])
     if (start === 0 || end === 0) return { error: err(`sort: field number is zero: ${spec}`) }
-    if (end !== undefined && end < start) return { error: err(`sort: reversed key range: ${spec}`) }
     // Any option on EITHER position suppresses the globals for this key
     // — `b` included, so `sort -r -k2b` sorts ascending.
     const own = mods.length > 0
@@ -176,7 +183,7 @@ function fieldBounds(line, sep) {
   // whereas `ann  bob` has only two. Counting runs merges those cases
   // and makes `-k3` pick the wrong span on one of them.
   const starts = [0]
-  const blank = (i) => /\s/u.test(line[i])
+  const blank = (i) => /[ \t]/u.test(line[i])
   let i = 0
   while (i < line.length) {
     while (i < line.length && blank(i)) i++
@@ -194,11 +201,13 @@ function keyOf(line, spec, sep) {
   // No end field means "to end of line"; an end past the last field
   // means the same rather than an error.
   const to = spec.end === undefined || spec.end > bounds.length ? line.length : bounds[spec.end - 1][1]
-  if (spec.b) while (from < to && /\s/u.test(line[from])) from++
+  if (spec.b) while (from < to && /[ \t]/u.test(line[from])) from++
   return line.slice(from, Math.max(from, to))
 }
 
-const cmpStrings = (a, b) => a < b ? -1 : a > b ? 1 : 0
+// C-locale folding is ASCII-only; full Unicode case expansion can
+// silently merge distinct records under -u (for example ß and SS).
+const foldCase = (s) => s.replace(/[a-z]/gu, (c) => c.toUpperCase())
 
 // The comparison key for the whole-line (no `-k`) path. GNU applies -b
 // and -f to the whole line, not only to keys — `sort -b` really does
@@ -207,8 +216,8 @@ const cmpStrings = (a, b) => a < b ? -1 : a > b ? 1 : 0
 // threaded into `globals` and then read only by parseKeySpecs, which
 // made it a silent no-op unless `-k` happened to be given too.
 function wholeLineKey(line, globals) {
-  const body = globals.b ? line.replace(/^\s+/u, '') : line
-  return globals.f ? body.toUpperCase() : body
+  const body = globals.b ? line.replace(/^[ \t]+/u, '') : line
+  return globals.f ? foldCase(body) : body
 }
 
 function sortByKeys(lines, specs, sep, unique, globalReverse) {
@@ -219,8 +228,8 @@ function sortByKeys(lines, specs, sep, unique, globalReverse) {
     for (let i = 0; i < specs.length; i++) {
       const spec = specs[i]
       const [x, y] = [a.keys[i], b.keys[i]]
-      const d = spec.n ? numericKey(x) - numericKey(y)
-        : spec.f ? cmpStrings(x.toUpperCase(), y.toUpperCase())
+      const d = spec.n ? compareNumeric(numericKey(x), numericKey(y))
+        : spec.f ? cmpStrings(foldCase(x), foldCase(y))
         : cmpStrings(x, y)
       if (d !== 0) return spec.r ? -d : d
     }
@@ -243,6 +252,20 @@ function sortByKeys(lines, specs, sep, unique, globalReverse) {
 }
 
 function numericKey(line) {
-  const m = /^[ \t]*(-?(?:\d+\.?\d*|\.\d+))/u.exec(line)
-  return m ? Number(m[1]) : 0
+  const m = /^[ \t]*(-?)(?:(\d+)(?:\.(\d*))?|\.(\d+))/u.exec(line)
+  if (!m) return '0'
+  const integer = (m[2] ?? '').replace(/^0+/u, '') || '0'
+  const fraction = (m[3] ?? m[4] ?? '').replace(/0+$/u, '')
+  const sign = m[1] && (integer !== '0' || fraction) ? '-' : ''
+  return sign + integer + (fraction ? '.' + fraction : '')
+}
+
+function compareNumeric(a, b) {
+  const an = a.startsWith('-'), bn = b.startsWith('-')
+  if (an !== bn) return an ? -1 : 1
+  const [ai, af = ''] = (an ? a.slice(1) : a).split('.')
+  const [bi, bf = ''] = (bn ? b.slice(1) : b).split('.')
+  const len = Math.max(af.length, bf.length)
+  const d = ai.length - bi.length || cmpStrings(ai, bi) || cmpStrings(af.padEnd(len, '0'), bf.padEnd(len, '0'))
+  return an ? -d : d
 }

@@ -12,7 +12,7 @@ import { Input } from './awk-input.js'
 import { initialRng } from './awk-math.js'
 import { redirectMessage } from './awk-parse.js'
 import { awkSprintf } from './awk-printf.js'
-import { StrNum, compare, toNum, toOutStr, toStr, truthy } from './awk-value.js'
+import { StrNum, byteLocale, compare, toNum, toOutStr, toStr, truthy } from './awk-value.js'
 
 const BREAK = { type: 'break' }
 const CONTINUE = { type: 'continue' }
@@ -29,13 +29,13 @@ export function createMachine(program, ctx, stdin, operands) {
     ['SUBSEP', '\u001C'], ['CONVFMT', '%.6g'], ['OFMT', '%.6g'],
     ['RSTART', 0], ['RLENGTH', -1], ['ERRNO', ''], ['IGNORECASE', 0],
     ['FIELDWIDTHS', ''], ['FPAT', '[^[:space:]]+'],
-    ['ENVIRON', new Map()], ['PROCINFO', new Map([['FS', 'FS']])],
-    ['ARGC', operands.length + 1], ['ARGV', argv],
+    ['ENVIRON', new SystemArray('ENVIRON')], ['PROCINFO', new SystemArray('PROCINFO', [['FS', 'FS']])],
+    ['ARGC', operands.length + 1], ['ARGV', argv], ['ARGIND', 0],
   ])
   const m = {
     program, globals, frames: [], record: '', recordValue: new StrNum(''), fields: [undefined], nf: 0,
     fieldMode: 'FS', out: [], errOut: [], steps: 0, exitCode: 0, ranges: [], rng: initialRng(),
-    input: new Input(ctx, stdin),
+    input: new Input(ctx, stdin), byteLocale: byteLocale(ctx),
     hasFileRules: program.beginFile.length > 0,
     // Injected so awk-eval.js and awk-input.js need no import of this
     // module or of the builtins.
@@ -45,6 +45,28 @@ export function createMachine(program, ctx, stdin, operands) {
     fileRule: (kind) => fileRule(m, kind),
   }
   return m
+}
+
+// Never present an absent process environment or a partial PROCINFO as
+// complete data. In particular sorted_in controls iteration in gawk;
+// accepting that key as an ordinary array entry silently ignores it.
+class SystemArray extends Map {
+  constructor(name, entries = []) { super(entries); this.systemName = name }
+  check(key) {
+    if (!this.systemName || (this.systemName === 'PROCINFO' && key === 'FS')) return
+    const detail = this.systemName === 'ENVIRON' ? 'ENVIRON' : `PROCINFO[${key ?? '*'}]`
+    throw new AwkError(`${detail} is not supported without the corresponding environment or process metadata`, null, detail)
+  }
+  get(key) { this.check(key); return super.get(key) }
+  has(key) { this.check(key); return super.has(key) }
+  set(key, value) { this.check(key); return super.set(key, value) }
+  delete(key) { this.check(key); return super.delete(key) }
+  clear() { this.check(); return super.clear() }
+  get size() { this.check(); return super.size }
+  keys() { this.check(); return super.keys() }
+  values() { this.check(); return super.values() }
+  entries() { this.check(); return super.entries() }
+  [Symbol.iterator]() { this.check(); return super[Symbol.iterator]() }
 }
 
 // The whole program. Returns the exit status; fatal errors propagate
@@ -138,7 +160,7 @@ export function execStmts(m, stmts) {
 }
 
 function execStmt(m, s) {
-  if (++m.steps > MAX_STEPS) throw new AwkError(`execution stopped after ${MAX_STEPS} statements (infinite loop?)`)
+  if (++m.steps > MAX_STEPS) throw new AwkError(`execution stopped after ${MAX_STEPS} statements (infinite loop?)`, null, 'execution limit')
   return EXEC[s.type](m, s)
 }
 
@@ -216,7 +238,7 @@ function emit(m, dest, text) {
   const name = toStr(evalExpr(m, dest), m)
   if (name === '/dev/stdout') m.out.push(text)
   else if (name === '/dev/stderr') m.errOut.push(text)
-  else if (name !== '/dev/null') throw new AwkError(redirectMessage(name))
+  else if (name !== '/dev/null') throw new AwkError(redirectMessage(name), null, 'output redirection')
 }
 
 function execPrint(m, s) {

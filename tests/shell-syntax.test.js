@@ -160,7 +160,7 @@ describe('shell syntax — parameters', () => {
   })
 
   it('`~` is the home directory (the tree root) at the start of a bare word', () => {
-    assert.equal(out('echo ~ ~/src "~" x~ ~"/src" ~user'), '/ /src ~ x~ ~/src ~user\n')
+    assert.equal(out('echo ~ ~/src "~" x~ ~"/src"'), '/ /src ~ x~ ~/src\n')
     assert.equal(out('cd src; cd ~; pwd'), '/\n')
     assert.equal(out('ls ~/src'), 'bar.ts\nfoo.js\n')
   })
@@ -500,7 +500,7 @@ describe('shell syntax — compound commands', () => {
     const outside = term().run('break; echo next')
     assert.equal(outside.stdout, 'next\n')
     assert.match(outside.stderr, /only meaningful in a `for` loop/u)
-    assert.deepEqual(gaps('for f in a; do break 2; done'), ['feature:break N'])
+    assert.deepEqual(gaps('for f in a; do break 2; done'), [])
   })
 
   it('`!` negates a pipeline; `{ …; }` groups without isolating', () => {
@@ -741,6 +741,19 @@ describe('shell syntax — command conventions', () => {
     assert.equal(out("cut -d' ' -f2 a.txt"), 'y\nworld\n')
     assert.equal(out("sort -t' ' -k2 a.txt"), 'hello world\nx y z\n')
     assert.equal(out('echo "-n x"'), '-n x\n')
+  })
+
+  it('echo prints the reported dashed heading as text, with no unsupported diagnostic', () => {
+    for (const [command, stdout] of [
+      ['echo "---abc---"', '---abc---\n'],
+      ['echo ---abc---', '---abc---\n'],
+      ['echo -n "---abc---"', '---abc---'],
+      ['echo "---abc---" -n', '---abc--- -n\n'],
+      ['echo -- "---abc---"', '-- ---abc---\n'],
+      ['echo "---abc---" 2>/dev/null | cat', '---abc---\n'],
+    ]) {
+      assert.deepEqual(term().run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] }, command)
+    }
   })
 
   it('echo parses options as bash does: leading `-[neE]` words only, everything else printed', () => {

@@ -27,6 +27,25 @@ export function resolve(cwd, path) {
   return normalize(cwd + '/' + path)
 }
 
+// Filesystem lookup must validate each component BEFORE collapsing `..`.
+// Otherwise `missing/../file` or `file/../other` can read an unrelated file.
+// Lexical helpers (dirname, basename, the public resolve API) stay separate.
+export function lookup(cwd, path, fs) {
+  const missing = { path: null, error: 'No such file or directory' }
+  const notDir = { path: null, error: 'Not a directory' }
+  if (path === '' || path.includes('\0')) return missing
+  const parts = (path.startsWith('/') ? path : cwd + '/' + path).split('/').filter(Boolean)
+  let at = '/'
+  for (const part of parts) {
+    if (!fs.isDir(at)) return fs.isFile(at) ? notDir : missing
+    if (part === '..') at = dirname(at)
+    else if (part !== '.') at = joinPath(at, part)
+  }
+  if (!fs.isDir(at) && !fs.isFile(at)) return missing
+  if (path.endsWith('/') && !fs.isDir(at)) return notDir
+  return { path: at, error: null }
+}
+
 export function dirname(path) {
   const p = normalize(path)
   if (p === '/') return '/'
@@ -40,6 +59,15 @@ export function basename(path) {
   if (p === '/') return '/'
   const i = p.lastIndexOf('/')
   return p.slice(i + 1)
+}
+
+// UTF-8 byte order is code-point order for valid Unicode. JavaScript's
+// default sort compares UTF-16 units and misorders astral characters.
+export function compareNames(a, b) {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i] !== b[i]) return a.codePointAt(i) - b.codePointAt(i)
+  }
+  return a.length - b.length
 }
 
 // Join an already-normalized directory path with a child name,
@@ -79,8 +107,8 @@ export function createFs(sources) {
     childMap.get(parent).files.push(basename(f))
   }
   for (const entry of childMap.values()) {
-    entry.dirs.sort()
-    entry.files.sort()
+    entry.dirs.sort(compareNames)
+    entry.files.sort(compareNames)
   }
   const fs = {
     isFile: (p) => files.has(p),
@@ -96,41 +124,21 @@ export function createFs(sources) {
   return fs
 }
 
-// The single tree traversal: a breadth-first generator over `root` and
-// every descendant, yielding `{ path, kind, depth }` (depth 0 = root,
-// 1 = its children, …). `maxDepth` caps the descent. `find` consumes
-// this directly (depth drives -mindepth/-maxdepth); `walkFiles` filters
-// it to file paths. An index pointer (not Array.shift) keeps traversal
-// O(n) on wide trees.
-//
-// Note: this virtual FS has no empty directories — `childMap` only
-// holds dirs registered as ancestors of a file (see `ensureDir`) — but
-// the walk copes if one appears: empty `dirs`/`files` just yields
-// nothing on that iteration.
-// `shouldDescend` is consulted AFTER a directory has been yielded, which
-// is what lets a consumer prune it: generators suspend at the `yield`,
-// so by the time this asks, the caller has already decided (`find`'s
-// `-prune` does exactly that). Returning false skips the whole subtree
-// rather than walking it and discarding the entries.
+// Iterative depth-first traversal. Yield before consulting shouldDescend so
+// find can prune the directory it just evaluated. Sorting makes the virtual
+// tree deterministic; native readdir order itself is filesystem-dependent.
 export function* walkTree(fs, root, maxDepth = Number.POSITIVE_INFINITY, shouldDescend = () => true) {
   if (fs.isFile(root)) { yield { path: root, kind: 'file', depth: 0 }; return }
   if (!fs.isDir(root)) return
-  yield { path: root, kind: 'dir', depth: 0 }
-  // The ROOT is offered to `shouldDescend` too, so `find . -prune`
-  // stops at the start directory instead of walking everything under
-  // it. Easy to miss: the root never passes through the loop below.
-  const queue = shouldDescend(root) ? [{ path: root, depth: 0 }] : []
-  for (let i = 0; i < queue.length; i++) {
-    const cur = queue[i]
-    if (cur.depth >= maxDepth) continue
-    const { dirs, files } = fs.listDir(cur.path)
-    const depth = cur.depth + 1
-    for (const d of dirs) {
-      const path = joinPath(cur.path, d)
-      yield { path, kind: 'dir', depth }
-      if (shouldDescend(path)) queue.push({ path, depth })
-    }
-    for (const f of files) yield { path: joinPath(cur.path, f), kind: 'file', depth }
+  const stack = [{ path: root, kind: 'dir', depth: 0 }]
+  while (stack.length) {
+    const entry = stack.pop()
+    yield entry
+    if (entry.kind !== 'dir' || entry.depth >= maxDepth || !shouldDescend(entry.path)) continue
+    const { dirs, files } = fs.listDir(entry.path)
+    const children = [...dirs.map((name) => ({ name, kind: 'dir' })), ...files.map((name) => ({ name, kind: 'file' }))]
+    children.sort((a, b) => compareNames(a.name, b.name))
+    for (const child of children.toReversed()) stack.push({ path: joinPath(entry.path, child.name), kind: child.kind, depth: entry.depth + 1 })
   }
 }
 

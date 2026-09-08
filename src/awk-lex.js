@@ -21,6 +21,7 @@
 // division. `a / b / c` divides; `$1 ~ /a/` matches.
 
 import { AwkError, BUILTINS, KEYWORDS } from './awk-common.js'
+import { utf8, utf8Decoder } from './util.js'
 
 // Longest first, so `**=` wins over `**` and `*=`, `|&` over `|`, etc.
 const OPERATORS = [
@@ -87,6 +88,7 @@ export function tokenize(src, warn = null) {
       let j = i + 1
       while (isNameChar(src[j])) j++
       const word = src.slice(i, j)
+      if (src.slice(j, j + 2) === '::') throw new AwkError('namespaces are not supported', line, 'namespaces')
       i = j
       if (KEYWORDS.has(word)) push('keyword', word === 'func' ? 'function' : word)
       else if (BUILTINS.has(word)) push('builtin', word)
@@ -94,6 +96,7 @@ export function tokenize(src, warn = null) {
       continue
     }
     const op = operatorAt(src, i)
+    if (c === '@') throw new AwkError('typed regexes, indirect calls and source directives are not supported', line, '@ extensions')
     if (!op) throw new AwkError(`unexpected character \`${c}\``, line)
     push('punct', op); i += op.length
   }
@@ -131,32 +134,34 @@ function readEscape(src, i, warn) {
   if (c >= '0' && c <= '7') {
     let j = i + 1
     while (j < i + 4 && src[j] >= '0' && src[j] <= '7') j++
-    return { text: String.fromCodePoint(Number.parseInt(src.slice(i + 1, j), 8)), end: j }
+    return { byte: Number.parseInt(src.slice(i + 1, j), 8) & 255, end: j }
   }
   if (c === 'x' && /[0-9a-fA-F]/u.test(src[i + 2] ?? '')) {
     let j = i + 2
     while (j < i + 4 && /[0-9a-fA-F]/u.test(src[j] ?? '')) j++
-    return { text: String.fromCodePoint(Number.parseInt(src.slice(i + 2, j), 16)), end: j }
+    return { byte: Number.parseInt(src.slice(i + 2, j), 16), end: j }
   }
+  if (c.codePointAt(0) > 127) throw new AwkError('non-ASCII characters after an escape are not supported', null, 'non-ASCII string escape')
   warn?.(`escape sequence \`\\${c}' treated as plain \`${c}'`)
   return { text: c, end: i + 2 }
 }
 
 function scanString(src, start, line, warn) {
-  let out = ''
+  const bytes = []
   let i = start
   while (i < src.length) {
     const c = src[i]
-    if (c === '"') return { value: out, end: i + 1 }
+    if (c === '"') return { value: utf8Decoder.decode(Uint8Array.from(bytes)), end: i + 1 }
     if (c === '\n') break
     if (c === '\\') {
       // Backslash-newline inside a string continues it (POSIX).
       if (src[i + 1] === '\n') { i += 2; continue }
       const r = readEscape(src, i, warn)
-      out += r.text; i = r.end
+      appendEscape(bytes, r); i = r.end
       continue
     }
-    out += c; i++
+    const point = String.fromCodePoint(src.codePointAt(i))
+    appendEscape(bytes, { text: point }); i += point.length
   }
   throw new AwkError('unterminated string', line)
 }
@@ -196,11 +201,19 @@ function scanRegex(src, start, line) {
 // Apply string-literal escape processing to text that did not come
 // through the lexer: `-v var=value` and `var=value` operands, and `-F`.
 export function unescapeAwkString(s, warn = null) {
-  let out = ''
+  const bytes = []
   for (let i = 0; i < s.length;) {
-    if (s[i] !== '\\') { out += s[i]; i++; continue }
+    if (s[i] !== '\\') {
+      const point = String.fromCodePoint(s.codePointAt(i))
+      appendEscape(bytes, { text: point }); i += point.length; continue
+    }
     const r = readEscape(s, i, warn)
-    out += r.text; i = r.end
+    appendEscape(bytes, r); i = r.end
   }
-  return out
+  return utf8Decoder.decode(Uint8Array.from(bytes))
+}
+
+function appendEscape(bytes, escape) {
+  if (escape.byte === undefined) { for (const byte of utf8.encode(escape.text)) bytes.push(byte) }
+  else bytes.push(escape.byte)
 }

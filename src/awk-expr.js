@@ -245,7 +245,7 @@ function parsePrimary(p, opts) {
 }
 
 function compileOrFail(p, source) {
-  try { return compileRegex(source, false, (msg) => p.warn(msg)) } catch (e) { return p.fail(e.message) }
+  try { return compileRegex(source, false, (msg) => p.warn(msg)) } catch (e) { return p.fail(e.message, e.gap ?? null) }
 }
 
 function parseName(p) {
@@ -253,6 +253,7 @@ function parseName(p) {
   if (p.accept('[')) {
     const subs = parseExprList(p, {})
     p.expect(']')
+    if (p.is('[')) p.fail('arrays of arrays are not supported', 'arrays of arrays')
     return { type: 'index', name, subs }
   }
   // `f (x)` — a space before the paren — is how awk writes `f`
@@ -312,7 +313,7 @@ function parseBuiltin(p) {
   if (args.length < min || args.length > max) {
     p.fail(`${name}() called with ${args.length} argument${args.length === 1 ? '' : 's'}; it takes ${min === max ? min : `${min} to ${max === Infinity ? 'any number' : max}`}`)
   }
-  if ((name === 'sub' || name === 'gsub') && args[2] && !isLvalue(args[2])) p.fail(`${name}(): third argument must be a variable, field or array element`)
+  if ((name === 'sub' || name === 'gsub') && args[2] && !isLvalue(args[2])) p.fail(`${name}(): substitution into a temporary value is not supported`, 'substitution into temporary value')
   if (name === 'split' && args[1].type !== 'var') p.fail('split(): second argument must be an array name')
   if (name === 'match' && args[2] && args[2].type !== 'var') p.fail('match(): third argument must be an array name')
   return { type: 'builtin', name, args }

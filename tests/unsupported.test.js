@@ -48,10 +48,10 @@ describe('run().unsupported — the case it exists for', () => {
   })
 
   it('reports gaps hit through find -exec and xargs, two levels down', () => {
-    // `';'` rather than the GNU-canonical `\;`: this shell parser does
-    // not honor backslash escapes outside quotes, a pre-existing
-    // limitation with its own todo test in terminal.test.js.
+    // Quoted and backslash-escaped semicolons both reach find as a
+    // literal terminator; the nested command's diagnostic must survive.
     assert.deepEqual(details("find . -name '*.js' -exec frobnicate {} ';' 2>/dev/null"), ['frobnicate'])
+    assert.deepEqual(details(String.raw`find . -name '*.js' -exec frobnicate {} \; 2>/dev/null`), ['frobnicate'])
     assert.deepEqual(details("find . -name '*.js' -exec frobnicate {} + 2>/dev/null"), ['frobnicate'])
     assert.deepEqual(details('echo hi | xargs frobnicate 2>/dev/null'), ['frobnicate'])
   })
@@ -98,10 +98,10 @@ describe('run().unsupported — what counts as a gap', () => {
     assert.equal(gaps('sleep 1 &')[0].kind, 'feature')
   })
 
-  it('kind `feature`: sed funnels every way out of its subset into one entry', () => {
-    // An unknown flag, a missing -n, and a regex address are all the
-    // same "this is not a real sed" to a caller deciding whether to use it.
-    for (const line of ["sed -e s/a/b/ f.txt", "sed '1,2p' f.txt", "sed -n 's/a/b/' f.txt"]) {
+  it('kind `feature`: sed reports unsupported scripts and flags', () => {
+    // Unknown flags, regex addresses, and unmodeled sed commands
+    // retain a structured diagnostic alongside stderr.
+    for (const line of ["sed -e s/a/b/ f.txt", "sed -n '/a/p' f.txt", "sed -n 'd' f.txt"]) {
       assert.deepEqual(details(line), ['script'], line)
       assert.equal(gaps(line)[0].command, 'sed')
     }
@@ -142,7 +142,7 @@ describe('run().unsupported — what counts as a gap', () => {
     // syntax are the ones worth pinning: they are the reason parseArgs
     // has a schema-aware numeric guard at all.
     for (const line of [
-      'head -2 f.txt', 'ls -10', 'tail -1 f.txt',
+      'head -2 f.txt', 'ls -- -10', 'tail -1 f.txt',
       'find . -name "*.txt" -print0 | xargs -0 wc -l',
       'sort -k2n f.txt', 'sort -t" " -k1,1 f.txt',
       'cat f.txt | tr -c "a-z" .', 'uniq -f1 f.txt',
@@ -388,12 +388,12 @@ describe('run().unsupported — shell constructs', () => {
     }
   })
 
-  it('classifies multi-level loop control, which nested `for` loops make reachable', () => {
-    // `break` and `continue` work; a level count does not.
+  it('supports multi-level loop control in nested for loops', () => {
+    // Counts larger than the nesting depth target the outermost loop.
     assert.deepEqual(detailsOf('for f in a b; do break; done'), [])
-    assert.deepEqual(detailsOf('for f in a b; do for g in c; do break 2; done; done'), ['break N'])
-    assert.deepEqual(detailsOf('for f in a b; do continue 2; done'), ['continue N'])
-    assert.equal(t().run('for f in a b; do break 2; done').unsupported[0].kind, 'feature')
+    assert.deepEqual(detailsOf('for f in a b; do for g in c; do break 2; done; done'), [])
+    assert.deepEqual(detailsOf('for f in a b; do continue 2; done'), [])
+    assert.equal(t().run('for f in a b; do break 2; done').exitCode, 0)
   })
 
   it('leaves reserved words alone anywhere but command position', () => {

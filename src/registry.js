@@ -11,7 +11,8 @@ import { defineCommands } from './custom.js'
 import { EXTRA_COMMANDS, HIDDEN_EXTRAS } from './extra-commands.js'
 import { NAV_COMMANDS } from './nav-commands.js'
 import { sed } from './sed.js'
-import { SHELL_BUILTINS } from './shell-builtins.js'
+import { unsupported } from './unsupported.js'
+import { SHELL_BUILTINS, SHELL_GAPS } from './shell-builtins.js'
 import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './text-commands.js'
 
 // `__proto__: null` so a user typing e.g. `toString` doesn't reach
@@ -28,6 +29,7 @@ const BUILTIN_COMMANDS = { __proto__: null, ...TEXT_COMMANDS, ...NAV_COMMANDS, .
 // uninteresting to mention; the SHELL_BUILTINS (`exit`, `break`, …)
 // are shell machinery.
 const BUILTIN_HIDDEN = { __proto__: null, sed, ...HIDDEN_EXTRAS, ...TRIVIAL_COMMANDS, ...SHELL_BUILTINS }
+const SHELL_ONLY = new Set(['cd', ':', ...Object.keys(SHELL_BUILTINS)])
 const isBuiltin = (name) => Boolean(BUILTIN_COMMANDS[name] || BUILTIN_HIDDEN[name])
 
 // Command priority for tab completion and the "not found" hint —
@@ -119,6 +121,7 @@ export function createRegistry(commands) {
     pipeNames: Object.freeze([...PIPE_NAMES, ...custom.pipeNames]),
     binPrefixes: BIN_PREFIXES,
     has,
+    shellOnly: (name) => SHELL_ONLY.has(name) && !custom.visible[name] && !custom.hidden[name],
     resolveCommand: (name) => resolveCommand(name, has),
     known: names.join(', '),
   })
@@ -127,3 +130,10 @@ export function createRegistry(commands) {
 // The no-wired-commands case is the common one and its registry is
 // immutable, so build it once and share it across terminals.
 export const DEFAULT_REGISTRY = createRegistry()
+
+// Render unavailable command names using the same registry used for dispatch.
+export function unknownCommand(name, reg) {
+  const gap = SHELL_GAPS.get(name)
+  if (gap !== undefined) return unsupported('feature', name, name, `${name}: ${gap}`, 127)
+  return unsupported('command', name, name, `${name}: command not found. Available: ${reg.known}`, 127)
+}

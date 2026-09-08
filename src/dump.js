@@ -16,8 +16,10 @@
 // `wc -c` counts — `é` is two bytes (c3 a9), each shown as `.` in any
 // ASCII gutter since they fall outside the printable 0x20–0x7e range.
 
+import { unsupported } from './unsupported.js'
+import { dumpInput } from './dump-input.js'
 import { parseArgs } from './parse.js'
-import { err, okWith, parseNonNegativeInt, readContent, utf8 } from './util.js'
+import { err, okWith } from './util.js'
 
 const BYTES_PER_LINE = 16
 // Full-line widths the partial last row pads out to. hexdump: 7-digit
@@ -30,11 +32,12 @@ const XXD_HEX_WIDTH = 39
 // `6568`), a 7-digit hex offset, and every data row padded to the
 // full-line width — exactly what util-linux prints. `-C` opts into the
 // canonical layout; `-v` defeats `*` folding; `-n`/`-s` cap and skip
-// bytes (real hexdump rejects `-s` on a pipe, but our stdin is
-// in-memory so it works uniformly).
+// bytes. A skip on a pipe reports the same illegal-seek error as Linux
+// hexdump. Count spelling and shared input are handled in dump-input.js.
 export function hexdump(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, { short: ['C', 'v'], valueShort: ['n', 's'] })
-  const sl = slice('hexdump', positional, stdin, ctx, { skip: values.get('s'), len: values.get('n'), skipFlag: '-s', lenFlag: '-n' })
+  if (positional.includes('-')) return unsupported('feature', 'hexdump', 'hyphen input operand', 'hexdump: a hyphen input operand is not supported; omit operands to read stdin')
+  const sl = dumpInput('hexdump', positional, stdin, ctx, { skip: values.get('s'), len: values.get('n'), skipFlag: '-s', lenFlag: '-n' })
   if (sl.error) return sl.error
   return okWith(dump(sl.bytes, sl.start, flags.has('v'), flags.has('C') ? HEXDUMP_C : HEXDUMP), sl.r)
 }
@@ -45,7 +48,10 @@ export function hexdump(stdin, tokens, ctx) {
 // od also rejects a skip past EOF instead of clamping (skipPastEofErrors).
 export function od(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, { short: ['v'], valueShort: ['j', 'N'] })
-  const sl = slice('od', positional, stdin, ctx, { skip: values.get('j'), len: values.get('N'), skipFlag: '-j', lenFlag: '-N', skipPastEofErrors: true })
+  if (!flags.size && !values.size && ((positional.length === 1 && /^\+\d/u.test(positional[0])) || (positional.length === 2 && /^\+?\d/u.test(positional[1])))) {
+    return unsupported('feature', 'od', 'legacy offset operand', 'od: legacy offset operands are not supported; use -j OFFSET')
+  }
+  const sl = dumpInput('od', positional, stdin, ctx, { skip: values.get('j'), len: values.get('N'), skipFlag: '-j', lenFlag: '-N', skipPastEofErrors: true })
   if (sl.error) return sl.error
   return okWith(dump(sl.bytes, sl.start, flags.has('v'), OD), sl.r)
 }
@@ -56,38 +62,11 @@ export function od(stdin, tokens, ctx) {
 // skip/limit.
 export function xxd(stdin, tokens, ctx) {
   const { values, positional } = parseArgs(tokens, { valueShort: ['s', 'l'] })
-  const sl = slice('xxd', positional, stdin, ctx, { skip: values.get('s'), len: values.get('l'), skipFlag: '-s', lenFlag: '-l' })
+  if (positional.length > 2) return err('xxd: too many operands')
+  if (positional.length === 2 && positional[1] !== '-') return unsupported('feature', 'xxd', 'output file', 'xxd: output files are not supported (filesystem is read-only)')
+  const sl = dumpInput('xxd', positional.slice(0, 1), stdin, ctx, { skip: values.get('s'), len: values.get('l'), skipFlag: '-s', lenFlag: '-l' })
   if (sl.error) return sl.error
   return okWith(dump(sl.bytes, sl.start, false, XXD), sl.r)
-}
-
-// Read the inputs, encode to bytes, then skip/limit. Skip normally
-// clamps to the content length so `-s` past EOF reads zero bytes while
-// the offset column still lands at the clamped position (matching
-// hexdump and xxd). od instead errors on a skip STRICTLY past EOF
-// (`opt.skipPastEofErrors`) — a skip landing exactly at EOF is still
-// valid. Counts are decimal, the same convention head/tail/grep use;
-// hex (`0x10`) and size-suffix forms aren't modeled. `r` carries
-// readContent's partial-failure stderr/exit for okWith.
-function slice(cmd, files, stdin, ctx, opt) {
-  const r = readContent(cmd, files, stdin, ctx)
-  const all = utf8.encode(r.content)
-  let start = 0
-  if (opt.skip !== undefined) {
-    const s = parseNonNegativeInt(opt.skip, `${cmd}: ${opt.skipFlag}`)
-    if (s.error) return { error: s.error }
-    if (opt.skipPastEofErrors && s.value > all.length) {
-      return { error: err(`${cmd}: cannot skip past end of combined input`) }
-    }
-    start = Math.min(s.value, all.length)
-  }
-  let bytes = all.subarray(start)
-  if (opt.len !== undefined) {
-    const n = parseNonNegativeInt(opt.len, `${cmd}: ${opt.lenFlag}`)
-    if (n.error) return { error: n.error }
-    bytes = bytes.subarray(0, n.value)
-  }
-  return { bytes, start, r }
 }
 
 // The shared engine. Walk the bytes a row at a time, folding runs of

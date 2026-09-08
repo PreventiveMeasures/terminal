@@ -50,6 +50,7 @@
 // Boundary tokens are tagged by `kind`, not by string value, so a
 // quoted `"|"` / `">"` / `"("` — or `"for"` — stays an ordinary word.
 
+import { sliceWord } from './word.js'
 import { NAME_RE, tokenize } from './tokenize.js'
 import { UnsupportedError } from './unsupported.js'
 
@@ -110,7 +111,7 @@ const newStep = (gate) => ({ gate, stages: [], negate: false, bang: false })
 // line, `{ !⏎}`, `do !; done`). The step keeps no stage at all.
 const bareBang = (step, stage) => step.bang && step.stages.length === 0 && commandPosition(stage) && stage.redirs.length === 0
 
-const wordOf = (t) => ({ value: t.value, mask: t.mask })
+const wordOf = (t) => sliceWord(t)
 
 // Nothing but assignments has been attached to the stage yet, so the
 // next word names a command — the one place the reserved words, `!`,
@@ -153,7 +154,7 @@ function assignmentOf(t) {
   if (!m) return null
   const eq = m[0].length
   if (t.mask !== null && /[12]/u.test(t.mask.slice(0, eq))) return null
-  return { name: m[1], word: { value: t.value.slice(eq), mask: t.mask === null ? null : t.mask.slice(eq) } }
+  return { name: m[1], word: sliceWord(t, eq) }
 }
 
 // Recursive: `end` names the token that closes the block being parsed
@@ -177,7 +178,7 @@ function buildSteps(raw, start, end) {
     }
     if (t.kind === 'pipe' || t.kind === 'pipe_err' || t.kind === 'and' || t.kind === 'or' || t.kind === 'semi') {
       // `|&` is `2>&1 |`, applied after the stage's own redirects.
-      if (t.kind === 'pipe_err' && isCommand(stage)) stage.redirs.push({ fd: 2, op: 'dup', toFd: 1 })
+      if (t.kind === 'pipe_err' && (isCommand(stage) || stage.group || stage.loop)) stage.redirs.push({ fd: 2, op: 'dup', toFd: 1 })
       if (!(t.kind === 'semi' && bareBang(steps.at(-1), stage))) steps.at(-1).stages.push(stage)
       stage = newStage()
       if (t.kind === 'and') steps.push(newStep('and'))
@@ -220,6 +221,7 @@ function buildSteps(raw, start, end) {
 // and `name() { … }` function definitions.
 function openParen(raw, i, stage) {
   const next = raw[i + 1]
+  if (stage.words.length <= 1 && raw[i].wordAdjacent && raw[i - 1]?.kind === 'word' && /^[A-Za-z_][A-Za-z0-9_]*\+?=$/u.test(raw[i - 1].value)) throw new UnsupportedError('feature', 'array assignment', 'shell array assignments are not supported')
   if (next?.kind === 'paren_open' && next.adjacent && commandPosition(stage)) {
     throw new UnsupportedError('feature', '((', 'arithmetic evaluation (`((…))`) is not supported')
   }
@@ -402,6 +404,7 @@ function applyRedir(stage, raw, i) {
     return i
   }
   if (op.op === 'close') {
+    if (op.fd === 0) throw new UnsupportedError('feature', '0<&-', 'closing standard input is not supported')
     stage.redirs.push(op.fd === 0 ? { fd: 0, op: 'text', body: '', expand: false } : { fd: op.fd, op: 'close' })
     return i
   }

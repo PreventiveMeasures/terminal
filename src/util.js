@@ -3,7 +3,8 @@
 // modules can import without pulling in each other through the
 // registry, which would create a cycle.
 
-import { resolve } from './fs.js'
+import { UnsupportedError } from './unsupported.js'
+import { lookup } from './fs.js'
 
 // The byte model every `-c`-style option shares. Content is a JS string
 // (UTF-16 code units), so anything counting or slicing BYTES — `wc -c`,
@@ -13,7 +14,14 @@ import { resolve } from './fs.js'
 // leading U+FEFF in decoded output instead of swallowing it, since
 // these are raw bytes being sliced, not a document being loaded.
 export const utf8 = new TextEncoder()
-export const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+const strictUtf8 = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true })
+export const utf8Decoder = {
+  decode(bytes) {
+    try { return strictUtf8.decode(bytes) } catch {
+      throw new UnsupportedError('feature', 'partial UTF-8 byte sequence', 'byte output that is not valid UTF-8 cannot be represented by this string-based terminal')
+    }
+  },
+}
 
 export const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0 })
 
@@ -75,7 +83,7 @@ export function consumeStdin(ctx, rest = '') {
 // can leave the rest for the next one. `/dev/stdin` is that stream too
 // when it is a pipe; on a regular file it reopens the file from the
 // start, on its own, as the kernel does.
-export function readFilesFor(cmd, files, ctx, stdin = '') {
+export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   const entries = []
   let stderr = ''
   let failed = false
@@ -83,19 +91,21 @@ export function readFilesFor(cmd, files, ctx, stdin = '') {
   for (const f of files) {
     // `-` is the standard input, by the convention every coreutils
     // reader follows; it keeps its name so banners can label it.
-    if (f === '/dev/stdin' && ctx.stdinFile) { entries.push({ name: f, content: stdin, kind: 'file' }); continue }
+    if (f === '/dev/null') { entries.push({ name: f, content: '', kind: 'file' }); continue }
+    if (f === '/dev/stdin' && ctx.stdinFile) { entries.push({ name: f, content: ctx.stdinOrigin, kind: 'file' }); continue }
     if (f === '-' || f === '/dev/stdin') { entries.push({ name: f, content: pipe, kind: 'file', shared: true }); pipe = ''; consumeStdin(ctx); continue }
-    const abs = resolve(ctx.cwd, f)
-    if (ctx.fs.isDir(abs)) {
-      stderr += `${cmd}: ${f}: is a directory\n`
-      failed = true
-      entries.push({ name: f, content: '', kind: 'dir' })
-      continue
-    }
-    if (!ctx.fs.isFile(abs)) {
-      stderr += `${cmd}: ${f}: no such file or directory\n`
+    const { path: abs, error } = lookup(ctx.cwd, f, ctx.fs)
+    if (error) {
+      stderr += `${cmd}: ${f}: ${error.toLowerCase()}\n`
       failed = true
       entries.push({ name: f, content: '', kind: 'missing' })
+      if (options.stopOnError) break
+      continue
+    }
+    if (ctx.fs.isDir(abs)) {
+      if (!options.noRead) { stderr += `${cmd}: ${f}: is a directory\n`; failed = true }
+      entries.push({ name: f, content: '', kind: 'dir' })
+      if (options.stopOnError || options.stopOnDir) break
       continue
     }
     entries.push({ name: f, content: ctx.fs.readFile(abs), kind: 'file' })
@@ -108,13 +118,13 @@ export function readFilesFor(cmd, files, ctx, stdin = '') {
 // files via readFilesFor with the same partial-failure semantics.
 // This is the per-file model — callers that need file names/boundaries
 // (wc, head, grep) iterate `.inputs`.
-export function readInputs(cmd, files, stdin, ctx) {
+export function readInputs(cmd, files, stdin, ctx, options) {
   if (files.length === 0) {
     consumeStdin(ctx)
     const only = [{ name: null, content: stdin, kind: 'file' }]
     return { inputs: only, entries: only, stderr: '', failed: false }
   }
-  return readFilesFor(cmd, files, ctx, stdin)
+  return readFilesFor(cmd, files, ctx, stdin, options)
 }
 
 // The concatenated-stream model: every readable input joined into one
@@ -131,26 +141,22 @@ export function readContent(cmd, files, stdin, ctx) {
 // exit 1 if any input failed, even when some files were read.
 export const okWith = (stdout, r) => ({ stdout, stderr: r.stderr, exitCode: r.failed ? 1 : 0 })
 
-// Parse a non-negative decimal count. The digits-only regex rejects
-// empty strings (`Number('')` is 0, which would otherwise sneak
-// through — relevant because the tokenizer can emit empty tokens
-// from quoted args like `head -n "" file`), whitespace,
-// sign-prefixed numbers, hex/oct/binary literals, and scientific
-// notation. The Number.isSafeInteger guard rejects values past
-// 2^53 - 1 where round-trip parsing stops being exact. Callers
-// that need a strictly positive count (e.g. xargs -n) check
-// `value === 0` themselves.
-export function parseNonNegativeInt(str, label, shown = str) {
-  if (typeof str !== 'string' || !/^\d+$/u.test(str)) {
+// GNU counts accept leading blanks and an optional plus; find requires
+// digits only. Unbounded counts saturate beyond any representable JS
+// input size, as grep/uniq/xargs do, instead of rejecting valid operands.
+// Commands with a fixed integer limit provide max. Positive-only callers
+// (e.g. xargs -n) additionally reject zero.
+export function parseNonNegativeInt(str, label, shown = str, { max = Infinity, digitsOnly = false } = {}) {
+  if (typeof str !== 'string' || !(digitsOnly ? /^\d+$/u : /^[ \t\n\r\f\v]*\+?\d+$/u).test(str)) {
     return { error: err(`${label}: invalid count: ${shown}`) }
   }
   const n = Number(str)
-  if (!Number.isSafeInteger(n)) return { error: err(`${label}: out of range: ${shown}`) }
-  return { value: n }
+  if (n > max) return { error: err(`${label}: out of range: ${shown}`) }
+  return { value: Math.min(n, Number.MAX_SAFE_INTEGER) }
 }
 
 // A count that may carry a sign, as head's and tail's `-n` / `-c` do.
-// The digits are validated exactly as above; the SIGN is handed back
+// GNU size suffixes are supported; the SIGN is handed back
 // rather than interpreted, because the two commands read it in mirror
 // image: `head -n -5` drops the last 5 lines, `tail -n +5` starts at
 // line 5, and an unsigned count means "first 5" to head and "last 5"
@@ -160,6 +166,17 @@ export function parseNonNegativeInt(str, label, shown = str) {
 export function parseSignedCount(str, label) {
   if (typeof str !== 'string') return { error: err(`${label}: invalid count: ${str}`) }
   const sign = str[0] === '+' || str[0] === '-' ? str[0] : ''
-  const r = parseNonNegativeInt(sign ? str.slice(1) : str, label, str)
-  return r.error ? r : { value: r.value, sign }
+  const part = sign === '-' ? str.slice(1) : str
+  const m = /^[ \t\n\r\v\f]*\+?(\d+)(b|[kKMGTPEZYRQ](?:i?B)?)?$/u.exec(part)
+  const bare = !sign && /^(?:b|[kKMGTPEZYRQ](?:i?B)?)$/u.test(part)
+  if (!m && !bare) return { error: err(`${label}: invalid count: ${str}`) }
+  const suffix = m?.[2] ?? (bare ? part : '')
+  let factor = 1n
+  if (suffix === 'b') factor = 512n
+  else if (suffix) factor = (suffix.length === 2 ? 1000n : 1024n) ** BigInt('KMGTPEZYRQ'.indexOf(suffix[0].toUpperCase()) + 1)
+  const n = BigInt(m?.[1] ?? '1') * factor
+  if (n > 18446744073709551615n) return { error: err(`${label}: count out of range: ${str}`) }
+  // A JS string cannot approach this bound; saturation preserves slicing
+  // semantics without rounding a representable input position.
+  return { value: Number(n > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : n), sign }
 }
