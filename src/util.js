@@ -1,18 +1,10 @@
-// Shared helpers for command modules. Kept in its own file (rather
-// than co-located with the registry) so the text- and nav-command
-// modules can import without pulling in each other through the
-// registry, which would create a cycle.
+// Shared command I/O and numeric parsing; independent of the command registry.
 
 import { UnsupportedError } from './unsupported.js'
 import { lookup } from './fs.js'
 
-// The byte model every `-c`-style option shares. Content is a JS string
-// (UTF-16 code units), so anything counting or slicing BYTES — `wc -c`,
-// `head -c`, `cut -c`, the dump commands — encodes to UTF-8 first: `é`
-// is 2 bytes, an emoji 4. Plain `.length` would count code units and
-// disagree with coreutils on multibyte text. `ignoreBOM` keeps a
-// leading U+FEFF in decoded output instead of swallowing it, since
-// these are raw bytes being sliced, not a document being loaded.
+// Byte operations encode JS strings as UTF-8. Preserve the BOM and refuse
+// slices that cannot be represented losslessly as string output.
 export const utf8 = new TextEncoder()
 const strictUtf8 = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true })
 export const utf8Decoder = {
@@ -25,9 +17,7 @@ export const utf8Decoder = {
 
 export const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0 })
 
-// Most stderr lines should end with a newline so consecutive
-// error outputs render on separate lines. Tolerate the rare
-// caller that already supplied one.
+// Terminate stderr once so consecutive errors stay on separate lines.
 export const err = (msg, code = 1) => ({
   stdout: '',
   stderr: msg.endsWith('\n') ? msg : msg + '\n',
@@ -36,88 +26,57 @@ export const err = (msg, code = 1) => ({
 
 export const usage = (line) => err(`usage: ${line}`, 2)
 
-// Split a string into lines, dropping the trailing empty element
-// produced by a trailing newline. `''` returns `[]` (no lines)
-// rather than `['']` so empty stdin doesn't read as one blank
-// line — important for grep/wc behavior on empty pipes.
-export function splitLines(s) {
+// Empty input has no lines; a trailing newline terminates the preceding line.
+export function splitLines(s, delimiter = '\n') {
   if (s === '') return []
-  const lines = s.split('\n')
+  const lines = s.split(delimiter)
   if (lines.at(-1) === '') lines.pop()
   return lines
 }
 
-// Inverse of `splitLines` for command output: empty array stays
-// empty (no bare newline), non-empty gets a trailing newline so
-// the next command sees one line per element. Pinning the
-// convention here keeps each command from re-implementing it.
-export const joinLines = (lines) => lines.length === 0 ? '' : lines.join('\n') + '\n'
+// Line-oriented output terminates nonempty arrays with a newline.
+export const joinLines = (lines, delimiter = '\n') => lines.length === 0 ? '' : lines.join(delimiter) + delimiter
 
-// Resolve and read each file path against the virtual filesystem.
-// Reads every path it can rather than aborting on the first bad one,
-// collecting a stderr line per missing/dir path — so `cat a missing b`
-// still emits a and b (matching coreutils' partial-failure behavior).
-// Returns `{ inputs, stderr, failed }`: `inputs` for the readable
-// files in order, `stderr` with one error line per failure, and
-// `failed` true if any path errored. The dir-vs-missing distinction
-// matters twice over. In the MESSAGE: `cat src` pointing at a directory
-// should say "is a directory", not "no such file or directory" — the
-// path exists, it's just not readable as a file. And in the OUTPUT: the
-// underlying `open()` SUCCEEDS on a directory and only the read fails,
-// so GNU head/tail still banner a directory operand while a missing one
-// gets nothing at all. `entries` carries every operand in order with
-// that distinction as `kind`; `inputs` is the readable subset, which is
-// what every other caller wants, so this changed nothing for them.
-// A command that reads its standard input records what it leaves of
-// it — nothing, unless it stopped short as `head -c N` does — for the
-// next command in the same group: `echo hi | { echo x; cat; }` prints
-// both, `{ cat; cat; }` once. A command that never reads it leaves it
-// be. The engine (index.js) resets the record before each command.
+// Preserve each line's terminator for byte-exact filters and stdin offsets.
+export const lineRecords = (text) => text.match(/[^\n]*\n|[^\n]+$/gu) ?? []
+
+// Readers record unconsumed stdin so later commands in a group share its offset.
 export function consumeStdin(ctx, rest = '') {
   ctx.stdinLeft = rest
 }
 
-// `stdin` backs a `-` operand — the first one; a second `-` names the
-// same stream and finds it at end of file, as `cat - -` does. Such
-// entries are marked `shared` so a reader that stops short (`head`)
-// can leave the rest for the next one. `/dev/stdin` is that stream too
-// when it is a pipe; on a regular file it reopens the file from the
-// start, on its own, as the kernel does.
+// Keep operand order and partial read failures; head/tail need directory entries
+// for banners even though they cannot read them. Repeated '-' shares one stream;
+// /dev/stdin reopens a regular file independently but shares a pipe's offset.
 export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   const entries = []
   let stderr = ''
-  let failed = false
   let pipe = stdin
-  for (const f of files) {
-    // `-` is the standard input, by the convention every coreutils
-    // reader follows; it keeps its name so banners can label it.
-    if (f === '/dev/null') { entries.push({ name: f, content: '', kind: 'file' }); continue }
-    if (f === '/dev/stdin' && ctx.stdinFile) { entries.push({ name: f, content: ctx.stdinOrigin, kind: 'file' }); continue }
-    if (f === '-' || f === '/dev/stdin') { entries.push({ name: f, content: pipe, kind: 'file', shared: true }); pipe = ''; consumeStdin(ctx); continue }
-    const { path: abs, error } = lookup(ctx.cwd, f, ctx.fs)
-    if (error) {
-      stderr += `${cmd}: ${f}: ${error.toLowerCase()}\n`
-      failed = true
-      entries.push({ name: f, content: '', kind: 'missing' })
-      if (options.stopOnError) break
-      continue
+  for (const name of files) {
+    const entry = { name, content: '', kind: 'file' }
+    let error
+    if (name === '/dev/stdin' && ctx.stdinFile) entry.content = ctx.stdinOrigin
+    else if (name === '-' || name === '/dev/stdin') {
+      entry.content = pipe
+      entry.shared = true
+      pipe = ''
+      consumeStdin(ctx)
+    } else if (name !== '/dev/null') {
+      const found = lookup(ctx.cwd, name, ctx.fs)
+      if (found.error) { entry.kind = 'missing'; error = found.error.toLowerCase() }
+      else if (ctx.fs.isDir(found.path)) {
+        entry.kind = 'dir'
+        if (!options.noRead) error = 'is a directory'
+      } else entry.content = ctx.fs.readFile(found.path)
     }
-    if (ctx.fs.isDir(abs)) {
-      if (!options.noRead) { stderr += `${cmd}: ${f}: is a directory\n`; failed = true }
-      entries.push({ name: f, content: '', kind: 'dir' })
-      if (options.stopOnError || options.stopOnDir) break
-      continue
-    }
-    entries.push({ name: f, content: ctx.fs.readFile(abs), kind: 'file' })
+    entries.push(entry)
+    if (error) stderr += `${cmd}: ${name}: ${error}\n`
+    if (entry.kind !== 'file' && (options.stopOnError || (entry.kind === 'dir' && options.stopOnDir))) break
   }
-  return { inputs: entries.filter((e) => e.kind === 'file'), entries, stderr, failed }
+  return { inputs: entries.filter((e) => e.kind === 'file'), entries, stderr, failed: stderr !== '' }
 }
 
-// File inputs with a stdin fallback: with no file operands a command
-// reads stdin (one nameless input); otherwise it reads the named
-// files via readFilesFor with the same partial-failure semantics.
-// This is the per-file model — callers that need file names/boundaries
-// (wc, head, grep) iterate `.inputs`.
+// With no file operands, stdin is one nameless input.
 export function readInputs(cmd, files, stdin, ctx, options) {
   if (files.length === 0) {
     consumeStdin(ctx)
@@ -127,25 +86,17 @@ export function readInputs(cmd, files, stdin, ctx, options) {
   return readFilesFor(cmd, files, ctx, stdin, options)
 }
 
-// The concatenated-stream model: every readable input joined into one
-// string, file boundaries dropped. For commands that treat all input
-// as a single stream (cat, sort, uniq). Carries the same partial-
-// failure stderr/failed so callers can hand it straight to okWith.
+// For commands that combine file contents into a single stream.
 export function readContent(cmd, files, stdin, ctx) {
   const r = readInputs(cmd, files, stdin, ctx)
   return { content: r.inputs.map((f) => f.content).join(''), stderr: r.stderr, failed: r.failed }
 }
 
-// Pair a command's stdout with the partial-failure outcome from
-// readInputs / readFilesFor: surface the per-file errors on stderr and
-// exit 1 if any input failed, even when some files were read.
+// Preserve read errors even when other inputs produced output.
 export const okWith = (stdout, r) => ({ stdout, stderr: r.stderr, exitCode: r.failed ? 1 : 0 })
 
-// GNU counts accept leading blanks and an optional plus; find requires
-// digits only. Unbounded counts saturate beyond any representable JS
-// input size, as grep/uniq/xargs do, instead of rejecting valid operands.
-// Commands with a fixed integer limit provide max. Positive-only callers
-// (e.g. xargs -n) additionally reject zero.
+// GNU counts allow leading blanks and '+', whereas find requires digits.
+// Saturate beyond representable input sizes unless the caller specifies a limit.
 export function parseNonNegativeInt(str, label, shown = str, { max = Infinity, digitsOnly = false } = {}) {
   if (typeof str !== 'string' || !(digitsOnly ? /^\d+$/u : /^[ \t\n\r\f\v]*\+?\d+$/u).test(str)) {
     return { error: err(`${label}: invalid count: ${shown}`) }
@@ -155,14 +106,8 @@ export function parseNonNegativeInt(str, label, shown = str, { max = Infinity, d
   return { value: Math.min(n, Number.MAX_SAFE_INTEGER) }
 }
 
-// A count that may carry a sign, as head's and tail's `-n` / `-c` do.
-// GNU size suffixes are supported; the SIGN is handed back
-// rather than interpreted, because the two commands read it in mirror
-// image: `head -n -5` drops the last 5 lines, `tail -n +5` starts at
-// line 5, and an unsigned count means "first 5" to head and "last 5"
-// to tail. `+` is the explicit form of each command's own default, so
-// `head -n +5` is `head -n 5`. Errors quote the operand as typed —
-// `-n +x` complains about `+x`, not `x`.
+// Retain the sign for head/tail: '-5' means omit the last five lines to head,
+// while '+5' means start at line five to tail. Preserve the operand in errors.
 export function parseSignedCount(str, label) {
   if (typeof str !== 'string') return { error: err(`${label}: invalid count: ${str}`) }
   const sign = str[0] === '+' || str[0] === '-' ? str[0] : ''
@@ -171,12 +116,17 @@ export function parseSignedCount(str, label) {
   const bare = !sign && /^(?:b|[kKMGTPEZYRQ](?:i?B)?)$/u.test(part)
   if (!m && !bare) return { error: err(`${label}: invalid count: ${str}`) }
   const suffix = m?.[2] ?? (bare ? part : '')
+  const count = scaledCount(BigInt(m?.[1] ?? '1'), suffix, label, str)
+  return count.error ? count : { ...count, sign }
+}
+
+// Shared GNU byte-count suffixes and unsigned 64-bit range checking.
+export function scaledCount(digits, suffix, label, shown) {
   let factor = 1n
   if (suffix === 'b') factor = 512n
   else if (suffix) factor = (suffix.length === 2 ? 1000n : 1024n) ** BigInt('KMGTPEZYRQ'.indexOf(suffix[0].toUpperCase()) + 1)
-  const n = BigInt(m?.[1] ?? '1') * factor
-  if (n > 18446744073709551615n) return { error: err(`${label}: count out of range: ${str}`) }
-  // A JS string cannot approach this bound; saturation preserves slicing
-  // semantics without rounding a representable input position.
-  return { value: Number(n > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : n), sign }
+  const n = digits * factor
+  if (n > 18446744073709551615n) return { error: err(`${label}: count out of range: ${shown}`) }
+  // Saturation preserves slicing positions beyond any representable JS string.
+  return { value: Number(n > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : n) }
 }

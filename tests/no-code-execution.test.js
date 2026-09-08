@@ -21,7 +21,7 @@
 
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { describe, it } from 'node:test'
 
 import { createTerminal } from '@preventive/terminal'
@@ -103,10 +103,17 @@ describe('no JS execution — source', () => {
   ]
 
   const dir = join(import.meta.dirname, '..', 'src')
-  const files = readdirSync(dir).filter((f) => f.endsWith('.js'))
+  const files = readdirSync(dir, { recursive: true }).filter((f) => f.endsWith('.js')).map((f) => f.split(sep).join('/')).sort()
 
   it('publishes at least one module (guards against an empty scan passing vacuously)', () => {
-    assert.ok(files.length > 5, `expected src/*.js, found ${files.length}`)
+    assert.ok(files.length > 5, `expected src/**/*.js, found ${files.length}`)
+  })
+
+  it('audits every packaged runtime module, including subdirectories', () => {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8'))
+    const packaged = pkg.files.filter((file) => file.endsWith('.js')).sort()
+    assert.deepEqual(files.map((file) => 'src/' + file), packaged)
+    for (const subdir of ['awk', 'commands', 'shell']) assert.ok(files.some((file) => file.startsWith(subdir + '/')), subdir)
   })
 
   for (const file of files) {

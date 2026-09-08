@@ -1,9 +1,5 @@
-// Virtual read-only filesystem built from a `{ path: content }`
-// sources map (the same shape stasis bundles ship — see
-// `ui/view/render-bundle.js`). All paths in the API are absolute
-// and POSIX-normalized; cwd-relative paths run through
-// `resolve(cwd, p)` first. Directories are derived from the set
-// of file paths — there is no separate dir entry in the input.
+// Read-only source map with a directory index derived from file paths.
+// All internal lookups use normalized absolute paths.
 
 export function normalize(path) {
   const absolute = path.startsWith('/')
@@ -70,29 +66,18 @@ export function compareNames(a, b) {
   return a.length - b.length
 }
 
-// Join an already-normalized directory path with a child name,
-// avoiding the `//foo` double slash at the root (`/` + `foo` → `/foo`).
+// Inputs are normalized; joining at the root must not introduce '//'.
 export function joinPath(dir, name) {
   return dir === '/' ? '/' + name : dir + '/' + name
 }
 
-// Path of `abs` relative to ancestor directory `root`, with no leading
-// slash. Assumes `abs` sits strictly under `root` (callers guarantee
-// it); `root === '/'` just drops the leading slash. Spans multiple
-// levels: relativeTo('/a', '/a/b/c') === 'b/c'.
+// abs must be a descendant of the normalized ancestor root.
 export function relativeTo(root, abs) {
   return root === '/' ? abs.slice(1) : abs.slice(root.length + 1)
 }
 
-// Build the filesystem. Accepts either a Map or a plain object
-// keyed by path. Non-string values are skipped — callers that
-// hand us a mixed-content map (binary blobs alongside source
-// text) get the text-only view.
-//
-// A per-directory child index is built once up front so listDir
-// is an O(1) lookup instead of an O(F+D) scan-per-call. `find`
-// and `tree` call listDir once per visited directory, so a tree
-// of N nodes would otherwise be O(N²).
+// Ignore non-string contents. Map keys and object keys share normalization;
+// the directory index is built once for repeated listings and traversal.
 export function createFs(sources) {
   const files = new Map()
   const it = sources instanceof Map ? sources.entries() : Object.entries(sources ?? {})
@@ -142,19 +127,12 @@ export function* walkTree(fs, root, maxDepth = Number.POSITIVE_INFINITY, shouldD
   }
 }
 
-// Every absolute file path under `root` (or `root` itself if it's a
-// file), in walkTree order — files of a directory before its
-// subdirectories' files. Friendly for grep -r / xargs consumers.
+// Filter the same depth-first order used by find.
 function* walkFiles(fs, root) {
   for (const entry of walkTree(fs, root)) if (entry.kind === 'file') yield entry.path
 }
 
-// Register `path` as a directory in the child index, bubbling up
-// so every ancestor also exists and records `path`'s basename as
-// one of its children. Iterative rather than recursive — a stasis
-// bundle with a pathologically deep path (thousands of segments)
-// would otherwise overflow the call stack during construction.
-// Idempotent: ancestors already in the map short-circuit the walk.
+// Build missing ancestors from the top down without recursive stack growth.
 function ensureDir(map, path) {
   const toCreate = []
   let p = path
@@ -162,8 +140,6 @@ function ensureDir(map, path) {
     toCreate.push(p)
     p = dirname(p)
   }
-  // Walk from the highest-unregistered ancestor down to `path`,
-  // creating each entry and recording it as a child of its parent.
   for (let i = toCreate.length - 1; i >= 0; i--) {
     const child = toCreate[i]
     map.set(child, { dirs: [], files: [] })

@@ -1,35 +1,15 @@
 import { readPosixClass } from './charclass.js'
 import { UnsupportedError } from './unsupported.js'
 
-// POSIX Basic Regular Expression → ECMAScript regex translation — the
-// dialect grep matches with by default (and under -G). A self-contained
-// transpiler with no dependency on the command layer, so it lives in
-// its own module. `breToEs(pattern)` returns `{ source }` (an ES `/u`-
-// ready pattern body) or `{ error }` (a message string; only for a bare
-// trailing backslash, which GNU grep also rejects).
+// Translate POSIX BRE escapes to ECMAScript syntax for grep.
 
-// Return the length (in chars, INCLUDING the leading backslash) of a
-// valid ES regex escape at `pattern[i]`. The caller passes through
-// `pattern.slice(i, i + len)` verbatim. Returns 0 when `\<next>`
-// isn't a valid ES escape (the caller drops the backslash and emits
-// `next` as a literal, matching POSIX BRE "identity escape").
-// Returns -1 for a trailing `\` with no following char.
-//
-// Why lookahead matters: ES /u rejects `\x`, `\u`, `\p` etc. unless
-// followed by their required suffix (`\xHH`, `\u{...}` / `\uHHHH`,
-// `\p{...}`, `\k<...>`, `\cX`). POSIX BRE / ugrep treat bare `\x`
-// as literal `x`. Without validation we'd silently fail to compile
-// the BRE-literal form.
+// Length of a GNU character escape, including its backslash; zero means the
+// caller should interpret the next character literally or as regex syntax.
 function escapeLength(pattern, i) {
   const next = pattern[i + 1]
   if (next === undefined) return -1
-  // ES-syntactic chars (identity escape) and GNU BRE extensions
-  // (`\b`/`\B` word boundary, `\d`/`\D`/`\s`/`\S`/`\w`/`\W` class
-  // escapes). NOT included: `\0`, `\t`, `\n`, `\r`, `\f`, `\v` —
-  // strict POSIX BRE (and ugrep / GNU grep) treats those as literal
-  // letters, not ES control escapes. `\0` in particular has the
-  // legacy-octal ES /u footgun (`\01` etc. throws), which Copilot
-  // flagged on PR #40.
+  // Preserve supported regex escapes and GNU BRE operators; discard the
+  // backslash on ordinary characters instead of producing an invalid /u escape.
   if ('^$\\.*+?()[]{}|/bBdDsSwW'.includes(next)) return 2
   if (next >= '1' && next <= '9') return 2  // backreference
   const isHex = (c) => c !== undefined && /[0-9A-Fa-f]/u.test(c)
@@ -57,32 +37,9 @@ function escapeLength(pattern, i) {
   return 0
 }
 
-// Translate POSIX-style BRE to ES regex by swapping which form is
-// the metachar: in BRE `(` `)` `{` `}` `+` `?` `|` are literal and
-// `\(` `\)` etc. are the metachar; in ES it's the reverse. Inside
-// `[...]` character classes nothing is swapped (POSIX and ES agree
-// that those chars are literal there). Escape sequences other than
-// the swapped set (`\d`, `\b`, `\s`, etc.) pass through unchanged
-// — matching GNU grep's BRE-with-extensions rather than strict
-// POSIX (where `\d` would be literal `d`).
-//
-// GNU BRE extensions also recognized:
-//   `\<` / `\>` — directional start / end of word, retained for
-//     grep-pattern.js to render for the boolean and extent matchers.
-//   `*` at the very start of the pattern or immediately after `^`
-//     is treated as literal (POSIX BRE rule: no preceding atom to
-//     repeat). ES rejects these as "Nothing to repeat".
-//   `^` and `$` are anchors only at the start / end of the pattern
-//     (or adjacent to `\(`/`\|`/`\)`). Elsewhere they're literal —
-//     POSIX BRE rule. ES treats both as anchors everywhere, which
-//     would silently break searches for literal `$VAR` / `a^b`.
-//
-// Returns `{ source }` or `{ error }` — the latter only for a bare
-// trailing `\`, which GNU grep also rejects as "Trailing backslash".
-//
-// Known divergences vs POSIX (ES semantics; reach for `-F` if needed):
-// `\]` inside class is ES escape (POSIX: literal `\`); `[^]` matches
-// anything (POSIX: error); `[[:alpha:]]`, `\(*\)` follow ES.
+// BRE uses escaped grouping, alternation, and interval operators. Unescaped
+// (){}+?| are literals. Preserve whether an atom is repeatable so a leading
+// '*' stays literal, including immediately after a group opening or anchor.
 export function breToEs(pattern) {
   const SWAP = '(){}+?|'
   let out = ''
@@ -95,11 +52,7 @@ export function breToEs(pattern) {
         const cls = readPosixClass(pattern, i)
         if (cls) { out += cls.body; i = cls.end - 1; continue }
       }
-      // Inside `[...]`, escape handling mirrors the outside-class
-      // branch but without SWAP / GNU-extension transforms: identity
-      // escapes pass through if ES accepts them; otherwise drop the
-      // backslash so `[\_]` / `[\a]` don't trip ES's invalid-escape
-      // error on POSIX-style literal escapes.
+      // Inside brackets, ordinary identity escapes lose their backslash too.
       if (c === '\\') {
         const len = escapeLength(pattern, i)
         if (len === -1) return { error: 'trailing backslash (\\)' }
@@ -138,13 +91,7 @@ export function breToEs(pattern) {
       // POSIX BRE: backslash before non-special char is literal.
       out += next; i++; continue
     }
-    // POSIX BRE: `*` at the start of the pattern (or right after
-    // an anchor `^`) is literal because there's no preceding atom.
-    // ES rejects both as "Nothing to repeat", which silently breaks
-    // searches for literal `*` strings (e.g. `*ptr` in C source).
-    // The `^` predecessor only counts when it's actually an anchor —
-    // a literal mid-pattern `^` lets `*` repeat it normally
-    // (`a^*b` means a + zero-or-more literal `^` + b).
+    // A leading '*' (also after ^ or a group opening) is a literal atom.
     if (c === '*' && (i === 0 || (pattern[i - 1] === '^' && caretIsAnchor(pattern, i - 1)))) { out += '\\*'; continue }
     if (c === '^' && !caretIsAnchor(pattern, i)) { out += '\\^'; continue }
     if (c === '$' && !(i === pattern.length - 1 || (pattern[i + 1] === '\\' && (pattern[i + 2] === ')' || pattern[i + 2] === '|')))) { out += '\\$'; continue }

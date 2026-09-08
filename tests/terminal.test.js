@@ -6339,6 +6339,20 @@ describe('createTerminal — awk', () => {
     assert.equal(out("awk 'BEGIN { for (i = 1; i <= 4; i++) a[i]; for (k in a) { delete a[k + 1]; n++ } print n, length(a) }'"), '4 1\n')
   })
 
+  it('for-loop break skips step side effects, continue runs them, and inner break stays local', () => {
+    const result = run(`awk 'function step() { steps++; return 1 } BEGIN {
+      for (i = 0; i < 3; i += step()) { break }
+      print i, steps + 0
+      for (i = 0; i < 3; i += step()) { continue }
+      print i, steps
+      for (outer = 0; outer < 2; outer++) {
+        for (inner = 0; inner < 3; inner += step()) { break }
+      }
+      print outer, inner, steps
+    }'`)
+    assert.deepEqual(result, { stdout: '0 0\n3 3\n2 0 3\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+  })
+
   it('control flow: if / else chains, while, do, for, for-in, break, continue, nested blocks, empty statements', () => {
     assert.equal(out("awk 'BEGIN { x = 5; if (x < 3) print \"low\"; else if (x < 10) print \"mid\"; else print \"high\" }'"), 'mid\n')
     assert.equal(out("awk 'BEGIN { i = 0; do { i++ } while (i < 3); print i; while (i < 10) { i++; if (i == 5) continue; if (i == 8) break; s = s i } print s; for (j = 0; j < 3; j++) t = t j; print t; for (;;) { k++; if (k > 2) break } print k }'"), '3\n467\n012\n3\n')
@@ -6645,6 +6659,12 @@ describe('createTerminal — awk', () => {
     assert.equal(out("awk 'BEGIN { printf \"%x|%#x|%9.2x|%u|%X|%x|%u\\n\", 1e30, 1e30, 1e30, -1e30, 2^64, 2^63, -2^63 }'"), '1e+30|1.00000e+30|    1e+30|-1e+30|1.84467e+19|8000000000000000|9223372036854775808\n')
     assert.equal(out("awk 'BEGIN { printf \"[%.0d][%.0u][%.0u][%#o][%#o][%#.2o][%-#.2o][%#x][%#.0x][%+.0d][%5.0d][%c]\\n\", 0.5, 0, 0.5, 0, 1e-6, 0, 0.5, 1e-6, 0, 0, 0, \"\" }'"), '[][][0][0][00][00][000][0x0][0][][     ][\0]\n')
     assert.equal(out("awk 'BEGIN { printf \"%#.0g|%#g|%#.0e|%#.0f|%'\"'\"'d|%5'\"'\"'d\\n\", 1, 1, 1, 1, 1234567, 12 }'"), '1.|1.00000|1.e+00|1.|1234567|   12\n')
+  })
+
+  it('evaluates 640 nested parentheses without unsupported diagnostics', () => {
+    const expression = '('.repeat(640) + '42' + ')'.repeat(640)
+    const result = run("awk 'BEGIN { print " + expression + " }'")
+    assert.deepEqual(result, { stdout: '42\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
   })
 
   it('grammar corners follow gawk: comparisons do not chain, `~` does, a space before a call is an error, empty rules are errors', () => {

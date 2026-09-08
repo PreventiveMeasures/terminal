@@ -1,116 +1,47 @@
-// Caller-supplied commands — the `opts.commands` wiring point.
-//
-// The builtin set is deliberately self-contained: no dependencies,
-// no I/O, nothing platform-specific. That rules out a whole class of
-// commands an embedder still wants, and `sha256sum` / `shasum` are
-// the motivating case — hashing needs a crypto implementation, and
-// this package has no business bundling one (or picking which
-// algorithms, and which runtime's API to speak). The embedder
-// already has one. So they hand in the handler and we supply the
-// shell around it: tokenizing, brace/glob expansion, pipes,
-// redirects, `&&` chains, `xargs`, completion, `which`.
-//
-//   // `sha256hex` is the host's — a crypto module, a hash library,
-//   // whatever the embedder already ships. This package stays
-//   // crypto-free.
-//   const term = createTerminal(sources, {
-//     commands: {
-//       sha256sum: {
-//         pipe: true,
-//         run: ({ args, readInputs }) => {
-//           const r = readInputs(args)
-//           const lines = r.inputs.map((i) => `${sha256hex(i.content)}  ${i.name ?? '-'}\n`)
-//           return { stdout: lines.join(''), stderr: r.stderr, exitCode: r.failed ? 1 : 0 }
-//         },
-//       },
-//     },
-//   })
-//
-// A handler receives an `io` object rather than the internal
-// `(stdin, tokens, ctx)` triple the builtins take. `ctx` carries
-// engine internals — the raw path-indexed fs, `dispatch`, the
-// registry itself — that are not a contract anyone outside `src/`
-// should build on, and handing out a mutable `ctx.cwd` would let a
-// wired command move the terminal underneath the caller. The io
-// object is the part that IS a contract.
-//
-// Results are normalized on the way out for the same reason, and
-// strictly. A handler one `.join('')` short of a string returns an
-// array; a lenient destructure would read that as `stdout: ''` and
-// report a successful command that printed nothing, with the cause
-// nowhere near the symptom. So anything that isn't a result throws,
-// and `dispatch` turns the throw into a `name: reason` stderr line —
-// the same treatment a builtin's internal error gets.
+// Caller-provided synchronous commands. Handlers receive a limited I/O view,
+// not the mutable execution context; malformed descriptors/results fail
+// explicitly rather than becoming a successful command with missing output.
 
 import { lookup, resolve } from './fs.js'
 import { consumeStdin, ok, readInputs } from './util.js'
 
-// A wired name has to survive the tokenizer and the dispatcher:
-// whitespace or shell punctuation could never be typed as a command,
-// `/` collides with the bin-prefix mapping, and a leading `-` would
-// parse as a flag. Requiring a leading letter or digit also keeps
-// `__proto__` and friends out of the registries, so the "dispatch
-// can't reach Object.prototype members" property holds for wired
-// commands exactly as it does for builtins.
+// Slash paths are reserved for bin aliases.
 const NAME_RE = /^[a-zA-Z0-9][\w.+-]*$/u
 
-// Descriptor keys, checked strictly. `parseArgs` rejects unknown
-// options for the same reason: a silently ignored `hide: true` (for
-// `hidden`) looks like it worked, and the command shows up in
-// completion anyway with nothing to explain why.
+// Reject misspelled descriptor fields instead of silently ignoring metadata.
 const SPEC_KEYS = ['run', 'pipe', 'hidden']
 
-// The fields a handler's result object may carry, checked just as
-// strictly and for the same reason.
 const RESULT_KEYS = ['stdout', 'stderr', 'exitCode']
 
-// Split `opts.commands` into the two registry halves registry.js
-// merges with the builtins, plus the name lists that feed completion
-// and the "Available: …" hint. `isBuiltin` is passed in rather than
-// imported so the command set stays registry.js's business.
 export function defineCommands(commands, isBuiltin) {
-  const visible = { __proto__: null }
-  const hidden = { __proto__: null }
+  const handlers = { __proto__: null }
   const names = []
   const pipeNames = []
   for (const [name, value] of commandEntries(commands)) {
     const { run, pipe, hidden: hide } = checkSpec(name, value, isBuiltin)
-    const handler = (stdin, tokens, ctx) => invoke(name, run, stdin, tokens, ctx)
-    if (hide) { hidden[name] = handler; continue }
-    visible[name] = handler
+    // A Map-like iterator may repeat a name; visible registrations take priority.
+    if (hide && names.includes(name)) continue
+    handlers[name] = (stdin, tokens, ctx) => invoke(name, run, stdin, tokens, ctx)
+    if (hide) continue
     names.push(name)
-    // `pipe` only drives completion, and hidden commands are absent
-    // from completion entirely — so it's meaningless there, exactly
-    // as it is for the builtin `od` / `xxd` (pipeable, unlisted).
+    // Visibility and pipeability affect completion, not dispatch.
     if (pipe) pipeNames.push(name)
   }
-  return { visible, hidden, names, pipeNames }
+  return { handlers, names, pipeNames }
 }
 
-// `[name, descriptor]` pairs out of whatever the caller passed. Every
-// rejected shape here is one that would otherwise construct a working
-// terminal with the commands silently missing or misnamed, and the
-// embedder's first symptom would be `sha256sum: command not found`
-// long after the wiring bug.
 function commandEntries(commands) {
   if (commands === undefined || commands === null) return []
-  // An array reaches `Object.entries` as index keys, and `0` is a
-  // legal command name (`7z` is why names may start with a digit), so
-  // `commands: [spec]` would quietly register a command called `0`.
+  // Object.entries would turn array indices into unintended command names.
   if (Array.isArray(commands)) {
     throw new TypeError('createTerminal: opts.commands must be an object or a Map (got an array)')
   }
   if (typeof commands !== 'object') {
     throw new TypeError(`createTerminal: opts.commands must be an object or a Map (got ${typeof commands})`)
   }
-  // Duck-typed rather than `instanceof Map`: a Map built in another
-  // realm — an iframe, a worker, a second copy of the bundle — fails
-  // `instanceof`, and `Object.entries` of a Map is `[]`, so the strict
-  // test would hand back a terminal with nothing wired into it.
+  // Cross-realm Maps fail instanceof; Object.entries would lose their entries.
   if (typeof commands.entries === 'function') return [...commands.entries()]
-  // Anything else has to be a plain data object: a class instance or
-  // an `Object.create(handlers)` keeps its commands on the prototype,
-  // where `Object.entries` cannot see them.
+  // Prototype-owned commands would be silently lost by Object.entries.
   const proto = Object.getPrototypeOf(commands)
   if (proto !== Object.prototype && proto !== null) {
     throw new TypeError('createTerminal: opts.commands must be a plain object or a Map (own enumerable properties only)')
@@ -118,17 +49,9 @@ function commandEntries(commands) {
   return Object.entries(commands)
 }
 
-// Validate one entry and normalize it to `{ run, pipe, hidden }`.
-// Every failure throws from `createTerminal` rather than degrading
-// at dispatch time: a typo'd descriptor is a wiring bug in the
-// embedder's own code, and the useful moment to hear about it is
-// when the terminal is built, not when a user happens to type the
-// name.
+// Validate wiring at construction, before a user tries to run the command.
 function checkSpec(name, value, isBuiltin) {
-  // A Map takes any key. A non-string one string-coerces through
-  // NAME_RE and then reaches `reg.names`, where completion — which
-  // has no error boundary, unlike `run()` — would call `.startsWith`
-  // on it and throw into the embedder's keystroke handler.
+  // Non-string Map keys cannot participate in command-name completion.
   if (typeof name !== 'string') {
     throw new TypeError(`createTerminal: command names must be strings (got ${typeof name})`)
   }
@@ -139,10 +62,7 @@ function checkSpec(name, value, isBuiltin) {
     throw new Error(`createTerminal: ${name}: cannot redefine a built-in command`)
   }
   if (typeof value === 'function') {
-    // The bare-function form carries no metadata, so `pipe`/`hidden`
-    // hung on the function itself (`Object.assign(fn, { pipe: true })`)
-    // would be dropped in silence — the command missing from
-    // completion with nothing to explain why.
+    // Metadata belongs on a descriptor, not properties of a bare handler.
     for (const key of Object.keys(value)) {
       if (SPEC_KEYS.includes(key)) {
         throw new Error(`createTerminal: ${name}: \`${key}\` belongs on a { run } descriptor, not on the handler function`)
@@ -153,10 +73,7 @@ function checkSpec(name, value, isBuiltin) {
   if (value === null || typeof value !== 'object') {
     throw new TypeError(`createTerminal: ${name}: expected a function or a { run } object`)
   }
-  // Read `run` ONCE. An accessor (or a Proxy) that answers differently
-  // on a second read would otherwise pass this check with a function
-  // and have something else stored — deferring the failure to dispatch
-  // time, which is what this function exists to prevent.
+  // Read once so stateful accessors cannot change the validated handler.
   const run = value.run
   if (typeof run !== 'function') {
     throw new TypeError(`createTerminal: ${name}: \`run\` must be a function`)
@@ -169,18 +86,8 @@ function checkSpec(name, value, isBuiltin) {
   return { run, pipe: Boolean(value.pipe), hidden: Boolean(value.hidden) }
 }
 
-// The per-invocation io object. `args` is post-expansion (braces and
-// globs already applied, argv[0] stripped), so a wired command sees
-// exactly what a builtin would. `cwd` is a snapshot: read-only by
-// construction, since a wired command that could `cd` would move the
-// terminal under the embedder without going through `run`.
-//
-// That snapshot is taken ONCE and `io.fs` / `io.readInputs` resolve
-// against it rather than against the live `ctx.cwd`, so the three can
-// never disagree — a handler that keeps its `io` past a later `cd`,
-// or that re-enters `run()` through the terminal handle the embedder
-// holds, would otherwise read `io.cwd` as one directory while
-// resolving its operands in another.
+// Snapshot cwd for io.cwd, io.fs, and io.readInputs together: saved I/O views
+// and reentrant handlers must not resolve paths against a later cwd.
 function invoke(name, run, stdin, tokens, ctx) {
   // A wired command is handed its stdin outright, so it is taken to
   // have read it: the next command in a group starts at its end.
@@ -192,15 +99,8 @@ function invoke(name, run, stdin, tokens, ctx) {
     stdin,
     cwd: scope.cwd,
     fs: fsView(scope),
-    // The coreutils partial-failure model, shared with cat/head/wc:
-    // read every path you can, collect one stderr line per failure,
-    // and report `failed` so the caller can exit non-zero while
-    // still emitting the files that did read. An empty list means
-    // "no file operands" and yields a single nameless input carrying
-    // stdin — the convention every filter in this registry follows.
-    // A bare string is rejected rather than spread into one input per
-    // CHARACTER, which would otherwise surface as five bogus "no such
-    // file" lines for `readInputs(args[0])`.
+    // Preserve partial reads and their errors. A string would otherwise be
+    // treated as an iterable of individual path characters.
     readInputs: (paths = []) => {
       if (typeof paths === 'string') throw new TypeError(`readInputs: expected an array of paths, got a string: ${paths}`)
       return readInputs(name, [...paths], stdin, scope)
@@ -209,11 +109,7 @@ function invoke(name, run, stdin, tokens, ctx) {
   return normalizeResult(run(io))
 }
 
-// Read-only, cwd-relative view of the virtual filesystem. The
-// internal fs speaks absolute normalized paths only; resolving here
-// means a handler can use the operands it was handed (`./a.txt`,
-// `../b`) without knowing that. Directory listings and walks are
-// copied out so a handler can't mutate the shared child index.
+// Resolve against the captured cwd; copy listings to protect shared indexes.
 function fsView(scope) {
   const at = (path) => lookup(scope.cwd, path, scope.fs).path
   return {
@@ -223,11 +119,8 @@ function fsView(scope) {
     readFile: (path) => scope.fs.readFile(at(path)),
     listDir: (path) => {
       const abs = at(path)
-      // The one view method that can fail, so it fails in the shape
-      // every builtin uses — `operand: reason`, naming the operand as
-      // typed. createFs's own throw says "not a directory" even for a
-      // path that isn't there, and quotes the resolved absolute form
-      // of an operand the user wrote relatively.
+      // Report the original operand, distinguishing missing files from files
+      // passed where a directory is required.
       if (!scope.fs.isDir(abs)) {
         throw new Error(`${path}: ${scope.fs.isFile(abs) ? 'not a directory' : 'no such file or directory'}`)
       }
@@ -238,32 +131,21 @@ function fsView(scope) {
   }
 }
 
-// Accepted shapes: a string (stdout, exit 0), a partial
-// `{ stdout, stderr, exitCode }`, or nothing at all (a silent
-// success, so `run() {}` is a working no-op). Anything else is a
-// wiring bug worth an error rather than a coerced value.
+// Accept stdout strings, partial result objects, and nullish silent success.
 function normalizeResult(result) {
   if (result === undefined || result === null) return ok()
   if (typeof result === 'string') return ok(result)
   if (typeof result !== 'object') {
     throw new TypeError(`invalid result: expected a string or an object (got ${typeof result})`)
   }
-  // A promise is the one wrong shape worth naming: the whole engine
-  // is synchronous — a pipeline stage's stdout is the next stage's
-  // stdin, immediately — so an `async run` (or a WebCrypto-style
-  // digest returning a promise) has no join point. Without this the
-  // promise would stringify into the stream as `[object Promise]`.
+  // Pipelines are synchronous; a promise has no point at which to be awaited.
   if (typeof result.then === 'function') {
     throw new TypeError('invalid result: commands are synchronous, a promise cannot be awaited')
   }
   if (Array.isArray(result)) {
     throw new TypeError('invalid result: expected a string or an object, got an array (join the lines first)')
   }
-  // The descriptor rule, applied to results: an object carrying none
-  // of these fields is a mistake, not an empty success. Without the
-  // check, one forgotten `.join('')` — an array of output lines, a
-  // hash digest still in binary form, a `{ out: … }` typo — reads as
-  // exit 0 with no output and nothing on stderr to explain it.
+  // Empty or misspelled result objects must not silently succeed.
   const keys = Object.keys(result)
   for (const key of keys) {
     if (!RESULT_KEYS.includes(key)) {
@@ -279,9 +161,6 @@ function normalizeResult(result) {
   if (!Number.isInteger(exitCode) || exitCode < 0) {
     throw new TypeError(`invalid result: exitCode must be a non-negative integer (got ${exitCode})`)
   }
-  // The trailing-newline rule util.js's `err` applies to every builtin
-  // holds for wired stderr too, or the next error line fuses onto the
-  // end of this one. stdout is left exactly as returned — `head -c`
-  // shows that a command may legitimately end mid-line.
+  // Keep stdout byte-exact; terminate stderr so consecutive errors don't fuse.
   return { stdout, stderr: stderr === '' || stderr.endsWith('\n') ? stderr : stderr + '\n', exitCode }
 }

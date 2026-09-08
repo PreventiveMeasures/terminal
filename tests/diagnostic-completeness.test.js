@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 import { DEFAULT_REGISTRY } from '../src/registry.js'
-import { SHELL_GAPS } from '../src/shell-builtins.js'
+import { SHELL_GAPS } from '../src/shell/builtins.js'
 import { createUnsupportedFeed } from '../src/unsupported.js'
 
 const FILES = { f: 'a 1\nb 2\na 1\n', u: 'é😀\n', 'src/a.js': 'const a = 1\n' }
