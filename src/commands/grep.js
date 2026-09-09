@@ -9,11 +9,11 @@ import { compilePatterns, inputGap } from './grep-pattern.js'
 import { compileGlob } from '../glob.js'
 import { countMatches, grepRun, grepSummary, noMatch } from './grep-output.js'
 
-const FLAGS = '[-i] [-I] [-v] [-n] [-r|-R] [-w] [-o] [-E|-F|-G] [-l] [-L] [-c] [-q] [-m N] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
+const FLAGS = '[-i] [-I] [-v] [-n] [-r|-R] [-w] [-x] [-o] [-E|-F|-G|-P] [-l] [-L] [-c] [-q] [-m N] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
 const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} -e PATTERN ... [PATH...]`
 
 // -r and -R coincide because the virtual filesystem has no symlinks.
-const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'h', 'H', 'o', 'E', 'F', 'G', 'q', 'I']
+const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'x', 'h', 'H', 'o', 'E', 'F', 'G', 'P', 'q', 'I']
 const VALUE_SHORTS = ['A', 'B', 'C', 'm']
 
 export function grep(stdin, tokens, ctx) {
@@ -59,7 +59,7 @@ export function grep(stdin, tokens, ctx) {
     result = mode ? grepSummary(inputs, re.res, { ...opts, mode }) : grepRun(inputs, re.res, opts)
   } catch (e) {
     if (e instanceof AwkError && e.gap) return unsupported('feature', 'grep', e.gap, `grep: ${e.message}`, 2)
-    throw e
+    return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2)
   }
   // Read errors preserve successful output but override the match status with exit 2.
   if (r.failed) return { stdout: result.stdout, stderr: r.stderr + result.stderr, exitCode: 2 }
@@ -108,7 +108,7 @@ function checkConflicts(flags) {
   if (modes.length > 1) {
     return unsupported('option', 'grep', 'combined output modes', `grep: ${modes.map((f) => `-${f}`).join(' / ')} are mutually exclusive`)
   }
-  const dialects = ['E', 'F', 'G'].filter((f) => flags.has(f))
+  const dialects = ['E', 'F', 'G', 'P'].filter((f) => flags.has(f))
   if (dialects.length > 1) {
     return err(`grep: ${dialects.map((f) => `-${f}`).join(' / ')} are mutually exclusive`, 2)
   }

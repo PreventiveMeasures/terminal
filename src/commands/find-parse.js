@@ -3,7 +3,7 @@ import { compileGlob } from '../glob.js'
 import { err, parseNonNegativeInt } from '../util.js'
 import { unsupported } from '../unsupported.js'
 
-const VALUE_PRIMARIES = new Set(['name', 'iname', 'type', 'path', 'mindepth', 'maxdepth'])
+const VALUE_PRIMARIES = new Set(['name', 'iname', 'type', 'path', 'ipath', 'mindepth', 'maxdepth'])
 const isTok = (t, name) => t === '-' + name || t === '--' + name
 
 export function parseFindArgs(tokens) {
@@ -95,7 +95,7 @@ function valuePredicate(kind, value, negate, depth) {
     depth[kind === 'mindepth' ? 'minDepth' : 'maxDepth'] = count.value
     return { kind: 'true', negate }
   }
-  return { kind, negate, re: compileGlob(value, { ignoreCase: kind === 'iname' }) }
+  return { kind, negate, re: compileGlob(value, { ignoreCase: kind === 'iname' || kind === 'ipath' }) }
 }
 
 // Known but unrepresentable file types are unsupported; invalid types are errors.

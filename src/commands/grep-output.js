@@ -1,5 +1,6 @@
 // Line selection and presentation shared by grep's output modes.
 import { joinLines, ok, splitLines } from '../util.js'
+import { UnsupportedError } from '../unsupported.js'
 
 export const anyMatch = (res, line) => res.some((re) => re.test(line))
 export const noMatch = () => ({ stdout: '', stderr: '', exitCode: 1 })
@@ -87,6 +88,7 @@ function presentLine(line, name, lineNum, res, opts, selected, out) {
         const search = re.scan ??= new RegExp(re.source, re.flags + 'g')
         search.lastIndex = cursor
         const m = search.exec(line)
+        if (m && m[0] === '' && re.pcre) throw new UnsupportedError('feature', 'PCRE empty match extent', 'only-matching with empty PCRE matches is not supported')
         match = m ? { start: m.index, end: m.index + m[0].length } : null
       }
       if (match && (!best || match.start < best.start || (match.start === best.start && match.end > best.end))) best = match

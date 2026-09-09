@@ -63,7 +63,7 @@ const NL_SEP = '\t'
 const NL_BLANK = ' '.repeat(NL_WIDTH + NL_SEP.length)
 
 function nl(stdin, tokens, ctx) {
-  const { values, positional } = parseArgs(tokens, { valueShort: ['b'] })
+  const { values, positional, order } = parseArgs(tokens, { valueShort: ['b', 'v'], valueLong: ['starting-line-number'] })
   const style = values.get('b') ?? 't'
   if (!['a', 't', 'n'].includes(style)) {
     const message = `nl: -b: only \`a\`, \`t\` and \`n\` are supported (got \`${style}\`)`
@@ -71,15 +71,22 @@ function nl(stdin, tokens, ctx) {
     if (style.startsWith('p')) return unsupported('option', 'nl', '-b p', message)
     return err(message)
   }
+  let n = 1n
+  for (const { name, value } of order) {
+    if (name !== 'v' && name !== 'starting-line-number') continue
+    if (!/^[ \t\n\r\f\v]*[+-]?\d+$/u.test(value)) return err(`nl: invalid starting line number: ${value}`)
+    n = BigInt(value)
+    if (n < -9223372036854775808n || n > 9223372036854775807n) return err(`nl: invalid starting line number: ${value}`)
+  }
   const r = readInputs('nl', positional, stdin, ctx)
   if (r.inputs.some(({ content }) => /(?:^|\n)(?:\\:){1,3}(?:\n|$)/u.test(content))) return unsupported('feature', 'nl', 'logical pages', 'nl: logical page delimiters are not supported')
   const out = []
-  let n = 0
   for (const { content } of r.inputs) {
     for (const line of splitLines(content)) {
       if (style === 'a' || (style === 't' && line !== '')) {
-        n++
+        if (n > 9223372036854775807n) return { stdout: joinLines(out), stderr: r.stderr + 'nl: line number overflow\n', exitCode: 1 }
         out.push(`${String(n).padStart(NL_WIDTH)}${NL_SEP}${line}`)
+        n++
       } else {
         out.push(NL_BLANK + line)
       }

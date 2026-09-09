@@ -2,6 +2,7 @@
 
 import { unsupported } from '../unsupported.js'
 import { echo } from './echo.js'
+import { printf } from './printf.js'
 import { parseArgs } from '../args.js'
 import { formatWc } from './wc-format.js'
 import { consumeStdin, err, joinLines, lineRecords, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from '../util.js'
@@ -282,7 +283,7 @@ export const TEXT_COMMANDS = {
   cat, grep,
   head: (stdin, tokens, ctx) => headTail('head', stdin, tokens, ctx),
   tail: (stdin, tokens, ctx) => headTail('tail', stdin, tokens, ctx),
-  wc, sort, uniq, echo, xargs, awk,
+  wc, sort, uniq, echo, printf, xargs, awk,
 }
 
 export const TRIVIAL_COMMANDS = {

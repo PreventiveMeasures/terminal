@@ -5555,7 +5555,7 @@ describe('createTerminal — complete: corner cases', () => {
     // Non-pipeable: ls / pwd / cd / find / tree / echo / seq / which /
     // basename / dirname — none of them read stdin, so none should
     // surface as a pipe target.
-    for (const name of ['ls', 'pwd', 'cd', 'find', 'tree', 'echo', 'seq', 'which', 'basename', 'dirname']) {
+    for (const name of ['ls', 'pwd', 'cd', 'find', 'tree', 'echo', 'printf', 'test', 'seq', 'which', 'basename', 'dirname']) {
       assert.deepEqual(t.complete('cat | ' + name), [], `${name} should not be a pipe target`)
     }
     // A prefix that only matches non-pipeable commands (`l` → ls) is [].

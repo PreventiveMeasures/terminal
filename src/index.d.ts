@@ -132,7 +132,7 @@ export interface CreateTerminalOptions {
  *   goes no further on: `&` backgrounding, `while` / `if` / `case` and
  *   the other shell blocks it does not implement, command substitution
  *   and arithmetic, the `${…}` parameter-expansion operators, shell
- *   builtins it lacks (`test`, `printf`, `source`, …), a variable
+ *   builtins it lacks (`source`, `eval`, …), a variable
  *   nothing set (there is no environment: `$PATH` expands to nothing,
  *   with this entry), a redirect that would write a file against the
  *   read-only filesystem, `sed` outside its one supported script form,

@@ -7,19 +7,19 @@ export const SHELL_FILES = { 'config/shell.env': 'PROJECT_NAME=terminal\n' }
 
 export const SHELL_WORKFLOWS = [
   {
-    purpose: 'Check for a package manifest before inspecting it',
-    command: 'test -f package.json && cat package.json',
-    expected: feature('test', 'test'),
+    purpose: 'Check read permissions before inspecting a package manifest',
+    command: 'test -r package.json && cat package.json',
+    expected: feature('-r', 'test'),
   },
   {
     purpose: 'Check that project documentation is nonempty',
     command: '[ -s README.md ] && head -n 20 README.md',
-    expected: feature('[', '['),
+    expected: feature('-s', '['),
   },
   {
-    purpose: 'Print matching source paths one per line',
-    command: String.raw`printf '%s\n' src/*.js`,
-    expected: feature('printf', 'printf'),
+    purpose: 'Quote matching source paths for reuse as shell input',
+    command: String.raw`printf '%q\n' src/*.js`,
+    expected: feature('%q', 'printf'),
   },
   {
     purpose: 'Read the first metrics row into a shell variable',

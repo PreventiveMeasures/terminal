@@ -9,9 +9,9 @@ const FILES = { f: 'a 1\nb 2\na 1\n', u: 'é😀\n', 'src/a.js': 'const a = 1\n'
 const run = (command) => createTerminal(FILES).run(command)
 const identity = (result) => result.unsupported.map(({ kind, command, detail }) => ({ kind, command, detail }))
 
-// These builtins accept arbitrary arguments or parse control counts.
+// These builtins interpret option-like tokens as data, counts, or expressions.
 // Every other registered command must diagnose unavailable options.
-const NO_OPTIONS = new Set(['echo', 'true', 'false', ':', 'exit', 'break', 'continue'])
+const NO_OPTIONS = new Set(['echo', 'true', 'false', ':', 'exit', 'break', 'continue', 'test', '['])
 const registered = { ...DEFAULT_REGISTRY.commands, ...DEFAULT_REGISTRY.hidden }
 
 describe('diagnostic completeness — command dispatch', () => {
@@ -56,6 +56,13 @@ describe('diagnostic completeness — command dispatch', () => {
       const r = run(name + ' --audit-missing-option')
       assert.deepEqual(r.unsupported, [])
       assert.notEqual(r.exitCode, 0)
+    }
+    for (const command of ['test --audit-missing-option', '[ --audit-missing-option ]']) {
+      const r = run(command)
+      assert.equal(r.exitCode, 0)
+      assert.equal(r.stdout, '')
+      assert.equal(r.stderr, '')
+      assert.deepEqual(r.unsupported, [])
     }
   })
 })
