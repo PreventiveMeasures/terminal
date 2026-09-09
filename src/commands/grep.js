@@ -2,7 +2,7 @@
 
 import { basename, lookup, relativeTo } from '../fs.js'
 import { parseArgs } from '../args.js'
-import { consumeStdin, err, parseNonNegativeInt, readFilesFor, readInputs, usage, utf8 } from '../util.js'
+import { consumeStdin, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, usage } from '../util.js'
 import { UnsupportedError, unsupported, unsupportedFrom } from '../unsupported.js'
 import { AwkError } from '../awk/common.js'
 import { compilePatterns, inputGap } from './grep-pattern.js'
@@ -51,7 +51,7 @@ export function grep(stdin, tokens, ctx) {
   // Filename filters apply to named and recursively discovered files, but not stdin.
   let inputs = r.inputs
   if (filters.name.length > 0) inputs = inputs.filter((inp) => inp.name === null || includedByName(basename(inp.name), filters.name))
-  if (filters.ignoreBinary) inputs = inputs.map((inp) => textInput(inp, filters))
+  if (counts.max !== 0) inputs = inputs.map((inp) => textInput(inp, filters, re.res, flags.has('v')))
   const gap = counts.max === 0 ? null : inputGap(inputs, re.res, flags.has('v'), filters.forceText)
   if (gap) return gap
   const showName = pickShowName(flags, rest.length)
@@ -82,7 +82,7 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
     if (paths.includes('-') || (paths.includes('/dev/stdin') && !ctx.stdinFile)) stdin = ''
     for (const input of r.inputs) {
       if (filters.name.length > 0 && input.name !== null && !includedByName(basename(input.name), filters.name)) continue
-      const inp = textInput(input, filters)
+      const inp = textInput(input, filters, res, invert)
       const gap = inputGap([inp], res, invert, filters.forceText)
       if (gap) { gap.stderr = stderr + gap.stderr; return gap }
       if (countMatches(inp.content, res, invert, 1) > 0) return { stdout: '', stderr, exitCode: 0 }
@@ -91,14 +91,19 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
   return { stdout: '', stderr, exitCode: failed ? 2 : 1 }
 }
 
-// Retain the operand for -L and -c, but binary input selects no lines,
-// including under -v. Removing just the NUL-containing line loses data.
-function textInput(input, filters) {
-  if (!filters.ignoreBinary || !input.content.includes('\0')) return input
+// Retain empty operands for -L and -c. Default binary mode treats NUL as
+// a record separator, so an input of unselected empty records is a non-match.
+function textInput(input, filters, res, invert) {
+  if (!input.content.includes('\0') || filters.forceText) return input
+  if (!filters.ignoreBinary) {
+    // oxlint-disable-next-line no-control-regex -- GNU binary mode uses NUL as a record delimiter.
+    return /^[\0\n]+$/u.test(input.content) && res.some((re) => re.test('')) === invert
+      ? { ...input, content: '' } : input
+  }
   // GNU's initial 96 KiB read detects NUL before matching that buffer.
   // Later discovery may retain earlier output, counts, or a quiet success;
   // buffer growth and read boundaries are not represented by this runtime.
-  if (utf8.encode(input.content.slice(0, input.content.indexOf('\0'))).length >= 96 * 1024) throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
+  if (encodeUtf8Loose(input.content.slice(0, input.content.indexOf('\0'))).length >= 96 * 1024) throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
   return { ...input, content: '' }
 }
 

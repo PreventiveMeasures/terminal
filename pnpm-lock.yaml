@@ -7,12 +7,25 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@exodus/bytes':
+        specifier: ^1.15.1
+        version: 1.15.1
     devDependencies:
       oxlint:
         specifier: ^1.63.0
         version: 1.64.0
 
 packages:
+
+  '@exodus/bytes@1.15.1':
+    resolution: {integrity: sha512-S6mL0yNB/Abt9Ei4tq8gDhcczc4S3+vQ4ra7vxnAf+YHC02srtqxKKZghx2Dq6p0e66THKwR6r8N6P95wEty7Q==}
+    engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
+    peerDependencies:
+      '@noble/hashes': ^1.8.0 || ^2.0.0
+    peerDependenciesMeta:
+      '@noble/hashes':
+        optional: true
 
   '@oxlint/binding-android-arm-eabi@1.64.0':
     resolution: {integrity: sha512-2r6Nq3XXGLHEXKkSj8JtmJ6N4gDw431DPFOg0ZoJHlNjnG6HVMm/ksQ10m0HJ8WBvwgMe1L50UHPaYZutCRPCw==}
@@ -147,6 +160,8 @@ packages:
         optional: true
 
 snapshots:
+
+  '@exodus/bytes@1.15.1': {}
 
   '@oxlint/binding-android-arm-eabi@1.64.0':
     optional: true

@@ -12,8 +12,6 @@
     "unicorn"
   ],
   "globals": {
-    "TextDecoder": "readonly",
-    "TextEncoder": "readonly",
     "structuredClone": "readonly"
   },
   "rules": {

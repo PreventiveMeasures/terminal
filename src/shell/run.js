@@ -3,17 +3,30 @@ import { backtickGap, readExpansion } from './lex.js'
 import { refusedWrite } from './parse.js'
 import { BindingMap } from './bindings.js'
 import { lookup } from '../fs.js'
-import { unsupportedNote } from '../unsupported.js'
+import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { err, reason } from '../util.js'
-import { appendOutput, emptyOutput, routeOutput, writeError } from './output.js'
+import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
+
+export { createIoGuard } from './io.js'
+export { commandWriteError } from './output.js'
+
+// Commands flush files before a subsequent command reads them.
+// Other streams stay in the enclosing handler's result for routing.
+export function routeExternalOutput(result, ctx) {
+  const fds = {
+    1: ctx.outputFds[1]?.path ? ctx.outputFds[1] : 'out',
+    2: ctx.outputFds[2]?.path ? ctx.outputFds[2] : 'err',
+  }
+  return routeOutput(result, { fds }, ctx)
+}
 
 // A list shares stdin across its steps: { cat; cat; } consumes it once.
 // `exit` bypasses pipeline negation; break/continue still carry its status.
 export function runSteps(steps, ctx, stream) {
   const result = emptyOutput()
   for (const step of steps) {
-    if (step.warnings) appendOutput(result, { ...emptyOutput(step.warnings), exitCode: result.exitCode })
+    if (step.warnings) appendOutput(result, routeOutput({ ...emptyOutput(step.warnings), exitCode: result.exitCode }, { fds: ctx.outputFds }, ctx))
     if (step.gate === 'and' && result.exitCode !== 0) continue
     if (step.gate === 'or' && result.exitCode === 0) continue
     const r = runPipeline(step.stages, ctx, stream)
@@ -30,17 +43,19 @@ export function runSteps(steps, ctx, stream) {
 // Only the first stage consumes the enclosing list's shared input stream.
 function runPipeline(stages, ctx, stream) {
   const output = emptyOutput()
+  let input = stream.text
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]
     const first = i === 0
-    const run = () => pipelineStage(stage, ctx, first ? stream.text : output.stdout, first && ctx.stdinFile)
+    let piped = ''
+    const fds = { ...ctx.outputFds }
+    if (i < stages.length - 1) fds[1] = { write(text) { piped += text } }
+    const stageInput = input
+    const run = () => pipelineStage(stage, ctx, stageInput, first && ctx.stdinFile, fds)
     const routed = stages.length > 1 ? isolated(ctx, run) : run()
     if (first) stream.text = routed.inputLeft
-    output.stdout = routed.stdout
-    output.stderr += routed.stderr
-    output.exitCode = routed.exitCode
-    output.unordered ||= routed.unordered
-    output.events.push(...(i === stages.length - 1 ? routed.events : routed.events.filter((e) => e.fd === 2)))
+    appendOutput(output, routed)
+    input = piped
     if (stages.length === 1) { output.halt = routed.halt; output.control = routed.control }
   }
   return output
@@ -48,9 +63,8 @@ function runPipeline(stages, ctx, stream) {
 
 // Simple-command arguments expand before redirects. All expansion diagnostics
 // follow the descriptors active at their expansion site.
-function pipelineStage(stage, ctx, stdin, stdinFile) {
-  const fds = { 1: 'out', 2: 'err' }
-  const initial = { fds, stdin, stdinFile, stdinOrigin: stdinFile ? ctx.stdinOrigin : null }
+function pipelineStage(stage, ctx, stdin, stdinFile, fds) {
+  const initial = { fds, stdin, stdinFile, stdinOrigin: stdinFile ? ctx.stdinOrigin : null, stdinHandle: stdinFile ? ctx.stdinHandle : null }
   return withState(ctx, { substitutionExit: null, expansionOutput: emptyOutput(), expansionFds: fds }, () => withStreams(initial, ctx, () => {
     const simple = !stage.group && !stage.loop && !stage.conditional
     let expanded, expansionError
@@ -63,34 +77,42 @@ function pipelineStage(stage, ctx, stdin, stdinFile) {
     } catch (e) {
       expansionError = shellFailure(ctx, e)
     }
-    const io = resolveRedirs(stage, ctx, ctx.stdinLeft, stdinFile)
+    const io = resolveRedirs(stage, ctx, ctx.stdinLeft, stdinFile, fds)
     ctx.expansionFds = io.fds
+    let routed = false
     const result = withStreams(io, ctx, () => shellResult(ctx, () => {
       if (expansionError) return expansionError
       if (io.error) return io.error
-      if (stage.group) return runGroup(stage, ctx, io.stdin)
-      if (stage.loop) return runLoop(stage.loop, ctx)
-      if (stage.conditional) return runConditional(stage.conditional, ctx, io.stdin)
+      if (!simple) {
+        const r = stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx) : runConditional(stage.conditional, ctx, io.stdin)
+        routed = true
+        return r
+      }
       return runStage(ctx, expanded)
     }))
     const inputLeft = io.inherited ? ctx.stdinLeft : io.parentLeft
-    appendOutput(ctx.expansionOutput, routeOutput(result, io, ctx))
+    appendOutput(ctx.expansionOutput, routed ? result : routeStageOutput(result, io, ctx))
     return { ...ctx.expansionOutput, inputLeft, halt: result.halt, control: result.control }
   }))
 }
 
+function routeStageOutput(result, io, ctx) {
+  try { return routeOutput(result, io, ctx) } catch (e) { return routeOutput(shellFailure(ctx, e), io, ctx) }
+}
+
 // Apply redirects left to right. Track reopened file origins separately
 // from pipe input; only inherited input advances the enclosing list's stream.
-function resolveRedirs(stage, ctx, stdin, stdinFile) {
-  const fds = { 1: 'out', 2: 'err' }
+function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
+  const fds = { ...initialFds }
   let input = stdin
   let file = stdinFile
   let origin = file ? ctx.stdinOrigin : null
+  let handle = file ? ctx.stdinHandle : null
   let inherited = true
   let parentLeft = stdin
-  const done = (error) => ({ error, fds, stdin: input, stdinFile: file, stdinOrigin: file ? origin : null, inherited, parentLeft })
+  const done = (error) => ({ error, fds, stdin: input, stdinFile: file, stdinOrigin: file ? origin : null, stdinHandle: file ? handle : null, inherited, parentLeft })
   const expand = (fn) => {
-    const value = withState(ctx, { expansionFds: fds }, () => withStreams({ fds, stdin: input, stdinFile: file, stdinOrigin: origin }, ctx, fn))
+    const value = withState(ctx, { expansionFds: fds }, () => withStreams({ fds, stdin: input, stdinFile: file, stdinOrigin: origin, stdinHandle: handle }, ctx, fn))
     input = ctx.stdinLeft
     if (inherited) parentLeft = input
     return value
@@ -104,7 +126,7 @@ function resolveRedirs(stage, ctx, stdin, stdinFile) {
       else if (r.op === 'to') {
         const t = r.target === undefined ? expand(() => expandRedirect(r.word, ctx)) : { value: r.target }
         if (t.error) return done(err(`error: ${t.error}`))
-        const dest = t.value === '/dev/null' ? 'null' : t.value === '/dev/stdout' ? fds[1] : t.value === '/dev/stderr' ? fds[2] : null
+        const dest = t.value === '/dev/null' ? 'null' : t.value === '/dev/stdout' ? fds[1] : t.value === '/dev/stderr' ? fds[2] : ctx.writable ? ctx.fs.openWritable(ctx.cwd, t.value, r.append) : null
         if (dest === null) {
           const e = refusedWrite(r.label, t.value)
           ctx.unsupported.add(unsupportedNote(e))
@@ -124,7 +146,16 @@ function resolveRedirs(stage, ctx, stdin, stdinFile) {
         // A pipe's /dev/stdin shares the current stream. A regular file
         // is reopened from its original start with an independent offset.
         if (t.value !== '/dev/stdin' || file) inherited = false
-        if (t.value !== '/dev/stdin') { file = t.value !== '/dev/null'; origin = file ? input : null }
+        if (t.value !== '/dev/stdin') { file = t.value !== '/dev/null'; origin = file ? input : null; handle = read.handle }
+      }
+    }
+    if (file && handle) {
+      const current = ctx.io.bufferReads(() => ctx.fs.readIdentity(handle.identity))
+      if (current !== handle.content) {
+        if (inherited || input !== handle.content) throw new UnsupportedError('feature', 'modified redirected input', 'reading an inherited input file after it changes is not supported')
+        // A later output redirect may truncate a newly opened input file.
+        input = origin = current
+        handle = { ...handle, content: current }
       }
     }
   } catch (e) { return done(shellFailure(ctx, e)) }
@@ -146,8 +177,7 @@ function shellResult(ctx, fn) {
 // Closed descriptors propagate from enclosing groups. Leave stdinLeft
 // available to the enclosing list while restoring the other stream state.
 function withStreams(io, ctx, fn) {
-  const closedAt = (fd) => io.fds[fd] === 'closed' || ctx.closed[io.fds[fd]] === true
-  const state = { closed: { out: closedAt(1), err: closedAt(2) }, stdinFile: Boolean(io.stdinFile), stdinOrigin: io.stdinOrigin }
+  const state = { outputFds: io.fds, closed: { out: io.fds[1] === 'closed', err: io.fds[2] === 'closed' }, stdinFile: Boolean(io.stdinFile), stdinOrigin: io.stdinOrigin, stdinHandle: io.stdinHandle }
   ctx.stdinLeft = io.stdin
   return withState(ctx, state, fn)
 }
@@ -183,7 +213,10 @@ function readInput(path, ctx, stdin) {
   if (path === '/dev/stdin') return { content: stdin }
   const { path: abs, error } = lookup(ctx.cwd, path, ctx.fs)
   if (error) return { error: err(`error: ${path}: ${error}`) }
-  if (ctx.fs.isFile(abs)) return { content: ctx.fs.readFile(abs) }
+  if (ctx.fs.isFile(abs)) {
+    const content = ctx.fs.readFile(abs)
+    return { content, handle: ctx.writable && abs.startsWith('/tmp/') ? { path: abs, content, identity: ctx.fs.fileIdentity(abs) } : null }
+  }
   return { error: err(`error: ${path}: Is a directory`) }
 }
 
@@ -194,9 +227,7 @@ function runStage(ctx, expanded) {
   if (argv.length === 0) {
     return { stdout: '', stderr: '', exitCode: ctx.substitutionExit ?? 0 }
   }
-  let r = withTemporaries(expanded.temps, ctx, () => ctx.invoke(argv[0], argv.slice(1), ctx.stdinLeft))
-  if (ctx.closed.out && r.stdout !== '') r = writeError(argv[0], r, ctx)
-  return r
+  return withTemporaries(expanded.temps, ctx, () => ctx.invoke(argv[0], argv.slice(1), ctx.stdinLeft))
 }
 
 // Prefix values expand left to right. After dispatch, keep changes to other

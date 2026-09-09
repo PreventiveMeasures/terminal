@@ -1,8 +1,10 @@
+import { resolve } from '../fs.js'
 import { consumeStdin, readFilesFor } from '../util.js'
+import { refreshSedStdin } from './sed-output.js'
 
 // Open operands only as records or an evaluated $ address require them.
 // q leaves later operands unopened and preserves the rest of shared stdin.
-export function sedInput(files, stdin, ctx, delimiter, separate) {
+export function sedInput(files, stdin, ctx, delimiter, separate, report) {
   const names = files.length ? files : ['-']
   const status = { stderr: '', failed: false }
   let index = 0, line = 0, pipe = stdin, source = null
@@ -10,10 +12,15 @@ export function sedInput(files, stdin, ctx, delimiter, separate) {
   function available() {
     while (source === null || source.pos === source.content.length) {
       if (index === names.length) return false
-      const r = readFilesFor('sed', [names[index++]], ctx, pipe)
+      source = null
+      const name = names[index++]
+      if (name === '-') pipe = refreshSedStdin(pipe, ctx)
+      else if (name === '/dev/stdin' && ctx.stdinHandle) ctx.stdinOrigin = ctx.io.bufferReads(() => ctx.fs.readIdentity(ctx.stdinHandle.identity))
+      const r = readFilesFor('sed', [name], ctx, pipe)
       status.stderr += r.stderr
       status.failed ||= r.failed
-      source = r.inputs.length ? { ...r.inputs[0], pos: 0, first: true } : null
+      source = r.inputs.length ? { ...r.inputs[0], identity: inputIdentity(name, ctx), pos: 0, first: true } : null
+      if (r.stderr && report) report(r.stderr)
       // readFilesFor consumes shared stdin eagerly; this reader consumes it
       // one record at a time, including when $ merely looks ahead.
       if (source?.shared) consumeStdin(ctx, pipe)
@@ -37,10 +44,15 @@ export function sedInput(files, stdin, ctx, delimiter, separate) {
     source.first = false
     let last
     return {
-      text, terminator, line: ++line, reset,
+      text, terminator, line: ++line, reset, identity: source.identity,
       last: () => last ??= source.pos < source.content.length ? false : separate || !available(),
     }
   }
 
-  return { next, status }
+  return { next, status, get identity() { return source?.identity } }
+}
+
+function inputIdentity(name, ctx) {
+  if (name === '-' || name === '/dev/stdin') return ctx.stdinHandle?.identity
+  return ctx.fs.fileIdentity?.(resolve(ctx.cwd, name))
 }

@@ -1,6 +1,6 @@
 import { formatNumeric, padField } from '../awk/format.js'
 import { UnsupportedError } from '../unsupported.js'
-import { utf8 } from '../util.js'
+import { encodeUtf8Loose } from '../util.js'
 import { INT64_MAX, INT64_MIN, UINT64_MAX } from '../numeric.js'
 
 const INTEGER = /^[+-]?(?:0[xX][\da-fA-F]+|0[0-7]*|[1-9]\d*)/u
@@ -8,7 +8,7 @@ const FLOAT = /^[+-]?(?:0[xX](?:[\da-fA-F]+(?:\.[\da-fA-F]*)?|\.[\da-fA-F]+)(?:[
 
 function charConstant(arg, state) {
   if (arg?.[0] !== "'" && arg?.[0] !== '"') return null
-  return state.byteLocale ? utf8.encode(arg.slice(1))[0] ?? 0 : arg.codePointAt(1) ?? 0
+  return state.byteLocale ? encodeUtf8Loose(arg.slice(1))[0] ?? 0 : arg.codePointAt(1) ?? 0
 }
 
 function numberPrefix(arg, pattern, state) {

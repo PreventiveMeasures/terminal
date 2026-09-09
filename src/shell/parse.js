@@ -8,7 +8,7 @@ import { assignmentOf, sliceWord } from './word.js'
 import { NAME_RE, tokenize } from './tokenize.js'
 import { UnsupportedError } from '../unsupported.js'
 
-export function parseLine(line) {
+export function parseLine(line, writable = false) {
   const raw = tokenize(line)
   for (const t of raw) {
     if (t.kind === 'amp') throw new UnsupportedError('feature', '&', 'background processes (`&`) are not supported')
@@ -17,7 +17,7 @@ export function parseLine(line) {
   while (raw.length > 0 && raw.at(-1).kind === 'semi') raw.pop()
   // A comment-only line (or one of only separators) runs nothing.
   if (raw.length === 0) return []
-  const p = { raw, i: 0, emptyStage: false }
+  const p = { raw, i: 0, emptyStage: false, writable }
   const steps = buildSteps(p, null)
   if (p.emptyStage) throw new Error('empty pipeline stage')
   return steps
@@ -273,8 +273,7 @@ function finishBlock(p, steps, stage, end) {
   return steps
 }
 
-// The write targets that are not files: the virtual FS is read-only,
-// so these are the only places a `>` may point.
+// These devices remain writable even when file writes are disabled.
 const DEVICES = new Set(['/dev/null', '/dev/stdout', '/dev/stderr'])
 
 // Consume one redirect and return its execution form. Literal unsupported
@@ -309,10 +308,11 @@ function parseRedirect(p) {
   }
   if (op.fd === 0) throw new UnsupportedError('feature', label, `writing to file descriptor 0 (\`${label}\`) is not supported`)
   const both = op.op === 'both' || op.op === 'bothAppend'
+  const append = op.op === 'append' || op.op === 'bothAppend'
   const word = sliceWord(target)
-  if (needsExpansion(word)) return { fd: op.fd, op: 'to', word, both, label }
-  if (!DEVICES.has(word.value)) throw refusedWrite(label, word.value)
-  return { fd: op.fd, op: 'to', target: word.value, both }
+  if (needsExpansion(word)) return { fd: op.fd, op: 'to', word, both, append, label }
+  if (!p.writable && !DEVICES.has(word.value)) throw refusedWrite(label, word.value)
+  return { fd: op.fd, op: 'to', target: word.value, both, append, label }
 }
 
 // A target that is not yet its final text: a `$` that is not hard-quoted

@@ -1,43 +1,54 @@
-import { UnsupportedError } from '../unsupported.js'
-import { utf8, utf8Decoder } from '../util.js'
+import { decodeUtf8, encodeUtf8Loose } from '../util.js'
 import { delimiter } from './sed-regex.js'
 
 const CONTROLS = { a: 7, f: 12, n: 10, r: 13, t: 9, v: 11, '\n': 10 }
 const BASES = { d: 10, o: 8, x: 16 }
 
-export function readSedText(p) {
+export function readSedText(p, command) {
   while (/[ \t]/u.test(p.script[p.i] ?? '')) p.i++
   if (p.i === p.script.length) throw new Error("expected \\ after 'a', 'c' or 'i'")
-  let text = ''
+  command.text = null
+  p.textState.pending = { command, raw: '' }
   if (p.script[p.i] === '\\') {
     const first = p.script[++p.i]
-    if (first === undefined) continuedText()
+    if (first === undefined) return
     p.i++
-    if (first !== '\n') text = first
+    if (first !== '\n') p.textState.pending.raw = first
   }
+  resumeSedText(p)
+}
+
+export function resumeSedText(p) {
+  const pending = p.textState.pending
+  if (!pending) return
+  let text = pending.raw
   while (p.i < p.script.length && p.script[p.i] !== '\n') {
     const c = p.script[p.i++]
-    text += c
     if (c === '\\') {
-      if (p.i === p.script.length) continuedText()
-      text += p.script[p.i++]
-    }
+      if (p.i === p.script.length) { pending.raw = text + '\n'; return }
+      text += c + p.script[p.i++]
+    } else text += c
   }
   // a writes this text verbatim; i/c replace its last byte with the output
   // record delimiter. Text scripts always use LF, including under sed -z.
-  return normalizeText(text + '\n')
+  pending.command.text = normalizeText(text + '\n')
+  p.textState.pending = null
 }
 
-function continuedText() {
-  throw new UnsupportedError('feature', 'continued text between expressions', 'sed: text continued across script expressions is not supported')
+export function finishSedText(state) {
+  if (!state?.pending) return
+  // GNU's final EOF copies unfinished text without escape normalization;
+  // a bare a\ / i\ / c\ retains NULL instead of an empty output line.
+  state.pending.command.text = state.pending.raw || null
+  state.pending = null
 }
 
 function normalizeText(text) {
-  return utf8Decoder.decode(normalizeBytes(text))
+  return decodeUtf8(normalizeBytes(text))
 }
 
 function normalizeBytes(text) {
-  const input = utf8.encode(text), out = []
+  const input = encodeUtf8Loose(text), out = []
   for (let i = 0; i < input.length; i++) {
     const byte = input[i]
     if (byte !== 92 || i + 1 === input.length) { out.push(byte); continue }
@@ -67,8 +78,8 @@ export function readTransliteration(p) {
   const sep = delimiter(p, "'y' command")
   const source = normalizeBytes(transliterationSet(p, sep))
   const target = normalizeBytes(transliterationSet(p, sep))
-  const from = p.byteLocale ? source : [...utf8Decoder.decode(source)]
-  const to = p.byteLocale ? target : [...utf8Decoder.decode(target)]
+  const from = p.byteLocale ? source : [...decodeUtf8(source)]
+  const to = p.byteLocale ? target : [...decodeUtf8(target)]
   if (from.length !== to.length) throw new Error("'y' command strings have different lengths")
   const translation = p.byteLocale ? Uint8Array.from({ length: 256 }, (_, i) => i) : new Map()
   for (let i = 0; i < from.length; i++) {
@@ -95,7 +106,7 @@ function transliterationSet(p, sep) {
 }
 
 export function transliterateLine(text, command) {
-  if (command.byteLocale) return utf8Decoder.decode(utf8.encode(text).map((byte) => command.translation[byte]))
+  if (command.byteLocale) return decodeUtf8(encodeUtf8Loose(text).map((byte) => command.translation[byte]))
   let out = ''
   for (const c of text) out += command.translation.get(c) ?? c
   return out

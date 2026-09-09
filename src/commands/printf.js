@@ -1,5 +1,5 @@
 import { UnsupportedError, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
-import { ok, usage, utf8, utf8Decoder } from '../util.js'
+import { decodeUtf8, encodeUtf8Loose, ok, usage } from '../util.js'
 import { printfBytes, printfEscape } from './printf-escape.js'
 import { printfFloatField, printfInteger, printfIntegerField } from './printf-number.js'
 import { INT32_MAX, INT32_MIN } from '../numeric.js'
@@ -51,7 +51,7 @@ function decodeOutput(state) {
   const bytes = new Uint8Array(state.size)
   let offset = 0
   for (const chunk of state.chunks) { bytes.set(chunk, offset); offset += chunk.length }
-  return utf8Decoder.decode(bytes)
+  return decodeUtf8(bytes)
 }
 
 const nextArg = (state) => state.args[state.index++]
@@ -72,12 +72,12 @@ function printFormat(format, state) {
         const out = 'diouxX'.includes(spec.conv)
           ? printfIntegerField(printfInteger(arg, 'ouxX'.includes(spec.conv), state), spec)
           : printfFloatField(arg, spec, state)
-        append(state, utf8.encode(out))
+        append(state, encodeUtf8Loose(out))
       }
     } else {
       let end = at + 1
       while (end < format.length && format[end] !== '%' && format[end] !== '\\') end++
-      append(state, utf8.encode(format.slice(at, end)))
+      append(state, encodeUtf8Loose(format.slice(at, end)))
       at = end
     }
   }
@@ -109,7 +109,7 @@ function readSpec(text, state) {
 }
 
 function printString(arg, spec, state) {
-  let bytes = spec.conv === 'b' ? printfBytes(arg, state) : utf8.encode(arg)
+  let bytes = spec.conv === 'b' ? printfBytes(arg, state) : encodeUtf8Loose(arg)
   if (spec.conv === 'c') bytes = bytes.length ? bytes.subarray(0, 1) : new Uint8Array(1)
   else if (spec.precision !== null) bytes = bytes.subarray(0, spec.precision)
   const missing = Math.max(0, spec.width - bytes.length)

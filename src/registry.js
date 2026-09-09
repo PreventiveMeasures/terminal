@@ -3,13 +3,14 @@
 import { defineCommands } from './custom.js'
 import { EXTRA_COMMANDS, HIDDEN_EXTRAS } from './commands/extra.js'
 import { NAV_COMMANDS } from './commands/nav.js'
+import { cat } from './commands/cat.js'
 import { sed } from './commands/sed.js'
 import { bracket, test } from './commands/test.js'
 import { markUnsupported, unsupported, unsupportedNote } from './unsupported.js'
 import { SHELL_BUILTINS, SHELL_GAPS } from './shell/builtins.js'
 import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './commands/text.js'
 
-const VISIBLE_COMMANDS = { test, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_COMMANDS }
+const VISIBLE_COMMANDS = { test, cat, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_COMMANDS }
 const grepAlias = (name, flag) => (stdin, tokens, ctx) => {
   const result = TEXT_COMMANDS.grep(stdin, [flag, ...tokens], ctx)
   const note = unsupportedNote(result)
@@ -25,8 +26,8 @@ const isBuiltin = (name) => Boolean(BUILTIN_COMMANDS[name])
 const COMMAND_ORDER = [
   'ls', 'cd', 'cat', 'grep', 'find',
   'head', 'tail', 'wc', 'tree',
-  'sort', 'uniq', 'cut', 'tr', 'awk', 'nl', 'tac', 'hexdump',
-  'xargs', 'echo', 'printf', 'test',
+  'sort', 'uniq', 'cut', 'tr', 'awk', 'nl', 'tac', 'hexdump', 'base64',
+  'xargs', 'echo', 'printf', 'test', 'rm',
   'pwd', 'seq', 'which', 'basename', 'dirname',
 ]
 const BUILTIN_NAMES = orderedCommandNames()
@@ -35,7 +36,7 @@ const BUILTIN_NAMES = orderedCommandNames()
 const PIPE_NAMES = [
   'grep', 'head', 'tail', 'wc',
   'sort', 'uniq', 'cut', 'xargs', 'awk',
-  'tr', 'nl', 'tac', 'hexdump', 'cat',
+  'tr', 'nl', 'tac', 'hexdump', 'cat', 'base64',
 ]
 
 function orderedCommandNames() {

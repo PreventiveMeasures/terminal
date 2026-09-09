@@ -89,6 +89,7 @@ function checkSpec(name, value, isBuiltin) {
 // Snapshot cwd for io.cwd, io.fs, and io.readInputs together: saved I/O views
 // and reentrant handlers must not resolve paths against a later cwd.
 function invoke(name, run, stdin, tokens, ctx) {
+  ctx.io?.bufferOutput()
   // A wired command is handed its stdin outright, so it is taken to
   // have read it: the next command in a group starts at its end.
   consumeStdin(ctx)
@@ -118,11 +119,11 @@ function fsView(scope) {
     isDir: (path) => scope.fs.isDir(at(path)),
     readFile: (path) => scope.fs.readFile(at(path)),
     listDir: (path) => {
-      const abs = at(path)
+      const { path: abs, error } = lookup(scope.cwd, path, scope.fs)
       // Report the original operand, distinguishing missing files from files
       // passed where a directory is required.
       if (!scope.fs.isDir(abs)) {
-        throw new Error(`${path}: ${scope.fs.isFile(abs) ? 'not a directory' : 'no such file or directory'}`)
+        throw new Error(`${path}: ${error?.toLowerCase() ?? 'not a directory'}`)
       }
       const { dirs, files } = scope.fs.listDir(abs)
       return { dirs: [...dirs], files: [...files] }

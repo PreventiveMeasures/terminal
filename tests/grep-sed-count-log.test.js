@@ -69,13 +69,13 @@ b "@a/double";
     ['blank lines', '\na\n\n', ' \n a\n \n'],
     ['an unterminated final line', 'a\nb', ' a\n b'],
     ['empty input', '', ''],
-  ].map(([inputKind, input, stdout]) => ({
-    purpose: `the exact sed prefix substitution handles ${inputKind}`,
-    command: "cat input | sed 's/^/ /'",
+  ].flatMap(([inputKind, input, stdout]) => ["sed 's/^/ /'", "sed -e 's/^/ /'"].map((command) => ({
+    purpose: `${command} handles ${inputKind}`,
+    command: 'cat input | ' + command,
     files: { input },
     cwd: '/',
     stdout,
-  })),
+  }))),
 ]
 
 describe('grep and sed — logged package-count pipeline', () => {

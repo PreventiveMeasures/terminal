@@ -1,5 +1,5 @@
 import { UnsupportedError } from '../unsupported.js'
-import { ok, utf8, utf8Decoder } from '../util.js'
+import { decodeUtf8, encodeUtf8Loose, ok } from '../util.js'
 import { isUnicodeScalar, stepAt } from '../unicode.js'
 
 // Only leading -[neE]+ words are options; -- and other spellings are literal.
@@ -29,8 +29,8 @@ export function echo(_stdin, tokens) {
 function interpretEscapes(s) {
   const simple = { a: 7, b: 8, e: 27, E: 27, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92 }
   const bytes = []
-  const text = (value) => { for (const b of utf8.encode(value)) bytes.push(b) }
-  const result = (stop) => ({ text: utf8Decoder.decode(Uint8Array.from(bytes)), stop })
+  const text = (value) => { for (const b of encodeUtf8Loose(value)) bytes.push(b) }
+  const result = (stop) => ({ text: decodeUtf8(Uint8Array.from(bytes)), stop })
   for (let i = 0; i < s.length; i++) {
     if (s[i] !== '\\' || i + 1 >= s.length) {
       const next = s.indexOf('\\', i + 1)

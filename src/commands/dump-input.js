@@ -1,6 +1,6 @@
 // Dump readers open operands lazily: a byte limit must neither consume the
 // next reader's input nor report errors from files it never opens.
-import { consumeStdin, err, readInputs, scaledCount, utf8, utf8Decoder } from '../util.js'
+import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, readInputs, scaledCount } from '../util.js'
 import { unsupported } from '../unsupported.js'
 
 export function dumpInput(cmd, files, stdin, ctx, opt) {
@@ -30,14 +30,14 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
     // xxd seeks from the beginning unless +OFFSET was specified. Linux
     // hexdump also uses SEEK_SET for a nonzero skip; od skips from here.
     const rewind = shared && ctx.stdinFile && opt.skip !== undefined && (cmd === 'xxd' || (cmd === 'hexdump' && skip.value > 0))
-    const all = utf8.encode(rewind ? ctx.stdinOrigin : entry?.content ?? '')
+    const all = encodeUtf8Loose(rewind ? ctx.stdinOrigin : entry?.content ?? '')
     const skipped = Math.min(skipping, all.length)
     skipping -= skipped; start += skipped
     const taken = Math.min(remaining, all.length - skipped)
     chunks.push(all.subarray(skipped, skipped + taken))
     remaining -= taken
     if (shared) {
-      rest = utf8Decoder.decode(all.subarray(skipped + taken))
+      rest = decodeUtf8(all.subarray(skipped + taken))
       consumeStdin(ctx, rest)
     }
     if (rewind && skipping) { start = skip.value; skipping = 0 }

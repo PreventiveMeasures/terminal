@@ -69,14 +69,4 @@ describe('sed text errors and unsupported byte output preserve diagnostics', () 
       assert.deepEqual(createTerminal({ input: 'line\n' }).run(command), expected('', 1, 'sed: recursive escaping after \\c not allowed\n'))
     })
   }
-  for (const script of ['a\\', 'i text\\', 'c text\\']) {
-    it(`reports a text continuation across expressions: ${script}`, () => {
-      const command = `sed -e ${quote(script)} -e 'next line' input`
-      const message = 'sed: text continued across script expressions is not supported'
-      const unsupported = [{ kind: 'feature', command: 'sed', detail: 'continued text between expressions', message }]
-      const terminal = createTerminal({ input: 'line\n' })
-      assert.deepEqual(terminal.run(command), expected('', 1, message + '\n', unsupported))
-      assert.deepEqual(terminal.run(command + ' 2>/dev/null | cat'), expected('', 0, '', unsupported))
-    })
-  }
 })

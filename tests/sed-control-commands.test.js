@@ -37,8 +37,8 @@ describe('sed q stops the program after finishing the current cycle output', () 
     ['quit accepts an explicit exit status', sed('2q 7'), 'one\ntwo\n', 7],
     ['exit status can touch the command', sed('q7'), 'one\n', 7],
     ['exit status is truncated to its low byte', sed('q256'), 'one\n'],
-    ['large exit status follows the bounded GNU integer parser', sed('q2147483648'), 'one\n', 255],
-    ['quit leaves an unterminated record unterminated', sed('q', 'unterminated'), 'item'],
+    ['large exit status preserves its low byte after GNU integer conversion', sed('q2147483648'), 'one\n'],
+    ['quit flushes an unterminated record delimiter', sed('q', 'unterminated'), 'item\n'],
     ['quit has no effect without an input cycle', sed('q7', 'empty'), ''],
     ['substitution changes the line printed by quit', sed('s/one/ONE/;q'), 'ONE\n'],
     ['explicit print before quit stays visible with quiet output', sed('p;q', 'input', '-n'), 'one\n'],
@@ -52,7 +52,7 @@ describe('sed q stops the program after finishing the current cycle output', () 
     ['insert prints immediately before quit', "sed -e 'i head' -e q input", 'head\none\n'],
     ['NUL mode quit preserves its record terminator', sed('q', 'zero', '-z'), 'a\0'],
     ['NUL mode quit flushes append text with its LF', "sed -z -e 'a tail' -e q zero", 'a\0tail\n'],
-    ['NUL mode quit preserves an unterminated final record', sed('2q', 'zeroLast', '-z'), 'a\0b'],
+    ['NUL mode quit flushes an unterminated final record delimiter', sed('2q', 'zeroLast', '-z'), 'a\0b\0'],
     ['separate-file mode still quits the entire program', sed('q', 'single input', '-s'), 'item\n'],
   ])
 })

@@ -43,6 +43,8 @@ const HOSTILE = [
   "Function('return 1')()",
   "require('child_process')",
   "import('node:fs')",
+  "printf 'eval(\"1+1\")' | base64 | base64 -d",
+  "printf 'ZXZhbA==KA==MQ==KQ==' | base64 -d",
   // Real interpreters, in the spellings shell muscle memory produces.
   "node -e 'process.exit(1)'",
   "sh -c 'id'",
@@ -203,9 +205,9 @@ describe('no JS execution — source', () => {
     }
   })
 
-  it('has no runtime dependencies to smuggle an evaluator in through', () => {
+  it('limits runtime dependencies to the byte codecs', () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8'))
-    assert.deepEqual(pkg.dependencies ?? {}, {})
+    assert.deepEqual(Object.keys(pkg.dependencies ?? {}).sort(), ['@exodus/bytes'])
   })
 })
 

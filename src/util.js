@@ -3,17 +3,22 @@
 import { UnsupportedError } from './unsupported.js'
 import { lookup } from './fs.js'
 import { UINT64_MAX } from './numeric.js'
+import { utf8fromString, utf8toString } from '@exodus/bytes/utf8.js'
+
+export { utf8fromStringLoose as encodeUtf8Loose } from '@exodus/bytes/utf8.js'
 
 // Byte operations encode JS strings as UTF-8. Preserve the BOM and refuse
 // slices that cannot be represented losslessly as string output.
-export const utf8 = new TextEncoder()
-const strictUtf8 = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true })
-export const utf8Decoder = {
-  decode(bytes) {
-    try { return strictUtf8.decode(bytes) } catch {
-      throw new UnsupportedError('feature', 'partial UTF-8 byte sequence', 'byte output that is not valid UTF-8 cannot be represented by this string-based terminal')
-    }
-  },
+export function encodeUtf8(text) {
+  try { return utf8fromString(text) } catch (e) {
+    if (!(e instanceof TypeError)) throw e
+    throw new UnsupportedError('feature', 'unpaired surrogate', 'unpaired UTF-16 surrogates cannot be encoded as UTF-8')
+  }
+}
+export function decodeUtf8(bytes) {
+  try { return utf8toString(bytes) } catch {
+    throw new UnsupportedError('feature', 'partial UTF-8 byte sequence', 'byte output that is not valid UTF-8 cannot be represented by this string-based terminal')
+  }
 }
 
 export const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0 })
@@ -52,6 +57,7 @@ export function lineRecords(text, delimiter = '\n') {
 
 // Readers record unconsumed stdin so later commands in a group share its offset.
 export function consumeStdin(ctx, rest = '') {
+  ctx.io?.read(ctx.stdinHandle?.identity)
   ctx.stdinLeft = rest
 }
 
@@ -65,7 +71,7 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   for (const name of files) {
     const entry = { name, content: '', kind: 'file' }
     let error
-    if (name === '/dev/stdin' && ctx.stdinFile) entry.content = ctx.stdinOrigin
+    if (name === '/dev/stdin' && ctx.stdinFile) { ctx.io?.read(ctx.stdinHandle?.identity); entry.content = ctx.stdinOrigin }
     else if (name === '-' || name === '/dev/stdin') {
       entry.content = pipe
       entry.shared = true

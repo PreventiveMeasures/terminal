@@ -3423,13 +3423,13 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     for (const cmd of unsupportedCases) {
       const r = t.run(cmd)
       assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
-      assert.match(r.stderr, /only addressed p/u, `${cmd}: expected canonical message`)
+      assert.match(r.stderr, /supported commands/u, `${cmd}: expected canonical message`)
     }
     // These hit specific (non-canonical) errors that name the
     // actual problem — they don't get the generic unsupported text.
     const specific = [
       ["sed -n '0,5p' big.txt", /line numbers must be >= 1/u],
-      ["sed -i -n '1,2p' big.txt", /unknown option: -i/u],
+      ["sed -i -n '1,2p' big.txt", /file system is read-only/u],
     ]
     for (const [cmd, re] of specific) {
       const r = t.run(cmd)
@@ -5553,18 +5553,17 @@ describe('createTerminal — complete: corner cases', () => {
     // Non-pipeable: ls / pwd / cd / find / tree / echo / seq / which /
     // basename / dirname — none of them read stdin, so none should
     // surface as a pipe target.
-    for (const name of ['ls', 'pwd', 'cd', 'find', 'tree', 'echo', 'printf', 'test', 'seq', 'which', 'basename', 'dirname']) {
+    for (const name of ['ls', 'pwd', 'cd', 'find', 'tree', 'echo', 'printf', 'test', 'rm', 'seq', 'which', 'basename', 'dirname']) {
       assert.deepEqual(t.complete('cat | ' + name), [], `${name} should not be a pipe target`)
     }
     // A prefix that only matches non-pipeable commands (`l` → ls) is [].
     assert.deepEqual(t.complete('cat | l'), [])
     // Pipeable: every PIPE_NAMES entry surfaces for the empty trailing word.
     const c = t.complete('cat | ')
-    for (const name of ['grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'xargs', 'awk', 'tr', 'nl', 'tac', 'hexdump', 'cat']) {
+    for (const name of ['grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'xargs', 'awk', 'tr', 'nl', 'tac', 'hexdump', 'cat', 'base64']) {
       assert.ok(c.includes('cat | ' + name), `${name} should be a pipe target`)
     }
-    // Empty completion straight after `|` has length 14 — full pipe set.
-    assert.equal(c.length, 14)
+    assert.equal(c.length, 15)
   })
 
   it('pipe-target priority lists grep first', () => {
@@ -5630,7 +5629,7 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat|l'), [])
     // Empty trailing word: full pipe set, each glued to `cat| ` with a space.
     const c = t.complete('cat|')
-    assert.equal(c.length, 14)
+    assert.equal(c.length, 15)
     assert.equal(c[0], 'cat| grep')
     // Every variant has the inserted space — no `cat|grep` leaks through.
     for (const variant of c) assert.ok(variant.startsWith('cat| '), `expected "cat| " prefix on ${variant}`)
@@ -5731,12 +5730,12 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat 1 |'), [
       'cat 1 | grep', 'cat 1 | head', 'cat 1 | tail', 'cat 1 | wc',
       'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs', 'cat 1 | awk',
-      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | hexdump', 'cat 1 | cat',
+      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | hexdump', 'cat 1 | cat', 'cat 1 | base64',
     ])
     assert.deepEqual(t.complete('cat 1 | '), [
       'cat 1 | grep', 'cat 1 | head', 'cat 1 | tail', 'cat 1 | wc',
       'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs', 'cat 1 | awk',
-      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | hexdump', 'cat 1 | cat',
+      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | hexdump', 'cat 1 | cat', 'cat 1 | base64',
     ])
     // A partial target is extended without inserting text before it.
     assert.deepEqual(t.complete('cat |gre'), ['cat |grep'])

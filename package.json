@@ -51,6 +51,8 @@
     "src/awk/value.js",
     "src/bre.js",
     "src/charclass.js",
+    "src/commands/base64.js",
+    "src/commands/cat.js",
     "src/commands/dump-input.js",
     "src/commands/dump.js",
     "src/commands/echo.js",
@@ -66,9 +68,13 @@
     "src/commands/printf-escape.js",
     "src/commands/printf-number.js",
     "src/commands/printf.js",
+    "src/commands/rm.js",
     "src/commands/sed-common.js",
+    "src/commands/sed-in-place.js",
     "src/commands/sed-input.js",
+    "src/commands/sed-output.js",
     "src/commands/sed-regex.js",
+    "src/commands/sed-run.js",
     "src/commands/sed-script.js",
     "src/commands/sed-text.js",
     "src/commands/sed.js",
@@ -84,6 +90,7 @@
     "src/glob.js",
     "src/index.d.ts",
     "src/index.js",
+    "src/mount.js",
     "src/numeric.js",
     "src/regex-locale.js",
     "src/registry.js",
@@ -92,6 +99,7 @@
     "src/shell/capture.js",
     "src/shell/builtins.js",
     "src/shell/expand.js",
+    "src/shell/io.js",
     "src/shell/lex.js",
     "src/shell/output.js",
     "src/shell/parse.js",
@@ -102,14 +110,17 @@
     "src/shell/word.js",
     "src/unicode.js",
     "src/unsupported.js",
-    "src/util.js"
+    "src/util.js",
+    "src/writable.js"
   ],
   "scripts": {
     "lint": "oxlint -c .oxlintrc.json ./src/ ./tests/",
     "test": "node --test --test-isolation=none ./tests/*.test.js",
     "test:slow": "AWK_SLOW_TESTS=1 node --test --test-isolation=none ./tests/*.test.js"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@exodus/bytes": "^1.15.1"
+  },
   "devDependencies": {
     "oxlint": "^1.63.0"
   },

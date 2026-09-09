@@ -81,7 +81,7 @@ function tilde(w, ctx, assignmentValue = false) {
   for (let i = 0; i < v.length; i++) {
     if (w.empty?.includes(i)) empty.push(value.length)
     const prefixStart = i === 0 || i === eqLen || (inValue(i) && v[i - 1] === ':' && bare(i - 1))
-    if (prefixStart && v[i] === '~' && bare(i)) {
+    if (prefixStart && v[i] === '~' && bare(i) && unquotedTilde(w, i, inValue(i))) {
       const n = v[i + 1]
       if (n && n !== '/' && n !== ':' && bare(i + 1)) throw new UnsupportedError('feature', 'tilde prefix', 'named-user and directory-stack tilde prefixes are not supported')
       const ends = n === undefined || (bare(i + 1) && (n === '/' || (n === ':' && inValue(i))))
@@ -98,6 +98,17 @@ function tilde(w, ctx, assignmentValue = false) {
   }
   if (w.empty?.includes(v.length)) empty.push(value.length)
   return { value, mask: /[12]/u.test(mask) ? mask : null, ...(empty.length ? { empty } : {}) }
+}
+
+function unquotedTilde(w, start, assignment) {
+  // Empty quotes also inhibit expansion: ~''/x and ''~/x are literal paths.
+  for (let i = start; i <= w.value.length; i++) {
+    if (w.empty?.includes(i)) return false
+    if (i === w.value.length) return true
+    if (maskAt(w, i) !== '0') return false
+    if (w.value[i] === '/' || (assignment && w.value[i] === ':')) return true
+  }
+  return true
 }
 
 const fresh = () => ({ value: '', mask: '', q: false })

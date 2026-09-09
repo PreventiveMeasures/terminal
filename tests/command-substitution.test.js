@@ -139,7 +139,7 @@ describe('command substitution — redirects and diagnostics', () => {
   })
 
   it('deduplicates diagnostics across substitutions without losing encounter order', () => {
-    const r = terminal().run('echo "$(grep --unknown x src/a.js 2>/dev/null)$(sed -i x src/a.js 2>/dev/null)$(grep --unknown x src/a.js 2>/dev/null)"')
+    const r = terminal().run('echo "$(grep --unknown x src/a.js 2>/dev/null)$(sed -i s/a/A/ src/a.js 2>/dev/null)$(grep --unknown x src/a.js 2>/dev/null)"')
     assert.equal(r.stdout, '\n')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)

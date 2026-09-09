@@ -6,18 +6,19 @@
 import { lookup, relativeTo, walkTree } from '../fs.js'
 import { parseFindArgs } from './find-parse.js'
 import { unsupported } from '../unsupported.js'
+import { appendOutput, emptyOutput } from '../shell/output.js'
 
 export function find(stdin, tokens, ctx) {
   const parsed = parseFindArgs(tokens)
   if (parsed.error) return parsed.error
   if (stdin !== '' && tokens.some((t) => t === '-exec' || t === '--exec')) return unsupported('feature', 'find', '-exec stdin', 'find: passing shared standard input to -exec is not supported')
   const { starts, minDepth, maxDepth, groups, batches } = parsed
-  const result = { stdout: '', stderr: '', exitCode: 0 }
+  const result = emptyOutput()
   for (const start of starts) {
     const { path: startAbs, error } = lookup(ctx.cwd, start, ctx.fs)
     if (error) {
       // A bad root does not prevent traversal of the remaining roots.
-      result.stderr += `find: ${start}: ${error.toLowerCase()}\n`
+      collectOutput(result, ctx.flushOutput(emptyOutput(`find: ${start}: ${error.toLowerCase()}\n`)))
       result.exitCode = 1
       continue
     }
@@ -61,7 +62,7 @@ function evalPredicate(p, entry, ctx, result) {
   }
   if (p.kind === 'path' || p.kind === 'ipath') return p.re.test(entry.path)
   if (p.kind === 'print' || p.kind === 'print0') {
-    result.stdout += entry.path + (p.kind === 'print' ? '\n' : '\0')
+    collectOutput(result, ctx.flushOutput({ stdout: entry.path + (p.kind === 'print' ? '\n' : '\0'), stderr: '', exitCode: 0 }))
     return true
   }
   // Batched exec is true during traversal; its eventual status belongs to find.
@@ -71,9 +72,14 @@ function evalPredicate(p, entry, ctx, result) {
 
 function runExec(cmd, args, ctx, result) {
   const r = ctx.dispatch(cmd, args, '')
-  result.stdout += r.stdout
-  result.stderr += r.stderr
+  collectOutput(result, r)
   return r.exitCode === 0
+}
+
+function collectOutput(result, next) {
+  const status = result.exitCode
+  appendOutput(result, next)
+  result.exitCode = status
 }
 
 function toDisplayPath(userPath, absRoot, absPath) {

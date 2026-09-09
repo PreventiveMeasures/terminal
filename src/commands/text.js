@@ -5,48 +5,11 @@ import { echo } from './echo.js'
 import { printf } from './printf.js'
 import { parseArgs } from '../args.js'
 import { formatWc } from './wc-format.js'
-import { consumeStdin, err, joinLines, lineRecords, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from '../util.js'
+import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines } from '../util.js'
 import { awk } from '../awk/index.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
 import { xargs } from './xargs.js'
-
-// cat displays actual UTF-8 bytes with -v; numbering uses the original
-// lines so marking an empty line with -E never makes -b count it.
-function cat(stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['n', 'b', 's', 'v', 'E', 'T', 'A', 'e', 't'] })
-  const r = readContent('cat', positional, stdin, ctx)
-  if (!flags.size) return okWith(r.content, r)
-  const showEnds = flags.has('E') || flags.has('A') || flags.has('e')
-  const showTabs = flags.has('T') || flags.has('A') || flags.has('t')
-  const visible = flags.has('v') || flags.has('A') || flags.has('e') || flags.has('t')
-  const content = flags.has('s') ? squeezeBlankLines(r.content) : r.content
-  let n = 0
-  const out = lineRecords(content).map((raw) => {
-    const ended = raw.endsWith('\n')
-    let line = ended ? raw.slice(0, -1) : raw
-    const prefix = (flags.has('b') ? line !== '' : flags.has('n')) ? `${String(++n).padStart(6)}\t` : ''
-    if (visible) line = [...utf8.encode(line)].map((b) => visibleByte(b, showTabs)).join('')
-    else {
-      if (showTabs) line = line.replaceAll('\t', '^I')
-      if (showEnds && ended && line.endsWith('\r')) line = line.slice(0, -1) + '^M'
-    }
-    return prefix + line + (ended ? (showEnds ? '$\n' : '\n') : '')
-  }).join('')
-  return okWith(out, r)
-}
-
-function visibleByte(b, tabs) {
-  if (b === 9) return tabs ? '^I' : '\t'
-  if (b >= 128) return 'M-' + visibleByte(b - 128, true)
-  if (b < 32) return '^' + String.fromCodePoint(b + 64)
-  return b === 127 ? '^?' : String.fromCodePoint(b)
-}
-
-// Keep one blank line, plus the preceding nonempty line's terminator if present.
-function squeezeBlankLines(content) {
-  return content.replace(/(^|\n)\n+/gu, '$1\n')
-}
 
 // head and tail share count syntax, byte/line slicing and operand presentation.
 function headTail(cmd, stdin, tokens, ctx) {
@@ -117,12 +80,12 @@ function dashNumberShorthand(tokens) {
 // Output must remain valid UTF-8: partial bytes cannot cross a string
 // pipeline faithfully, so the shared decoder reports that limitation.
 function sliceBytes(content, range) {
-  const bytes = utf8.encode(content)
+  const bytes = encodeUtf8Loose(content)
   // `range` resolves against THIS input's byte length, so `-c -3` drops
   // the last three bytes of each input separately, as GNU does.
   const [start, end] = range(bytes.length)
   if (start === 0 && end >= bytes.length) return content
-  return utf8Decoder.decode(bytes.subarray(start, end))
+  return decodeUtf8(bytes.subarray(start, end))
 }
 
 // Banner presence depends on named operands, including missing ones. Only opened
@@ -197,7 +160,7 @@ function pickWcFlags(flags) {
 function wcCounts(content, ctx, which, needsWidth) {
   const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG')
   const cLocale = locale === 'C' || locale === 'POSIX'
-  const bytes = which.c || needsWidth || (which.m && cLocale) ? utf8.encode(content).length : 0
+  const bytes = which.c || needsWidth || (which.m && cLocale) ? encodeUtf8Loose(content).length : 0
   return {
     l: which.l ? (content.match(/\n/gu) ?? []).length : 0,
     w: which.w ? (content.match(cLocale ? /[^\t\n\v\f\r ]+/gu : /[^\t\n\v\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u2060\u3000]+/gu) ?? []).length : 0,
@@ -245,7 +208,7 @@ function uniq(stdin, tokens, ctx) {
       const text = rest.toWellFormed()
       return ignoreCase ? text.replace(/[A-Z]/gu, (c) => c.toLowerCase()) : text
     }
-    const bytes = utf8.encode(rest).subarray(skipChars.value, width.value === undefined ? undefined : skipChars.value + width.value)
+    const bytes = encodeUtf8Loose(rest).subarray(skipChars.value, width.value === undefined ? undefined : skipChars.value + width.value)
     // Keys may contain partial UTF-8: compare bytes without decoding or
     // emitting them. GNU uniq's -s/-w and C case folding operate on bytes.
     return (ignoreCase ? bytes.map((b) => b >= 65 && b <= 90 ? b + 32 : b) : bytes).join(',')
@@ -280,7 +243,7 @@ function cmdTrue() { return ok() }
 function cmdFalse() { return { stdout: '', stderr: '', exitCode: 1 } }
 
 export const TEXT_COMMANDS = {
-  cat, grep,
+  grep,
   head: (stdin, tokens, ctx) => headTail('head', stdin, tokens, ctx),
   tail: (stdin, tokens, ctx) => headTail('tail', stdin, tokens, ctx),
   wc, sort, uniq, echo, printf, xargs, awk,
