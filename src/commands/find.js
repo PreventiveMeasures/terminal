@@ -59,7 +59,7 @@ function evalPredicate(p, entry, ctx, result) {
     const { dirs, files } = ctx.fs.listDir(entry.abs)
     return dirs.length + files.length === 0
   }
-  if (p.kind === 'path') return p.re.test(entry.path)
+  if (p.kind === 'path' || p.kind === 'ipath') return p.re.test(entry.path)
   if (p.kind === 'print' || p.kind === 'print0') {
     result.stdout += entry.path + (p.kind === 'print' ? '\n' : '\0')
     return true

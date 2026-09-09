@@ -8,9 +8,9 @@ export const TEXT_FILES = {
 // Expectations identify the missing capability independently of error wording.
 export const TEXT_WORKFLOWS = [
   {
-    purpose: 'Extract exported names with a PCRE lookbehind',
-    command: String.raw`grep -nP '(?<=export )\w+' src/index.js`,
-    expected: [{ kind: 'option', command: 'grep', detail: '-P' }],
+    purpose: 'Extract exported names with a PCRE match-start reset',
+    command: String.raw`grep -noP 'export \K\w+' src/index.js`,
+    expected: [{ kind: 'feature', command: 'grep', detail: 'PCRE escape \\K' }],
   },
   {
     purpose: 'Search source and documentation using a checked-in pattern file',

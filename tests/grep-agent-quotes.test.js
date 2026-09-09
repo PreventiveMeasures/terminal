@@ -181,3 +181,27 @@ describe('grep — agent quoting regressions', () => {
     })
   }
 })
+
+describe('grep — quoted assignment fragments', () => {
+  const command = String.raw`grep -n "a\|b c\|e += \"; f=\"\|e += \"; g=\"\|a b = c" f/d.txt`
+  const selected = ['a', 'b c', 'e += "; f="', 'e += "; g="', 'a b = c']
+  const decoys = ['b  c', 'e = "; f="', 'e += "; h="', "e += '; f='", 'e+ = "; g="', 'e += "; g=\'']
+  const files = {
+    'f/d.txt': ['skip', ...selected, ...decoys].join('\n') + '\n',
+    'other.txt': 'a\n',
+  }
+
+  it('the reported command preserves all five BRE alternatives and literal quotes, semicolons and plus signs', () => {
+    assert.deepEqual(createTerminal(files).run(command), {
+      stdout: selected.map((line, i) => `${i + 2}:${line}\n`).join(''),
+      stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+    })
+  })
+
+  it('retains the longest alternative when a shorter one starts at the same position', () => {
+    assert.deepEqual(createTerminal(files).run(command.replace('grep -n', 'grep -on')), {
+      stdout: selected.map((line, i) => `${i + 2}:${line}\n`).join(''),
+      stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+    })
+  })
+})

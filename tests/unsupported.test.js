@@ -222,7 +222,7 @@ describe('run().unsupported — the contract', () => {
     assert.equal(r.stderr, 'ls: unknown option: -t\n')
     assert.equal(r.exitCode, 1)
     assert.equal(term().run('frobnicate').exitCode, 127, 'command-not-found keeps its 127')
-    assert.equal(term().run('grep -P foo f.txt').exitCode, 2, "grep keeps its own usage exit 2")
+    assert.equal(term().run('grep -Z foo f.txt').exitCode, 2, "grep keeps its own usage exit 2")
     // The entry's message is that stderr line, minus the stream newline.
     assert.equal(r.unsupported[0].message + '\n', r.stderr)
   })

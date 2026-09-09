@@ -560,7 +560,7 @@ describe('shell syntax — compound commands', () => {
     assert.deepEqual(gaps('[[ -f a.txt ]] && echo yes'), ['feature:[['])
     assert.deepEqual(gaps('time ls'), ['feature:time'])
     // Builtins are shell features, not missing commands: no "Available:" hint.
-    for (const line of ['test -f a.txt', '[ -f a.txt ]', 'printf "%s\\n" hi', 'source x', 'type ls', 'set -e']) {
+    for (const line of ['source x', 'type ls', 'set -e']) {
       const r = term().run(line)
       assert.equal(r.unsupported[0].kind, 'feature', line)
       assert.doesNotMatch(r.stderr, /Available:/u, line)

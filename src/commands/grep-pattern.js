@@ -5,6 +5,7 @@ import { AwkRegex } from '../awk/regex.js'
 import { parseEre } from '../awk/re-parse.js'
 import { breToEs } from '../bre.js'
 import { asciiCompatible, hasUnicodeSpace } from '../regex-locale.js'
+import { pcreSource } from './grep-pcre.js'
 
 // POSIX named classes are shared with the glob translator. Collating
 // and equivalence expressions need locale semantics that we do not model.
@@ -97,10 +98,13 @@ export function compilePatterns(patterns, flags) {
   // numbers across patterns. A line matches if any pattern selects it.
   const res = []
   const reFlags = flags.has('i') ? 'isu' : 'su'
+  const whole = flags.has('x'), word = flags.has('w') && !whole
+  if (flags.has('P') && patterns.length !== 1) return { error: err('grep: -P only supports a single pattern', 2) }
   for (const pattern of patterns) {
-    if (!flags.has('F')) validateRegex(pattern, flags.has('E'))
+    if (!flags.has('F') && !flags.has('P')) validateRegex(pattern, flags.has('E'))
     let source
     if (flags.has('F')) source = RegExp.escape(pattern)
+    else if (flags.has('P')) source = pcreSource(pattern)
     else if (flags.has('E')) source = ereClasses(pattern)
     else {
       const r = breToEs(pattern)
@@ -108,25 +112,29 @@ export function compilePatterns(patterns, flags) {
       source = r.source
     }
     const canonical = source
-    if (flags.has('w')) source = `(?<![A-Za-z0-9_])(?:${source})(?![A-Za-z0-9_])`
+    if (word) source = `(?<![A-Za-z0-9_])(?:${source})(?![A-Za-z0-9_])`
+    if (whole) source = `^(?:${source})$`
     try {
-      const re = new RegExp(flags.has('F') ? source : grepSource(source), reFlags)
-      re.localeSensitive = flags.has('i') || flags.has('w') || (!flags.has('F') && localeSensitive(source))
-      re.asciiCompatible = re.localeSensitive && !flags.has('i') && !flags.has('w') && asciiCompatible(grepSource(source, true), pattern)
+      const re = new RegExp(flags.has('F') || flags.has('P') ? source : grepSource(source), reFlags)
+      re.pcre = flags.has('P')
+      re.localeSensitive = flags.has('i') || word || (!flags.has('F') && localeSensitive(canonical)) || (re.pcre && /\\[dD]/u.test(canonical))
+      // The ASCII proof understands POSIX patterns, not PCRE escapes/classes.
+      re.asciiCompatible = !re.pcre && re.localeSensitive && !flags.has('i') && !word && asciiCompatible(grepSource(canonical, true), pattern)
       re.spaceClass = /\[:(?:space|blank):\]|\\[sS]/u.test(pattern)
       re.unicodePattern = /[\u0080-\u{10FFFF}]/u.test(pattern)
-      re.binaryLiteral = flags.has('F') || !/[\\.^$*+?()[\]{}|]/u.test(source)
-      if (flags.has('o') && !flags.has('F')) {
-        if (flags.has('w') || /\\[1-9]|\(\?/u.test(source)) return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: only-matching with backreferences, lookarounds or word constraints is not supported', 2) }
+      re.binaryLiteral = !whole && (flags.has('F') || !/[\\.^$*+?()[\]{}|]/u.test(source))
+      if (flags.has('o') && !flags.has('F') && !flags.has('P') && !whole) {
+        if (word || /\\[1-9]|\(\?/u.test(source)) return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: only-matching with backreferences, lookarounds or word constraints is not supported', 2) }
         try { re.extent = new AwkRegex(grepSource(source, true), flags.has('i')) } catch {
           return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: POSIX match extent for this pattern is not supported', 2) }
         }
       }
       res.push(re)
     } catch (e) {
-      if (gnuSyntaxGap(canonical, flags)) return { error: unsupported('feature', 'grep', 'GNU regex syntax', 'grep: this GNU regular expression cannot be represented by the JavaScript matcher', 2) }
+      if (!flags.has('P') && gnuSyntaxGap(canonical, flags)) return { error: unsupported('feature', 'grep', 'GNU regex syntax', 'grep: this GNU regular expression cannot be represented by the JavaScript matcher', 2) }
       // Pattern errors use exit 2; retain the selected dialect in the error message.
       const dialect = flags.has('F') ? `fixed-string /${reFlags}`
+        : flags.has('P') ? `PCRE subset /${reFlags}`
         : flags.has('E') ? `ERE / ECMAScript /${reFlags}`
         : `BRE /${reFlags}`
       return { error: err(`grep: invalid pattern (${dialect}): ${e.message}`, 2) }

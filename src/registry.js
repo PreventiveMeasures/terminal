@@ -4,14 +4,15 @@ import { defineCommands } from './custom.js'
 import { EXTRA_COMMANDS, HIDDEN_EXTRAS } from './commands/extra.js'
 import { NAV_COMMANDS } from './commands/nav.js'
 import { sed } from './commands/sed.js'
+import { bracket, test } from './commands/test.js'
 import { unsupported } from './unsupported.js'
 import { SHELL_BUILTINS, SHELL_GAPS } from './shell/builtins.js'
 import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './commands/text.js'
 
-const VISIBLE_COMMANDS = { ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_COMMANDS }
+const VISIBLE_COMMANDS = { test, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_COMMANDS }
 // Visibility affects completion and help; all commands share one lookup table.
 // A null prototype prevents inherited names from becoming commands.
-const BUILTIN_COMMANDS = { __proto__: null, sed, ...HIDDEN_EXTRAS, ...TRIVIAL_COMMANDS, ...SHELL_BUILTINS, ...VISIBLE_COMMANDS }
+const BUILTIN_COMMANDS = { __proto__: null, sed, '[': bracket, ...HIDDEN_EXTRAS, ...TRIVIAL_COMMANDS, ...SHELL_BUILTINS, ...VISIBLE_COMMANDS }
 const SHELL_ONLY = new Set(['cd', ':', ...Object.keys(SHELL_BUILTINS)])
 const isBuiltin = (name) => Boolean(BUILTIN_COMMANDS[name])
 
@@ -20,7 +21,7 @@ const COMMAND_ORDER = [
   'ls', 'cd', 'cat', 'grep', 'find',
   'head', 'tail', 'wc', 'tree',
   'sort', 'uniq', 'cut', 'tr', 'awk', 'nl', 'tac', 'hexdump',
-  'xargs', 'echo',
+  'xargs', 'echo', 'printf', 'test',
   'pwd', 'seq', 'which', 'basename', 'dirname',
 ]
 const BUILTIN_NAMES = orderedCommandNames()

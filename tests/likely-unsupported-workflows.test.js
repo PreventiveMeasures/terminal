@@ -144,12 +144,12 @@ describe('likely agent commands — diagnostic boundaries', () => {
 
   it('retains separate diagnostics in encounter order through nested dispatch', () => {
     const t = createTerminal(FILES)
-    const line = String.raw`{ find src -type f -exec grep -P TODO {} \; ; cat data/paths.txt | xargs sed -i 's/TODO/DONE/g'; jq '.scripts' package.json; } 2>/dev/null | true`
+    const line = String.raw`{ find src -type f -exec grep -P '(?>TODO)' {} \; ; cat data/paths.txt | xargs sed -i 's/TODO/DONE/g'; jq '.scripts' package.json; } 2>/dev/null | true`
     const r = t.run(line)
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)
     assert.deepEqual(identities(r), [
-      { kind: 'option', command: 'grep', detail: '-P' },
+      { kind: 'feature', command: 'grep', detail: 'PCRE group' },
       { kind: 'feature', command: 'sed', detail: 'script' },
       { kind: 'command', command: 'jq', detail: 'jq' },
     ])
