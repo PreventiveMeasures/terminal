@@ -180,9 +180,7 @@ describe('shell syntax — parameters', () => {
 
   it('the substitutions this shell lacks are refused, not passed through', () => {
     for (const [line, detail] of [
-      ['echo $(pwd)', '$('],
       ['echo `pwd`', '`'],
-      ['echo "$(pwd)"', '$('],
       ['echo $((1+2))', '$(('],
       ['echo ${x%.js}', '${'],
       ['echo ${#x}', '${'],
@@ -418,12 +416,10 @@ describe('shell syntax — redirects', () => {
   })
 
   it('the substitutions this shell lacks are refused inside an unquoted here-document too', () => {
-    assert.deepEqual(gaps('cat <<EOF\n$(echo owned)\nEOF'), ['feature:$('])
     assert.deepEqual(gaps('cat <<EOF\n`echo owned`\nEOF'), ['feature:`'])
     assert.deepEqual(gaps('cat <<EOF\n$((1+2))\nEOF'), ['feature:$(('])
     assert.deepEqual(gaps('x=5; cat <<EOF\n${x:-y}\nEOF'), ['feature:${'])
-    const r = term().run('cat <<EOF\n$(echo owned)\nEOF')
-    assert.deepEqual([r.stdout, r.exitCode], ['', 1])
+    assert.equal(out('cat <<EOF\n$(echo expanded)\nEOF'), 'expanded\n')
     // Escaped, under a quoted delimiter, or a plain dollar: text.
     assert.equal(out('cat <<EOF\n\\$(echo kept) \\`x\\` \\${x:-y}\nEOF'), '$(echo kept) `x` ${x:-y}\n')
     assert.equal(out("cat <<'EOF'\n$(echo owned) `x` $((1)) ${x:-y}\nEOF"), '$(echo owned) `x` $((1)) ${x:-y}\n')

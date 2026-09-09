@@ -8,30 +8,31 @@ import { AwkError } from '../awk/common.js'
 import { compilePatterns, inputGap } from './grep-pattern.js'
 import { compileGlob } from '../glob.js'
 import { countMatches, grepRun, grepSummary, noMatch } from './grep-output.js'
+import { grepPatterns } from './grep-pattern-files.js'
 
-const FLAGS = '[-i] [-I] [-v] [-n] [-r|-R] [-w] [-x] [-o] [-E|-F|-G|-P] [-l] [-L] [-c] [-q] [-m N] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
-const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} -e PATTERN ... [PATH...]`
+const FLAGS = '[-i] [-a|-I] [-s] [-v] [-n] [-r|-R] [-w] [-x] [-o] [-E|-F|-G|-P] [-l] [-L] [-c] [-q] [-m N] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
+const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} [-e PATTERN] [-f FILE] ... [PATH...]`
 
 // -r and -R coincide because the virtual filesystem has no symlinks.
-const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'x', 'h', 'H', 'o', 'E', 'F', 'G', 'P', 'q', 'I']
+const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'x', 'h', 'H', 'o', 'E', 'F', 'G', 'P', 'q', 'I', 'a', 's']
 const VALUE_SHORTS = ['A', 'B', 'C', 'm']
 
 export function grep(stdin, tokens, ctx) {
   // Repeatable patterns and filename filters retain their own argument values.
   let parsed
-  try { parsed = parseArgs(tokens, { short: SHORT_FLAGS, valueShort: VALUE_SHORTS, repeatable: ['e', 'include', 'exclude', 'exclude-dir'] }) }
+  try { parsed = parseArgs(tokens, { short: SHORT_FLAGS, long: ['text', 'no-messages'], valueShort: VALUE_SHORTS, repeatable: ['e', 'f', 'file', 'include', 'exclude', 'exclude-dir'] }) }
   // Preserve diagnostic metadata when converting argument errors to grep status 2.
   catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
-  const { flags, values, positional } = parsed
-  const ePatterns = values.get('e') ?? []
-  let patterns, rest
-  if (ePatterns.length > 0) { patterns = ePatterns; rest = positional }
-  else if (positional.length > 0) { patterns = [positional[0]]; rest = positional.slice(1) }
-  else return usage(USAGE)
+  const { flags, values } = parsed
+  const source = grepPatterns(parsed, stdin, ctx)
+  if (!source) return usage(USAGE)
+  if (source.error) return source.error
+  const { patterns, rest } = source
+  stdin = source.stdin
   const conflict = checkConflicts(flags)
   if (conflict) return conflict
   let re
-  try { re = compilePatterns(patterns.flatMap((p) => p.split('\n')), flags) } catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
+  try { re = compilePatterns(patterns, flags) } catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
   if (re.error) return re.error
   const counts = parseCounts(values)
   if (counts.error) return counts.error
@@ -40,7 +41,10 @@ export function grep(stdin, tokens, ctx) {
   if (counts.max !== 0 && ctx.stdinFile && (flags.has('q') || flags.has('l') || flags.has('L') || values.has('m')) && (rest.length === 0 || rest.includes('-'))) return unsupported('feature', 'grep', 'partial stdin reads', 'grep: early termination on shared file input is not supported', 2)
   const recursive = flags.has('r') || flags.has('R')
   const filters = compileFilters(parsed)
-  filters.ignoreBinary = flags.has('I') && counts.max !== 0
+  const binaryMode = parsed.order.findLast((o) => ['a', 'I', 'text'].includes(o.name))?.name
+  filters.ignoreBinary = binaryMode === 'I' && counts.max !== 0
+  filters.forceText = binaryMode === 'a' || binaryMode === 'text'
+  filters.silent = flags.has('s') || flags.has('no-messages')
   if (flags.has('q')) return grepQuiet(stdin, rest, ctx, recursive, filters, re.res, flags.has('v'))
   const r = grepInputs(recursive, stdin, rest, ctx, filters)
   if (counts.max === 0) consumeStdin(ctx, stdin)
@@ -48,7 +52,7 @@ export function grep(stdin, tokens, ctx) {
   let inputs = r.inputs
   if (filters.name.length > 0) inputs = inputs.filter((inp) => inp.name === null || includedByName(basename(inp.name), filters.name))
   if (filters.ignoreBinary) inputs = inputs.map((inp) => textInput(inp, filters))
-  const gap = counts.max === 0 ? null : inputGap(inputs, re.res, flags.has('v'))
+  const gap = counts.max === 0 ? null : inputGap(inputs, re.res, flags.has('v'), filters.forceText)
   if (gap) return gap
   const showName = pickShowName(flags, rest.length)
   const invert = flags.has('v')
@@ -79,7 +83,7 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
     for (const input of r.inputs) {
       if (filters.name.length > 0 && input.name !== null && !includedByName(basename(input.name), filters.name)) continue
       const inp = textInput(input, filters)
-      const gap = inputGap([inp], res, invert)
+      const gap = inputGap([inp], res, invert, filters.forceText)
       if (gap) { gap.stderr = stderr + gap.stderr; return gap }
       if (countMatches(inp.content, res, invert, 1) > 0) return { stdout: '', stderr, exitCode: 0 }
     }
@@ -143,7 +147,7 @@ function pickShowName(flags, nFiles) {
 function grepInputs(recursive, stdin, rest, ctx, filters) {
   if (!recursive) {
     const r = readInputs('grep', rest, stdin, ctx)
-    return { ...r, inputs: r.inputs.map((input) => input.name === '-' ? { ...input, name: null } : input) }
+    return { ...r, stderr: filters.silent ? '' : r.stderr, inputs: r.inputs.map((input) => input.name === '-' ? { ...input, name: null } : input) }
   }
   const inputs = []
   let stderr = ''
@@ -166,7 +170,7 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
       inputs.push({ name: displayName(rest.length ? p : '', abs, filePath), content: ctx.fs.readFile(filePath), recursive: true })
     }
   }
-  return { inputs, stderr, failed }
+  return { inputs, stderr: filters.silent ? '' : stderr, failed }
 }
 
 // Name filters retain option order so the last matching include/exclude wins.

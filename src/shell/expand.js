@@ -1,4 +1,4 @@
-// Bash expansion order: braces, tilde, parameters/word splitting, then globs.
+// Bash expansion order: braces, tilde, substitutions and word splitting, then globs.
 // Quoting is per character: "$d"/*.js still globs, while "$f" never splits.
 // Bindings and a few shell-derived variables exist here; unknown environment
 // names expand to nothing with a warning and an unsupported entry. Process
@@ -8,7 +8,7 @@ import { assignmentOf, sliceWord } from './word.js'
 import { UnsupportedError } from '../unsupported.js'
 import { expandBraces } from './braces.js'
 import { globPaths, hasGlobMeta } from '../glob.js'
-import { scanRef } from './lex.js'
+import { readExpansion, scanRef } from './lex.js'
 
 const PROCESS_PARAMS = new Set(['$', '!', '0', '-', '_'])
 
@@ -120,10 +120,11 @@ function substitute(w, ctx, warnings, split) {
     if (w.empty?.includes(i)) cur.q = true
     if (i === w.value.length) break
     const m = maskAt(w, i)
-    const ref = m !== '1' && w.value[i] === '$' ? scanRef(w.value, i, w.mask) : null
+    const active = m !== '1' && w.value[i] === '$'
+    const ref = active ? (w.value[i + 1] === '(' ? readExpansion(w.value, i) : scanRef(w.value, i, w.mask)) : null
     if (!ref) { add(cur, w.value[i], m); continue }
     i += ref.raw.length - 1
-    const r = lookup(ref.name, ctx, warnings)
+    const r = ref.command === undefined ? lookup(ref.name, ctx, warnings) : { value: ctx.substitute(ref.command) }
     if (r.literal) { add(cur, ref.raw, m); continue }
     // `"$@"` with no positional parameters is no word at all, where
     // `"$*"` is one empty word; only the quoting of the rest decides.

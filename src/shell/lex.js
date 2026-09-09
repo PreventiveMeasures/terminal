@@ -3,6 +3,7 @@
 
 import { utf8, utf8Decoder } from '../util.js'
 import { UnsupportedError } from '../unsupported.js'
+import { readCommandSubstitution } from './substitution.js'
 
 export const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/u
 const NAME_CHAR = /[A-Za-z0-9_]/u
@@ -40,11 +41,15 @@ export function scanRef(line, i, mask = null) {
 }
 
 // Called wherever substitution is active, including unquoted here-documents.
-export function readExpansion(line, i) {
-  const n = line[i + 1]
+export function readExpansion(line, i, depth = 0) {
+  let next = i + 1
+  while (line[next] === '\\' && line[next + 1] === '\n') next += 2
+  const n = line[next]
   if (n === '(') {
-    if (line[i + 2] === '(') throw new UnsupportedError('feature', '$((', 'arithmetic expansion (`$((…))`) is not supported')
-    throw new UnsupportedError('feature', '$(', 'command substitution (`$(…)`) is not supported')
+    let second = next + 1
+    while (line[second] === '\\' && line[second + 1] === '\n') second += 2
+    if (line[second] === '(') throw new UnsupportedError('feature', '$((', 'arithmetic expansion (`$((…))`) is not supported')
+    return readCommandSubstitution(line, i, next, depth, { readExpansion, decodeAnsiC, readHeredocBodies, readOperator })
   }
   if (n === '[') throw new UnsupportedError('feature', '$[', 'arithmetic expansion (`$[…]`) is not supported')
   return readRef(line, i)

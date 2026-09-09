@@ -100,10 +100,9 @@ export const SHELL_WORKFLOWS = [
     parseTime: true,
   },
   {
-    purpose: 'Capture a source-directory listing for a later command',
-    command: 'files=$(ls src); echo "$files"',
-    expected: feature('$('),
-    parseTime: true,
+    purpose: 'Print an audit completion message when the shell exits',
+    command: "trap 'echo audit complete' EXIT",
+    expected: feature('trap', 'trap'),
   },
   {
     purpose: 'Compute the end line of a source excerpt',
@@ -130,9 +129,9 @@ export const SHELL_WORKFLOWS = [
     parseTime: true,
   },
   {
-    purpose: 'Choose an inspection command based on project metadata',
-    command: 'if test -f package.json; then cat package.json; else ls; fi',
-    expected: feature('if'),
+    purpose: 'Wait until a generated source report becomes available',
+    command: 'until test -f generated/report.json; do sleep 1; done',
+    expected: feature('until'),
     parseTime: true,
   },
   {

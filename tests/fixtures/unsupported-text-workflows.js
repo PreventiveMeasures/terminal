@@ -13,9 +13,9 @@ export const TEXT_WORKFLOWS = [
     expected: [{ kind: 'feature', command: 'grep', detail: 'PCRE escape \\K' }],
   },
   {
-    purpose: 'Search source and documentation using a checked-in pattern file',
-    command: 'grep -rn -f patterns.txt src README.md',
-    expected: [{ kind: 'option', command: 'grep', detail: '-f' }],
+    purpose: 'Search with checked-in patterns while reading filename exclusions from a file',
+    command: 'grep -rn -f patterns.txt --exclude-from=excluded.txt src README.md',
+    expected: [{ kind: 'option', command: 'grep', detail: '--exclude-from' }],
   },
   {
     purpose: 'Produce NUL-delimited filenames containing TODO markers',

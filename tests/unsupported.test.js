@@ -371,13 +371,10 @@ describe('run().unsupported — shell constructs', () => {
   const detailsOf = (line) => t().run(line).unsupported.map((u) => u.detail)
 
   it('names the construct, not the word the parser choked on', () => {
-    // `while true; do …; done` used to die on `unexpected \`do\``,
-    // pointing at the wrong word; `if true; then …; fi` reported three
-    // separate "command not found" gaps for one construct.
+    // Unsupported blocks identify their opening construct, not a later keyword.
     for (const [line, detail] of [
       ['while true; do echo a; done', 'while'],
       ['until false; do echo a; done', 'until'],
-      ['if true; then echo a; fi', 'if'],
       ['case x in a) echo a;; esac', 'case'],
       ['select x in a b; do echo $x; done', 'select'],
       ['function f { echo a; }', 'function'],

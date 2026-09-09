@@ -35,8 +35,8 @@ const SOURCES = {
 
 // Command lines that read like code execution to a human — and to an
 // agent that types them expecting a real shell. Every one must come
-// back inert: parsed as data, rejected by the grammar, or dispatched
-// to a command that does not exist. None may evaluate anything.
+// stay inside the virtual interpreter or return an error. None may
+// evaluate JavaScript or launch a host command.
 const HOSTILE = [
   // Direct evaluator names as argv[0].
   "eval('1+1')",
@@ -48,9 +48,12 @@ const HOSTILE = [
   "sh -c 'id'",
   '/bin/sh -c id',
   '/usr/bin/env node',
-  // Command substitution: the classic way a shell turns text into a
-  // second command. This grammar has no such form.
+  // Substitution still dispatches through the virtual command registry.
   'echo $(whoami)',
+  "echo $(node -e 'process.exit(1)')",
+  "x=$(sh -c id); echo \"$x\"",
+  "echo \"$(echo \"$(node -e 'process.exit(1)')\")\"",
+  'if true; then echo $(whoami); else node -e 1; fi',
   'echo `id`',
   'echo ${HOME}',
   'echo $HOME',
@@ -72,8 +75,8 @@ const HOSTILE = [
   'cat a.js & id',
   '(node -e 1)',
   'true && node -e 1 || sh -c id',
-  // `for` loops are the one place a `$name` expands, and the value can
-  // land in command position — where it must still hit the registry.
+  // An expanded value can land in command position and must still hit
+  // the registry.
   'for c in "node -e 1" "sh -c id"; do $c; done',
   "for f in eval; do $f '1+1'; done",
   'for f in a; do $(id); done',
@@ -268,16 +271,22 @@ describe('no JS execution — runtime', () => {
     }
   })
 
-  it('has no command substitution: `$(…)` and backticks are refused, `${…}` never runs anything', () => {
+  it('runs command substitution through the virtual registry and rejects unsupported expansion forms', () => {
     const t = createTerminal(SOURCES)
-    // Both substitution spellings are refused at parse time, so the
-    // text between them never reaches a command, let alone a process.
-    for (const line of ['echo `id`', 'echo $(whoami)', 'x=$(id)', 'echo "$(id)"', 'echo $((1+1))']) {
+    assert.deepEqual(t.run('echo "$(cat a.js)"'), {
+      stdout: 'hello\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+    })
+    for (const line of ['echo `id`', 'echo $((1+1))']) {
       const r = t.run(line)
       assert.equal(r.exitCode, 1, line)
       assert.equal(r.stdout, '', line)
       assert.match(r.stderr, /not supported/u, line)
       assert.equal(r.unsupported[0].kind, 'feature', line)
+    }
+    for (const line of ["echo $(node -e 'process.exit(1)')", 'x=$(sh -c id)', 'echo "$(/bin/sh -c id)"']) {
+      const r = t.run(line)
+      assert.match(r.stderr, /command not found/u, line)
+      assert.equal(r.unsupported[0].kind, 'command', line)
     }
     // `$NAME` / `${NAME}` are variable references, and the only bindings
     // this shell has are its own (`for` variables, assignments, and the

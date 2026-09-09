@@ -238,7 +238,7 @@ export function compilePatterns(patterns, flags) {
   const res = []
   const reFlags = flags.has('i') ? 'isu' : 'su'
   const whole = flags.has('x'), word = flags.has('w') && !whole
-  if (flags.has('P') && patterns.length !== 1) return { error: err('grep: -P only supports a single pattern', 2) }
+  if (flags.has('P') && new Set(patterns).size > 1) return { error: err('grep: -P only supports a single pattern', 2) }
   for (const pattern of patterns) {
     if (!flags.has('F') && !flags.has('P')) validateRegex(pattern, flags.has('E'))
     let source
@@ -297,11 +297,11 @@ function gnuSyntaxGap(source, flags) {
   try { parseEre(grepSource(source, true)); return true } catch (e) { return Boolean(e.gap) }
 }
 
-export function inputGap(inputs, res, invert) {
+export function inputGap(inputs, res, invert, forceText = false) {
   if (inputs.length === 0) return null
   // A literal absent from a binary file is still safely a non-match.
   // Regex anchors and classes can see NUL boundaries differently in GNU.
-  if (inputs.some((inp) => inp.content.includes('\0') && (invert || res.some((re) => !re.binaryLiteral || re.test(inp.content))))) return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
+  if (!forceText && inputs.some((inp) => inp.content.includes('\0') && (invert || res.some((re) => !re.binaryLiteral || re.test(inp.content))))) return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
   const localePatterns = res.filter((re) => re.localeSensitive && (!re.asciiCompatible || re.spaceClass))
   if (localePatterns.length === 0) return null
   const unicode = localePatterns.some((re) => !re.unicodePattern) && inputs.some((inp) => /[\u0080-\u{10FFFF}]/u.test(inp.content))

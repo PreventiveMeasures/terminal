@@ -130,3 +130,13 @@ export function scaledCount(digits, suffix, label, shown) {
   // Saturation preserves slicing positions beyond any representable JS string.
   return { value: Number(n > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : n) }
 }
+
+// Custom handlers may throw primitives, null, or objects with throwing getters.
+export function reason(e) {
+  try {
+    const message = e?.message
+    return typeof message === 'string' && message !== '' ? message : String(e)
+  } catch {
+    return 'threw a value with no message'
+  }
+}

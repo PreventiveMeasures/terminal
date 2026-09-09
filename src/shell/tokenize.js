@@ -1,5 +1,5 @@
 // Produce words with quotes/escapes removed but a per-UTF-16-unit mask:
-// 0 = bare, 1 = hard-quoted, 2 = double-quoted (parameter expansion remains).
+// 0 = bare, 1 = hard-quoted, 2 = double-quoted (substitutions remain active).
 // Empty quoted fragments retain offsets so later expansion cannot erase them.
 // Boundary tokens have distinct kinds; words retain whether any part was
 // quoted so only bare words can become shell keywords.
@@ -22,7 +22,7 @@ export function tokenize(line) {
   // `st.line` is the cursor's source of truth: splicing backslash-newline
   // out of a reference rewrites it mid-scan, and the rest of the file
   // already reads it rather than the parameter.
-  const st = { line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2 }
+  const st = { line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoted: false, quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2 }
   while (st.i < st.line.length) {
     const c = st.line[st.i]
     if (st.quote && c === st.quote) { closeQuote(st); st.i++; continue }
@@ -60,15 +60,16 @@ function closeQuote(st) {
 }
 
 // Quote masks count UTF-16 units, including both halves of astral characters.
-function put(st, ch, m) {
+function put(st, ch, m, quoted = m !== '0') {
   st.cur += ch
   st.mask += m.repeat(ch.length)
+  st.quoted ||= quoted
 }
 
 function flush(st) {
   if (st.cur !== '' || st.empty.length > 0) {
-    const quoted = st.empty.length > 0 || /[12]/u.test(st.mask)
-    const token = { kind: 'word', value: st.cur, mask: quoted ? st.mask : null, quoted, ...(st.empty.length ? { empty: st.empty } : {}) }
+    const quoted = st.empty.length > 0 || st.quoted
+    const token = { kind: 'word', value: st.cur, mask: /[12]/u.test(st.mask) || quoted ? st.mask : null, quoted, ...(st.empty.length ? { empty: st.empty } : {}) }
     st.tokens.push(token)
     // A heredoc delimiter remains a word token and also guides body collection.
     const pending = st.heredocs.find((h) => h.delim === null)
@@ -77,6 +78,7 @@ function flush(st) {
   st.cur = ''
   st.mask = ''
   st.empty = []
+  st.quoted = false
 }
 
 function emit(st, token) {
@@ -128,6 +130,12 @@ function readDollar(st) {
   if (m === '0' && n === '"') { openQuote(st, '"'); st.i += 2; return }
   const ref = readExpansion(line, st.i)
   if (!ref) { put(st, '$', '1'); st.i++; return }
+  if (ref.command !== undefined) {
+    put(st, '$', m)
+    put(st, ref.raw.slice(1), '1', false)
+    st.i += ref.raw.length
+    return
+  }
   // Quote removal must not join a reference to the next quoted fragment.
   const next = line[st.i + ref.raw.length]
   const text = NAME_RE.test(ref.name) && (next === '"' || next === "'")

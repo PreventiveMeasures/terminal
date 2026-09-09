@@ -143,12 +143,10 @@ describe('diagnostic completeness — runtime and parser limitations', () => {
     ['a+=(one two)', 'array assignment'],
     ['a=(); a+=(one)', 'array assignment'],
     ['echo ${x:-default}', '${'],
-    ['echo $(cat f)', '$('],
     ['echo $((1+2))', '$(('],
     ['cat <(cat f)', '<('],
     ['cat f > out', '>'],
     ['while true; do cat f; done', 'while'],
-    ['if true; then cat f; fi', 'if'],
     ['fn() { cat f; }; fn', 'function'],
   ]) {
     it(command, () => {
