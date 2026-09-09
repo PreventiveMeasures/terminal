@@ -13,9 +13,9 @@ export const TEXT_WORKFLOWS = [
     expected: [{ kind: 'feature', command: 'grep', detail: 'PCRE escape \\K' }],
   },
   {
-    purpose: 'Search source and documentation using a checked-in pattern file',
-    command: 'grep -rn -f patterns.txt src README.md',
-    expected: [{ kind: 'option', command: 'grep', detail: '-f' }],
+    purpose: 'Search with checked-in patterns while reading filename exclusions from a file',
+    command: 'grep -rn -f patterns.txt --exclude-from=excluded.txt src README.md',
+    expected: [{ kind: 'option', command: 'grep', detail: '--exclude-from' }],
   },
   {
     purpose: 'Produce NUL-delimited filenames containing TODO markers',
@@ -28,9 +28,9 @@ export const TEXT_WORKFLOWS = [
     expected: [{ kind: 'feature', command: 'grep', detail: '-o regex extent' }],
   },
   {
-    purpose: 'Read exported declarations through their closing brace',
-    command: String.raw`sed -n '/^export /,/^}/p' src/index.js`,
-    expected: [{ kind: 'feature', command: 'sed', detail: 'script' }],
+    purpose: 'Read exported declarations case-insensitively through their closing brace',
+    command: String.raw`sed -n '/^export /I,/^}/p' src/index.js`,
+    expected: [{ kind: 'feature', command: 'sed', detail: 'address regex flags' }],
   },
   {
     purpose: 'Remove blank lines before inspecting a README',
@@ -43,9 +43,9 @@ export const TEXT_WORKFLOWS = [
     expected: [{ kind: 'feature', command: 'sed', detail: 'script' }],
   },
   {
-    purpose: 'Normalize import and export prefixes with an extended expression',
-    command: String.raw`sed -E 's/^(export|import) /module /' src/index.js`,
-    expected: [{ kind: 'feature', command: 'sed', detail: 'script' }],
+    purpose: 'Normalize import and export prefixes case-insensitively with an extended expression',
+    command: String.raw`sed -E 's/^(export|import) /module /I' src/index.js`,
+    expected: [{ kind: 'feature', command: 'sed', detail: 'substitution flags' }],
   },
   {
     purpose: 'Preview a case-insensitive replacement of TODO markers',

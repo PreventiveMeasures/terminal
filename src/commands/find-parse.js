@@ -2,6 +2,7 @@
 import { compileGlob } from '../glob.js'
 import { err, parseNonNegativeInt } from '../util.js'
 import { unsupported } from '../unsupported.js'
+import { INT32_MAX } from '../numeric.js'
 
 const VALUE_PRIMARIES = new Set(['name', 'iname', 'type', 'path', 'ipath', 'mindepth', 'maxdepth'])
 const isTok = (t, name) => t === '-' + name || t === '--' + name
@@ -90,7 +91,7 @@ function valuePredicate(kind, value, negate, depth) {
     return checked.error ? checked : { kind, negate, types: checked.types }
   }
   if (kind === 'mindepth' || kind === 'maxdepth') {
-    const count = parseNonNegativeInt(value, `find: -${kind}`, value, { max: 2147483647, digitsOnly: true })
+    const count = parseNonNegativeInt(value, `find: -${kind}`, value, { max: INT32_MAX, digitsOnly: true })
     if (count.error) return count
     depth[kind === 'mindepth' ? 'minDepth' : 'maxDepth'] = count.value
     return { kind: 'true', negate }

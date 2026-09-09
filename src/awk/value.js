@@ -8,8 +8,9 @@ import { AwkError } from './common.js'
 import { compareNames } from '../fs.js'
 import { formatNumeric, parseFormat } from './format.js'
 
+// Immutable input text can cache its numeric value without losing string type.
 export class StrNum {
-  constructor(s) { this.s = s }
+  constructor(s) { this.s = s; this.number = undefined; this.numeric = undefined }
 }
 
 const BLANK = '[ \\t\\n\\r\\f\\v]*'
@@ -41,7 +42,7 @@ const arrayInScalar = () => new AwkError('attempt to use an array in a scalar co
 export function toNum(v) {
   if (typeof v === 'number') return v
   if (v === undefined) return 0
-  if (v instanceof StrNum) return parsePrefix(v.s)
+  if (v instanceof StrNum) return v.number ??= parsePrefix(v.s)
   if (typeof v === 'string') return parsePrefix(v)
   throw arrayInScalar()
 }
@@ -101,7 +102,8 @@ export function toOutStr(v, m) {
   return typeof v === 'number' ? numToStr(v, ofmt(m)) : toStr(v, m)
 }
 
-const isNumericValue = (v) => typeof v === 'number' || v === undefined || (v instanceof StrNum && looksNumeric(v.s))
+const numericString = (v) => v.numeric ??= looksNumeric(v.s)
+const isNumericValue = (v) => typeof v === 'number' || v === undefined || (v instanceof StrNum && numericString(v))
 
 // gawk's IGNORECASE: regex matching, string comparison and index()
 // ignore case while it is non-zero.
@@ -128,20 +130,20 @@ export function compare(a, b, m) {
 export function truthy(v) {
   if (typeof v === 'number') return v !== 0 && !Number.isNaN(v)
   if (typeof v === 'string') return v !== ''
-  if (v instanceof StrNum) return looksNumeric(v.s) ? toNum(v) !== 0 : v.s !== ''
+  if (v instanceof StrNum) return numericString(v) ? toNum(v) !== 0 : v.s !== ''
   if (v === undefined) return false
   throw arrayInScalar()
 }
 
 // Array subscripts are strings; numbers convert with CONVFMT, so
 // `a[0.1 + 0.2]` and `a["0.3"]` name the same element.
-export const subscriptKey = (v, m) => toStr(v, m)
+export const subscriptKey = (v, m) => Number.isSafeInteger(v) ? String(v) : toStr(v, m)
 
 // gawk's typeof(): the type of a cell as the program sees it.
 export function typeName(v) {
   if (v instanceof Map) return 'array'
   if (v === undefined) return 'untyped'
   if (typeof v === 'number') return 'number'
-  if (v instanceof StrNum) return looksNumeric(v.s) ? 'strnum' : 'string'
+  if (v instanceof StrNum) return numericString(v) ? 'strnum' : 'string'
   return 'string'
 }

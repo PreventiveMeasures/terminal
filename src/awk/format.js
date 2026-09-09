@@ -1,14 +1,8 @@
-// Format parsing and numeric rendering shared by ./printf.js (arguments)
-// and ./value.js (CONVFMT/OFMT).
-
-// `%[flags][width][.precision][length]conv`. Width and precision are a
-// number, `*` (taken from the argument list at print time), or null.
-// The `'` (thousands grouping) flag and one `h` / `l` / `L` length
-// modifier are accepted and ignored, as gawk does in the C locale. A
-// `%` conversion (`%%`, or `%5%`) is a percent sign; an unknown
-// conversion stays literal text.
+// Numeric rendering shared by shell printf, AWK printf and CONVFMT/OFMT.
 import { AwkError, MAX_FIELD_WIDTH } from './common.js'
 
+// AWK ignores apostrophe grouping and a single h/l/L modifier in the C locale.
+// Width/precision can be numeric, '*' or null; unknown conversions stay literal.
 const SPEC = /^%([-+ 0#']*)(\d+|\*)?'?(?:\.(\d+|\*)?)?[hlL]?(.)?/su
 const CONVERSIONS = 'diouxXeEfFgGcs'
 
@@ -47,11 +41,8 @@ export function parseFormat(fmt) {
   return pieces
 }
 
-// Pad `prefix + body` to the spec's width. `-` left-justifies with
-// spaces; `0` pads with zeros between the sign/base prefix and the
-// digits, but only where C allows it (numeric conversions, and for
-// integers only when no precision was given) — the caller says so via
-// `zeroOk`.
+// Zero padding follows the sign/base prefix. Callers disable it for strings
+// and integer formats with an explicit precision, matching C printf.
 export function padField(prefix, body, spec, zeroOk) {
   const width = spec.width ?? 0
   if (width > MAX_FIELD_WIDTH) throw new AwkError('format width exceeds the output limit', null, 'format size limit')

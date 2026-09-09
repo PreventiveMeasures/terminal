@@ -23,7 +23,7 @@ export class Signal extends Error {
 const arrayAsScalar = (name) => new AwkError(`attempt to use array \`${name}\` in a scalar context`)
 
 function scopeOf(m, name) {
-  const frame = m.frames.at(-1)
+  const frame = m.frame
   return frame !== undefined && frame.has(name) ? frame : m.globals
 }
 
@@ -63,6 +63,7 @@ export function setVar(m, name, v) {
 export function getArray(m, name) {
   const origin = scopeOf(m, name)
   let key = name, scope = origin, value = scope.get(key)
+  if (value instanceof Map) return value
   const referred = isRef(value)
   while (isRef(value)) {
     scope = value.scope; key = value.name
@@ -140,20 +141,20 @@ export function subscriptKeys(m, nodes) {
 }
 
 function resolveRef(m, node) {
-  if (node.type === 'var') return { kind: 'var', name: node.name }
-  if (node.type === 'index') return { kind: 'index', arr: getArray(m, node.name), key: subscriptKeys(m, node.subs) }
-  return { kind: 'field', i: fieldIndex(m, node.index) }
+  if (node.type === 'var') return node
+  if (node.type === 'index') return { type: 'index', arr: getArray(m, node.name), key: subscriptKeys(m, node.subs) }
+  return { type: 'field', i: fieldIndex(m, node.index) }
 }
 
 function readRef(m, ref) {
-  if (ref.kind === 'var') return scalar(getVar(m, ref.name), ref.name)
-  if (ref.kind === 'index') return ref.arr.get(ref.key)
+  if (ref.type === 'var') return scalar(getVar(m, ref.name), ref.name)
+  if (ref.type === 'index') return ref.arr.get(ref.key)
   return getField(m, ref.i)
 }
 
 function writeRef(m, ref, v) {
-  if (ref.kind === 'var') setVar(m, ref.name, v)
-  else if (ref.kind === 'index') ref.arr.set(ref.key, v)
+  if (ref.type === 'var') setVar(m, ref.name, v)
+  else if (ref.type === 'index') ref.arr.set(ref.key, v)
   else setField(m, ref.i, v)
 }
 
@@ -198,51 +199,49 @@ function increment(m, n, post) {
   return post ? before : after
 }
 
-const EVAL = {
-  __proto__: null,
-  num: (m, n) => n.value,
-  str: (m, n) => n.value,
-  regex: (m, n) => (regexOf(m, n).test(m.record) ? 1 : 0),
-  var: (m, n) => scalar(getVar(m, n.name), n.name),
-  index: (m, n) => {
-    const arr = getArray(m, n.name)
-    const key = subscriptKeys(m, n.subs)
-    // Referencing an element creates it (POSIX), which is why `in` exists.
-    if (!arr.has(key)) arr.set(key, undefined)
-    return arr.get(key)
-  },
-  field: (m, n) => getField(m, fieldIndex(m, n.index)),
-  assign: (m, n) => {
-    const ref = resolveRef(m, n.target)
-    let v = evalExpr(m, n.value)
-    if (v instanceof Map) throw new AwkError('attempt to use an array in a scalar context')
-    if (n.op !== '=') v = arith(n.op[0], toNum(readRef(m, ref)), toNum(v))
-    writeRef(m, ref, v)
-    return v
-  },
-  cond: (m, n) => evalExpr(m, truthy(evalExpr(m, n.test)) ? n.consequent : n.alternate),
-  or: (m, n) => (truthy(evalExpr(m, n.left)) || truthy(evalExpr(m, n.right)) ? 1 : 0),
-  and: (m, n) => (truthy(evalExpr(m, n.left)) && truthy(evalExpr(m, n.right)) ? 1 : 0),
-  not: (m, n) => (truthy(evalExpr(m, n.expr)) ? 0 : 1),
-  neg: (m, n) => -toNum(evalExpr(m, n.expr)),
-  plus: (m, n) => toNum(evalExpr(m, n.expr)),
-  binary: (m, n) => arith(n.op, toNum(evalExpr(m, n.left)), toNum(evalExpr(m, n.right))),
-  concat: (m, n) => toStr(evalExpr(m, n.left), m) + toStr(evalExpr(m, n.right), m),
-  compare: (m, n) => (COMPARE[n.op](compare(evalExpr(m, n.left), evalExpr(m, n.right), m)) ? 1 : 0),
-  match: (m, n) => {
-    const s = toStr(evalExpr(m, n.left), m)
-    return regexOf(m, n.right).test(s) === n.negate ? 0 : 1
-  },
-  in: (m, n) => (getArray(m, n.array).has(subscriptKeys(m, n.keys)) ? 1 : 0),
-  preinc: (m, n) => increment(m, n, false),
-  postinc: (m, n) => increment(m, n, true),
-  call: (m, n) => callUser(m, n),
-  builtin: (m, n) => m.callBuiltin(m, n),
-  getline: (m, n) => getline(m, n),
-}
-
 export function evalExpr(m, n) {
-  return EVAL[n.type](m, n)
+  switch (n.type) {
+    case 'num': case 'str': return n.value
+    case 'regex': return regexOf(m, n).test(m.record) ? 1 : 0
+    case 'var': return scalar(getVar(m, n.name), n.name)
+    case 'index': {
+      const arr = getArray(m, n.name)
+      const key = subscriptKeys(m, n.subs)
+      const value = arr.get(key)
+      // Referencing an element creates it (POSIX), which is why `in` exists.
+      if (value === undefined) arr.set(key, undefined)
+      return value
+    }
+    case 'field': return getField(m, fieldIndex(m, n.index))
+    case 'assign': {
+      const ref = resolveRef(m, n.target)
+      let v = evalExpr(m, n.value)
+      if (v instanceof Map) throw new AwkError('attempt to use an array in a scalar context')
+      if (n.op !== '=') v = arith(n.op[0], toNum(readRef(m, ref)), toNum(v))
+      writeRef(m, ref, v)
+      return v
+    }
+    case 'cond': return evalExpr(m, truthy(evalExpr(m, n.test)) ? n.consequent : n.alternate)
+    case 'or': return truthy(evalExpr(m, n.left)) || truthy(evalExpr(m, n.right)) ? 1 : 0
+    case 'and': return truthy(evalExpr(m, n.left)) && truthy(evalExpr(m, n.right)) ? 1 : 0
+    case 'not': return truthy(evalExpr(m, n.expr)) ? 0 : 1
+    case 'neg': return -toNum(evalExpr(m, n.expr))
+    case 'plus': return toNum(evalExpr(m, n.expr))
+    case 'binary': return arith(n.op, toNum(evalExpr(m, n.left)), toNum(evalExpr(m, n.right)))
+    case 'concat': return toStr(evalExpr(m, n.left), m) + toStr(evalExpr(m, n.right), m)
+    case 'compare': return COMPARE[n.op](compare(evalExpr(m, n.left), evalExpr(m, n.right), m)) ? 1 : 0
+    case 'match': {
+      const s = toStr(evalExpr(m, n.left), m)
+      return regexOf(m, n.right).test(s) === n.negate ? 0 : 1
+    }
+    case 'in': return getArray(m, n.array).has(subscriptKeys(m, n.keys)) ? 1 : 0
+    case 'preinc': return increment(m, n, false)
+    case 'postinc': return increment(m, n, true)
+    case 'call': return callUser(m, n)
+    case 'builtin': return m.callBuiltin(m, n)
+    case 'getline': return getline(m, n)
+    default: throw new AwkError(`unknown expression: ${n.type}`)
+  }
 }
 
 function callUser(m, n) {
@@ -250,16 +249,19 @@ function callUser(m, n) {
   if (n.args.length > fn.params.length) {
     throw new AwkError(`function \`${n.name}\` called with ${n.args.length} arguments, but it accepts only ${fn.params.length}`)
   }
-  if (m.frames.length >= MAX_CALL_DEPTH) throw new AwkError(`function call nesting deeper than ${MAX_CALL_DEPTH} levels (runaway recursion?)`, null, 'call depth limit')
+  if (m.callDepth >= MAX_CALL_DEPTH) throw new AwkError(`function call nesting deeper than ${MAX_CALL_DEPTH} levels (runaway recursion?)`, null, 'call depth limit')
+  const caller = m.frame
   const frame = new Map()
   for (let i = 0; i < fn.params.length; i++) frame.set(fn.params[i], i < n.args.length ? argValue(m, n.args[i]) : undefined)
-  m.frames.push(frame)
+  m.frame = frame
+  m.callDepth++
   try {
     const sig = m.execStmts(m, fn.body)
     if (sig === undefined || sig.type === 'return') return sig?.value
     throw new Signal(sig)
   } finally {
-    m.frames.pop()
+    m.frame = caller
+    m.callDepth--
   }
 }
 

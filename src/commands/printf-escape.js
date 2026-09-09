@@ -1,5 +1,6 @@
 import { UnsupportedError } from '../unsupported.js'
 import { utf8 } from '../util.js'
+import { isUnicodeScalar, stepAt } from '../unicode.js'
 
 const SIMPLE = { a: 7, b: 8, e: 27, E: 27, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92 }
 
@@ -25,7 +26,7 @@ export function printfEscape(text, at, argument, state) {
     } else {
       const code = parseInt(text.slice(at + 2, end), 16)
       if (c === 'x') return { bytes: [code], end }
-      if (code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) {
+      if (!isUnicodeScalar(code)) {
         throw new UnsupportedError('feature', 'Unicode escape', 'escapes outside Unicode scalar values are not supported')
       }
       if (state.byteLocale && code > 127) {
@@ -34,7 +35,8 @@ export function printfEscape(text, at, argument, state) {
       return { bytes: utf8.encode(String.fromCodePoint(code)), end }
     }
   }
-  return { bytes: utf8.encode('\\' + c), end }
+  end = at + 1 + stepAt(text, at + 1)
+  return { bytes: utf8.encode(text.slice(at, end)), end }
 }
 
 export function printfBytes(text, state) {

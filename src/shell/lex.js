@@ -3,6 +3,8 @@
 
 import { utf8, utf8Decoder } from '../util.js'
 import { UnsupportedError } from '../unsupported.js'
+import { readCommandSubstitution } from './substitution.js'
+import { isUnicodeScalar } from '../unicode.js'
 
 export const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/u
 const NAME_CHAR = /[A-Za-z0-9_]/u
@@ -40,11 +42,15 @@ export function scanRef(line, i, mask = null) {
 }
 
 // Called wherever substitution is active, including unquoted here-documents.
-export function readExpansion(line, i) {
-  const n = line[i + 1]
+export function readExpansion(line, i, depth = 0) {
+  let next = i + 1
+  while (line[next] === '\\' && line[next + 1] === '\n') next += 2
+  const n = line[next]
   if (n === '(') {
-    if (line[i + 2] === '(') throw new UnsupportedError('feature', '$((', 'arithmetic expansion (`$((…))`) is not supported')
-    throw new UnsupportedError('feature', '$(', 'command substitution (`$(…)`) is not supported')
+    let second = next + 1
+    while (line[second] === '\\' && line[second + 1] === '\n') second += 2
+    if (line[second] === '(') throw new UnsupportedError('feature', '$((', 'arithmetic expansion (`$((…))`) is not supported')
+    return readCommandSubstitution(line, i, next, depth, { readExpansion, decodeAnsiC, readHeredocBodies, readOperator })
   }
   if (n === '[') throw new UnsupportedError('feature', '$[', 'arithmetic expansion (`$[…]`) is not supported')
   return readRef(line, i)
@@ -57,41 +63,52 @@ export const backtickGap = () => new UnsupportedError('feature', '`', 'command s
 // continue to the closing quote: $'a\0b' is 'a', not an unterminated string.
 const ANSI_SIMPLE = { a: '\u0007', b: '\b', e: '\u001B', E: '\u001B', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?' }
 
+// Quote boundaries follow source escapes, independently of how \c consumes them.
+function ansiQuoteEnd(line, start) {
+  for (let i = start; i < line.length; i++) {
+    if (line[i] === '\\') i++
+    else if (line[i] === "'") return i
+  }
+  throw new Error('unterminated single quote')
+}
+
 export function decodeAnsiC(line, start) {
+  const end = ansiQuoteEnd(line, start)
   const bytes = []
   const text = (s) => { for (const b of utf8.encode(s)) bytes.push(b) }
-  let i = start
-  for (; i < line.length && line[i] !== "'"; i++) {
+  for (let i = start; i < end; i++) {
     if (line[i] !== '\\') {
       const ch = String.fromCodePoint(line.codePointAt(i))
       text(ch); i += ch.length - 1; continue
     }
     const n = line[i + 1]
-    if (n === undefined) { text('\\'); continue }
     if (n in ANSI_SIMPLE) { text(ANSI_SIMPLE[n]); i++; continue }
-    const numeric = /^(?:[0-7]{1,3}|x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8})/u.exec(line.slice(i + 1))
+    if (n === 'x' && line[i + 2] === '{') throw new UnsupportedError('feature', 'ANSI-C hexadecimal escape', 'braced hexadecimal escapes in ANSI-C quotes are not supported')
+    const numeric = /^(?:[0-7]{1,3}|x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8})/u.exec(line.slice(i + 1, end))
     if (numeric) {
       const digits = numeric[0]
       const octal = /^[0-7]/u.test(digits)
       const code = octal ? parseInt(digits, 8) : parseInt(digits.slice(1), 16)
       if (octal || digits[0] === 'x') bytes.push(code & 255)
       else {
-        if (code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) throw new UnsupportedError('feature', 'ANSI-C Unicode escape', 'ANSI-C escapes outside Unicode scalar values are not supported')
+        if (!isUnicodeScalar(code)) throw new UnsupportedError('feature', 'ANSI-C Unicode escape', 'ANSI-C escapes outside Unicode scalar values are not supported')
         text(String.fromCodePoint(code))
       }
       i += digits.length
       continue
     }
-    if (n === 'c' && line[i + 2] !== undefined && line[i + 2] !== "'") {
-      bytes.push(line[i + 2].toUpperCase().codePointAt(0) ^ 0x40)
+    if (n === 'c' && i + 2 < end) {
+      const control = line.codePointAt(i + 2)
+      if (control > 127) throw new UnsupportedError('feature', 'ANSI-C control escape', 'ANSI-C control escapes require an ASCII character')
+      bytes.push(control === 63 ? 127 : control & 31)
       i += 2
+      if (control === 92 && line[i + 1] === '\\') i++
       continue
     }
     text('\\')
   }
-  if (i >= line.length) throw new Error('unterminated single quote')
   const nul = bytes.indexOf(0)
-  return { text: utf8Decoder.decode(Uint8Array.from(nul === -1 ? bytes : bytes.slice(0, nul))), end: i + 1 }
+  return { text: utf8Decoder.decode(Uint8Array.from(nul === -1 ? bytes : bytes.slice(0, nul))), end: end + 1 }
 }
 
 // Parentheses delimit even mid-word. A descriptor prefix is recognized only
@@ -164,7 +181,8 @@ export function readHeredocBodies(line, newlineAt, pending) {
   let i = newlineAt + 1
   for (const h of pending) {
     const lines = []
-    while (i <= line.length) {
+    let terminated = false
+    while (i < line.length) {
       let end, text = ''
       for (;;) {
         end = line.indexOf('\n', i)
@@ -174,12 +192,14 @@ export function readHeredocBodies(line, newlineAt, pending) {
         if (h.quotedDelim || end === -1 || !continues(text)) break
         text = text.slice(0, -1)
       }
+      if (end === -1 && text === '') break
       if (h.strip) text = text.replace(/^\t+/u, '')
-      if (text === h.delim) break
+      if (text === h.delim) { terminated = true; break }
       lines.push(text)
       if (end === -1) break
     }
     h.body = lines.length === 0 ? '' : lines.join('\n') + '\n'
+    if (!terminated) h.warning = `warning: here-document delimited by end-of-file (wanted \`${h.delim}')\n`
   }
   return i - 1
 }

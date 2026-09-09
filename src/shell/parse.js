@@ -1,6 +1,6 @@
 // Parse gated pipelines whose stages contain unexpanded words/assignments,
-// ordered redirects, a nested group, or a for-loop. Expansion happens only
-// when execution reaches a stage. Parentheses isolate cwd/bindings; brace
+// ordered redirects, or nested groups, loops and conditionals. Expansion happens
+// only when execution reaches a stage. Parentheses isolate cwd/bindings; brace
 // groups share them. Redirects retain source order (2>&1 >/dev/null).
 // Token kinds and quoting distinguish operators/keywords from literal words.
 
@@ -27,12 +27,13 @@ export function parseLine(line) {
 // line parses so later syntax errors retain precedence. Nested readers share p.
 function appendStage(p, step, stage) {
   step.stages.push(stage)
-  if (!stage.group && !stage.loop && !isCommand(stage)) p.emptyStage = true
+  if (!isBlock(stage) && !isCommand(stage)) p.emptyStage = true
 }
 
 // Assignments and redirects alone are valid commands. Check emptiness before
 // adding |&'s implicit redirect, which must not legitimize an empty stage.
 const isCommand = (s) => s.words.length > 0 || s.assigns.length > 0 || s.redirs.length > 0
+const isBlock = (s) => s.group || s.loop || s.conditional
 
 const newStage = () => ({ words: [], assigns: [], redirs: [] })
 const newStep = (gate) => ({ gate, stages: [], negate: false, bang: false })
@@ -43,14 +44,13 @@ const newStep = (gate) => ({ gate, stages: [], negate: false, bang: false })
 const bareBang = (step, stage) => step.bang && step.stages.length === 0 && commandPosition(stage) && stage.redirs.length === 0
 
 // Reserved words require no words or assignments yet; leading redirects may
-// still attach to a following group or loop.
-const commandPosition = (stage) => !stage.group && !stage.loop && stage.words.length === 0 && stage.assigns.length === 0
+// still attach to a following block.
+const commandPosition = (stage) => !isBlock(stage) && stage.words.length === 0 && stage.assigns.length === 0
 
 // Reserved words, recognized unquoted and in command position only.
-const KEYWORDS = new Set(['for', 'do', 'done', '{', '}', '!'])
+const KEYWORDS = new Set(['for', 'do', 'done', 'if', '{', '}', '!'])
 
-// Closers of blocks this shell never opens (or has already closed). A
-// stray one is a syntax error, as in bash — not an unknown command.
+// A closer outside its expected block is a syntax error, not an unknown command.
 const CLOSERS = new Set(['then', 'else', 'elif', 'fi', 'esac', 'in'])
 
 // Reserved constructs receive feature diagnostics, not command-not-found.
@@ -58,7 +58,6 @@ const CLOSERS = new Set(['then', 'else', 'elif', 'fi', 'esac', 'in'])
 const UNIMPLEMENTED_BLOCKS = new Map([
   ['while', '`while` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
   ['until', '`until` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
-  ['if', '`if` conditionals are not supported; gate on exit status with `&&` / `||` instead'],
   ['case', '`case` statements are not supported; gate on exit status with `&&` / `||` instead'],
   ['select', '`select` loops are not supported'],
   ['function', 'shell functions are not supported'],
@@ -71,6 +70,7 @@ const UNIMPLEMENTED_BLOCKS = new Map([
 function buildSteps(p, end) {
   const { raw } = p
   const steps = [newStep('first')]
+  if (end === null) p.unit = steps[0]
   let stage = newStage()
   while (p.i < raw.length) {
     const t = raw[p.i]
@@ -85,25 +85,30 @@ function buildSteps(p, end) {
     }
     if (t.kind === 'pipe' || t.kind === 'pipe_err' || t.kind === 'and' || t.kind === 'or' || t.kind === 'semi') {
       // `|&` is `2>&1 |`, applied after the stage's own redirects.
-      if (t.kind === 'pipe_err' && (isCommand(stage) || stage.group || stage.loop)) stage.redirs.push({ fd: 2, op: 'dup', toFd: 1 })
+      if (t.kind === 'pipe_err' && (isCommand(stage) || isBlock(stage))) stage.redirs.push({ fd: 2, op: 'dup', toFd: 1 })
       if (!(t.kind === 'semi' && bareBang(steps.at(-1), stage))) appendStage(p, steps.at(-1), stage)
       stage = newStage()
       if (t.kind === 'and' || t.kind === 'or') steps.push(newStep(t.kind))
       else if (t.kind === 'semi') steps.push(newStep('seq'))
+      if (end === null && (t.newline || t.lineEnd)) p.unit = steps.at(-1)
       p.i++
       continue
     }
     if (t.kind === 'dsemi') throw new Error('syntax error near unexpected token `;;`')
     if (t.kind === 'redir') {
+      // Bash reads a complete top-level line before executing its commands.
+      // Warnings precede that unit even when its gated command is skipped.
+      if (t.warning) p.unit.warnings = (p.unit.warnings ?? '') + t.warning
       const redir = parseRedirect(p)
       if (redir) stage.redirs.push(redir)
       continue
     }
-    // A completed group/loop accepts only a boundary or a redirect.
+    // A completed block accepts only a boundary or a redirect.
     if (stage.group) throw new Error(`unexpected token after \`${stage.isolate ? ')' : '}'}\``)
     if (stage.loop) throw new Error('unexpected token after `done`')
+    if (stage.conditional) throw new Error('unexpected token after `fi`')
     if (!t.quoted && commandPosition(stage)) {
-      if (t.value === end) { p.i++; return finishBlock(p, steps, stage, end) }
+      if (Array.isArray(end) ? end.includes(t.value) : t.value === end) { p.i++; return finishBlock(p, steps, stage, end) }
       if (commandWord(t, p, steps.at(-1), stage)) continue
     }
     const assign = stage.words.length === 0 ? assignmentOf(t) : null
@@ -114,6 +119,7 @@ function buildSteps(p, end) {
   if (end === ')') throw new Error('unmatched `(`')
   if (end === '}') throw new Error('unmatched `{`')
   if (end === 'done') throw new Error('for: missing `done`')
+  if (end) throw new Error(`if: missing \`${end === 'then' ? 'then' : 'fi'}\``)
   if (!bareBang(steps.at(-1), stage)) appendStage(p, steps.at(-1), stage)
   return steps
 }
@@ -160,8 +166,30 @@ function commandWord(t, p, step, stage) {
   if (v === '}') throw new Error('syntax error near unexpected token `}`')
   if (v === 'done') throw new Error('unexpected `done`')
   if (v === 'do') throw new Error('unexpected `do`')
-  stage.loop = parseFor(p)
+  if (v === 'if') stage.conditional = parseConditional(p)
+  else stage.loop = parseFor(p)
   return true
+}
+
+const BRANCH_ENDS = ['elif', 'else', 'fi']
+
+function parseConditional(p) {
+  const branches = []
+  let closer
+  do {
+    skipNewlines(p)
+    const condition = buildSteps(p, 'then')
+    skipNewlines(p)
+    const body = buildSteps(p, BRANCH_ENDS)
+    branches.push({ condition, body })
+    closer = p.raw[p.i - 1].value
+  } while (closer === 'elif')
+  let otherwise = null
+  if (closer === 'else') {
+    skipNewlines(p)
+    otherwise = buildSteps(p, 'fi')
+  }
+  return { branches, otherwise }
 }
 
 // Parse NAME in WORDS; do BODY; done. Headers skip exactly one separator;
@@ -202,7 +230,7 @@ function parseFor(p) {
   return { name, words, body: buildSteps(p, 'done') }
 }
 
-// Newlines are allowed after '{' and 'do'; semicolons are not.
+// Block-opening keywords allow newlines before their lists, but not semicolons.
 function skipNewlines(p) {
   while (p.raw[p.i]?.kind === 'semi' && p.raw[p.i].newline) p.i++
 }
@@ -237,7 +265,7 @@ const EMPTY_BLOCK_ERRORS = { ')': 'empty subshell `()`', '}': 'empty group `{ }`
 function finishBlock(p, steps, stage, end) {
   const lastStep = steps.at(-1)
   const emptyTail = commandPosition(stage) && stage.redirs.length === 0 && lastStep.stages.length === 0
-  if (emptyTail && steps.length === 1) throw new Error(EMPTY_BLOCK_ERRORS[end])
+  if (emptyTail && steps.length === 1) throw new Error(end === 'then' ? 'if: empty condition' : EMPTY_BLOCK_ERRORS[end] ?? 'if: empty branch body')
   // `{ echo a; ! }`: bash wants a separator after a bare `!`.
   if (emptyTail && lastStep.bang) throw new Error('syntax error near unexpected token after `!`')
   if (emptyTail && lastStep.gate === 'seq') steps.pop()

@@ -1,5 +1,6 @@
 import { UnsupportedError } from '../unsupported.js'
 import { ok, utf8, utf8Decoder } from '../util.js'
+import { isUnicodeScalar, stepAt } from '../unicode.js'
 
 // Only leading -[neE]+ words are options; -- and other spellings are literal.
 // The last -e/-E wins, while any -n suppresses the final newline.
@@ -52,13 +53,14 @@ function interpretEscapes(s) {
       const code = parseInt(digits, 16)
       if (c === 'x') bytes.push(code)
       else {
-        if (code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) throw new UnsupportedError('feature', 'echo Unicode escape', 'echo: escapes outside Unicode scalar values are not supported')
+        if (!isUnicodeScalar(code)) throw new UnsupportedError('feature', 'echo Unicode escape', 'echo: escapes outside Unicode scalar values are not supported')
         text(String.fromCodePoint(code))
       }
       continue
     }
-    text('\\' + c)
+    const end = i + stepAt(s, i)
+    text('\\' + s.slice(i, end))
+    i = end - 1
   }
   return result(false)
 }
-

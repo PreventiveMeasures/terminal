@@ -5,6 +5,7 @@
 // ./format.js.
 
 import { AwkError, MAX_FIELD_WIDTH } from './common.js'
+import { isUnicodeScalar } from '../unicode.js'
 import { formatNumeric, padField, parseFormat } from './format.js'
 import { StrNum, checkText, looksNumeric, toNum, toStr } from './value.js'
 
@@ -64,7 +65,7 @@ function charOf(arg) {
   const numeric = typeof arg === 'number' || (arg instanceof StrNum && looksNumeric(arg.s))
   if (numeric) {
     const code = Math.trunc(toNum(arg))
-    if (!Number.isSafeInteger(code) || code < 0 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) throw new AwkError('printf: character code outside Unicode scalar values is not supported', null, 'character code')
+    if (!isUnicodeScalar(code)) throw new AwkError('printf: character code outside Unicode scalar values is not supported', null, 'character code')
     return String.fromCodePoint(code)
   }
   const s = arg instanceof StrNum ? arg.s : arg ?? ''

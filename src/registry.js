@@ -5,14 +5,19 @@ import { EXTRA_COMMANDS, HIDDEN_EXTRAS } from './commands/extra.js'
 import { NAV_COMMANDS } from './commands/nav.js'
 import { sed } from './commands/sed.js'
 import { bracket, test } from './commands/test.js'
-import { unsupported } from './unsupported.js'
+import { markUnsupported, unsupported, unsupportedNote } from './unsupported.js'
 import { SHELL_BUILTINS, SHELL_GAPS } from './shell/builtins.js'
 import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './commands/text.js'
 
 const VISIBLE_COMMANDS = { test, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_COMMANDS }
+const grepAlias = (name, flag) => (stdin, tokens, ctx) => {
+  const result = TEXT_COMMANDS.grep(stdin, [flag, ...tokens], ctx)
+  const note = unsupportedNote(result)
+  return note ? markUnsupported(result, note.kind, name, note.detail, note.message) : result
+}
 // Visibility affects completion and help; all commands share one lookup table.
 // A null prototype prevents inherited names from becoming commands.
-const BUILTIN_COMMANDS = { __proto__: null, sed, '[': bracket, ...HIDDEN_EXTRAS, ...TRIVIAL_COMMANDS, ...SHELL_BUILTINS, ...VISIBLE_COMMANDS }
+const BUILTIN_COMMANDS = { __proto__: null, sed, egrep: grepAlias('egrep', '-E'), fgrep: grepAlias('fgrep', '-F'), '[': bracket, ...HIDDEN_EXTRAS, ...TRIVIAL_COMMANDS, ...SHELL_BUILTINS, ...VISIBLE_COMMANDS }
 const SHELL_ONLY = new Set(['cd', ':', ...Object.keys(SHELL_BUILTINS)])
 const isBuiltin = (name) => Boolean(BUILTIN_COMMANDS[name])
 

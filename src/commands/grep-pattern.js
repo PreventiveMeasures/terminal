@@ -3,7 +3,7 @@ import { UnsupportedError, unsupported } from '../unsupported.js'
 import { err } from '../util.js'
 import { AwkRegex } from '../awk/regex.js'
 import { parseEre } from '../awk/re-parse.js'
-import { breToEs } from '../bre.js'
+import { breToEs, validateBackreferences } from '../bre.js'
 import { asciiCompatible, hasUnicodeSpace } from '../regex-locale.js'
 import { pcreSource } from './grep-pcre.js'
 
@@ -68,6 +68,7 @@ export function grepSource(source, extent = false) {
     if (c === '\\') {
       const next = source[++i]
       out += !bracket && Object.hasOwn(assertions, next) ? assertions[next] : c + next
+      if (!extent && !bracket && /[1-9]/u.test(next) && /\d/u.test(source[i + 1] ?? '')) out += '(?:)'
     } else {
       if (c === '[') bracket = true
       if (c === ']') bracket = false
@@ -77,13 +78,14 @@ export function grepSource(source, extent = false) {
   return out
 }
 
-const ERE_INTERVAL = /^\{(\d+)(?:,(\d*))?\}/u
-const BRE_INTERVAL = /^\\\{(\d+)(?:,(\d*))?\\\}/u
+const ERE_INTERVAL = /^\{(?=\d|,)(\d*)(?:,(\d*))?\}/u
+const BRE_INTERVAL = /^\\\{(?=\d|,)(\d*)(?:,(\d*))?\\\}/u
 
 // GNU rejects an interval bound above RE_DUP_MAX outright. ECMAScript
 // accepts any bound, so the limit is ours to enforce.
 function intervalBounds(pattern, i, extended) {
   const m = (extended ? ERE_INTERVAL : BRE_INTERVAL).exec(pattern.slice(i))
+  if (!m && !extended) throw new Error('invalid repetition count')
   if (m) checkInterval(Number(m[1]), m[2] === undefined || m[2] === '' ? undefined : Number(m[2]))
 }
 
@@ -139,7 +141,7 @@ const fixedWidth = (atom) => !atom.startsWith('(') && !/^\\[1-9]/u.test(atom)
 // reintroduce the ambiguity, so it is refused and reported as a GNU form
 // the JavaScript matcher cannot represent.
 function stackQuantifiers(atom, chain) {
-  if (chain.length === 1) return atom + chain[0].text
+  if (chain.length === 1) return atom + quantText(chain[0].bounds)
   let bounds = chain[0].bounds
   let nested = null
   for (let i = 1; i < chain.length; i++) {
@@ -238,7 +240,7 @@ export function compilePatterns(patterns, flags) {
   const res = []
   const reFlags = flags.has('i') ? 'isu' : 'su'
   const whole = flags.has('x'), word = flags.has('w') && !whole
-  if (flags.has('P') && patterns.length !== 1) return { error: err('grep: -P only supports a single pattern', 2) }
+  if (flags.has('P') && new Set(patterns).size > 1) return { error: err('grep: -P only supports a single pattern', 2) }
   for (const pattern of patterns) {
     if (!flags.has('F') && !flags.has('P')) validateRegex(pattern, flags.has('E'))
     let source
@@ -251,6 +253,7 @@ export function compilePatterns(patterns, flags) {
       source = r.source
     }
     const canonical = source
+    if (!flags.has('F') && !flags.has('P') && validateBackreferences(canonical)) return { error: unsupported('feature', 'grep', 'conditional backreference', 'grep: backreferences with conditional or repeated-empty captures are not supported', 2) }
     if (word) source = `(?<![A-Za-z0-9_])(?:${source})(?![A-Za-z0-9_])`
     if (whole) source = `^(?:${source})$`
     try {
@@ -259,7 +262,7 @@ export function compilePatterns(patterns, flags) {
       // already reads those the way GNU does, so it takes `source` as is.
       // `-P` selects the ECMAScript reading, where `a+?` really is lazy,
       // so the rewrite is ERE's alone.
-      const re = new RegExp(flags.has('F') || flags.has('P') ? source : grepSource(flags.has('E') ? posixQuantifiers(source) : source), reFlags)
+      const re = new RegExp(flags.has('F') || flags.has('P') ? source : grepSource(posixQuantifiers(source)), reFlags)
       re.pcre = flags.has('P')
       re.localeSensitive = flags.has('i') || word || (!flags.has('F') && localeSensitive(canonical)) || (re.pcre && /\\[dD]/u.test(canonical))
       // The ASCII proof understands POSIX patterns, not PCRE escapes/classes.
@@ -292,16 +295,17 @@ export function compilePatterns(patterns, flags) {
 // those failures as mistakes in the user's regex. Invalid references and
 // malformed BRE intervals remain ordinary errors.
 function gnuSyntaxGap(source, flags) {
-  if (/\\[1-9]/u.test(source)) return false
   if (!flags.has('E') && /(?<!\\)\{(?!\d*(?:,\d*)?\})/u.test(source)) return false
+  // References were validated before compilation. Their ERE-parser escape
+  // reading is only a syntax proof here; it is never used to match input.
   try { parseEre(grepSource(source, true)); return true } catch (e) { return Boolean(e.gap) }
 }
 
-export function inputGap(inputs, res, invert) {
+export function inputGap(inputs, res, invert, forceText = false) {
   if (inputs.length === 0) return null
   // A literal absent from a binary file is still safely a non-match.
   // Regex anchors and classes can see NUL boundaries differently in GNU.
-  if (inputs.some((inp) => inp.content.includes('\0') && (invert || res.some((re) => !re.binaryLiteral || re.test(inp.content))))) return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
+  if (!forceText && inputs.some((inp) => inp.content.includes('\0') && (invert || res.some((re) => !re.binaryLiteral || re.test(inp.content))))) return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
   const localePatterns = res.filter((re) => re.localeSensitive && (!re.asciiCompatible || re.spaceClass))
   if (localePatterns.length === 0) return null
   const unicode = localePatterns.some((re) => !re.unicodePattern) && inputs.some((inp) => /[\u0080-\u{10FFFF}]/u.test(inp.content))

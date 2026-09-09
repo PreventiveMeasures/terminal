@@ -1,15 +1,5 @@
-// The rest of the suite exercises awk one construct at a time. This file
-// runs whole programs: a Turing machine, an interpreter for another
-// Turing-complete language, backtracking search, and the report shape
-// day-to-day work actually takes. They earn their runtime as canaries —
-// each breaks if `split`, `substr`, SUBSEP subscripts, arrays by
-// reference, `getline` or the loop control signals regress — and they
-// pin the claim that this awk computes rather than filters.
-//
-// Heavier sizes of the same programs live in a second suite behind
-// AWK_SLOW_TESTS=1. They add ~4.5s of work to a default suite that runs
-// in ~13s, which is a bad trade for coverage differing only in scale —
-// `pnpm test:slow` runs everything.
+// Whole programs exercise interactions between arrays, functions, input,
+// and control flow. AWK_SLOW_TESTS=1 includes heavier workloads and limits.
 
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
@@ -18,7 +8,7 @@ import { env } from 'node:process'
 import { AWK_FILES } from './fixtures/awk-programs.js'
 import { createTerminal } from '@preventive/terminal'
 
-const SLOW = { skip: env.AWK_SLOW_TESTS === '1' ? false : 'set AWK_SLOW_TESTS=1, or run `pnpm test:slow` (~4.5s)' }
+const SLOW = { skip: env.AWK_SLOW_TESTS === '1' ? false : 'set AWK_SLOW_TESTS=1, or run `pnpm test:slow`' }
 
 // The virtual FS is read-only and each awk invocation gets its own
 // machine, so one terminal serves every case.
@@ -102,9 +92,15 @@ describe('awk runs whole programs', () => {
 })
 
 describe('awk runs whole programs — heavier sizes', SLOW, () => {
-  it('scales the same programs up', () => {
+  it('solves ten queens by recursive backtracking', () => {
     assert.match(out('awk -v N=10 -f queens.awk'), /\n10-queens: 724 solutions\n$/u)
+  })
+
+  it('sieves primes below 100000', () => {
     assert.equal(out('awk -v N=100000 -f sieve.awk'), 'primes below 100000: 9592 (largest 99991)\n')
+  })
+
+  it('sieves primes below 400000', () => {
     assert.equal(out('awk -v N=400000 -f sieve.awk'), 'primes below 400000: 33860 (largest 399989)\n')
   })
 

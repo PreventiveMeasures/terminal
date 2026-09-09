@@ -4,13 +4,11 @@
 import { err, ok } from '../util.js'
 import { unsupported } from '../unsupported.js'
 import { NAME_RE } from './lex.js'
+import { INT64_MAX, INT64_MIN } from '../numeric.js'
 
 // Bash accepts signed 64-bit control counts. Exit status wraps modulo 256;
 // malformed exit numbers take precedence over excess-argument errors.
 // Subshell/pipeline boundaries consume halt without stopping the outer shell.
-const INT64_MAX = 9223372036854775807n
-const INT64_MIN = -9223372036854775808n
-
 function controlNumber(value) {
   const arg = value.replace(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/gu, '')
   const parsed = /^[+-]?\d+$/u.test(arg) ? BigInt(arg) : null
@@ -49,9 +47,7 @@ function loopControl(name) {
 // Rebinding matters: x=2 export x persists the prefix assignment. A bare
 // export name only rebinds an existing value; it does not invent one.
 function exportCmd(_stdin, tokens, ctx) {
-  // `--` ends option processing, as `help export` says: everything after
-  // it is a name, so `export -- -p` is an invalid identifier rather than
-  // the listing option, and `export --` alone still lists.
+  // After --, -p is an identifier to validate; -- alone still lists variables.
   const terminated = tokens[0] === '--'
   const operands = terminated ? tokens.slice(1) : tokens
   if (operands.length === 0 || (!terminated && operands[0] === '-p')) return unsupported('option', 'export', '-p', 'export: listing the environment is not supported (there is none)')

@@ -29,7 +29,7 @@ export function createMachine(program, ctx, stdin, operands) {
     ['ARGC', operands.length + 1], ['ARGV', argv], ['ARGIND', 0],
   ])
   const m = {
-    program, globals, frames: [], record: '', recordValue: new StrNum(''), fields: [undefined], nf: 0,
+    program, globals, frame: undefined, callDepth: 0, record: '', recordValue: new StrNum(''), fields: [undefined], nf: 0,
     fieldMode: 'FS', out: [], errOut: [], steps: 0, exitCode: 0, ranges: [], rng: initialRng(),
     input: new Input(ctx, stdin), byteLocale: byteLocale(ctx),
     hasFileRules: program.beginFile.length > 0,
@@ -151,7 +151,32 @@ export function execStmts(m, stmts) {
 
 function execStmt(m, s) {
   if (++m.steps > MAX_STEPS) throw new AwkError(`execution stopped after ${MAX_STEPS} statements (infinite loop?)`, null, 'execution limit')
-  return EXEC[s.type](m, s)
+  switch (s.type) {
+    case 'block': return execStmts(m, s.body)
+    case 'empty': return
+    case 'expr': evalExpr(m, s.expr); return
+    case 'print': return execPrint(m, s)
+    case 'printf': return execPrintf(m, s)
+    case 'if':
+      if (truthy(evalExpr(m, s.test))) return execStmt(m, s.consequent)
+      return s.alternate === null ? undefined : execStmt(m, s.alternate)
+    case 'while': case 'do': case 'for': return execLoop(m, s)
+    case 'forin': return execForIn(m, s)
+    case 'switch': return execSwitch(m, s)
+    case 'break': return BREAK
+    case 'continue': return CONTINUE
+    case 'next': return NEXT
+    case 'nextfile': return NEXTFILE
+    case 'exit': return execExit(m, s)
+    case 'return': return { type: 'return', value: s.value === null ? undefined : evalExpr(m, s.value) }
+    case 'delete': {
+      const arr = getArray(m, s.name)
+      if (s.subs === null) arr.clear()
+      else arr.delete(subscriptKeys(m, s.subs))
+      return
+    }
+    default: throw new AwkError(`unknown statement: ${s.type}`)
+  }
 }
 
 function execLoop(m, s) {
@@ -229,33 +254,4 @@ function execExit(m, s) {
     m.exitCode = ((n % 256) + 256) % 256
   }
   return EXIT
-}
-
-const EXEC = {
-  __proto__: null,
-  block: (m, s) => execStmts(m, s.body),
-  empty: () => {},
-  expr: (m, s) => { evalExpr(m, s.expr) },
-  print: execPrint,
-  printf: execPrintf,
-  if: (m, s) => {
-    if (truthy(evalExpr(m, s.test))) return execStmt(m, s.consequent)
-    if (s.alternate !== null) return execStmt(m, s.alternate)
-  },
-  while: execLoop,
-  do: execLoop,
-  for: execLoop,
-  forin: execForIn,
-  switch: execSwitch,
-  break: () => BREAK,
-  continue: () => CONTINUE,
-  next: () => NEXT,
-  nextfile: () => NEXTFILE,
-  exit: execExit,
-  return: (m, s) => ({ type: 'return', value: s.value === null ? undefined : evalExpr(m, s.value) }),
-  delete: (m, s) => {
-    const arr = getArray(m, s.name)
-    if (s.subs === null) arr.clear()
-    else arr.delete(subscriptKeys(m, s.subs))
-  },
 }

@@ -12,7 +12,7 @@ const num = (m, node) => toNum(evalExpr(m, node))
 // sequence repeats from run to run until srand() is called. The state is
 // an unsigned 32-bit value; gawk's initial seed is 1, and that is what
 // the first srand() reports as the previous seed.
-const TWO_32 = 4294967296
+const TWO_32 = 2 ** 32
 
 function seedState(seed) {
   return Number(BigInt.asUintN(32, BigInt(Math.trunc(seed))))

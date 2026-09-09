@@ -43,7 +43,7 @@ export function routeOutput(result, io, ctx) {
 }
 
 // Commands differ in closed-stdout status; hexdump and tree ignore the failure.
-const WRITE_ERROR_STATUS = new Map([['ls', 2], ['grep', 2], ['sort', 2], ['xxd', 3], ['sed', 4], ['xargs', 123], ['hexdump', 0], ['tree', 0]])
+const WRITE_ERROR_STATUS = new Map([['ls', 2], ['grep', 2], ['egrep', 2], ['fgrep', 2], ['sort', 2], ['xxd', 3], ['sed', 4], ['xargs', 123], ['hexdump', 0], ['tree', 0]])
 
 export function writeError(name, r, ctx) {
   const status = WRITE_ERROR_STATUS.get(ctx.registry.resolveCommand(name)) ?? 1

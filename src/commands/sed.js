@@ -2,15 +2,15 @@
 import { parseArgs } from '../args.js'
 import { err, lineRecords, okWith, readInputs } from '../util.js'
 import { unsupported, unsupportedFrom } from '../unsupported.js'
-import { SED_SUBSET, parseSedScript, substituteLine } from './sed-script.js'
+import { SED_SUBSET, parseSedScript, selectsLine, substituteLine } from './sed-script.js'
 
 export function sed(stdin, tokens, ctx) {
   let parsed
-  try { parsed = parseArgs(tokens, { short: ['n'] }) } catch { return unsupported('feature', 'sed', 'script', SED_SUBSET) }
+  try { parsed = parseArgs(tokens, { short: ['n', 'E', 'r'], long: ['regexp-extended'] }) } catch { return unsupported('feature', 'sed', 'script', SED_SUBSET) }
   const { flags, positional } = parsed
   if (positional.length === 0) return err(SED_SUBSET)
   let commands
-  try { commands = parseSedScript(positional[0]) } catch (e) { return failure(e) }
+  try { commands = parseSedScript(positional[0], flags.has('E') || flags.has('r') || flags.has('regexp-extended')) } catch (e) { return failure(e) }
   const r = readInputs('sed', positional.slice(1), stdin, ctx)
   // Each EOF ends a record even without a final newline. Output preserves
   // that missing newline until another print needs to start a fresh line.
@@ -29,7 +29,7 @@ export function sed(stdin, tokens, ctx) {
       const newline = lines[i].endsWith('\n') ? '\n' : ''
       let text = newline ? lines[i].slice(0, -1) : lines[i]
       for (const command of commands) {
-        if (i + 1 < command.start || i + 1 > command.end) continue
+        if (!selectsLine(command, text, i + 1, i + 1 === lines.length)) continue
         if (command.kind === 'p') { emit(text, newline); continue }
         const result = substituteLine(text, command)
         text = result.out
@@ -38,7 +38,10 @@ export function sed(stdin, tokens, ctx) {
       if (!flags.has('n')) emit(text, newline)
     }
   } catch (e) {
-    return failure(e)
+    const failed = failure(e)
+    failed.stdout = out.join('')
+    failed.stderr = r.stderr + failed.stderr
+    return failed
   }
   return { ...okWith(out.join(''), r), exitCode: r.failed ? 2 : 0 }
 }

@@ -3,11 +3,12 @@ import { compareNames, joinPath, lookup } from '../fs.js'
 import { parseArgs } from '../args.js'
 import { err, parseNonNegativeInt } from '../util.js'
 import { unsupported } from '../unsupported.js'
+import { INT32_MAX } from '../numeric.js'
 
 export function tree(_stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, { short: ['a', 'd', 'F'], long: ['noreport'], valueShort: ['L'] })
   if (positional.length > 1) return unsupported('feature', 'tree', 'multiple roots', 'tree: multiple roots are not supported')
-  const limit = values.has('L') ? parseNonNegativeInt(values.get('L'), 'tree: -L', values.get('L'), { max: 2147483647 }) : { value: Number.POSITIVE_INFINITY }
+  const limit = values.has('L') ? parseNonNegativeInt(values.get('L'), 'tree: -L', values.get('L'), { max: INT32_MAX }) : { value: Number.POSITIVE_INFINITY }
   if (limit.error) return limit.error
   if (!limit.value) return err('tree: -L must be greater than zero')
   const start = positional[0] ?? '.'

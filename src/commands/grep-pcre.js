@@ -1,4 +1,5 @@
 import { UnsupportedError } from '../unsupported.js'
+import { isUnicodeScalar } from '../unicode.js'
 
 function gap(detail) {
   throw new UnsupportedError('feature', 'PCRE ' + detail, `PCRE ${detail} is not supported`)
@@ -129,6 +130,6 @@ function characterEscape(pattern, at) {
   if (!match) throw new Error('invalid PCRE character escape')
   const radix = hex ? 16 : 8
   const code = parseInt(match[1] ?? match[2], radix)
-  if (code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) gap('character escape')
+  if (!isUnicodeScalar(code)) gap('character escape')
   return { source: `\\u{${code.toString(16)}}`, end: at + match[0].length }
 }
