@@ -1,14 +1,6 @@
-// `opts.commands` — the wiring point for commands this package will
-// not implement itself.
-//
-// The motivating case is `sha256sum`: hashing needs a crypto
-// implementation, and a package with zero runtime dependencies has no
-// business bundling one. So the embedder hands in the handler and the
-// engine supplies the shell around it. These tests wire a REAL
-// `sha256sum` using the host's crypto (available here, deliberately
-// not in `src/`) and then check it behaves like any other command —
-// expansion, pipes, redirects, gates, `xargs`, completion, `which` —
-// alongside the contract the handler itself has to hold up.
+// Embedders provide additional commands through opts.commands. These tests
+// supply sha256sum using host crypto and verify that the shell applies its
+// normal expansion, piping, redirection, dispatch, and completion rules.
 
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'

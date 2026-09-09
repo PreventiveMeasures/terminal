@@ -1,5 +1,5 @@
 import { parseArgs } from '../args.js'
-import { consumeStdin, err, joinLines, lineRecords, ok, okWith, readInputs, splitLines, usage, utf8, utf8Decoder } from '../util.js'
+import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, joinLines, lineRecords, ok, okWith, readInputs, splitLines, usage } from '../util.js'
 import { unsupported } from '../unsupported.js'
 import { hexdump, od, xxd } from './dump.js'
 import { INT64_MAX, INT64_MIN, UINT64_MAX } from '../numeric.js'
@@ -108,7 +108,7 @@ function cut(stdin, tokens, ctx) {
   const list = parseCutList(hasF ? values.get('f') : values.get('c'))
   if (list.error) return list.error
   const delim = values.get('d') === '' ? '\0' : values.get('d') ?? '\t'
-  if (hasF && utf8.encode(delim).length !== 1) return err('cut: -d delimiter must be a single byte')
+  if (hasF && encodeUtf8Loose(delim).length !== 1) return err('cut: -d delimiter must be a single byte')
   const r = readInputs('cut', positional, stdin, ctx)
   const out = []
   for (const { content } of r.inputs) {
@@ -126,8 +126,8 @@ function cut(stdin, tokens, ctx) {
 
 // GNU cut -c selects bytes even in UTF-8 mode. Partial characters must be diagnosed.
 function cutBytes(line, ranges) {
-  const bytes = utf8.encode(line)
-  return utf8Decoder.decode(Uint8Array.from(pickByPositions(bytes, ranges)))
+  const bytes = encodeUtf8Loose(line)
+  return decodeUtf8(Uint8Array.from(pickByPositions(bytes, ranges)))
 }
 
 function parseCutList(spec) {

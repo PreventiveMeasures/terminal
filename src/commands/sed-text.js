@@ -1,4 +1,4 @@
-import { utf8, utf8Decoder } from '../util.js'
+import { decodeUtf8, encodeUtf8Loose } from '../util.js'
 import { delimiter } from './sed-regex.js'
 
 const CONTROLS = { a: 7, f: 12, n: 10, r: 13, t: 9, v: 11, '\n': 10 }
@@ -44,11 +44,11 @@ export function finishSedText(state) {
 }
 
 function normalizeText(text) {
-  return utf8Decoder.decode(normalizeBytes(text))
+  return decodeUtf8(normalizeBytes(text))
 }
 
 function normalizeBytes(text) {
-  const input = utf8.encode(text), out = []
+  const input = encodeUtf8Loose(text), out = []
   for (let i = 0; i < input.length; i++) {
     const byte = input[i]
     if (byte !== 92 || i + 1 === input.length) { out.push(byte); continue }
@@ -78,8 +78,8 @@ export function readTransliteration(p) {
   const sep = delimiter(p, "'y' command")
   const source = normalizeBytes(transliterationSet(p, sep))
   const target = normalizeBytes(transliterationSet(p, sep))
-  const from = p.byteLocale ? source : [...utf8Decoder.decode(source)]
-  const to = p.byteLocale ? target : [...utf8Decoder.decode(target)]
+  const from = p.byteLocale ? source : [...decodeUtf8(source)]
+  const to = p.byteLocale ? target : [...decodeUtf8(target)]
   if (from.length !== to.length) throw new Error("'y' command strings have different lengths")
   const translation = p.byteLocale ? Uint8Array.from({ length: 256 }, (_, i) => i) : new Map()
   for (let i = 0; i < from.length; i++) {
@@ -106,7 +106,7 @@ function transliterationSet(p, sep) {
 }
 
 export function transliterateLine(text, command) {
-  if (command.byteLocale) return utf8Decoder.decode(utf8.encode(text).map((byte) => command.translation[byte]))
+  if (command.byteLocale) return decodeUtf8(encodeUtf8Loose(text).map((byte) => command.translation[byte]))
   let out = ''
   for (const c of text) out += command.translation.get(c) ?? c
   return out

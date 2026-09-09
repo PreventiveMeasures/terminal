@@ -118,7 +118,9 @@
     "test": "node --test --test-isolation=none ./tests/*.test.js",
     "test:slow": "AWK_SLOW_TESTS=1 node --test --test-isolation=none ./tests/*.test.js"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@exodus/bytes": "^1.15.1"
+  },
   "devDependencies": {
     "oxlint": "^1.63.0"
   },

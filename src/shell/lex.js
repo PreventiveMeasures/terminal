@@ -1,7 +1,7 @@
 // Lexical helpers for operators, parameter references, ANSI-C quotes and
 // here-document bodies. tokenize.js owns the cursor and quoting state.
 
-import { utf8, utf8Decoder } from '../util.js'
+import { decodeUtf8, encodeUtf8Loose } from '../util.js'
 import { UnsupportedError } from '../unsupported.js'
 import { readCommandSubstitution } from './substitution.js'
 import { isUnicodeScalar } from '../unicode.js'
@@ -75,7 +75,7 @@ function ansiQuoteEnd(line, start) {
 export function decodeAnsiC(line, start) {
   const end = ansiQuoteEnd(line, start)
   const bytes = []
-  const text = (s) => { for (const b of utf8.encode(s)) bytes.push(b) }
+  const text = (s) => { for (const b of encodeUtf8Loose(s)) bytes.push(b) }
   for (let i = start; i < end; i++) {
     if (line[i] !== '\\') {
       const ch = String.fromCodePoint(line.codePointAt(i))
@@ -108,7 +108,7 @@ export function decodeAnsiC(line, start) {
     text('\\')
   }
   const nul = bytes.indexOf(0)
-  return { text: utf8Decoder.decode(Uint8Array.from(nul === -1 ? bytes : bytes.slice(0, nul))), end: end + 1 }
+  return { text: decodeUtf8(Uint8Array.from(nul === -1 ? bytes : bytes.slice(0, nul))), end: end + 1 }
 }
 
 // Parentheses delimit even mid-word. A descriptor prefix is recognized only

@@ -151,31 +151,13 @@ describe('base64 input and diagnostic errors', () => {
   })
 })
 
-describe('base64 uses modern byte APIs when the runtime provides them', () => {
-  /* eslint-disable no-extend-native -- The synchronous API stub restores both descriptors in finally. */
-  it('uses native methods and keeps byte decoding independent of Buffer', () => {
-    const encoder = Object.getOwnPropertyDescriptor(Uint8Array.prototype, 'toBase64')
-    const decoder = Object.getOwnPropertyDescriptor(Uint8Array, 'fromBase64')
-    let decoded = 0, encoded = 0
-    try {
-      Object.defineProperty(Uint8Array.prototype, 'toBase64', { configurable: true, value() {
-        encoded++
-        return globalThis.btoa(Array.from(this, (byte) => String.fromCodePoint(byte)).join(''))
-      } })
-      Object.defineProperty(Uint8Array, 'fromBase64', { configurable: true, value(text) {
-        decoded++
-        return Uint8Array.from(globalThis.atob(text), (char) => char.codePointAt(0))
-      } })
-      const t = createTerminal({ input: 'é' })
-      assert.deepEqual(t.run('base64 input | base64 -d'), expected('é'))
-      assert.equal(encoded, 1)
-      assert.equal(decoded, 1)
-    } finally {
-      if (encoder) Object.defineProperty(Uint8Array.prototype, 'toBase64', encoder)
-      else delete Uint8Array.prototype.toBase64
-      if (decoder) Object.defineProperty(Uint8Array, 'fromBase64', decoder)
-      else delete Uint8Array.fromBase64
-    }
+describe('base64 repeated decoding keeps each result independent', () => {
+  it('does not retain bytes or errors from a previous longer decode', () => {
+    const t = createTerminal({ long: 'AAEC'.repeat(4096), partial: 'YQ==!', short: 'AQ==', empty: '' })
+    assert.deepEqual(t.run('base64 -d long'), expected('\0\u0001\u0002'.repeat(4096)))
+    assert.deepEqual(t.run('base64 -d partial'), expected('a', 1, 'base64: invalid input\n'))
+    assert.deepEqual(t.run('base64 -d short'), expected('\u0001'))
+    assert.deepEqual(t.run('base64 -d empty'), expected(''))
+    assert.deepEqual(t.run('base64 -d long'), expected('\0\u0001\u0002'.repeat(4096)))
   })
-  /* eslint-enable no-extend-native */
 })

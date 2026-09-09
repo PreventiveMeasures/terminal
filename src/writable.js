@@ -1,5 +1,5 @@
 import { compareNames, lookup, resolve, walkTree } from './fs.js'
-import { encodeUtf8, utf8Decoder } from './util.js'
+import { decodeUtf8, encodeUtf8 } from './util.js'
 
 // Only the overlay owns mutable bytes. The mounted source map and its
 // directory index remain separate and are never copied into this map.
@@ -17,13 +17,13 @@ export function writableFs(base) {
   const fs = {
     observeIo: (value) => { observer = value },
     fileIdentity: (path) => files.get(path),
-    readIdentity: (inode) => { observer?.read(inode); return utf8Decoder.decode(inode.bytes) },
+    readIdentity: (inode) => { observer?.read(inode); return decodeUtf8(inode.bytes) },
     isFile: (path) => files.has(path) || base.isFile(path),
     isDir: (path) => path === '/tmp' || base.isDir(path),
     readFile: (path) => {
       const inode = files.get(path)
       observer?.read(inode ?? path)
-      return inode ? utf8Decoder.decode(inode.bytes) : base.readFile(path)
+      return inode ? decodeUtf8(inode.bytes) : base.readFile(path)
     },
     listDir: (path) => {
       if (path === '/') return rootEntries

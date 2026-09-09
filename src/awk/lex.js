@@ -4,7 +4,7 @@
 // `/` starts a regex unless the previous token ends an operand.
 
 import { AwkError, BUILTINS, KEYWORDS } from './common.js'
-import { utf8, utf8Decoder } from '../util.js'
+import { decodeUtf8, encodeUtf8Loose } from '../util.js'
 
 // Longest first, so `**=` wins over `**` and `*=`, `|&` over `|`, etc.
 const OPERATORS = [
@@ -134,7 +134,7 @@ function decodeString(src, start, warn, line = null) {
   while (i < src.length) {
     const c = src[i]
     if (line !== null) {
-      if (c === '"') return { value: utf8Decoder.decode(Uint8Array.from(bytes)), end: i + 1 }
+      if (c === '"') return { value: decodeUtf8(Uint8Array.from(bytes)), end: i + 1 }
       if (c === '\n') break
       if (c === '\\' && src[i + 1] === '\n') { i += 2; continue }
     }
@@ -147,7 +147,7 @@ function decodeString(src, start, warn, line = null) {
     }
   }
   if (line !== null) throw new AwkError('unterminated string', line)
-  return { value: utf8Decoder.decode(Uint8Array.from(bytes)), end: i }
+  return { value: decodeUtf8(Uint8Array.from(bytes)), end: i }
 }
 
 // The regex body is kept verbatim (escapes included) for ./re-parse.js
@@ -189,6 +189,6 @@ export function unescapeAwkString(s, warn = null) {
 }
 
 function appendEscape(bytes, escape) {
-  if (escape.byte === undefined) { for (const byte of utf8.encode(escape.text)) bytes.push(byte) }
+  if (escape.byte === undefined) { for (const byte of encodeUtf8Loose(escape.text)) bytes.push(byte) }
   else bytes.push(escape.byte)
 }

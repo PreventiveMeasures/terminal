@@ -1,0 +1,318 @@
+{
+  "upstream": {
+    "repository": "ExodusOSS/bytes",
+    "commit": "c33d586715d461d0c6171e4cf7c71a06eda447ec",
+    "version": "1.15.1",
+    "source": "tests/base64.test.js"
+  },
+  "raw": [
+    {
+      "hex": "",
+      "input": ""
+    },
+    {
+      "hex": "00",
+      "input": "AA=="
+    },
+    {
+      "hex": "01",
+      "input": "AQ=="
+    },
+    {
+      "hex": "ff",
+      "input": "/w=="
+    }
+  ],
+  "rejected": [
+    {
+      "input": "aa==",
+      "hex": "69",
+      "valid": false
+    },
+    {
+      "input": " ",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "    ",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "aaaa aaaa",
+      "hex": "69a69a",
+      "valid": false
+    },
+    {
+      "input": "aaaa  aaaa",
+      "hex": "69a69a",
+      "valid": false
+    },
+    {
+      "input": "aaaa    aaaa",
+      "hex": "69a69a",
+      "valid": false
+    },
+    {
+      "input": "aaaa aaa",
+      "hex": "69a69a",
+      "valid": false
+    },
+    {
+      "input": "aa== ",
+      "hex": "69",
+      "valid": false
+    },
+    {
+      "input": "aa ==",
+      "hex": "69",
+      "valid": false
+    },
+    {
+      "input": "\n",
+      "hex": "",
+      "valid": true
+    },
+    {
+      "input": "\n\n\n\n",
+      "hex": "",
+      "valid": true
+    },
+    {
+      "input": "aaaa\naaaa",
+      "hex": "69a69a69a69a",
+      "valid": true
+    },
+    {
+      "input": "aaaa\n\n\n\naaaa",
+      "hex": "69a69a69a69a",
+      "valid": true
+    },
+    {
+      "input": "aaaa\n",
+      "hex": "69a69a",
+      "valid": true
+    },
+    {
+      "input": "aaaa\n\n\n\n",
+      "hex": "69a69a",
+      "valid": true
+    },
+    {
+      "input": " ",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "    ",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "aaaa    aaaa",
+      "hex": "69a69a",
+      "valid": false
+    },
+    {
+      "input": "_aY=",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "_aa=",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "-a==",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "-Q==",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "a",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "aaaaa",
+      "hex": "69a69a",
+      "valid": false
+    },
+    {
+      "input": "=",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "==",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "===",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "====",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "a=",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "a==",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "a===",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "a====",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "aa=",
+      "hex": "69",
+      "valid": false
+    },
+    {
+      "input": "aa===",
+      "hex": "69",
+      "valid": false
+    },
+    {
+      "input": "aa===",
+      "hex": "69",
+      "valid": false
+    },
+    {
+      "input": "aaa==",
+      "hex": "69a6",
+      "valid": false
+    },
+    {
+      "input": "aaa===",
+      "hex": "69a6",
+      "valid": false
+    },
+    {
+      "input": "aaa====",
+      "hex": "69a6",
+      "valid": false
+    },
+    {
+      "input": "aaaa=",
+      "hex": "69a69a",
+      "valid": false
+    },
+    {
+      "input": "aaaa==",
+      "hex": "69a69a",
+      "valid": false
+    },
+    {
+      "input": "aaaa===",
+      "hex": "69a69a",
+      "valid": false
+    },
+    {
+      "input": "####",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "@@@@",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "aaa#",
+      "hex": "69a6",
+      "valid": false
+    },
+    {
+      "input": "a%aa",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "Z−==",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "✖✖✖✖",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "a-+a",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "aa+_",
+      "hex": "69af",
+      "valid": false
+    },
+    {
+      "input": "aa_/",
+      "hex": "69",
+      "valid": false
+    },
+    {
+      "input": "-a/a",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "a=aa",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "aa=a",
+      "hex": "69",
+      "valid": false
+    },
+    {
+      "input": "=aaa",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "input": "aa==a",
+      "hex": "69",
+      "valid": false
+    },
+    {
+      "input": "aaa=a",
+      "hex": "69a6",
+      "valid": false
+    },
+    {
+      "input": "aa==aaaa",
+      "hex": "69",
+      "valid": false
+    },
+    {
+      "input": "aaa=aaaa",
+      "hex": "69a6",
+      "valid": false
+    }
+  ]
+}

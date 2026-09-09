@@ -5,7 +5,7 @@ import { echo } from './echo.js'
 import { printf } from './printf.js'
 import { parseArgs } from '../args.js'
 import { formatWc } from './wc-format.js'
-import { consumeStdin, err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8, utf8Decoder } from '../util.js'
+import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines } from '../util.js'
 import { awk } from '../awk/index.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
@@ -80,12 +80,12 @@ function dashNumberShorthand(tokens) {
 // Output must remain valid UTF-8: partial bytes cannot cross a string
 // pipeline faithfully, so the shared decoder reports that limitation.
 function sliceBytes(content, range) {
-  const bytes = utf8.encode(content)
+  const bytes = encodeUtf8Loose(content)
   // `range` resolves against THIS input's byte length, so `-c -3` drops
   // the last three bytes of each input separately, as GNU does.
   const [start, end] = range(bytes.length)
   if (start === 0 && end >= bytes.length) return content
-  return utf8Decoder.decode(bytes.subarray(start, end))
+  return decodeUtf8(bytes.subarray(start, end))
 }
 
 // Banner presence depends on named operands, including missing ones. Only opened
@@ -160,7 +160,7 @@ function pickWcFlags(flags) {
 function wcCounts(content, ctx, which, needsWidth) {
   const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG')
   const cLocale = locale === 'C' || locale === 'POSIX'
-  const bytes = which.c || needsWidth || (which.m && cLocale) ? utf8.encode(content).length : 0
+  const bytes = which.c || needsWidth || (which.m && cLocale) ? encodeUtf8Loose(content).length : 0
   return {
     l: which.l ? (content.match(/\n/gu) ?? []).length : 0,
     w: which.w ? (content.match(cLocale ? /[^\t\n\v\f\r ]+/gu : /[^\t\n\v\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u2060\u3000]+/gu) ?? []).length : 0,
@@ -208,7 +208,7 @@ function uniq(stdin, tokens, ctx) {
       const text = rest.toWellFormed()
       return ignoreCase ? text.replace(/[A-Z]/gu, (c) => c.toLowerCase()) : text
     }
-    const bytes = utf8.encode(rest).subarray(skipChars.value, width.value === undefined ? undefined : skipChars.value + width.value)
+    const bytes = encodeUtf8Loose(rest).subarray(skipChars.value, width.value === undefined ? undefined : skipChars.value + width.value)
     // Keys may contain partial UTF-8: compare bytes without decoding or
     // emitting them. GNU uniq's -s/-w and C case folding operate on bytes.
     return (ignoreCase ? bytes.map((b) => b >= 65 && b <= 90 ? b + 32 : b) : bytes).join(',')

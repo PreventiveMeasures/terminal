@@ -1,7 +1,7 @@
 // sort uses the whole line as a final tiebreak unless -u suppresses it.
 
 import { parseArgs } from '../args.js'
-import { err, joinLines, okWith, readInputs, splitLines, utf8 } from '../util.js'
+import { encodeUtf8Loose, err, joinLines, okWith, readInputs, splitLines } from '../util.js'
 import { unsupported } from '../unsupported.js'
 import { compareNames as cmpStrings } from '../fs.js'
 
@@ -12,7 +12,7 @@ export function sort(stdin, tokens, ctx) {
     repeatable: ['k'],
   })
   const sep = values.get('t')
-  if (sep !== undefined && utf8.encode(sep).length !== 1) return err(`sort: multi-character tab \`${sep}\``)
+  if (sep !== undefined && encodeUtf8Loose(sep).length !== 1) return err(`sort: multi-character tab \`${sep}\``)
   const globals = { n: flags.has('n'), f: flags.has('f'), b: flags.has('b'), r: flags.has('r') }
   const keys = parseKeySpecs(values.get('k') ?? [], globals)
   if (keys.error) return keys.error

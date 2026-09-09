@@ -1,5 +1,5 @@
 import { UnsupportedError } from '../unsupported.js'
-import { utf8 } from '../util.js'
+import { encodeUtf8Loose } from '../util.js'
 import { isUnicodeScalar, stepAt } from '../unicode.js'
 
 const SIMPLE = { a: 7, b: 8, e: 27, E: 27, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92 }
@@ -32,11 +32,11 @@ export function printfEscape(text, at, argument, state) {
       if (state.byteLocale && code > 127) {
         throw new UnsupportedError('feature', 'Unicode escape in C locale', 'non-ASCII Unicode escapes in the C locale are not supported')
       }
-      return { bytes: utf8.encode(String.fromCodePoint(code)), end }
+      return { bytes: encodeUtf8Loose(String.fromCodePoint(code)), end }
     }
   }
   end = at + 1 + stepAt(text, at + 1)
-  return { bytes: utf8.encode(text.slice(at, end)), end }
+  return { bytes: encodeUtf8Loose(text.slice(at, end)), end }
 }
 
 export function printfBytes(text, state) {
@@ -50,7 +50,7 @@ export function printfBytes(text, state) {
     } else {
       const next = text.indexOf('\\', at)
       const end = next < 0 ? text.length : next
-      for (const b of utf8.encode(text.slice(at, end))) bytes.push(b)
+      for (const b of encodeUtf8Loose(text.slice(at, end))) bytes.push(b)
       at = end
     }
   }

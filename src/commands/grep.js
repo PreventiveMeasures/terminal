@@ -2,7 +2,7 @@
 
 import { basename, lookup, relativeTo } from '../fs.js'
 import { parseArgs } from '../args.js'
-import { consumeStdin, err, parseNonNegativeInt, readFilesFor, readInputs, usage, utf8 } from '../util.js'
+import { consumeStdin, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, usage } from '../util.js'
 import { UnsupportedError, unsupported, unsupportedFrom } from '../unsupported.js'
 import { AwkError } from '../awk/common.js'
 import { compilePatterns, inputGap } from './grep-pattern.js'
@@ -103,7 +103,7 @@ function textInput(input, filters, res, invert) {
   // GNU's initial 96 KiB read detects NUL before matching that buffer.
   // Later discovery may retain earlier output, counts, or a quiet success;
   // buffer growth and read boundaries are not represented by this runtime.
-  if (utf8.encode(input.content.slice(0, input.content.indexOf('\0'))).length >= 96 * 1024) throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
+  if (encodeUtf8Loose(input.content.slice(0, input.content.indexOf('\0'))).length >= 96 * 1024) throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
   return { ...input, content: '' }
 }
 

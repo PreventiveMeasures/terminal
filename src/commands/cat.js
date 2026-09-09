@@ -1,7 +1,7 @@
 import { UnsupportedError } from '../unsupported.js'
 import { lookup } from '../fs.js'
 import { parseArgs } from '../args.js'
-import { lineRecords, okWith, readContent, utf8 } from '../util.js'
+import { encodeUtf8Loose, lineRecords, okWith, readContent } from '../util.js'
 
 // cat displays actual UTF-8 bytes with -v; numbering uses the original
 // lines so marking an empty line with -E never makes -b count it.
@@ -25,8 +25,8 @@ function readCatContent(files, stdin, ctx, format, transforms) {
     const identity = redirected ? ctx.stdinHandle?.identity : ctx.fs.fileIdentity?.(path)
     if (stderr && sameFile(path, identity, ctx.outputFds[2])) throw new UnsupportedError('feature', 'cat input modified by diagnostics', 'cat: reading an input after writing diagnostics to the same file is not supported')
     if (sameFile(path, identity, output)) {
-      const position = shared ? utf8.encode(ctx.stdinHandle.content).length - utf8.encode(pipe).length : 0
-      if (position < output.position + utf8.encode(format(content)).length) {
+      const position = shared ? encodeUtf8Loose(ctx.stdinHandle.content).length - encodeUtf8Loose(pipe).length : 0
+      if (position < output.position + encodeUtf8Loose(format(content)).length) {
         stderr += `cat: ${name}: input file is output file\n`
         continue
       }
@@ -59,7 +59,7 @@ function formatCat(input, flags) {
     const ended = raw.endsWith('\n')
     let line = ended ? raw.slice(0, -1) : raw
     const prefix = (flags.has('b') ? line !== '' : flags.has('n')) ? `${String(++n).padStart(6)}\t` : ''
-    if (visible) line = [...utf8.encode(line)].map((b) => visibleByte(b, showTabs)).join('')
+    if (visible) line = [...encodeUtf8Loose(line)].map((b) => visibleByte(b, showTabs)).join('')
     else {
       if (showTabs) line = line.replaceAll('\t', '^I')
       if (showEnds && ended && line.endsWith('\r')) line = line.slice(0, -1) + '^M'
