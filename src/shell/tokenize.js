@@ -8,6 +8,7 @@
 // lex.js handles substitutions, operators, ANSI-C strings and here-documents.
 
 import { NAME_RE, backtickGap, decodeAnsiC, readExpansion, readHeredocBodies, readOperator } from './lex.js'
+import { UnsupportedError } from '../unsupported.js'
 
 export { NAME_RE }
 
@@ -34,6 +35,9 @@ export function tokenize(line) {
     if (c === '#' && !inToken) { skipComment(st); continue }
     if (c === '\n') { newline(st); continue }
     if (isBlank(c)) { flush(st); st.i++; continue }
+    if (c === '(' && st.mask.at(-1) === '0' && /[?*+@!]/u.test(st.cur.at(-1)) && !st.empty.includes(st.cur.length)) {
+      throw new UnsupportedError('feature', 'extglob', 'extended glob patterns are not supported')
+    }
     const op = readOperator(st.line, st.i, !inToken)
     if (op?.token.kind === 'paren_open') op.token.wordAdjacent = inToken
     if (op) { flush(st); emit(st, op.token); st.i = op.end; continue }

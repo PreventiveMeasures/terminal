@@ -199,9 +199,9 @@ describe('sed control command syntax errors are ordinary failures', () => {
 describe('sed control commands retain unsupported diagnostics', () => {
   for (const [command, detail] of [
     [sed('Q'), 'script'],
-    [sed('1{h;}'), 'script'],
-    [sed('1!{h;}'), 'script'],
-    [sed('q;h'), 'script'],
+    [sed('1{F;}'), 'script'],
+    [sed('1!{F;}'), 'script'],
+    [sed('q;F'), 'script'],
     [sed(String.raw`y/\xFF/X/`, 'left'), 'partial UTF-8 byte sequence'],
     ['LC_ALL=C ' + sed(String.raw`y/a/\xFF/`, 'left'), 'partial UTF-8 byte sequence'],
     ['LC_ALL=C ' + sed(String.raw`y/\xC3/X/`, 'unicode'), 'partial UTF-8 byte sequence'],
@@ -219,7 +219,7 @@ describe('sed control commands retain unsupported diagnostics', () => {
   }
 
   it('an unsupported compiled command does not consume shared stdin', () => {
-    const result = createTerminal(FILES).run("cat input | { sed 'q;h' 2>/dev/null; cat; }")
+    const result = createTerminal(FILES).run("cat input | { sed 'q;F' 2>/dev/null; cat; }")
     assert.equal(result.stdout, FILES.input)
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)

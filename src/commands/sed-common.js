@@ -1,6 +1,6 @@
 import { UnsupportedError, unsupported, unsupportedFrom } from '../unsupported.js'
 
-export const SED_SUBSET = 'sed: supported commands are p, P, n, N, d, a, i, c, q, =, y, :, b, t, T, { }, and s/regexp/replacement/[Npgw]'
+export const SED_SUBSET = 'sed: supported commands are p, P, n, N, d, D, a, i, c, g, G, h, H, x, w, q, =, y, :, b, t, T, { }, and s/regexp/replacement/[NgiIpw]'
 export const MAX_SED_STEPS = 1_000_000
 export const MAX_SED_SPACE = 16 * 1024 * 1024
 export const MAX_SED_OUTPUT = 64 * 1024 * 1024

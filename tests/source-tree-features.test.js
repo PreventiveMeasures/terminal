@@ -54,7 +54,7 @@ describe('source analysis features — permanent regressions', () => {
       ['grep -I TODO f', { f: 'TODO\n'.repeat(30000) + '\0' }, 'late binary detection'],
       ["grep -oE '.+.+ ' f", { f: 'é \n' }, 'non-ASCII regex semantics'],
       ["grep -E '[[:space:]]' f", { f: '\u2003\n' }, 'non-ASCII regex semantics'],
-      ["sed 's/a/b/e' f", { f: 'a' }, 'substitution flags'],
+      ["sed 's/a/b/e' f", { f: 'a' }, 'substitution flag e'],
       ["sed 's/\\(a\\)\\|\\(ab\\)/\\1/g' f", { f: 'ab' }, 'regex capture semantics'],
       ["sed 's/./x/' f", { f: 'é' }, 'non-ASCII regex semantics'],
     ]

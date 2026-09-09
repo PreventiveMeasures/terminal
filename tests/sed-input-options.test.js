@@ -18,7 +18,7 @@ const FILES = {
   'scripts/print': '1p\n$p\n',
   'scripts/empty': '',
   'scripts/broken': 's/a',
-  'scripts/unsupported': 'h\n',
+  'scripts/unsupported': 'F\n',
   'scripts/dialect': 's/a+/X/',
   dialect: 'a+\naa\n',
   '-z': 's/a/A/',

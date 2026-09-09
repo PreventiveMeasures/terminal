@@ -14,7 +14,7 @@ export function runSed(program, flags, ctx, capture = false) {
   const result = output.start(input)
   const content = []
   const emit = lineWriter(capture ? (text) => { output.account(text); content.push(text) } : (text) => output.stream(1, text), delimiter)
-  const state = { delimiter, quiet, separate, regexState: program.regexState, budget: program.budget, emit, input, output }
+  const state = { delimiter, quiet, separate, hold: program.hold, regexState: program.regexState, budget: program.budget, emit, input, output }
   try {
     const code = runRecords(program.commands, state)
     result.quit = code !== null
@@ -35,6 +35,8 @@ function runRecords(commands, state) {
   let first = true
   for (let record = state.input.next(); record; record = state.input.next()) {
     if (first || state.separate && record.reset) {
+      // GNU resets hold length between separate files, preserving its terminator.
+      state.hold.text = ''
       for (const command of commands) {
         command.active = command.start?.type === 'line' && command.start.value === 0
         command.closed = false
@@ -75,6 +77,13 @@ function runCycle(commands, cycle) {
     }
     if (kind === 'q') { cycle.exitCode = command.exitCode; break }
     if (kind === 'd') return true
+    if (kind === 'D') {
+      const end = cycle.text.indexOf(cycle.delimiter)
+      if (end < 0) return true
+      cycle.text = cycle.text.slice(end + cycle.delimiter.length)
+      i = -1
+      continue
+    }
     if (kind === 'n' || kind === 'N') { if (!nextPattern(cycle, kind === 'N')) return true; continue }
     if (kind === 'c') {
       if (!command.active && command.text !== null) cycle.emit(command.text.slice(0, -1), cycle.delimiter)
@@ -96,6 +105,8 @@ function outputCommand(command, cycle) {
     const end = cycle.text.indexOf(cycle.delimiter)
     cycle.emit(end < 0 ? cycle.text : cycle.text.slice(0, end), end < 0 ? cycle.terminator : cycle.delimiter)
   } else if (kind === '=') cycle.emit(String(cycle.line), cycle.delimiter)
+  else if (kind === 'w') command.writer(cycle.text, cycle.terminator)
+  else if ('gGhHx'.includes(kind)) holdCommand(kind, cycle)
   else if (kind === 'y') cycle.text = transliterateLine(cycle.text, command)
   else {
     const result = substituteLine(cycle.text, command, cycle.regexState)
@@ -105,6 +116,21 @@ function outputCommand(command, cycle) {
     if (command.print) cycle.emit(cycle.text, cycle.terminator)
     if (command.writer) command.writer(cycle.text, cycle.terminator)
   }
+}
+
+function holdCommand(kind, cycle) {
+  const hold = cycle.hold
+  if (kind === 'x') {
+    const { text, terminator } = cycle
+    Object.assign(cycle, hold)
+    Object.assign(hold, { text, terminator })
+  } else {
+    const from = kind === 'h' || kind === 'H' ? cycle : hold
+    const to = from === hold ? cycle : hold
+    to.text = kind === 'G' || kind === 'H' ? to.text + cycle.delimiter + from.text : from.text
+    to.terminator = from.terminator
+  }
+  if (hold.text.length > MAX_SED_SPACE) throw new UnsupportedError('feature', 'hold space limit', 'sed: hold space limit exceeded')
 }
 
 function nextPattern(cycle, append) {

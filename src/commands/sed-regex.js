@@ -3,6 +3,7 @@ import { breToEs, validateBackreferences } from '../bre.js'
 import { ereClasses, grepSource, validateRegex } from './grep-pattern.js'
 import { asciiCompatible, hasUnicodeSpace } from '../regex-locale.js'
 import { scriptGap } from './sed-common.js'
+import { UnsupportedError } from '../unsupported.js'
 
 const controls = { n: '\n', t: '\t', r: '\r', a: '\u0007', f: '\f', v: '\v' }
 
@@ -55,15 +56,17 @@ export function substitution(p) {
   const replacement = delimited(p, sep, false)
   const parts = replacementParts(replacement)
   // GNU opens w targets before validating the regexp or its references.
-  const flags = substitutionFlags(p, pattern === '')
-  const compiled = compilePattern(pattern, p.extended)
+  const flags = substitutionFlags(p)
+  if (pattern === '' && (flags.ignoreCase || flags.multiline)) throw new Error('cannot specify modifiers on empty regexp')
+  if (flags.multiline) unsupportedFlag(flags.multiline)
+  const compiled = compilePattern(pattern, p.extended, false, flags.ignoreCase)
   for (const part of parts) {
     if (typeof part === 'number' && part > compiled.re?.groupCount) throw new Error(`invalid reference \\${part} in replacement`)
   }
   return { ...compiled, parts, ...flags }
 }
 
-function substitutionFlags(p, previous) {
+function substitutionFlags(p) {
   const flags = { global: false, print: false, nth: null }
   while (p.i < p.script.length) {
     const token = p.script[p.i]
@@ -83,21 +86,33 @@ function substitutionFlags(p, previous) {
       if (flags[flag]) throw new Error('multiple substitution flags')
       flags[flag] = true
     } else if (token === 'w') {
-      const name = /^[ \t]*([^\n]*)/u.exec(p.script.slice(p.i))
-      p.i += name[0].length
-      if (name[1] === '') throw new Error('missing filename in r/R/w/W commands')
-      if (p.openWrite) flags.writer = p.openWrite(name[1])
-      else flags.writeName = name[1]
+      Object.assign(flags, readWriteFile(p))
       break
-    } else if ('iImM'.includes(token) && previous) throw new Error('cannot specify modifiers on empty regexp')
-    else if ('iImMe'.includes(token)) scriptGap('substitution flags')
+    } else if (token === 'i' || token === 'I') flags.ignoreCase = true
+    else if (token === 'm' || token === 'M') flags.multiline = token
+    else if (token === 'e') unsupportedFlag(token)
     else throw new Error(`unknown option to substitute command: '${token}'`)
   }
   return flags
 }
 
-export function compilePattern(pattern, extended, noSub = false) {
-  if (!pattern) return { re: null }
+function unsupportedFlag(flag) {
+  const feature = flag === 'e' ? 'command evaluation' : 'multiline regex matching'
+  throw new UnsupportedError('feature', `substitution flag ${flag}`, `sed: substitution flag '${flag}' (${feature}) is not supported`)
+}
+
+export function readWriteFile(p) {
+  const name = /^[ \t]*([^\n]*)/u.exec(p.script.slice(p.i))
+  p.i += name[0].length
+  if (name[1] === '') throw new Error('missing filename in r/R/w/W commands')
+  return p.openWrite ? { writer: p.openWrite(name[1]) } : { writeName: name[1] }
+}
+
+export function compilePattern(pattern, extended, noSub = false, ignoreCase = false) {
+  if (!pattern) {
+    if (ignoreCase) throw new Error('cannot specify modifiers on empty regexp')
+    return { re: null }
+  }
   validateRegex(pattern, extended)
   const normalized = pattern.replace(/\\(.)/gu, (s, c) => {
     if (c === 'o') scriptGap('regex escape')
@@ -110,8 +125,8 @@ export function compilePattern(pattern, extended, noSub = false) {
   for (const [, escape] of translated.source.matchAll(/\\(.)/gu)) {
     if (/[1-9]/u.test(escape)) scriptGap('regex backreferences')
   }
-  const re = new AwkRegex(grepSource(translated.source, true), false)
-  return { re, noSub, compatible: asciiCompatible(re.src, pattern), spaceClass: /\[:(?:space|blank):\]|\\[sS]/u.test(pattern) }
+  const re = new AwkRegex(grepSource(translated.source, true), ignoreCase)
+  return { re, noSub, compatible: !ignoreCase && asciiCompatible(re.src, pattern), spaceClass: /\[:(?:space|blank):\]|\\[sS]/u.test(pattern) }
 }
 
 // GNU sed's POSIX modes are stricter than grep and AWK: ERE rejects stray
