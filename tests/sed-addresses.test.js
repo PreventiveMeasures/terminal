@@ -24,6 +24,10 @@ const CASES = [
   ["sed -n 's/X/end/;/start/,/end/p' input", 'start\nX\noutside\n', 'start\nend\n'],
   [String.raw`sed -n '/^a\/b$/p' input`, 'a/b\nab\n', 'a/b\n'],
   [String.raw`sed -n '/^a\tb$/p' input`, 'a\tb\natb\n', 'a\tb\n'],
+  [String.raw`sed -n '1,\%end%p' input`, 'a\nend\nafter\n', 'a\nend\n'],
+  [String.raw`sed -n '\%a%p' input`, 'a\nb\n', 'a\n'],
+  ["sed -n '/a/!p' input", 'a\nb\n', 'b\n'],
+  ["sed -n '/a/{p;}' input", 'a\nb\n', 'a\n'],
   ["sed -n '/[/]/p;/[;]$/p' input", '/\n;\nx\n', '/\n;\n'],
   ["sed -n '/^a$/p' input", 'a\r\na\n', 'a\n'],
   [String.raw`sed -n 's/x/\n/;/^$/p' input`, 'x\n\n', '\n'],
@@ -53,18 +57,15 @@ describe('sed unsupported features retain diagnostics', () => {
   const gaps = [
     ["sed -n '/a/Ip' input", 'address regex flags'],
     ["sed -n '/a/Mp' input", 'address regex flags'],
+    ["sed -n '/a/ I p' input", 'address regex flags'],
+    ["sed -n '/a/ M p' input", 'address regex flags'],
     ["sed -n '1~2p' input", 'step address'],
     ["sed -n '0~2p' input", 'step address'],
     ["sed -n '/a/,~3p' input", 'step address'],
-    [String.raw`sed -n '1,\%end%p' input`, 'address delimiter'],
-    [String.raw`sed -n '\%a%p' input`, 'address delimiter'],
-    ["sed -n '//p' input", 'previous regular expression'],
     [String.raw`sed -n '/\(a\)\1/p' input`, 'regex backreferences'],
     [String.raw`sed -E 's/(a)\1/x/' input`, 'regex backreferences'],
     [String.raw`sed -n '/\o101/p' input`, 'regex escape'],
     [String.raw`sed -E 's/\o101/x/' input`, 'regex escape'],
-    ["sed -n '/a/!p' input", 'script'],
-    ["sed -n '/a/{p;}' input", 'script'],
     ["sed -n 'p # comment' input", 'comments'],
     ["sed -n 'p# comment' input", 'comments'],
     ["sed -n 'p;# comment' input", 'comments'],
@@ -100,7 +101,7 @@ describe('sed unsupported features retain diagnostics', () => {
 
   it('reports malformed addresses and replacement references as ordinary errors', () => {
     const terminal = createTerminal({ input: 'a\n' })
-    for (const command of ["sed -n '0p' input", "sed -n '0,2p' input",
+    for (const command of ["sed -n '0p' input", "sed -n '0,2p' input", "sed -n '//p' input",
       "sed -n '/unterminated' input", "sed -n '1,p' input", String.raw`sed -E 's/(a)/\2/' input`,
       ...[String.raw`a\)`, String.raw`a\(`, String.raw`a\{`].flatMap(pattern => [
         `sed -n '/${pattern}/p' input`, `sed 's/${pattern}/x/' input`,
@@ -111,4 +112,18 @@ describe('sed unsupported features retain diagnostics', () => {
       assert.deepEqual(result.unsupported, [], command)
     }
   })
+
+  // GNU compile_regex rejects modifiers on empty patterns during compilation,
+  // even when no input record could evaluate the address.
+  // https://github.com/mirror/sed/blob/0c1fe22ccacf4887e0be6c11deb4e9c83acc287d/sed/regexp.c
+  for (const script of ['//Ip', '//Mp', '//IMp', '// I p', '// M p', '/a/p;//Ip', String.raw`\%%Ip`]) {
+    for (const input of ['', 'a\n']) {
+      it(`empty address modifiers fail before reading ${input ? 'nonempty' : 'empty'} input: ${script}`, () => {
+        assert.deepEqual(createTerminal({ input }).run(`sed -n '${script}' input`), {
+          stdout: '', stderr: 'sed: cannot specify modifiers on empty regexp\n',
+          exitCode: 1, cwd: '/', unsupported: [],
+        })
+      })
+    }
+  }
 })

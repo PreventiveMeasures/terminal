@@ -100,6 +100,8 @@ describe('sed reports expression argument and option errors precisely', () => {
     "sed -Ee 's/(/X/' input",
     "sed -e 's/a/A/' -e 's/b/\\1/' input",
     "sed --regexp-extended=value -e 's/a/A/' input",
+    'sed -e -n input',
+    'sed -e -- input',
   ]) {
     it(`keeps ordinary expression/argument failures off diagnostics: ${command}`, () => {
       const actual = createTerminal(FILES).run(command)
@@ -109,14 +111,14 @@ describe('sed reports expression argument and option errors precisely', () => {
       assert.deepEqual(actual.unsupported, [])
     })
   }
-  for (const command of ["sed -e d input", "sed -e -n input", "sed -e -- input"]) {
+  for (const command of ['sed -e h input', 'sed -e N input']) {
     it(`attributes unsupported command text to the script: ${command}`, () => {
       const actual = createTerminal(FILES).run(command)
       assert.equal(actual.exitCode, 1)
       assert.equal(actual.unsupported.length, 1)
       assert.deepEqual(actual.unsupported[0], {
         kind: 'feature', command: 'sed', detail: 'script',
-        message: 'sed: only addressed p and s/regexp/replacement/[gp] scripts are supported',
+        message: 'sed: only addressed p, d, a, i, c, q, =, y, { } and s/regexp/replacement/[Npg] scripts are supported',
       })
       assert.equal(actual.stderr, actual.unsupported[0].message + '\n')
     })

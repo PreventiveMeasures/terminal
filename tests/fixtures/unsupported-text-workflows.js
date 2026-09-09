@@ -33,8 +33,8 @@ export const TEXT_WORKFLOWS = [
     expected: [{ kind: 'feature', command: 'sed', detail: 'address regex flags' }],
   },
   {
-    purpose: 'Remove blank lines before inspecting a README',
-    command: String.raw`sed '/^[[:space:]]*$/d' README.md`,
+    purpose: 'Append one metric record after each README line',
+    command: String.raw`sed 'R data/metrics.tsv' README.md`,
     expected: [{ kind: 'feature', command: 'sed', detail: 'script' }],
   },
   {

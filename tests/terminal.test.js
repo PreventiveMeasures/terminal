@@ -3418,7 +3418,7 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     // Unmodeled scripts retain the subset diagnostic.
     const unsupportedCases = [
       'sed',                                // no args
-      "sed -n '/foo/!p' big.txt",           // negated address
+      "sed -n '/foo/H' big.txt",            // hold-space command
     ]
     for (const cmd of unsupportedCases) {
       const r = t.run(cmd)
