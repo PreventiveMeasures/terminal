@@ -1,10 +1,8 @@
 import { formatNumeric, padField } from '../awk/format.js'
 import { UnsupportedError } from '../unsupported.js'
 import { utf8 } from '../util.js'
+import { INT64_MAX, INT64_MIN, UINT64_MAX } from '../numeric.js'
 
-const INT_MAX = (1n << 63n) - 1n
-const INT_MIN = -(1n << 63n)
-const UINT_MAX = (1n << 64n) - 1n
 const INTEGER = /^[+-]?(?:0[xX][\da-fA-F]+|0[0-7]*|[1-9]\d*)/u
 const FLOAT = /^[+-]?(?:0[xX](?:[\da-fA-F]+(?:\.[\da-fA-F]*)?|\.[\da-fA-F]+)(?:[pP][+-]?\d+)?|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf(?:inity)?|nan(?:\([\w]*\))?)/iu
 
@@ -31,9 +29,9 @@ export function printfInteger(arg, unsigned, state) {
   const digits = parsed.replace(/^[+-]/u, '')
   const magnitude = BigInt(/^0[0-7]+$/u.test(digits) ? '0o' + digits : digits)
   const value = negative ? -magnitude : magnitude
-  if (unsigned ? magnitude > UINT_MAX : value < INT_MIN || value > INT_MAX) {
+  if (unsigned ? magnitude > UINT64_MAX : value < INT64_MIN || value > INT64_MAX) {
     state.stderr += `printf: ${arg}: numerical result out of range\n`
-    return unsigned ? UINT_MAX : negative ? INT_MIN : INT_MAX
+    return unsigned ? UINT64_MAX : negative ? INT64_MIN : INT64_MAX
   }
   return unsigned ? BigInt.asUintN(64, value) : value
 }

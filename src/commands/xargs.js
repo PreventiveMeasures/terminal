@@ -21,7 +21,7 @@ export function xargs(stdin, tokens, ctx) {
   else if (replace === undefined) items = inputWords(stdin)
   else {
     if (/["'\\]/u.test(stdin)) return unsupported('feature', 'xargs', '-I input quoting', 'xargs: quoted or escaped replacement lines are not supported')
-    items = splitLines(stdin).map((line) => line.replace(/^[ \t]+/u, '')).filter(Boolean)
+    items = splitLines(stdin).map((line) => line.replace(/^[ \t\r\f\v]+/u, '')).filter(Boolean)
   }
   if (items.length === 0 && (flags.has('r') || replace !== undefined)) return ok()
   // Build each batch only when it is reached; unavailable commands stop immediately.
@@ -46,6 +46,9 @@ function inputWords(input) {
   let quote = null, started = false, word = ''
   for (let i = 0; i < input.length; i++) {
     const c = input[i]
+    // GNU strips all ASCII whitespace before an argument, but only blanks
+    // and newlines separate arguments once an unquoted word has started.
+    if (!started && /[ \t\n\r\f\v]/u.test(c)) continue
     if (quote) {
       if (c === quote) quote = null
       else if (c === '\n') throw new Error('xargs: unmatched quote')

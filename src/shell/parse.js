@@ -70,6 +70,7 @@ const UNIMPLEMENTED_BLOCKS = new Map([
 function buildSteps(p, end) {
   const { raw } = p
   const steps = [newStep('first')]
+  if (end === null) p.unit = steps[0]
   let stage = newStage()
   while (p.i < raw.length) {
     const t = raw[p.i]
@@ -89,11 +90,15 @@ function buildSteps(p, end) {
       stage = newStage()
       if (t.kind === 'and' || t.kind === 'or') steps.push(newStep(t.kind))
       else if (t.kind === 'semi') steps.push(newStep('seq'))
+      if (end === null && (t.newline || t.lineEnd)) p.unit = steps.at(-1)
       p.i++
       continue
     }
     if (t.kind === 'dsemi') throw new Error('syntax error near unexpected token `;;`')
     if (t.kind === 'redir') {
+      // Bash reads a complete top-level line before executing its commands.
+      // Warnings precede that unit even when its gated command is skipped.
+      if (t.warning) p.unit.warnings = (p.unit.warnings ?? '') + t.warning
       const redir = parseRedirect(p)
       if (redir) stage.redirs.push(redir)
       continue

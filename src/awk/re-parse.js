@@ -8,6 +8,7 @@
 
 import { AwkError } from './common.js'
 import { POSIX_RANGES as CLASSES } from '../charclass.js'
+import { codePointSize } from '../unicode.js'
 
 const CONTROL = { __proto__: null, n: 10, t: 9, r: 13, f: 12, v: 11, a: 7, b: 8 }
 const SYNTAX = '^$.[]|()*+?{}\\/"'
@@ -28,7 +29,7 @@ class EreParser {
   // Next code point as a char node, surrogate pairs kept whole.
   literal() {
     const code = this.src.codePointAt(this.i)
-    this.i += code > 0xFFFF ? 2 : 1
+    this.i += codePointSize(code)
     return { type: 'char', code }
   }
 
@@ -136,9 +137,9 @@ class EreParser {
       while (digits.length < 2 && isHex(this.peek())) digits += this.src[this.i++]
       return regexByte(digits, 16)
     }
-    if (!SYNTAX.includes(c) && warnUnknown) this.warn?.(`regexp escape sequence \`\\${c}' is not a known regexp operator`)
-    const code = c.codePointAt(0)
-    if (code > 0xFFFF) this.i++
+    const code = this.src.codePointAt(this.i - 1)
+    if (!SYNTAX.includes(c) && warnUnknown) this.warn?.(`regexp escape sequence \`\\${String.fromCodePoint(code)}' is not a known regexp operator`)
+    this.i += codePointSize(code) - 1
     return code
   }
 
@@ -195,7 +196,7 @@ class EreParser {
       return this.escapedCode(e, false)
     }
     const code = this.src.codePointAt(this.i)
-    this.i += code > 0xFFFF ? 2 : 1
+    this.i += codePointSize(code)
     return code
   }
 }

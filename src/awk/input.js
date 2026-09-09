@@ -10,6 +10,7 @@ import { AwkRegex, compileRegex, nonEmptyMatch, splitByRegex, stepAt } from './r
 import { StrNum, checkText, ignoreCase, toNum, toStr } from './value.js'
 import { lookup } from '../fs.js'
 import { consumeStdin } from '../util.js'
+import { UINT32_MAX } from '../numeric.js'
 
 // `src` is `{ text, pos }`; advances `pos`. Returns { rec, rt } or null at
 // the end of the text. A terminator at the very end does not start an
@@ -75,8 +76,8 @@ export function parseWidths(spec) {
   return items.map((item, i) => {
     const m = /^(?:(\+?\d+):)?(\+?\d+|\*)$/u.exec(item)
     const skip = m?.[1] === undefined ? 0 : Number(m[1])
-    const width = m?.[2] === '*' ? 0xFFFFFFFF : Number(m?.[2])
-    if (!m || (m[1] !== undefined && skip === 0) || skip > 0xFFFFFFFF || !(width > 0 && width <= 0xFFFFFFFF) || (m[2] === '*' && i !== items.length - 1)) throw new AwkError(`invalid FIELDWIDTHS value \`${spec}'`)
+    const width = m?.[2] === '*' ? UINT32_MAX : Number(m?.[2])
+    if (!m || (m[1] !== undefined && skip === 0) || skip > UINT32_MAX || !(width > 0 && width <= UINT32_MAX) || (m[2] === '*' && i !== items.length - 1)) throw new AwkError(`invalid FIELDWIDTHS value \`${spec}'`)
     return { skip, width }
   })
 }

@@ -19,9 +19,7 @@ const NEWLINE_ABSORB = new Set(['semi', 'and', 'or', 'pipe', 'pipe_err', 'paren_
 const isBlank = (c) => c === ' ' || c === '\t'
 
 export function tokenize(line) {
-  // `st.line` is the cursor's source of truth: splicing backslash-newline
-  // out of a reference rewrites it mid-scan, and the rest of the file
-  // already reads it rather than the parameter.
+  // Reference scanning splices backslash-newline out of st.line.
   const st = { line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoted: false, quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2 }
   while (st.i < st.line.length) {
     const c = st.line[st.i]
@@ -158,5 +156,6 @@ function newline(st) {
   }
   const prev = st.tokens.at(-1)
   if (prev && !NEWLINE_ABSORB.has(prev.kind)) st.tokens.push({ kind: 'semi', newline: true })
+  else if (prev?.kind === 'semi') prev.lineEnd = true
   st.i++
 }

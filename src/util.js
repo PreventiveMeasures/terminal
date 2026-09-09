@@ -2,6 +2,7 @@
 
 import { UnsupportedError } from './unsupported.js'
 import { lookup } from './fs.js'
+import { UINT64_MAX } from './numeric.js'
 
 // Byte operations encode JS strings as UTF-8. Preserve the BOM and refuse
 // slices that cannot be represented losslessly as string output.
@@ -76,7 +77,6 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   return { inputs: entries.filter((e) => e.kind === 'file'), entries, stderr, failed: stderr !== '' }
 }
 
-// With no file operands, stdin is one nameless input.
 export function readInputs(cmd, files, stdin, ctx, options) {
   if (files.length === 0) {
     consumeStdin(ctx)
@@ -86,13 +86,11 @@ export function readInputs(cmd, files, stdin, ctx, options) {
   return readFilesFor(cmd, files, ctx, stdin, options)
 }
 
-// For commands that combine file contents into a single stream.
 export function readContent(cmd, files, stdin, ctx) {
   const r = readInputs(cmd, files, stdin, ctx)
   return { content: r.inputs.map((f) => f.content).join(''), stderr: r.stderr, failed: r.failed }
 }
 
-// Preserve read errors even when other inputs produced output.
 export const okWith = (stdout, r) => ({ stdout, stderr: r.stderr, exitCode: r.failed ? 1 : 0 })
 
 // GNU counts allow leading blanks and '+', whereas find requires digits.
@@ -126,7 +124,7 @@ export function scaledCount(digits, suffix, label, shown) {
   if (suffix === 'b') factor = 512n
   else if (suffix) factor = (suffix.length === 2 ? 1000n : 1024n) ** BigInt('KMGTPEZYRQ'.indexOf(suffix[0].toUpperCase()) + 1)
   const n = digits * factor
-  if (n > 18446744073709551615n) return { error: err(`${label}: count out of range: ${shown}`) }
+  if (n > UINT64_MAX) return { error: err(`${label}: count out of range: ${shown}`) }
   // Saturation preserves slicing positions beyond any representable JS string.
   return { value: Number(n > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : n) }
 }

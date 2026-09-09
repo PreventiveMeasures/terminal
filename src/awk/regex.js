@@ -5,6 +5,9 @@
 import { AwkError } from './common.js'
 import { parseEre, toJsSource } from './re-parse.js'
 import { compileNfa, search } from './re.js'
+import { stepAt } from '../unicode.js'
+
+export { stepAt }
 
 const CACHE = new Map()
 const NON_ASCII = /[\u0080-\u{10FFFF}]/u
@@ -82,11 +85,6 @@ export function compileRegex(src, ignoreCase = false, warn = null) {
   const re = new AwkRegex(src, ignoreCase, warn)
   CACHE.set(key, re)
   return re
-}
-
-// One UTF-16 step at `at`: 2 across a surrogate pair, else 1.
-export function stepAt(s, at) {
-  return s.codePointAt(at) > 0xFFFF ? 2 : 1
 }
 
 // Empty matches delimit neither RS records nor FS fields.

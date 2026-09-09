@@ -13,6 +13,7 @@ import { isolated, withState } from './state.js'
 export function runSteps(steps, ctx, stream) {
   const result = emptyOutput()
   for (const step of steps) {
+    if (step.warnings) appendOutput(result, { ...emptyOutput(step.warnings), exitCode: result.exitCode })
     if (step.gate === 'and' && result.exitCode !== 0) continue
     if (step.gate === 'or' && result.exitCode === 0) continue
     const r = runPipeline(step.stages, ctx, stream)

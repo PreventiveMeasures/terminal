@@ -1,6 +1,7 @@
 // Line selection and presentation shared by grep's output modes.
 import { joinLines, ok, splitLines } from '../util.js'
 import { UnsupportedError } from '../unsupported.js'
+import { stepAt } from '../unicode.js'
 
 export const anyMatch = (res, line) => res.some((re) => re.test(line))
 export const noMatch = () => ({ stdout: '', stderr: '', exitCode: 1 })
@@ -94,7 +95,7 @@ function presentLine(line, name, lineNum, res, opts, selected, out) {
       if (match && (!best || match.start < best.start || (match.start === best.start && match.end > best.end))) best = match
     }
     if (!best) break
-    if (best.end === best.start) { cursor = best.end + (line.codePointAt(best.end) > 0xFFFF ? 2 : 1); continue }
+    if (best.end === best.start) { cursor = best.end + stepAt(line, best.end); continue }
     out.push(formatLine(line.slice(best.start, best.end), name, lineNum, selected, opts))
     cursor = best.end
   }

@@ -80,6 +80,7 @@
     "src/glob.js",
     "src/index.d.ts",
     "src/index.js",
+    "src/numeric.js",
     "src/regex-locale.js",
     "src/registry.js",
     "src/shell/bindings.js",
@@ -95,6 +96,7 @@
     "src/shell/substitution.js",
     "src/shell/tokenize.js",
     "src/shell/word.js",
+    "src/unicode.js",
     "src/unsupported.js",
     "src/util.js"
   ],

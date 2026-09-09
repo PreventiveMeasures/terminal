@@ -2,9 +2,10 @@ import { UnsupportedError, unsupported, unsupportedFrom, unsupportedNote } from 
 import { ok, usage, utf8, utf8Decoder } from '../util.js'
 import { printfBytes, printfEscape } from './printf-escape.js'
 import { printfFloatField, printfInteger, printfIntegerField } from './printf-number.js'
+import { INT32_MAX, INT32_MIN } from '../numeric.js'
+import { MAX_FIELD_WIDTH } from '../awk/common.js'
 
 const SPEC = /^%([-+ #0']*)(\d+|\*)?(?:\.(-?\d+|\*)?)?([hlLjzt]*)(.)?/su
-const MAX_FIELD = 1_000_000
 const MAX_OUTPUT = 8_000_000
 
 export function printf(_stdin, tokens, ctx) {
@@ -98,12 +99,12 @@ function readSpec(text, state) {
     width: width === '*' ? Number(printfInteger(nextArg(state), false, state)) : Number(width ?? 0),
     precision: precision === '*' ? Number(printfInteger(nextArg(state), false, state)) : precision === undefined ? match[0].includes('.') ? 0 : null : Number(precision),
   }
-  if (width === '*' && Math.abs(spec.width) > 2147483647 || precision === '*' && (spec.precision < -2147483648 || spec.precision > 2147483647)) {
+  if (width === '*' && Math.abs(spec.width) > INT32_MAX || precision === '*' && (spec.precision < INT32_MIN || spec.precision > INT32_MAX)) {
     throw new UnsupportedError('feature', 'format size limit', 'star width or precision outside the signed 32-bit range is not supported')
   }
   if (spec.width < 0) { spec.minus = true; spec.width = -spec.width }
   if (spec.precision < 0) spec.precision = null
-  if (spec.width > MAX_FIELD || spec.precision > MAX_FIELD) throw new UnsupportedError('feature', 'format size limit', 'format width or precision exceeds the output limit')
+  if (spec.width > MAX_FIELD_WIDTH || spec.precision > MAX_FIELD_WIDTH) throw new UnsupportedError('feature', 'format size limit', 'format width or precision exceeds the output limit')
   return spec
 }
 

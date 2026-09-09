@@ -1,8 +1,7 @@
 // Read-only sed scripts with line/regex addresses and BRE/ERE substitutions.
 // Unsupported commands/flags fail before reading any file.
 import { AwkRegex, substituteAll } from '../awk/regex.js'
-import { breToEs } from '../bre.js'
-import { validateBracket } from '../charclass.js'
+import { breToEs, validateBackreferences } from '../bre.js'
 import { ereClasses, grepSource, validateRegex } from './grep-pattern.js'
 import { asciiCompatible, hasUnicodeSpace } from '../regex-locale.js'
 import { UnsupportedError } from '../unsupported.js'
@@ -138,8 +137,6 @@ function substitution(p) {
 function compilePattern(pattern, extended) {
   if (!pattern) scriptGap('previous regular expression')
   validateRegex(pattern, extended)
-  if (!extended) validateBre(pattern)
-  if (/\\[1-9]/u.test(pattern)) scriptGap('regex backreferences')
   const controls = { n: '\n', t: '\t', r: '\r', a: '\u0007', f: '\f', v: '\v' }
   const normalized = pattern.replace(/\\(.)/gu, (s, c) => {
     if (c === 'o') scriptGap('regex escape')
@@ -147,28 +144,49 @@ function compilePattern(pattern, extended) {
   })
   const translated = extended ? { source: ereClasses(normalized) } : breToEs(normalized)
   if (translated.error) throw new Error(translated.error)
+  validateSedRegex(translated.source, extended)
+  validateBackreferences(translated.source)
+  for (const [, escape] of translated.source.matchAll(/\\(.)/gu)) {
+    if (/[1-9]/u.test(escape)) scriptGap('regex backreferences')
+  }
   const re = new AwkRegex(grepSource(translated.source, true), false)
   return { re, compatible: asciiCompatible(re.src, pattern), spaceClass: /\[:(?:space|blank):\]|\\[sS]/u.test(pattern) }
 }
 
-// ERE accepts stray closing parentheses and malformed intervals as literals;
-// translating BRE first would incorrectly accept its escaped versions too.
-function validateBre(pattern) {
-  let groups = 0
-  for (let i = 0; i < pattern.length; i++) {
-    if (pattern[i] === '[') { i = validateBracket(pattern, i); continue }
-    if (pattern[i] !== '\\') continue
-    const c = pattern[++i]
-    if (c === '(') groups++
-    else if (c === ')') {
-      if (--groups < 0) throw new Error('unmatched \\)')
-    } else if (c === '{') {
-      const interval = /^\d+(?:,\d*)?\\\}/u.exec(pattern.slice(i + 1))
-      if (interval === null) throw new Error('invalid repetition count')
-      i += interval[0].length
+// GNU sed's POSIX modes are stricter than grep and AWK: ERE rejects stray
+// parentheses, malformed intervals and leading repeats; BRE also rejects a
+// star or interval stacked after another repeat. Inspect the canonical tokens
+// so escaped metacharacters and class members keep their literal meaning.
+function validateSedRegex(source, extended) {
+  let bracket = false, groups = 0, repeatable = false, repeated = false
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]
+    if (c === '\\') {
+      const next = source[++i]
+      if (!bracket) { repeatable = !'bB<>`\''.includes(next); repeated = false }
+      continue
     }
+    if (bracket) {
+      if (c === ']') { bracket = false; repeatable = true; repeated = false }
+      continue
+    }
+    if (c === '[') { bracket = true; continue }
+    if (c === '(') { groups++; repeatable = false; repeated = false; continue }
+    if (c === ')') {
+      if (--groups < 0) throw new Error('unmatched )')
+    } else if (c === '|' || c === '^' || c === '$') {
+      repeatable = false; repeated = false; continue
+    } else if ('*+?{'.includes(c)) {
+      const interval = c === '{' ? /^\{(?=\d|,)(\d*)(?:,(\d*))?\}/u.exec(source.slice(i)) : null
+      if (c === '{' && interval === null) throw new Error('invalid repetition count')
+      if (!repeatable || (!extended && repeated && (c === '*' || c === '{'))) throw new Error('Invalid preceding regular expression')
+      if (interval) i += interval[0].length - 1
+      repeated = true
+      continue
+    }
+    repeatable = true; repeated = false
   }
-  if (groups > 0) throw new Error('unmatched \\(')
+  if (groups > 0) throw new Error('unmatched (')
 }
 
 function replacementParts(text, sep, groupCount) {

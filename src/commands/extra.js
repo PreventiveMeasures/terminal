@@ -2,6 +2,7 @@ import { parseArgs } from '../args.js'
 import { consumeStdin, err, joinLines, lineRecords, ok, okWith, readInputs, splitLines, usage, utf8, utf8Decoder } from '../util.js'
 import { unsupported } from '../unsupported.js'
 import { hexdump, od, xxd } from './dump.js'
+import { INT64_MAX, INT64_MIN, UINT64_MAX } from '../numeric.js'
 
 // tac reverses each file separately. Separators stay attached to the preceding
 // record, so an unterminated final record in a\nb produces ba\n.
@@ -35,7 +36,6 @@ function seq(_stdin, tokens) {
   const incr = nums.length === 3 ? nums[1] : 1n
   const last = nums.at(-1)
   if (incr === 0n) return err('seq: increment must be non-zero')
-  // Bound the computed range before allocating its output.
   const inRange = incr > 0 ? first <= last : first >= last
   const count = inRange ? ((last > first ? last - first : first - last) / (incr > 0n ? incr : -incr)) + 1n : 0
   if (count > MAX_SEQ_ELEMENTS) {
@@ -76,7 +76,7 @@ function nl(stdin, tokens, ctx) {
     if (name !== 'v' && name !== 'starting-line-number') continue
     if (!/^[ \t\n\r\f\v]*[+-]?\d+$/u.test(value)) return err(`nl: invalid starting line number: ${value}`)
     n = BigInt(value)
-    if (n < -9223372036854775808n || n > 9223372036854775807n) return err(`nl: invalid starting line number: ${value}`)
+    if (n < INT64_MIN || n > INT64_MAX) return err(`nl: invalid starting line number: ${value}`)
   }
   const r = readInputs('nl', positional, stdin, ctx)
   if (r.inputs.some(({ content }) => /(?:^|\n)(?:\\:){1,3}(?:\n|$)/u.test(content))) return unsupported('feature', 'nl', 'logical pages', 'nl: logical page delimiters are not supported')
@@ -84,7 +84,7 @@ function nl(stdin, tokens, ctx) {
   for (const { content } of r.inputs) {
     for (const line of splitLines(content)) {
       if (style === 'a' || (style === 't' && line !== '')) {
-        if (n > 9223372036854775807n) return { stdout: joinLines(out), stderr: r.stderr + 'nl: line number overflow\n', exitCode: 1 }
+        if (n > INT64_MAX) return { stdout: joinLines(out), stderr: r.stderr + 'nl: line number overflow\n', exitCode: 1 }
         out.push(`${String(n).padStart(NL_WIDTH)}${NL_SEP}${line}`)
         n++
       } else {
@@ -111,9 +111,7 @@ function cut(stdin, tokens, ctx) {
   const out = []
   for (const { content } of r.inputs) {
     for (const line of hasF && delim === '\n' ? (content === '' ? [] : [content]) : splitLines(content)) {
-      // A line with no delimiter is passed through whole by default;
-      // `-s` drops it instead. Only meaningful in field mode, since
-      // byte mode has no delimiter to miss.
+      // Field mode passes undelimited lines through unless -s was given.
       if (hasF && !line.includes(delim)) {
         if (!flags.has('s')) out.push(line)
         continue
@@ -134,7 +132,7 @@ function parseCutList(spec) {
   const ranges = []
   for (const part of spec.split(/[, \t]/u)) {
     if (part === '') return { error: err(`cut: empty list item in \`${spec}\``) }
-    if ((part.match(/\d+/gu) ?? []).some((n) => BigInt(n) > 18446744073709551615n)) return { error: err(`cut: offset is too large: ${part}`) }
+    if ((part.match(/\d+/gu) ?? []).some((n) => BigInt(n) > UINT64_MAX)) return { error: err(`cut: offset is too large: ${part}`) }
     const range = /^(\d*)(?:-(\d*))?$/u.exec(part)
     if (!range || (!range[1] && !range[2])) return { error: err(`cut: invalid list item: ${part}`) }
     const start = range[1] === '' ? 1 : Number(range[1])

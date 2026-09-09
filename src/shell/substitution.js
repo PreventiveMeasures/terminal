@@ -1,13 +1,13 @@
 import { UnsupportedError } from '../unsupported.js'
 
-const MAX_DEPTH = 64
+export const MAX_SUBSTITUTION_DEPTH = 64
 const freshWord = () => ({ value: '', quoted: false, started: false })
-const depthGap = () => new UnsupportedError('feature', 'command substitution depth', `command substitution nesting above ${MAX_DEPTH} is not supported`)
+const depthGap = () => new UnsupportedError('feature', 'command substitution depth', `command substitution nesting above ${MAX_SUBSTITUTION_DEPTH} is not supported`)
 
 // Find the closing parenthesis without interpreting the command. Heredoc
 // bodies and nested substitutions have their own quoting boundaries.
 export function readCommandSubstitution(line, start, open, depth, helpers) {
-  if (depth >= MAX_DEPTH) throw depthGap()
+  if (depth >= MAX_SUBSTITUTION_DEPTH) throw depthGap()
   const st = { line, i: open + 1, depth, helpers, parens: 0, quote: null, word: freshWord(), command: true, target: null, heredocs: [] }
   while (st.i < line.length) {
     if (scan(st)) return { raw: line.slice(start, st.i + 1), command: line.slice(open + 1, st.i) }
@@ -116,7 +116,7 @@ function operator(st, op) {
     st.parens--
     st.command = false
   } else if (token.kind === 'paren_open') {
-    if (st.depth + ++st.parens >= MAX_DEPTH) throw depthGap()
+    if (st.depth + ++st.parens >= MAX_SUBSTITUTION_DEPTH) throw depthGap()
     st.command = true
   } else if (token.kind === 'redir') {
     if (token.op === 'heredoc') st.heredocs.push(token)

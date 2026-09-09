@@ -1,49 +1,10 @@
 import { readPosixClass } from './charclass.js'
 import { UnsupportedError } from './unsupported.js'
 
-// Translate POSIX BRE escapes to ECMAScript syntax for grep.
-
-// Length of a GNU character escape, including its backslash; zero means the
-// caller should interpret the next character literally or as regex syntax.
-function escapeLength(pattern, i) {
-  const next = pattern[i + 1]
-  if (next === undefined) return -1
-  // Preserve supported regex escapes and GNU BRE operators; discard the
-  // backslash on ordinary characters instead of producing an invalid /u escape.
-  if ('^$\\.*+?()[]{}|/bBdDsSwW'.includes(next)) return 2
-  if (next >= '1' && next <= '9') return 2  // backreference
-  const isHex = (c) => c !== undefined && /[0-9A-Fa-f]/u.test(c)
-  const balanced = (open, close) => {
-    if (pattern[i + 2] !== open) return 0
-    const end = pattern.indexOf(close, i + 3)
-    return end > i + 3 ? end - i + 1 : 0
-  }
-  if (next === 'x') return isHex(pattern[i + 2]) && isHex(pattern[i + 3]) ? 4 : 0
-  if (next === 'u') {
-    // `\u{H..H}` requires 1-6 hex digits AND code point ≤ 0x10FFFF;
-    // `\uHHHH` requires exactly 4 hex digits. Invalid forms fall
-    // back to the BRE identity-escape branch (drop the backslash).
-    if (pattern[i + 2] === '{') {
-      const len = balanced('{', '}')
-      const body = len ? pattern.slice(i + 3, i + len - 1) : ''
-      const valid = body.length >= 1 && body.length <= 6 && [...body].every(isHex) && parseInt(body, 16) <= 0x10FFFF
-      return valid ? len : 0
-    }
-    return [2, 3, 4, 5].every((k) => isHex(pattern[i + k])) ? 6 : 0
-  }
-  if (next === 'p' || next === 'P') return balanced('{', '}')
-  if (next === 'c') return /[A-Za-z]/u.test(pattern[i + 2] ?? '') ? 3 : 0
-  if (next === 'k') return balanced('<', '>')
-  return 0
-}
-
-// BRE uses escaped grouping, alternation, and interval operators. Unescaped
-// (){}+?| are literals. Preserve whether an atom is repeatable so a leading
-// '*' stays literal, including immediately after a group opening or anchor.
+// Callers validate GNU syntax and unsupported escapes before translation.
 export function breToEs(pattern) {
-  const SWAP = '(){}+?|'
-  let out = ''
-  let inClass = false
+  const swap = '(){}+?|'
+  let canRepeat = false, groups = 0, inClass = false, out = ''
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i]
     if (inClass) {
@@ -52,58 +13,119 @@ export function breToEs(pattern) {
         const cls = readPosixClass(pattern, i)
         if (cls) { out += cls.body; i = cls.end - 1; continue }
       }
-      // Inside brackets, ordinary identity escapes lose their backslash too.
-      if (c === '\\') {
-        const len = escapeLength(pattern, i)
-        if (len === -1) return { error: 'trailing backslash (\\)' }
-        if (len > 0) { out += pattern.slice(i, i + len); i += len - 1; continue }
-        out += pattern[i + 1]; i++; continue
-      }
       out += c
-      if (c === ']') inClass = false
+      if (c === ']') { inClass = false; canRepeat = true }
       continue
     }
     if (c === '[') {
-      // POSIX: `]` immediately after `[` (or `[^`) is literal, not
-      // class-close. ES /u rejects `[]…]` / `[^]…]`; escape the
-      // leading `]` so the same chars land in the class.
       out += c; inClass = true
-      // Skip past a leading `^` (negation) so the next iteration
-      // doesn't reprocess it as a class member — `[^a]` was
-      // being mis-emitted as `[^^a]`.
       if (pattern[i + 1] === '^') { out += '^'; i++ }
-      // POSIX: `]` immediately after `[` (or `[^`) is literal. ES
-      // /u rejects `[]…]` / `[^]…]`; escape it so the same chars
-      // land in the class and the tracker doesn't exit early.
+      // The first ] is a member, including immediately after negation.
       if (pattern[i + 1] === ']') { out += '\\]'; i++ }
       continue
     }
     if (c === '\\') {
-      if (i + 1 >= pattern.length) return { error: 'trailing backslash (\\)' }
-      const next = pattern[i + 1]
-      // BRE-specific transforms first — these aren't ES syntax,
-      // so escapeLength would return 0 for them.
-      if (SWAP.includes(next)) { out += next; i++; continue }
-      if (next === '<' || next === '>' || next === '`' || next === "'") { out += '\\' + next; i++; continue }
-      // Validated ES escape (including multi-char `\xHH`, `\p{...}`).
-      const len = escapeLength(pattern, i)
-      if (len > 0) { out += pattern.slice(i, i + len); i += len - 1; continue }
-      // POSIX BRE: backslash before non-special char is literal.
-      out += next; i++; continue
+      const next = pattern[++i]
+      if (next === undefined) return { error: 'trailing backslash (\\)' }
+      if (swap.includes(next)) {
+        if ((next === '+' || next === '?') && !canRepeat) {
+          out += '\\' + next; canRepeat = true; continue
+        }
+        if (next === '(') groups++
+        if (next === ')' && groups-- === 0) return { error: 'Unmatched ) or \\)' }
+        if (next === '(' || next === '|') canRepeat = false
+        if (next === ')' || next === '}') canRepeat = true
+        out += next
+      } else {
+        out += '^$\\.*[]/bBsSwW<>`\'123456789'.includes(next) ? '\\' + next : next
+        canRepeat = !'bB<>`\''.includes(next)
+      }
+      continue
     }
-    // A leading '*' (also after ^ or a group opening) is a literal atom.
-    if (c === '*' && (i === 0 || (pattern[i - 1] === '^' && caretIsAnchor(pattern, i - 1)))) { out += '\\*'; continue }
-    if (c === '^' && !caretIsAnchor(pattern, i)) { out += '\\^'; continue }
-    if (c === '$' && !(i === pattern.length - 1 || (pattern[i + 1] === '\\' && (pattern[i + 2] === ')' || pattern[i + 2] === '|')))) { out += '\\$'; continue }
-    if (SWAP.includes(c)) { out += '\\' + c; continue }
-    out += c
+    if (c === '*') { out += canRepeat ? '*' : '\\*'; canRepeat = true; continue }
+    if (c === '^') {
+      canRepeat = !caretIsAnchor(pattern, i)
+      out += canRepeat ? '\\^' : '^'
+      continue
+    }
+    if (c === '$') {
+      canRepeat = !(i === pattern.length - 1 || (pattern[i + 1] === '\\' && (pattern[i + 2] === ')' || pattern[i + 2] === '|')))
+      out += canRepeat ? '\\$' : '$'
+      continue
+    }
+    out += swap.includes(c) ? '\\' + c : c
+    canRepeat = true
   }
-  return { source: out }
+  return groups > 0 ? { error: 'Unmatched ( or \\(' } : { source: out }
 }
 
 // POSIX BRE: `^` is an anchor at pos 0 or immediately after `\(` /
 // `\|` (GNU group / alternation extension). Elsewhere it's literal.
 function caretIsAnchor(pattern, i) {
   if (i === 0) return true
-  return i >= 2 && pattern[i - 2] === '\\' && (pattern[i - 1] === '(' || pattern[i - 1] === '|')
+  if (i < 2 || pattern[i - 2] !== '\\' || (pattern[i - 1] !== '(' && pattern[i - 1] !== '|')) return false
+  let escapes = 0
+  for (let j = i - 3; j >= 0 && pattern[j] === '\\'; j--) escapes++
+  return escapes % 2 === 0
+}
+
+// Canonical ERE: a reference must follow its closed group. JS also allows
+// absent groups to match empty text, whereas GNU requires participation.
+// Return whether a valid reference needs capture semantics JS cannot preserve.
+export function validateBackreferences(source) {
+  if (!/\\[1-9]/u.test(source)) return false
+  const closed = new Set(), stack = [], unstable = new Set()
+  let bracket = false, captures = 0, conditional = false
+  let atomGroups = [], guaranteed = new Set()
+  let nullable = false
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]
+    if (c === '\\') {
+      const next = source[++i]
+      if (!bracket && /[1-9]/u.test(next ?? '')) {
+        const id = Number(next)
+        if (!closed.has(id)) throw new Error('Invalid back reference')
+        if (!guaranteed.has(id) || unstable.has(id)) conditional = true
+      }
+      atomGroups = []
+      continue
+    }
+    if (bracket) { if (c === ']') bracket = false; continue }
+    if (c === '[') { bracket = true; atomGroups = []; continue }
+    if (c === '(') {
+      stack.push({ id: ++captures, entry: new Set(guaranteed), branches: [], start: i })
+      atomGroups = []
+    } else if (c === '|') {
+      const group = stack.at(-1)
+      if (group) group.branches.push(guaranteed)
+      guaranteed = new Set(group?.entry)
+      atomGroups = []
+    } else if (c === ')') {
+      const group = stack.pop()
+      if (!group) continue
+      guaranteed = group.branches.reduce((all, branch) => all.intersection(branch), guaranteed)
+      guaranteed.add(group.id)
+      closed.add(group.id)
+      atomGroups = [...guaranteed.difference(group.entry)]
+      nullable = nullableGroup(source.slice(group.start, i + 1))
+    } else if (c === '*' || c === '?' || c === '+') {
+      if (c !== '?' && nullable) for (const id of atomGroups) unstable.add(id)
+      if (c !== '+') for (const id of atomGroups) guaranteed.delete(id)
+    } else if (c === '{') {
+      const interval = /^\{(\d*)(?:,(\d*))?\}/u.exec(source.slice(i))
+      if (interval) {
+        if (Number(interval[1]) === 0) guaranteed = guaranteed.difference(new Set(atomGroups))
+        const max = interval[2] === undefined ? Number(interval[1]) : interval[2] === '' ? Infinity : Number(interval[2])
+        if (nullable && max > 1) atomGroups.forEach((id) => unstable.add(id))
+        i += interval[0].length - 1
+      } else atomGroups = []
+    } else atomGroups = []
+  }
+  return conditional
+}
+
+function nullableGroup(source) {
+  // Invalid standalone backreferences or GNU-only syntax prevent a proof.
+  // Repeated nullable captures otherwise retain different final empty values.
+  try { return new RegExp(`^(?:${source})$`, 'su').test('') } catch { return true }
 }

@@ -3,10 +3,11 @@ import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
 import { err } from '../util.js'
 import { parseLine } from './parse.js'
+import { MAX_SUBSTITUTION_DEPTH } from './substitution.js'
 
 export function commandSubstitution(command, ctx, runSteps) {
   const depth = (ctx.substitutionDepth ?? 0) + 1
-  if (depth > 64) throw new UnsupportedError('feature', 'command substitution nesting limit', 'command substitution nesting beyond 64 levels is not supported')
+  if (depth > MAX_SUBSTITUTION_DEPTH) throw new UnsupportedError('feature', 'command substitution nesting limit', `command substitution nesting beyond ${MAX_SUBSTITUTION_DEPTH} levels is not supported`)
   const result = withState(ctx, { substitutionDepth: depth, closed: { out: false, err: ctx.closed.err } }, () => isolated(ctx, () => {
     try {
       const steps = parseLine(command)

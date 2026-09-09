@@ -5,6 +5,7 @@
 // States use next for consuming edges and x/y for split edges.
 
 import { AwkError } from './common.js'
+import { codePointSize } from '../unicode.js'
 
 const MAX_STATES = 50_000
 
@@ -142,7 +143,7 @@ export function search(nfa, str, from) {
     // New attempts start at every position until something has matched.
     if (best === null) add(clist, nfa.start, pos, pos, stampC)
     const code = pos < n ? str.codePointAt(pos) : -1
-    const step = code > 0xFFFF ? 2 : 1
+    const step = codePointSize(code)
     if (clist.length === 0) {
       if (best !== null || pos >= n) break
       pos += step
