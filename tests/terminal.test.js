@@ -3418,14 +3418,14 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     // Unmodeled scripts and flags retain the subset diagnostic.
     const unsupportedCases = [
       'sed',                                // no args
-      "sed -n '/foo/p' big.txt",            // regex address
+      "sed -n '/foo/!p' big.txt",           // negated address
       "sed -i -n '1,2p' big.txt",           // unsupported flag
       "sed -e '1p' big.txt",                // unsupported flag
     ]
     for (const cmd of unsupportedCases) {
       const r = t.run(cmd)
       assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
-      assert.match(r.stderr, /only numeric print addresses/u, `${cmd}: expected canonical message`)
+      assert.match(r.stderr, /only addressed p/u, `${cmd}: expected canonical message`)
     }
     // These hit specific (non-canonical) errors that name the
     // actual problem — they don't get the generic unsupported text.

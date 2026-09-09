@@ -135,7 +135,7 @@ export interface CreateTerminalOptions {
  *   builtins it lacks (`source`, `eval`, …), a variable
  *   nothing set (there is no environment: `$PATH` expands to nothing,
  *   with this entry), a redirect that would write a file against the
- *   read-only filesystem, `sed` outside its one supported script form,
+ *   read-only filesystem, unsupported `sed` commands or regex features,
  *   and the gawk features its `awk` refuses (`system()`, output pipes,
  *   writing to a file).
  */
@@ -151,7 +151,8 @@ export interface Unsupported {
    * Short identifier for the missing construct, stable enough to switch on.
    * Usually the token as typed (`-prune`, `--bogus`, `frobnicate`, `>>`), but
    * normalized where one gap has several spellings: `tr -sd` and `tr -d -s`
-   * both report `-d -s`, and every unsupported `sed` script reports `script`.
+   * both report `-d -s`; unsupported `sed` commands report `script`, while
+   * unsupported regex features have their own identifiers.
    */
   detail: string
   /** Human-readable diagnostic: the same line the gap put on stderr, minus the trailing newline. Shell-level gaps omit the generic `error: ` prefix that stderr carries. */
