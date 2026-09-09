@@ -60,7 +60,7 @@ const GREP = [
   ['-oE extracts each match', ORCHARD, 'grep -oE "[a-z]+" input', 'oak\nelm\nfir\noak\nelm\n'],
   ['-o with a trailing-context pattern', PUNCT, 'grep -o "[^/]*$" input', 'c\nfir\n'],
   ['-oE with a bracketed interval', HEX, "grep -oE '([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}' input", 'de:ad:be:ef:00:11\n'],
-  ['-o on an empty pattern', ORCHARD, 'grep -o "" input | head -n1; echo $?', '0\n'],
+  ['-o on an empty pattern succeeds without printing', ORCHARD, 'grep -o "" input; echo $?', '0\n'],
   ['-r walks a directory', TREE, 'grep -r oak grove | sort', 'grove/a.txt:oak\ngrove/sub/c.txt:oak\n'],
   ['-r on a single file behaves like grep', TREE, 'grep -r oak grove/a.txt', 'oak\n'],
   ['-rl lists the matching files', TREE, 'grep -rl oak grove | sort', 'grove/a.txt\ngrove/sub/c.txt\n'],

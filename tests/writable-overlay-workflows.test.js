@@ -109,9 +109,12 @@ describe('writable overlay — configuration', () => {
   })
 
   it('leaves the filesystem read-only when the option is absent', () => {
-    const result = createTerminal(NUMS).run('sed -i 1d input')
+    // The same terminal answers both, so a mutation that slipped through
+    // before the diagnostic would still be visible here.
+    const terminal = createTerminal(NUMS)
+    const result = terminal.run('sed -i 1d input')
     assert.equal(result.unsupported.length, 1)
-    assert.equal(createTerminal(NUMS).run('cat input').stdout, NUMS.input)
     assert.notEqual(result.exitCode, 0)
+    assert.equal(terminal.run('cat input').stdout, NUMS.input)
   })
 })
