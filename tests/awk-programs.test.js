@@ -1,5 +1,8 @@
 // Whole programs exercise interactions between arrays, functions, input,
-// and control flow. AWK_SLOW_TESTS=1 includes heavier workloads and limits.
+// and control flow. AWK_SLOW_TESTS=1 adds the sizes that stay expensive:
+// a 400000-key sieve, and the two programs that run into the step budget
+// — those cost what MAX_STEPS costs, so no optimisation shortens them,
+// and the limit itself is already covered by default in terminal.test.js.
 
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
@@ -8,7 +11,7 @@ import { env } from 'node:process'
 import { AWK_FILES } from './fixtures/awk-programs.js'
 import { createTerminal } from '@preventive/terminal'
 
-const SLOW = { skip: env.AWK_SLOW_TESTS === '1' ? false : 'set AWK_SLOW_TESTS=1, or run `pnpm test:slow`' }
+const SLOW = { skip: env.AWK_SLOW_TESTS === '1' ? false : 'set AWK_SLOW_TESTS=1, or run `pnpm test:slow` (~2.4s)' }
 
 // The virtual FS is read-only and each awk invocation gets its own
 // machine, so one terminal serves every case.
@@ -89,9 +92,11 @@ describe('awk runs whole programs', () => {
       '',
     ].join('\n'))
   })
-})
 
-describe('awk runs whole programs — heavier sizes', SLOW, () => {
+  // Scale, at a size the default run can afford: ten queens recurses
+  // deeper and deletes more, and the sieve grows an array past 100000
+  // keys. Both were gated when they cost 292ms and 307ms; they are now
+  // 235ms and 127ms together with the rest of this suite.
   it('solves ten queens by recursive backtracking', () => {
     assert.match(out('awk -v N=10 -f queens.awk'), /\n10-queens: 724 solutions\n$/u)
   })
@@ -99,7 +104,9 @@ describe('awk runs whole programs — heavier sizes', SLOW, () => {
   it('sieves primes below 100000', () => {
     assert.equal(out('awk -v N=100000 -f sieve.awk'), 'primes below 100000: 9592 (largest 99991)\n')
   })
+})
 
+describe('awk runs whole programs — heavier sizes', SLOW, () => {
   it('sieves primes below 400000', () => {
     assert.equal(out('awk -v N=400000 -f sieve.awk'), 'primes below 400000: 33860 (largest 399989)\n')
   })
