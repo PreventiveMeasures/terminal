@@ -22,6 +22,11 @@ export function appendOutput(result, next) {
   result.unordered ||= unorderedOutput(next)
 }
 
+// Capture diagnostics at the expansion site, before later redirects change fd 2.
+export function expansionStderr(ctx, stderr) {
+  if (stderr) appendOutput(ctx.expansionOutput, routeOutput(emptyOutput(stderr), { fds: ctx.expansionFds }, ctx))
+}
+
 export function routeOutput(result, io, ctx) {
   let r = result
   const merged = io.fds[1] === io.fds[2] && ['out', 'err'].includes(io.fds[1])
@@ -31,8 +36,7 @@ export function routeOutput(result, io, ctx) {
   }
   const events = []
   let stderr = '', stdout = ''
-  const initial = io.warnings ? [{ fd: 2, text: io.warnings }] : []
-  for (const e of [...initial, ...eventsOf(r)]) {
+  for (const e of eventsOf(r)) {
     const dest = io.fds[e.fd]
     if (dest !== 'out' && dest !== 'err') continue
     events.push({ fd: dest === 'out' ? 1 : 2, text: e.text })

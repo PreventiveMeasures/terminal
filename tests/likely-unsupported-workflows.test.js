@@ -150,7 +150,7 @@ describe('likely agent commands — diagnostic boundaries', () => {
     assert.equal(r.exitCode, 0)
     assert.deepEqual(identities(r), [
       { kind: 'feature', command: 'grep', detail: 'PCRE group' },
-      { kind: 'feature', command: 'sed', detail: 'script' },
+      { kind: 'option', command: 'sed', detail: '-i' },
       { kind: 'command', command: 'jq', detail: 'jq' },
     ])
     assert.deepEqual(t.run('cat package.json').unsupported, [], 'feeds reset between runs')

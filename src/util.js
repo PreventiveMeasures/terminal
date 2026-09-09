@@ -39,7 +39,16 @@ export function splitLines(s, delimiter = '\n') {
 export const joinLines = (lines, delimiter = '\n') => lines.length === 0 ? '' : lines.join(delimiter) + delimiter
 
 // Preserve each line's terminator for byte-exact filters and stdin offsets.
-export const lineRecords = (text) => text.match(/[^\n]*\n|[^\n]+$/gu) ?? []
+export function lineRecords(text, delimiter = '\n') {
+  const records = []
+  for (let pos = 0; pos < text.length;) {
+    const end = text.indexOf(delimiter, pos)
+    const next = end < 0 ? text.length : end + delimiter.length
+    records.push(text.slice(pos, next))
+    pos = next
+  }
+  return records
+}
 
 // Readers record unconsumed stdin so later commands in a group share its offset.
 export function consumeStdin(ctx, rest = '') {

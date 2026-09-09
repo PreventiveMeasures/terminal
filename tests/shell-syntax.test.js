@@ -620,14 +620,16 @@ describe('shell syntax — subshell boundaries and redirect operands', () => {
     assert.equal(out('(false); echo $?'), '1\n')
   })
 
-  it('warnings from expanding a redirect operand follow fd 2', () => {
-    const silenced = term().run('cat <<< $NOPE 2>/dev/null')
+  it('redirect expansion warnings follow fd 2 at the expansion site', () => {
+    const silenced = term().run('cat 2>/dev/null <<< $NOPE')
     assert.equal(silenced.stderr, '')
     assert.equal(silenced.stdout, '\n')
     assert.deepEqual(silenced.unsupported.map((u) => u.detail), ['$NOPE'])
-    const swapped = term().run('cat <<< $NOPE 2>&1 >/dev/null')
+    const swapped = term().run('cat 2>&1 <<< $NOPE >/dev/null')
     assert.equal(swapped.stderr, '')
     assert.match(swapped.stdout, /^warning: \$NOPE is unset/u)
+    assert.match(term().run('cat <<< $NOPE 2>/dev/null').stderr, /^warning: \$NOPE is unset/u)
+    assert.match(term().run('cat <<< $NOPE 2>&1 >/dev/null').stderr, /^warning: \$NOPE is unset/u)
     assert.match(term().run('cat <<< $NOPE').stderr, /^warning: \$NOPE is unset/u)
   })
 

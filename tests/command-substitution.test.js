@@ -143,7 +143,7 @@ describe('command substitution — redirects and diagnostics', () => {
     assert.equal(r.stdout, '\n')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)
-    assert.deepEqual(r.unsupported.map(({ command, detail }) => [command, detail]), [['grep', '--unknown'], ['sed', 'script']])
+    assert.deepEqual(r.unsupported.map(({ command, detail }) => [command, detail]), [['grep', '--unknown'], ['sed', '-i']])
   })
 
   it('does not execute substitutions in skipped branches', () => {

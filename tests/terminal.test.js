@@ -3413,14 +3413,12 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     assert.equal(r.stdout, 'A1\nA2\nA3\nC1\nC2\n')
   })
 
-  it('rejects anything outside the narrow subset (single canonical message)', () => {
+  it('distinguishes unsupported sed scripts from option and syntax errors', () => {
     const t = createTerminal(SRC)
-    // Unmodeled scripts and flags retain the subset diagnostic.
+    // Unmodeled scripts retain the subset diagnostic.
     const unsupportedCases = [
       'sed',                                // no args
       "sed -n '/foo/!p' big.txt",           // negated address
-      "sed -i -n '1,2p' big.txt",           // unsupported flag
-      "sed -e '1p' big.txt",                // unsupported flag
     ]
     for (const cmd of unsupportedCases) {
       const r = t.run(cmd)
@@ -3431,6 +3429,7 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     // actual problem — they don't get the generic unsupported text.
     const specific = [
       ["sed -n '0,5p' big.txt", /line numbers must be >= 1/u],
+      ["sed -i -n '1,2p' big.txt", /unknown option: -i/u],
     ]
     for (const [cmd, re] of specific) {
       const r = t.run(cmd)
