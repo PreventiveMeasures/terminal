@@ -96,6 +96,7 @@
     "src/numeric.js",
     "src/regex-locale.js",
     "src/registry.js",
+    "src/shell/aliases.js",
     "src/shell/bindings.js",
     "src/shell/braces.js",
     "src/shell/capture.js",

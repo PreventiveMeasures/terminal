@@ -114,18 +114,22 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
     check(t, 'cat /tmp/a', 'alpha\n')
   })
 
-  it('flushes verbose output before opening the source', () => {
+  it('diagnoses buffered verbose output pointing at the source', () => {
     const t = terminal()
     check(t, 'printf old >/tmp/source')
-    check(t, 'cp -v /tmp/source /tmp/dest >>/tmp/source')
-    const content = "old'/tmp/source' -> '/tmp/dest'\n"
-    check(t, 'cat /tmp/source /tmp/dest', content.repeat(2))
+    const result = t.run('cp -v /tmp/source /tmp/dest >>/tmp/source')
+    assert.equal(result.exitCode, 1)
+    assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+    check(t, 'cat /tmp/source', 'old')
+    check(t, 'test -e /tmp/dest', '', '', 1)
   })
 
-  it('truncates verbose output written into the destination before copying', () => {
+  it('diagnoses buffered verbose output pointing at the destination', () => {
     const t = terminal()
-    check(t, 'cp -v a /tmp/out >/tmp/out')
-    check(t, 'cat /tmp/out', 'alpha\n')
+    const result = t.run('cp -v a /tmp/out >/tmp/out')
+    assert.equal(result.exitCode, 1)
+    assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+    check(t, 'cat /tmp/out', '')
   })
 
   it('quotes unusual filenames consistently with other file commands', () => {

@@ -16,13 +16,15 @@ export function cp(_stdin, tokens, ctx) {
   if (operands.error) return err('cp: ' + operands.error)
   const { sources, target, directory } = operands
   const { flags } = parsed
+  const verbose = flags.has('v') || flags.has('verbose')
+  const copies = sources.map((source) => [source, directory ? target.replace(/\/+$/u, '') + '/' + basename(source) : target])
   const state = {
     ctx, result: emptyOutput(), failed: false, sources: new Set(), copied: new Set(),
     noClobber: flags.has('n') || flags.has('no-clobber'),
-    force: flags.has('f') || flags.has('force'), verbose: flags.has('v') || flags.has('verbose'),
+    force: flags.has('f') || flags.has('force'), verbose,
+    outputOverlap: verbose && outputOverlaps(copies, ctx),
   }
-  for (const source of sources) {
-    const destination = directory ? target.replace(/\/+$/u, '') + '/' + basename(source) : target
+  for (const [source, destination] of copies) {
     // Each copy finishes before the next operand is opened. Ancestor scopes
     // (such as xargs reading its arguments) still guard their own input.
     ctx.io.setReads([])
@@ -46,9 +48,9 @@ function copyOperands({ positional, flags, order }, ctx) {
   if (targets.length > 1) return { error: 'multiple target directories specified' }
   const explicit = targets[0]?.value
   const noDirectory = flags.has('T') || flags.has('no-target-directory')
-  if (explicit !== undefined && noDirectory) return { error: 'cannot combine --target-directory (-t) and --no-target-directory (-T)' }
   if (positional.length === 0) return { error: 'missing file operand' }
   if (explicit === undefined && positional.length === 1) return { error: 'missing destination file operand after ' + quoteName(positional[0], ctx) }
+  if (explicit !== undefined && noDirectory) return { error: 'cannot combine --target-directory (-t) and --no-target-directory (-T)' }
   if (noDirectory && positional.length > 2) return { error: 'extra operand ' + quoteName(positional[2], ctx) }
   const target = explicit ?? positional.at(-1)
   const found = lookup(ctx.cwd, target, ctx.fs)
@@ -70,14 +72,18 @@ function copyFile(source, destination, state) {
   if (state.sources.has(found.path)) return report(state, `cp: warning: source file ${shownSource} specified more than once\n`, false, true)
   state.sources.add(found.path)
   const dest = lookup(ctx.cwd, destination, ctx.fs)
+  if (dest.error && dest.error !== 'No such file or directory') return fail(`cannot stat ${shownTarget}: ${dest.error}`)
   if (state.noClobber && dest.path !== null) return
   if (sameFile(found.path, dest.path, ctx.fs)) return fail(`${shownSource} and ${shownTarget} are the same file`)
   if (ctx.fs.isDir(dest.path)) return fail(`cannot overwrite directory ${shownTarget} with non-directory ${shownSource}`)
   const absolute = resolve(ctx.cwd, destination)
   if (state.copied.has(absolute)) return fail(`will not overwrite just-created ${shownTarget} with ${shownSource}`)
   const invalid = targetError(destination, dest, ctx)
+  if (state.verbose) {
+    if (state.outputOverlap) throw new UnsupportedError('feature', 'copy output buffering', 'buffered verbose output sharing a copied file is not supported')
+    report(state, `${shownSource} -> ${shownTarget}\n`)
+  }
   if (invalid) return fail(`cannot create regular file ${shownTarget}: ${invalid}`)
-  if (state.verbose) report(state, `${shownSource} -> ${shownTarget}\n`)
   try {
     if (!ctx.fs.copyWritable?.(ctx.cwd, found.path, destination)) {
       return fail(`${state.force && dest.path !== null ? 'cannot remove' : 'cannot create regular file'} ${shownTarget}: Read-only file system`)
@@ -94,6 +100,18 @@ function sameFile(source, destination, fs) {
   if (source === destination) return true
   const identity = fs.fileIdentity?.(source)
   return identity !== undefined && identity === fs.fileIdentity(destination)
+}
+
+// GNU buffers verbose stdout; buffer fills and error() flushes can change
+// a later copy when that descriptor points to a source or destination.
+function outputOverlaps(copies, ctx) {
+  const output = ctx.outputFds[1]
+  if (typeof output !== 'object') return false
+  return copies.some((paths) => paths.some((name) => {
+    const found = lookup(ctx.cwd, name, ctx.fs)
+    if (found.error || ctx.fs.isDir(found.path)) return false
+    return output.identity === undefined ? output.path === found.path : output.identity === ctx.fs.fileIdentity?.(found.path)
+  }))
 }
 
 function isSpecialFile(name, cwd) {

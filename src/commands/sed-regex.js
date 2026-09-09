@@ -104,8 +104,10 @@ function unsupportedFlag(flag) {
 export function readWriteFile(p) {
   const name = /^[ \t]*([^\n]*)/u.exec(p.script.slice(p.i))
   p.i += name[0].length
-  if (name[1] === '') throw new Error('missing filename in r/R/w/W commands')
-  return p.openWrite ? { writer: p.openWrite(name[1]) } : { writeName: name[1] }
+  // Script files can contain NULs; GNU passes the collected name as a C string.
+  const filename = name[1].split('\0', 1)[0]
+  if (filename === '') throw new Error('missing filename in r/R/w/W commands')
+  return p.openWrite ? { writer: p.openWrite(filename) } : { writeName: filename }
 }
 
 export function compilePattern(pattern, extended, noSub = false, ignoreCase = false) {

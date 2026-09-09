@@ -7,6 +7,7 @@
 import { assignmentOf, sliceWord } from './word.js'
 import { NAME_RE, tokenize } from './tokenize.js'
 import { UnsupportedError } from '../unsupported.js'
+import { advanceAliases } from './aliases.js'
 
 export function parseLine(line, writable = false, hasCommand = () => false) {
   const raw = tokenize(line)
@@ -33,20 +34,6 @@ export function parseLine(line, writable = false, hasCommand = () => false) {
 // Record empty stages while building, but defer the error until the whole
 // line parses so later syntax errors retain precedence. Nested readers share p.
 function appendStage(p, step, stage) {
-  const name = stage.words[0]?.value
-  const piped = step.stages.length > 0 || ['pipe', 'pipe_err'].includes(p.raw[p.i]?.kind)
-  if (!piped && name === 'alias' && !p.hasCommand(name)) {
-    for (const { value } of stage.words.slice(1)) {
-      const eq = value.indexOf('=')
-      if (eq > 0) p.aliases.add(value.slice(0, eq))
-    }
-  }
-  if (!piped && name === 'unalias' && !p.hasCommand(name)) {
-    for (const { value } of stage.words.slice(1)) {
-      if (value === '-a') p.aliases.clear()
-      else p.aliases.delete(value)
-    }
-  }
   step.stages.push(stage)
   if (!isBlock(stage) && !isCommand(stage)) p.emptyStage = true
 }
@@ -87,13 +74,14 @@ const UNIMPLEMENTED_BLOCKS = new Map([
   ['coproc', '`coproc` is not supported'],
 ])
 
-const ASSIGNMENT_COMMANDS = new Set(['declare', 'typeset', 'local', 'readonly', 'export', 'eval', 'let'])
+const ASSIGNMENT_COMMANDS = new Set(['alias', 'declare', 'typeset', 'local', 'readonly', 'export', 'eval', 'let'])
 
 // Recursive readers share one cursor, positioned after any consumed closer.
 function buildSteps(p, end) {
   const { raw } = p
   const steps = [newStep('first')]
   if (end === null) p.unit = steps[0]
+  let unitStart = 0
   let stage = newStage()
   while (p.i < raw.length) {
     const t = raw[p.i]
@@ -113,7 +101,11 @@ function buildSteps(p, end) {
       stage = newStage()
       if (t.kind === 'and' || t.kind === 'or') steps.push(newStep(t.kind))
       else if (t.kind === 'semi') steps.push(newStep('seq'))
-      if (end === null && (t.newline || t.lineEnd)) p.unit = steps.at(-1)
+      if (end === null && (t.newline || t.lineEnd)) {
+        p.aliases = advanceAliases(steps.slice(unitStart, -1), p.aliases, p.hasCommand)
+        unitStart = steps.length - 1
+        p.unit = steps.at(-1)
+      }
       p.i++
       continue
     }
@@ -155,20 +147,21 @@ function openParen(p, stage) {
   const next = raw[i + 1]
   const previous = raw[i - 1]
   const first = stage.words[0]
-  const assignment = stage.words.length <= 1 || (first.mask === null && ASSIGNMENT_COMMANDS.has(first.value))
+  const word = stage.words.at(-1)
+  const target = raw[i - 2]?.kind === 'redir' && !['dup', 'close'].includes(raw[i - 2].op)
+  const assignment = !target && ((stage.words.length === 0 && stage.assigns.length > 0) ||
+    (word && word.value === previous?.value && (stage.words.length === 1 || (first.mask === null && ASSIGNMENT_COMMANDS.has(first.value)))))
   if (assignment && raw[i].wordAdjacent && previous?.kind === 'word' && !previous.quoted && /^[A-Za-z_][A-Za-z0-9_]*\+?=$/u.test(previous.value)) throw new UnsupportedError('feature', 'array assignment', 'shell array assignments are not supported')
   if (next?.kind === 'paren_open' && next.adjacent && commandPosition(stage)) {
     throw new UnsupportedError('feature', '((', 'arithmetic evaluation (`((…))`) is not supported')
   }
-  if (stage.words.length === 1 && stage.assigns.length === 0 && next?.kind === 'paren_close') {
+  if (stage.words.length === 1 && stage.assigns.length === 0 && stage.redirs.length === 0 && next?.kind === 'paren_close') {
     throw new UnsupportedError('feature', 'function', `shell functions (\`${stage.words[0].value}() { … }\`) are not supported`)
   }
   // A subshell occupies a whole stage, but retains any leading redirects.
   if (!commandPosition(stage)) throw new Error('unexpected `(`')
   p.i++
-  const aliases = p.aliases
-  p.aliases = new Set(aliases)
-  try { stage.group = buildSteps(p, ')') } finally { p.aliases = aliases }
+  stage.group = buildSteps(p, ')')
   stage.isolate = true
 }
 
