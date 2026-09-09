@@ -1,4 +1,4 @@
-import { readPosixClass } from '../charclass.js'
+import { MAX_INTERVAL, checkInterval, readPosixClass, validateBracket } from '../charclass.js'
 import { UnsupportedError, unsupported } from '../unsupported.js'
 import { err } from '../util.js'
 import { AwkRegex } from '../awk/regex.js'
@@ -77,18 +77,157 @@ export function grepSource(source, extent = false) {
   return out
 }
 
+const ERE_INTERVAL = /^\{(\d+)(?:,(\d*))?\}/u
+const BRE_INTERVAL = /^\\\{(\d+)(?:,(\d*))?\\\}/u
+
+// GNU rejects an interval bound above RE_DUP_MAX outright. ECMAScript
+// accepts any bound, so the limit is ours to enforce.
+function intervalBounds(pattern, i, extended) {
+  const m = (extended ? ERE_INTERVAL : BRE_INTERVAL).exec(pattern.slice(i))
+  if (m) checkInterval(Number(m[1]), m[2] === undefined || m[2] === '' ? undefined : Number(m[2]))
+}
+
+// POSIX stacks quantifiers: `a+?` is `(a+)?`, which matches the empty
+// string, and `a+*` is `(a+)*`. ECMAScript reads `+?` as a lazy `+` and
+// rejects `+*` outright, so the pair has to be rewritten for the JS
+// matcher. Wrapping it as `(?:a+)*` would be correct and catastrophic —
+// nested unbounded repetition backtracks exponentially on input that
+// fails to match — so the pair is folded into one quantifier instead.
+const QUANTS = { __proto__: null, '*': { min: 0, max: Infinity }, '+': { min: 1, max: Infinity }, '?': { min: 0, max: 1 } }
+
+function quantBounds(text) {
+  if (QUANTS[text]) return QUANTS[text]
+  const m = ERE_INTERVAL.exec(text)
+  const min = Number(m[1])
+  return { min, max: m[2] === undefined ? min : m[2] === '' ? Infinity : Number(m[2]) }
+}
+
+const times = (a, b) => (a === 0 || b === 0 ? 0 : a === Infinity || b === Infinity ? Infinity : a * b)
+
+// `(X{m1,n1}){m2,n2}` matches k copies of X for every k that is a sum of
+// between m2 and n2 numbers drawn from [m1,n1]. When those k form one
+// unbroken range the pair is a single quantifier — `a+*` is just `a*` —
+// and the nesting disappears with them. Returns null when the reachable
+// counts have a hole, as `(a{2,}){0,1}` does between 0 and 2.
+function collapse(inner, outer) {
+  const first = Math.max(outer.min, 1)
+  if (first > outer.max) return { min: 0, max: 0 }
+  if (inner.min > 0) {
+    if (outer.min === 0 && inner.min > 1) return null
+    if (inner.max !== Infinity && outer.max > first && (first + 1) * inner.min > first * inner.max + 1) return null
+  }
+  const max = times(outer.max, inner.max)
+  return max !== Infinity && max > MAX_INTERVAL ? null : { min: times(outer.min, inner.min), max }
+}
+
+function quantText(b) {
+  if (b.max === Infinity) return b.min === 0 ? '*' : b.min === 1 ? '+' : `{${b.min},}`
+  if (b.min === 0 && b.max === 1) return '?'
+  return b.min === b.max ? `{${b.min}}` : `{${b.min},${b.max}}`
+}
+
+// A repetition consumes a fixed width only when the atom does: a single
+// character, escape or bracket expression matches exactly one. A group
+// can match several lengths — `(a|aa){3}` covers 3 to 6 characters — and
+// repeating that under an unbounded count is the ambiguity the fold
+// exists to avoid, so groups and backreferences do not qualify.
+const fixedWidth = (atom) => !atom.startsWith('(') && !/^\\[1-9]/u.test(atom)
+
+// Fold a chain of quantifiers applied to one atom. A pair that will not
+// collapse may still nest safely when every repetition consumes a fixed
+// width, or when the outer one repeats at most once; anything else would
+// reintroduce the ambiguity, so it is refused and reported as a GNU form
+// the JavaScript matcher cannot represent.
+function stackQuantifiers(atom, chain) {
+  if (chain.length === 1) return atom + chain[0].text
+  let bounds = chain[0].bounds
+  let nested = null
+  for (let i = 1; i < chain.length; i++) {
+    const { bounds: outer, text } = chain[i]
+    const merged = nested === null ? collapse(bounds, outer) : null
+    if (merged) { bounds = merged; continue }
+    const fixed = nested === null && bounds.min === bounds.max && fixedWidth(atom)
+    if (!fixed && outer.max > 1) throw new Error('stacked quantifier needs ambiguous nesting')
+    nested = `(?:${nested ?? atom + quantText(bounds)})${text}`
+  }
+  return nested ?? atom + quantText(bounds)
+}
+
+// End of the bracket expression opening at `start`, honouring the escapes
+// the translators emit inside a class.
+function classEnd(source, start) {
+  let i = start + 1
+  if (source[i] === '^') i++
+  for (; i < source.length; i++) {
+    if (source[i] === '\\') { i++; continue }
+    if (source[i] === ']') return i
+  }
+  return source.length - 1
+}
+
+// Rewrite each atom together with every quantifier stacked on it. Groups
+// carry their whole text as the atom, so `(ab)+?` becomes `(ab)*`.
+export function posixQuantifiers(source) {
+  let out = ''
+  let unitStart = -1   // where the bare atom starts in `out`, -1 if none
+  let unitEnd = -1     // where its first quantifier began
+  let chain = []
+  const flush = () => {
+    if (chain.length > 0) out = out.slice(0, unitStart) + stackQuantifiers(out.slice(unitStart, unitEnd), chain)
+    chain = []
+  }
+  const atom = (text) => { flush(); unitStart = out.length; unitEnd = -1; out += text }
+  const groups = []
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]
+    if (c === '\\') { atom(c + (source[++i] ?? '')); continue }
+    if (c === '[') {
+      const end = classEnd(source, i)
+      atom(source.slice(i, end + 1))
+      i = end
+      continue
+    }
+    if (c === '(') { flush(); groups.push(out.length); unitStart = -1; out += c; continue }
+    if (c === ')') { flush(); out += c; unitStart = groups.pop() ?? -1; unitEnd = -1; continue }
+    // Nothing quantifiable precedes an alternation branch or an anchor.
+    if (c === '|' || c === '^' || c === '$') { flush(); out += c; unitStart = -1; continue }
+    const interval = c === '{' ? ERE_INTERVAL.exec(source.slice(i)) : null
+    if (c === '*' || c === '+' || c === '?' || interval) {
+      const text = interval ? interval[0] : c
+      i += text.length - 1
+      if (unitStart < 0) { out += text; continue }   // nothing to quantify; JS reports it
+      if (chain.length === 0) unitEnd = out.length
+      chain.push({ bounds: quantBounds(text), text })
+      continue
+    }
+    atom(c)
+  }
+  flush()
+  return out
+}
+
 // These constructs have different meanings in ECMAScript and GNU grep.
 // Refuse them rather than letting the JS engine silently pick a dialect.
+// Bracket expressions and interval bounds are checked here, on the
+// pattern as written, so BRE and ERE get the same diagnostics.
 export function validateRegex(pattern, extended) {
-  let bracket = false
+  // Membership is by position, not by the next `]`: a class ends where
+  // validateBracket says it does, so the `]` closing `[:alpha:]` inside it
+  // — or a literal `]` in first position — does not end it early. Members
+  // shaped like intervals or groups are then read as the characters they
+  // are, so `[[:alpha:]{40000}]` and `[(?]` stay the classes GNU sees.
+  let bracketEnd = -1
   for (let i = 0; i < pattern.length; i++) {
+    const bracket = i <= bracketEnd
     const c = pattern[i]
     if (c === '\\') {
       const next = pattern[++i]
       if (next === undefined) throw new Error('trailing backslash')
       if (bracket || (next && 'dDxXuUpPkKcC'.includes(next))) throw new UnsupportedError('feature', 'regex escape', 'grep: this regex escape is not supported with GNU semantics')
-    } else if (c === '[') bracket = true
-    else if (c === ']') bracket = false
+      if (!extended && next === '{') intervalBounds(pattern, i - 1, false)
+    } else if (c === '[' && !bracket) bracketEnd = validateBracket(pattern, i)
+    else if (bracket) continue
+    else if (extended && c === '{') intervalBounds(pattern, i, true)
     else if (extended && c === '(' && pattern[i + 1] === '?') throw new UnsupportedError('feature', 'regex extension', 'grep: ECMAScript group extensions are not supported in ERE')
   }
 }
@@ -115,7 +254,12 @@ export function compilePatterns(patterns, flags) {
     if (word) source = `(?<![A-Za-z0-9_])(?:${source})(?![A-Za-z0-9_])`
     if (whole) source = `^(?:${source})$`
     try {
-      const re = new RegExp(flags.has('F') || flags.has('P') ? source : grepSource(source), reFlags)
+      // The boolean matcher needs POSIX quantifier stacking spelled out
+      // for ECMAScript; the extent matcher below parses ERE itself and
+      // already reads those the way GNU does, so it takes `source` as is.
+      // `-P` selects the ECMAScript reading, where `a+?` really is lazy,
+      // so the rewrite is ERE's alone.
+      const re = new RegExp(flags.has('F') || flags.has('P') ? source : grepSource(flags.has('E') ? posixQuantifiers(source) : source), reFlags)
       re.pcre = flags.has('P')
       re.localeSensitive = flags.has('i') || word || (!flags.has('F') && localeSensitive(canonical)) || (re.pcre && /\\[dD]/u.test(canonical))
       // The ASCII proof understands POSIX patterns, not PCRE escapes/classes.

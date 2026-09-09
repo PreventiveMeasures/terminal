@@ -19,9 +19,12 @@ const NEWLINE_ABSORB = new Set(['semi', 'and', 'or', 'pipe', 'pipe_err', 'paren_
 const isBlank = (c) => c === ' ' || c === '\t'
 
 export function tokenize(line) {
+  // `st.line` is the cursor's source of truth: splicing backslash-newline
+  // out of a reference rewrites it mid-scan, and the rest of the file
+  // already reads it rather than the parameter.
   const st = { line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2 }
-  while (st.i < line.length) {
-    const c = line[st.i]
+  while (st.i < st.line.length) {
+    const c = st.line[st.i]
     if (st.quote && c === st.quote) { closeQuote(st); st.i++; continue }
     if (st.quote === "'") { put(st, c, '1'); st.i++; continue }
     if (c === '\\') { readEscape(st); continue }
@@ -33,7 +36,7 @@ export function tokenize(line) {
     if (c === '#' && !inToken) { skipComment(st); continue }
     if (c === '\n') { newline(st); continue }
     if (isBlank(c)) { flush(st); st.i++; continue }
-    const op = readOperator(line, st.i, !inToken)
+    const op = readOperator(st.line, st.i, !inToken)
     if (op?.token.kind === 'paren_open') op.token.wordAdjacent = inToken
     if (op) { flush(st); emit(st, op.token); st.i = op.end; continue }
     put(st, c, '0')
@@ -41,7 +44,7 @@ export function tokenize(line) {
   }
   if (st.quote) throw new Error(`unterminated ${st.quote === "'" ? 'single' : 'double'} quote`)
   flush(st)
-  if (st.heredocs.length > 0) readHeredocBodies(line, line.length, st.heredocs)
+  if (st.heredocs.length > 0) readHeredocBodies(st.line, st.line.length, st.heredocs)
   return st.tokens
 }
 
@@ -99,9 +102,19 @@ function readEscape(st) {
   }
 }
 
+// Backslash-newline is spliced out before the shell recognises tokens,
+// so a reference split across lines is still one reference: `$\<newline>?`
+// is `$?`. Splicing only ahead of the cursor leaves every position the
+// tokenizer has already recorded valid. Single-quoted text never reaches
+// here, which is why the pair is always a continuation.
+function spliceContinuations(st, at) {
+  while (st.line[at] === '\\' && st.line[at + 1] === '\n') st.line = st.line.slice(0, at) + st.line.slice(at + 2)
+}
+
 // References keep their source text and 0/2 mask for later expansion.
 // ANSI-C strings become hard-quoted text; literal dollars cannot expand.
 function readDollar(st) {
+  spliceContinuations(st, st.i + 1)
   const { line } = st
   const m = st.quote === '"' ? '2' : '0'
   const n = line[st.i + 1]
