@@ -143,19 +143,23 @@ export function posixQuantifiers(source) {
 // Bracket expressions and interval bounds are checked here, on the
 // pattern as written, so BRE and ERE get the same diagnostics.
 export function validateRegex(pattern, extended) {
-  let bracket = false
+  // Membership is by position, not by the next `]`: a class ends where
+  // validateBracket says it does, so the `]` closing `[:alpha:]` inside it
+  // — or a literal `]` in first position — does not end it early. Members
+  // shaped like intervals or groups are then read as the characters they
+  // are, so `[[:alpha:]{40000}]` and `[(?]` stay the classes GNU sees.
+  let bracketEnd = -1
   for (let i = 0; i < pattern.length; i++) {
+    const bracket = i <= bracketEnd
     const c = pattern[i]
     if (c === '\\') {
       const next = pattern[++i]
       if (next === undefined) throw new Error('trailing backslash')
       if (bracket || (next && 'dDxXuUpPkKcC'.includes(next))) throw new UnsupportedError('feature', 'regex escape', 'grep: this regex escape is not supported with GNU semantics')
-      if (!extended && !bracket && next === '{') intervalBounds(pattern, i - 1, false)
-    } else if (c === '[') {
-      if (!bracket) validateBracket(pattern, i)
-      bracket = true
-    } else if (c === ']') bracket = false
-    else if (extended && c === '{' && !bracket) intervalBounds(pattern, i, true)
+      if (!extended && next === '{') intervalBounds(pattern, i - 1, false)
+    } else if (c === '[' && !bracket) bracketEnd = validateBracket(pattern, i)
+    else if (bracket) continue
+    else if (extended && c === '{') intervalBounds(pattern, i, true)
     else if (extended && c === '(' && pattern[i + 1] === '?') throw new UnsupportedError('feature', 'regex extension', 'grep: ECMAScript group extensions are not supported in ERE')
   }
 }

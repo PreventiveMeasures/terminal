@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
-const FILES = { f: 'BADRPT\nxyz\naaa\nab\n' }
+const FILES = { f: 'BADRPT\nxyz\naaa\nab\n', g: 'aaa\nx{40000}\na(?\n' }
 const run = (command) => createTerminal(FILES).run(command)
 
 // POSIX stacks quantifiers: `a+?` is `(a+)?`, which is nullable and so
@@ -71,6 +71,37 @@ const ACCEPTED = [
   ["grep -ce '[[:alpha:]]' f", '4\n'],
   ["grep -coE 'a' f", '2\n'],
 ]
+
+// Everything between `[` and its closing `]` is a set of characters, so
+// nothing in there is syntax: not the `]` that ends a POSIX class inside
+// it, not a brace-shaped member, not a group-shaped one. Tracking the
+// class by position rather than by the next `]` is what keeps the
+// interval and ECMAScript-extension checks from firing on its contents.
+const CLASS_MEMBERS = [
+  ["grep -cE '[[:alpha:]{40000}]' g", '3\n'],
+  ["grep -cE '[]{40000}]' g", '1\n'],
+  ["grep -cE '[(?]' g", '1\n'],
+  ["grep -cE '[{}]' g", '1\n'],
+  ["grep -cE '[[:alpha:][:digit:]]' g", '3\n'],
+  // The same checks still apply outside a class.
+  ["grep -cE 'a[[:alpha:]]{1}?' g", '2\n'],
+]
+
+describe('GNU conformance — bracket contents are members, not syntax', () => {
+  for (const [command, stdout] of CLASS_MEMBERS) {
+    it(command, () => {
+      const r = run(command)
+      assert.deepEqual(r.unsupported, [], command + ': refusing the pattern does not count as matching it')
+      assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout, stderr: '', exitCode: 0 })
+    })
+  }
+
+  it("an interval outside the class is still bounded: grep -E 'a{40000}' g", () => {
+    const r = run("grep -E 'a{40000}' g")
+    assert.equal(r.exitCode, 2)
+    assert.equal(r.stderr, 'grep: Regular expression too big\n')
+  })
+})
 
 describe('GNU conformance — POSIX quantifier stacking', () => {
   for (const [command, stdout] of STACKED) {
