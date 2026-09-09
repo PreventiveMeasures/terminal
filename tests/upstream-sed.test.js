@@ -90,12 +90,11 @@ describe('GNU sed audit — address ranges', () => {
 
 describe('GNU sed audit — unavailable features remain observable', () => {
   const scripts = [
-    's/oak/elm/2', 's/oak/elm/I', 's/oak/elm/M', 's/oak/elm/e', 's/oak/elm/w output',
-    String.raw`s/oak/\U&/`, String.raw`s/oak/\0/`, String.raw`s/oak/\x41/`,
+    's/oak/elm/I', 's/oak/elm/M', 's/oak/elm/e', 's/oak/elm/w output',
+    String.raw`s/oak/\U&/`, String.raw`s/oak/\x41/`,
     String.raw`s/oak/\o101/`, String.raw`s/oak/\d65/`, String.raw`s/oak/\Q/`,
-    '1~2p', '2,~3p', String.raw`\#oak#p`, '/oak/Ip', '/oak/Mp',
-    '/oak/!p', '/oak/{p;}', 's/oak/elm/;s//fir/', 's/oak/elm/ # comment',
-    'y/oak/elm/', 'd', 'D', 'N', 'h', 'H', 'g', 'G', 'x', 'q', 'r input', 'w output',
+    '1~2p', '2,~3p', '/oak/Ip', '/oak/Mp', 's/oak/elm/ # comment',
+    'D', 'N', 'h', 'H', 'g', 'G', 'x', 'r input', 'w output',
     String.raw`s/\(oak\)\1/elm/`,
   ]
   for (const script of scripts) {
@@ -113,6 +112,19 @@ describe('GNU sed audit — unavailable features remain observable', () => {
       assert.deepEqual(hidden.unsupported, result.unsupported)
     })
   }
+})
+
+describe('GNU sed audit — extended commands', () => {
+  for (const [script, stdout] of [
+    ['s/oak/elm/2', 'oakelm\n'],
+    [String.raw`s/oak/\0/`, 'oakoak\n'],
+    [String.raw`\#oak#p`, 'oakoak\noakoak\n'],
+    ['/oak/!p', 'oakoak\n'],
+    ['/oak/{p;}', 'oakoak\noakoak\n'],
+    ['s/oak/elm/;s//fir/', 'elmfir\n'],
+    ['y/oak/elm/', 'elmelm\n'],
+    ['q', 'oakoak\n'],
+  ]) it(script, () => check(script, 'oakoak\n', stdout))
 })
 
 describe('GNU sed audit — invalid syntax is an ordinary error', () => {
