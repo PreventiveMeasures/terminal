@@ -167,8 +167,9 @@ describe('GNU conformance — stacked quantifiers do not nest', () => {
     ['a{1}?', 'a?'], ['(ab)+?', '(ab)*'], ['[a-z]+?', '[a-z]*'], ['a{2,5}+', 'a{2,}'],
     ['x+?y*', 'x*y*'], ['^a+?$', '^a*$'], ['a|b+?', 'a|b*'],
     // These cannot be folded, but nest safely: the outer repeats at most
-    // once, or each repetition consumes a fixed length.
+    // once, or each repetition consumes a fixed width.
     ['a{2,}?', '(?:a{2,})?'], ['a{3}{2,}', '(?:a{3}){2,}'],
+    ['[a-z]{3}{2,}', '(?:[a-z]{3}){2,}'], ['\\w{3}{2,}', '(?:\\w{3}){2,}'],
   ]
   for (const [pattern, rewritten] of FOLDED) {
     it(`${pattern} → ${rewritten}`, () => {
@@ -182,6 +183,22 @@ describe('GNU conformance — stacked quantifiers do not nest', () => {
     const r = run("grep -cE 'a{2,5}*' f")
     assert.equal(r.exitCode, 2)
     assert.deepEqual(r.unsupported.map((u) => u.detail), ['GNU regex syntax'])
+  })
+
+  it('a fixed repeat count is not a fixed width when the atom varies', () => {
+    // `(a|aa){3}` covers 3 to 6 characters, so repeating it unboundedly is
+    // ambiguous even though the count is exact. Refusing is what keeps
+    // this from running for minutes: 36 characters took 1.2s when only
+    // the count was checked, and each further one doubled it.
+    const t = createTerminal({ long: 'a'.repeat(400) + 'c\n' })
+    const started = hrtime.bigint()
+    const r = t.run("grep -cE '(a|aa){3}{2,}b' long")
+    const ms = Number(hrtime.bigint() - started) / 1e6
+    assert.equal(r.exitCode, 2)
+    assert.deepEqual(r.unsupported.map((u) => u.detail), ['GNU regex syntax'])
+    assert.ok(ms < 1000, `took ${ms.toFixed(0)}ms`)
+    // A single-character atom still nests, and stays linear.
+    assert.equal(t.run("grep -cE 'a{3}{2,}b' long").stdout, '0\n')
   })
 
   it('a stacked quantifier over a long non-match stays linear', () => {

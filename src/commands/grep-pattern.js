@@ -126,9 +126,16 @@ function quantText(b) {
   return b.min === b.max ? `{${b.min}}` : `{${b.min},${b.max}}`
 }
 
+// A repetition consumes a fixed width only when the atom does: a single
+// character, escape or bracket expression matches exactly one. A group
+// can match several lengths — `(a|aa){3}` covers 3 to 6 characters — and
+// repeating that under an unbounded count is the ambiguity the fold
+// exists to avoid, so groups and backreferences do not qualify.
+const fixedWidth = (atom) => !atom.startsWith('(') && !/^\\[1-9]/u.test(atom)
+
 // Fold a chain of quantifiers applied to one atom. A pair that will not
 // collapse may still nest safely when every repetition consumes a fixed
-// length, or when the outer one repeats at most once; anything else would
+// width, or when the outer one repeats at most once; anything else would
 // reintroduce the ambiguity, so it is refused and reported as a GNU form
 // the JavaScript matcher cannot represent.
 function stackQuantifiers(atom, chain) {
@@ -139,7 +146,7 @@ function stackQuantifiers(atom, chain) {
     const { bounds: outer, text } = chain[i]
     const merged = nested === null ? collapse(bounds, outer) : null
     if (merged) { bounds = merged; continue }
-    const fixed = nested === null && bounds.min === bounds.max
+    const fixed = nested === null && bounds.min === bounds.max && fixedWidth(atom)
     if (!fixed && outer.max > 1) throw new Error('stacked quantifier needs ambiguous nesting')
     nested = `(?:${nested ?? atom + quantText(bounds)})${text}`
   }
