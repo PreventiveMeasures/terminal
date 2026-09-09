@@ -63,7 +63,12 @@ export function validateBracket(pattern, start) {
       if (close === -1) throw new Error('Unmatched [, [^, [:, [., or [=')
       if (kind === ':' && !(pattern.slice(i + 2, close) in POSIX_CLASSES)) throw new Error('Invalid character class name')
       i = close + 2
-      ranged = false
+      // A character class or an equivalence class names a set, so it is
+      // not a range endpoint: a `-` after one reads exactly as a `-`
+      // after a completed range does, an error unless it is the last
+      // member. `[[:alpha:]-z]` is rejected, `[[:alpha:]-]` is not. A
+      // collating element names one character and is an ordinary member.
+      ranged = kind !== '.'
       continue
     }
     // A `-` directly after a completed range has no reading: GNU rejects
@@ -72,7 +77,15 @@ export function validateBracket(pattern, start) {
     const width = c === '\\' && i + 1 < pattern.length ? 2 : 1
     const after = pattern[i + width]
     if (after === '-' && pattern[i + width + 1] !== undefined && pattern[i + width + 1] !== ']') {
-      i += width + 1 + (pattern[i + width + 1] === '\\' ? 2 : 1)
+      const endAt = i + width + 1
+      const opens = pattern[endAt] === '[' ? pattern[endAt + 1] : undefined
+      // ...nor the far end of one: `[a-[:digit:]]`. A collating element
+      // may close the range, and is consumed whole so the scan stays in
+      // step: `[a-[.z.]]`.
+      if (opens === ':' || opens === '=') throw new Error('Invalid range end')
+      const close = opens === '.' ? pattern.indexOf('.]', endAt + 2) : -1
+      if (opens === '.' && close === -1) throw new Error('Unmatched [, [^, [:, [., or [=')
+      i = close === -1 ? endAt + (pattern[endAt] === '\\' ? 2 : 1) : close + 2
       ranged = true
       continue
     }

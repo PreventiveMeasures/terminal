@@ -1,4 +1,4 @@
-import { checkInterval, readPosixClass, validateBracket } from '../charclass.js'
+import { MAX_INTERVAL, checkInterval, readPosixClass, validateBracket } from '../charclass.js'
 import { UnsupportedError, unsupported } from '../unsupported.js'
 import { err } from '../util.js'
 import { AwkRegex } from '../awk/regex.js'
@@ -87,6 +87,65 @@ function intervalBounds(pattern, i, extended) {
   if (m) checkInterval(Number(m[1]), m[2] === undefined || m[2] === '' ? undefined : Number(m[2]))
 }
 
+// POSIX stacks quantifiers: `a+?` is `(a+)?`, which matches the empty
+// string, and `a+*` is `(a+)*`. ECMAScript reads `+?` as a lazy `+` and
+// rejects `+*` outright, so the pair has to be rewritten for the JS
+// matcher. Wrapping it as `(?:a+)*` would be correct and catastrophic —
+// nested unbounded repetition backtracks exponentially on input that
+// fails to match — so the pair is folded into one quantifier instead.
+const QUANTS = { __proto__: null, '*': { min: 0, max: Infinity }, '+': { min: 1, max: Infinity }, '?': { min: 0, max: 1 } }
+
+function quantBounds(text) {
+  if (QUANTS[text]) return QUANTS[text]
+  const m = ERE_INTERVAL.exec(text)
+  const min = Number(m[1])
+  return { min, max: m[2] === undefined ? min : m[2] === '' ? Infinity : Number(m[2]) }
+}
+
+const times = (a, b) => (a === 0 || b === 0 ? 0 : a === Infinity || b === Infinity ? Infinity : a * b)
+
+// `(X{m1,n1}){m2,n2}` matches k copies of X for every k that is a sum of
+// between m2 and n2 numbers drawn from [m1,n1]. When those k form one
+// unbroken range the pair is a single quantifier — `a+*` is just `a*` —
+// and the nesting disappears with them. Returns null when the reachable
+// counts have a hole, as `(a{2,}){0,1}` does between 0 and 2.
+function collapse(inner, outer) {
+  const first = Math.max(outer.min, 1)
+  if (first > outer.max) return { min: 0, max: 0 }
+  if (inner.min > 0) {
+    if (outer.min === 0 && inner.min > 1) return null
+    if (inner.max !== Infinity && outer.max > first && (first + 1) * inner.min > first * inner.max + 1) return null
+  }
+  const max = times(outer.max, inner.max)
+  return max !== Infinity && max > MAX_INTERVAL ? null : { min: times(outer.min, inner.min), max }
+}
+
+function quantText(b) {
+  if (b.max === Infinity) return b.min === 0 ? '*' : b.min === 1 ? '+' : `{${b.min},}`
+  if (b.min === 0 && b.max === 1) return '?'
+  return b.min === b.max ? `{${b.min}}` : `{${b.min},${b.max}}`
+}
+
+// Fold a chain of quantifiers applied to one atom. A pair that will not
+// collapse may still nest safely when every repetition consumes a fixed
+// length, or when the outer one repeats at most once; anything else would
+// reintroduce the ambiguity, so it is refused and reported as a GNU form
+// the JavaScript matcher cannot represent.
+function stackQuantifiers(atom, chain) {
+  if (chain.length === 1) return atom + chain[0].text
+  let bounds = chain[0].bounds
+  let nested = null
+  for (let i = 1; i < chain.length; i++) {
+    const { bounds: outer, text } = chain[i]
+    const merged = nested === null ? collapse(bounds, outer) : null
+    if (merged) { bounds = merged; continue }
+    const fixed = nested === null && bounds.min === bounds.max
+    if (!fixed && outer.max > 1) throw new Error('stacked quantifier needs ambiguous nesting')
+    nested = `(?:${nested ?? atom + quantText(bounds)})${text}`
+  }
+  return nested ?? atom + quantText(bounds)
+}
+
 // End of the bracket expression opening at `start`, honouring the escapes
 // the translators emit inside a class.
 function classEnd(source, start) {
@@ -99,42 +158,44 @@ function classEnd(source, start) {
   return source.length - 1
 }
 
-// POSIX stacks quantifiers: `a+?` is `(a+)?`, which matches the empty
-// string, and `a+*` is `(a+)*`. ECMAScript reads `+?` as a lazy `+` and
-// rejects `+*` outright, so wrap each quantified unit to restore GNU's
-// reading. Groups wrap whole, and a third quantifier wraps the second.
+// Rewrite each atom together with every quantifier stacked on it. Groups
+// carry their whole text as the atom, so `(ab)+?` becomes `(ab)*`.
 export function posixQuantifiers(source) {
   let out = ''
-  let unit = -1        // where the last quantifiable unit starts in `out`
-  let quantified = false
+  let unitStart = -1   // where the bare atom starts in `out`, -1 if none
+  let unitEnd = -1     // where its first quantifier began
+  let chain = []
+  const flush = () => {
+    if (chain.length > 0) out = out.slice(0, unitStart) + stackQuantifiers(out.slice(unitStart, unitEnd), chain)
+    chain = []
+  }
+  const atom = (text) => { flush(); unitStart = out.length; unitEnd = -1; out += text }
   const groups = []
-  const atom = () => { unit = out.length; quantified = false }
   for (let i = 0; i < source.length; i++) {
     const c = source[i]
-    if (c === '\\') { atom(); out += c + (source[++i] ?? ''); continue }
+    if (c === '\\') { atom(c + (source[++i] ?? '')); continue }
     if (c === '[') {
       const end = classEnd(source, i)
-      atom()
-      out += source.slice(i, end + 1)
+      atom(source.slice(i, end + 1))
       i = end
       continue
     }
-    if (c === '(') { groups.push(out.length); unit = -1; quantified = false; out += c; continue }
-    if (c === ')') { out += c; unit = groups.pop() ?? -1; quantified = false; continue }
+    if (c === '(') { flush(); groups.push(out.length); unitStart = -1; out += c; continue }
+    if (c === ')') { flush(); out += c; unitStart = groups.pop() ?? -1; unitEnd = -1; continue }
     // Nothing quantifiable precedes an alternation branch or an anchor.
-    if (c === '|' || c === '^' || c === '$') { out += c; unit = -1; quantified = false; continue }
+    if (c === '|' || c === '^' || c === '$') { flush(); out += c; unitStart = -1; continue }
     const interval = c === '{' ? ERE_INTERVAL.exec(source.slice(i)) : null
     if (c === '*' || c === '+' || c === '?' || interval) {
       const text = interval ? interval[0] : c
-      if (quantified && unit >= 0) out = out.slice(0, unit) + '(?:' + out.slice(unit) + ')'
-      out += text
-      quantified = true
       i += text.length - 1
+      if (unitStart < 0) { out += text; continue }   // nothing to quantify; JS reports it
+      if (chain.length === 0) unitEnd = out.length
+      chain.push({ bounds: quantBounds(text), text })
       continue
     }
-    atom()
-    out += c
+    atom(c)
   }
+  flush()
   return out
 }
 

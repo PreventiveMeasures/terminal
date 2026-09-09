@@ -6,7 +6,9 @@
 
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { hrtime } from 'node:process'
 import { createTerminal } from '@preventive/terminal'
+import { posixQuantifiers } from '../src/commands/grep-pattern.js'
 
 const FILES = { f: 'BADRPT\nxyz\naaa\nab\n', g: 'aaa\nx{40000}\na(?\n' }
 const run = (command) => createTerminal(FILES).run(command)
@@ -31,6 +33,7 @@ const STACKED = [
   ["grep -cE 'a++' f", '2\n'],
   // A third quantifier applies to the second.
   ["grep -cE 'a+?*' f", '4\n'],
+  ["grep -cE 'a{2,5}+' f", '1\n'],
   ["grep -E 'a+?' f", 'BADRPT\nxyz\naaa\nab\n'],
   // `-w` still constrains the rewritten pattern.
   ["grep -cwE 'a+?' f", '1\n'],
@@ -55,6 +58,15 @@ const REJECTED = [
   ["grep -e 'a\\{32768\\}' f", 'Regular expression too big'],
   ["grep -E 'b{1000000000}' f", 'Regular expression too big'],
   ["grep -E 'a{40000,}' f", 'Regular expression too big'],
+  // A POSIX class names a set, so it cannot be either end of a range.
+  ["grep -E '[[:alpha:]-z]' f", 'Invalid range end'],
+  ["grep -E '[[:alpha:]-[:digit:]]' f", 'Invalid range end'],
+  ["grep -E '[a-[:digit:]]' f", 'Invalid range end'],
+  ["grep -e '[[:alpha:]-z]' f", 'Invalid range end'],
+  // An equivalence class names a set too. A collating element names one
+  // character and stays a legal endpoint, so it is left to the translator,
+  // which refuses collation separately.
+  ["grep -E '[[=a=]-z]' f", 'Invalid range end'],
 ]
 
 // The neighbouring forms that stay legal, so validating brackets and
@@ -70,6 +82,10 @@ const ACCEPTED = [
   ["grep -cE 'a{32767}' f", '0\n', 1],
   ["grep -ce '[[:alpha:]]' f", '4\n'],
   ["grep -coE 'a' f", '2\n'],
+  // A `-` beside a class is an ordinary member first or last, as elsewhere.
+  ["grep -cE '[[:alpha:]-]' f", '4\n'],
+  ["grep -cE '[-[:alpha:]]' f", '4\n'],
+  ["grep -cE '[[:alpha:][:digit:]]' f", '4\n'],
 ]
 
 // Everything between `[` and its closing `]` is a set of characters, so
@@ -140,6 +156,45 @@ describe('GNU conformance — bracket and interval forms that stay legal', () =>
 // reference split across lines is still one reference. The tokenizer read
 // `$` from the raw line and found `\` after it, emitting a literal `$`
 // and leaving `?` to be read as its own word.
+// Spelling `a+?` as the nested `(?:a+)?` is correct and catastrophic:
+// ECMAScript backtracks exponentially through nested unbounded repetition
+// on input that fails to match, where GNU's matcher does not backtrack at
+// all. Stacked quantifiers are folded into one instead, so the rewrite
+// introduces no nesting for the forms that can be written without it.
+describe('GNU conformance — stacked quantifiers do not nest', () => {
+  const FOLDED = [
+    ['a+?', 'a*'], ['a+*', 'a*'], ['a++', 'a+'], ['a*?', 'a*'], ['a+?*', 'a*'],
+    ['a{1}?', 'a?'], ['(ab)+?', '(ab)*'], ['[a-z]+?', '[a-z]*'], ['a{2,5}+', 'a{2,}'],
+    ['x+?y*', 'x*y*'], ['^a+?$', '^a*$'], ['a|b+?', 'a|b*'],
+    // These cannot be folded, but nest safely: the outer repeats at most
+    // once, or each repetition consumes a fixed length.
+    ['a{2,}?', '(?:a{2,})?'], ['a{3}{2,}', '(?:a{3}){2,}'],
+  ]
+  for (const [pattern, rewritten] of FOLDED) {
+    it(`${pattern} → ${rewritten}`, () => {
+      assert.equal(posixQuantifiers(pattern), rewritten)
+    })
+  }
+
+  it('a pattern needing ambiguous nesting is refused, not shipped', () => {
+    // `(a{2,5})*` has no single-quantifier equivalent, so it would have to
+    // nest a variable-length body under an unbounded repeat.
+    const r = run("grep -cE 'a{2,5}*' f")
+    assert.equal(r.exitCode, 2)
+    assert.deepEqual(r.unsupported.map((u) => u.detail), ['GNU regex syntax'])
+  })
+
+  it('a stacked quantifier over a long non-match stays linear', () => {
+    // Exponential before the fold: 24 characters took ~220ms, and each
+    // further character doubled it.
+    const t = createTerminal({ long: 'a'.repeat(4000) + 'c\n' })
+    const started = hrtime.bigint()
+    assert.equal(t.run("grep -cE 'a+*b' long").stdout, '0\n')
+    const ms = Number(hrtime.bigint() - started) / 1e6
+    assert.ok(ms < 1000, `took ${ms.toFixed(0)}ms`)
+  })
+})
+
 describe('GNU conformance — line continuation inside a reference', () => {
   const CONTINUED = [
     ['echo $\\\n?', '0\n'],
