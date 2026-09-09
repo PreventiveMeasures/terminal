@@ -1,5 +1,5 @@
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
-import { appendOutput, emptyOutput, routeOutput } from './output.js'
+import { expansionStderr } from './output.js'
 import { isolated, withState } from './state.js'
 import { err } from '../util.js'
 import { parseLine } from './parse.js'
@@ -28,7 +28,7 @@ export function commandSubstitution(command, ctx, runSteps) {
     value = value.replaceAll('\0', '')
     stderr += 'warning: command substitution: ignored null byte in input\n'
   }
-  appendOutput(ctx.expansionOutput, routeOutput(emptyOutput(stderr), { fds: ctx.expansionFds }, ctx))
+  expansionStderr(ctx, stderr)
   let end = value.length
   while (end > 0 && value[end - 1] === '\n') end--
   return value.slice(0, end)

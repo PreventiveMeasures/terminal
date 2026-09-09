@@ -1,9 +1,20 @@
 import { lookup } from '../fs.js'
 import { err, ok } from '../util.js'
 import { UnsupportedError, unsupportedFrom } from '../unsupported.js'
+import { INT64_MAX, INT64_MIN } from '../numeric.js'
 
 const UNARY_GAPS = new Set(['-b', '-c', '-g', '-h', '-k', '-p', '-r', '-s', '-t', '-u', '-v', '-w', '-x', '-G', '-L', '-N', '-O', '-R', '-S', '-o'])
-const BINARY_GAPS = new Set(['-eq', '-ne', '-lt', '-le', '-gt', '-ge', '-nt', '-ot', '-ef', '<', '>'])
+const BINARY_GAPS = new Set(['-nt', '-ot', '-ef', '<', '>'])
+const INTEGER_TESTS = {
+  __proto__: null,
+  '-eq': (left, right) => left === right,
+  '-ne': (left, right) => left !== right,
+  '-lt': (left, right) => left < right,
+  '-le': (left, right) => left <= right,
+  '-gt': (left, right) => left > right,
+  '-ge': (left, right) => left >= right,
+}
+const INTEGER_DIGITS = String(INT64_MAX).length
 const STREAMS = new Set(['/dev/stdin', '/dev/stdout', '/dev/stderr'])
 
 export function test(_stdin, tokens, ctx) {
@@ -40,6 +51,7 @@ function evaluate(tokens, ctx) {
   if (tokens.length === 3) {
     if (second === '=' || second === '==') return first === third
     if (second === '!=') return first !== third
+    if (Object.hasOwn(INTEGER_TESTS, second)) return INTEGER_TESTS[second](integerOperand(first), integerOperand(third))
     if (BINARY_GAPS.has(second)) gap(second)
     if (second === '-a' || second === '-o') gap('compound expressions')
   }
@@ -49,6 +61,20 @@ function evaluate(tokens, ctx) {
   }
   if (tokens.some((token) => ['-a', '-o', '!', '(', ')'].includes(token))) gap('compound expressions')
   throw new Error(tokens.length > 3 ? 'too many arguments' : `${second}: binary operator expected`)
+}
+
+function integerOperand(operand) {
+  // Bash test uses decimal strtoimax, with C leading whitespace but only
+  // space/tab after the number. Check the full match because JS $ permits LF.
+  const match = /^[ \t\n\r\f\v]*([+-]?)(\d+)[ \t]*$/u.exec(operand)
+  if (match && match[0].length === operand.length) {
+    const digits = match[2].replace(/^0+/u, '') || '0'
+    if (digits.length <= INTEGER_DIGITS) {
+      const value = BigInt(match[1] + digits)
+      if (value >= INT64_MIN && value <= INT64_MAX) return value
+    }
+  }
+  throw new Error(`${operand}: integer expression expected`)
 }
 
 function fileTest(operator, operand, ctx) {

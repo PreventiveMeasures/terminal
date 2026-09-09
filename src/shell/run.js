@@ -5,7 +5,7 @@ import { BindingMap } from './bindings.js'
 import { lookup } from '../fs.js'
 import { unsupportedNote } from '../unsupported.js'
 import { err, reason } from '../util.js'
-import { appendOutput, emptyOutput, eventsOf, routeOutput, unorderedOutput, writeError } from './output.js'
+import { appendOutput, emptyOutput, routeOutput, writeError } from './output.js'
 import { isolated, withState } from './state.js'
 
 // A list shares stdin across its steps: { cat; cat; } consumes it once.
@@ -46,8 +46,8 @@ function runPipeline(stages, ctx, stream) {
   return output
 }
 
-// Simple-command arguments expand before its redirects. A substitution's
-// stderr therefore follows the descriptors active at the expansion site.
+// Simple-command arguments expand before redirects. All expansion diagnostics
+// follow the descriptors active at their expansion site.
 function pipelineStage(stage, ctx, stdin, stdinFile) {
   const fds = { 1: 'out', 2: 'err' }
   const initial = { fds, stdin, stdinFile, stdinOrigin: stdinFile ? ctx.stdinOrigin : null }
@@ -57,10 +57,8 @@ function pipelineStage(stage, ctx, stdin, stdinFile) {
     try {
       if (simple) {
         expanded = expandWords(stage.words, ctx)
-        const warnings = []
-        if (expanded.argv.length === 0) assignValues(stage.assigns, ctx, warnings)
-        else expanded.temps = temporaryValues(stage.assigns, ctx, warnings)
-        expanded.stderr += warnings.join('')
+        if (expanded.argv.length === 0) assignValues(stage.assigns, ctx)
+        else expanded.temps = temporaryValues(stage.assigns, ctx)
       }
     } catch (e) {
       expansionError = shellFailure(ctx, e)
@@ -69,7 +67,7 @@ function pipelineStage(stage, ctx, stdin, stdinFile) {
     ctx.expansionFds = io.fds
     const result = withStreams(io, ctx, () => shellResult(ctx, () => {
       if (expansionError) return expansionError
-      if (io.error) return failedStage(io.error, expanded)
+      if (io.error) return io.error
       if (stage.group) return runGroup(stage, ctx, io.stdin)
       if (stage.loop) return runLoop(stage.loop, ctx)
       if (stage.conditional) return runConditional(stage.conditional, ctx, io.stdin)
@@ -85,13 +83,12 @@ function pipelineStage(stage, ctx, stdin, stdinFile) {
 // from pipe input; only inherited input advances the enclosing list's stream.
 function resolveRedirs(stage, ctx, stdin, stdinFile) {
   const fds = { 1: 'out', 2: 'err' }
-  const warnings = []
   let input = stdin
   let file = stdinFile
   let origin = file ? ctx.stdinOrigin : null
   let inherited = true
   let parentLeft = stdin
-  const done = (error) => ({ error, fds, stdin: input, stdinFile: file, stdinOrigin: file ? origin : null, inherited, parentLeft, warnings: warnings.join('') })
+  const done = (error) => ({ error, fds, stdin: input, stdinFile: file, stdinOrigin: file ? origin : null, inherited, parentLeft })
   const expand = (fn) => {
     const value = withState(ctx, { expansionFds: fds }, () => withStreams({ fds, stdin: input, stdinFile: file, stdinOrigin: origin }, ctx, fn))
     input = ctx.stdinLeft
@@ -105,7 +102,7 @@ function resolveRedirs(stage, ctx, stdin, stdinFile) {
         fds[r.fd] = fds[r.toFd]
       } else if (r.op === 'close') fds[r.fd] = 'closed'
       else if (r.op === 'to') {
-        const t = r.target === undefined ? expand(() => expandRedirect(r.word, ctx, warnings)) : { value: r.target }
+        const t = r.target === undefined ? expand(() => expandRedirect(r.word, ctx)) : { value: r.target }
         if (t.error) return done(err(`error: ${t.error}`))
         const dest = t.value === '/dev/null' ? 'null' : t.value === '/dev/stdout' ? fds[1] : t.value === '/dev/stderr' ? fds[2] : null
         if (dest === null) {
@@ -116,11 +113,11 @@ function resolveRedirs(stage, ctx, stdin, stdinFile) {
         if (dest === 'closed') return done(err(`error: ${t.value}: No such file or directory`))
         fds[r.fd] = dest
         if (r.both) fds[2] = dest
-      } else if (r.op === 'text') { input = r.expand ? expand(() => expandScalar(heredocWord(r.body), ctx, warnings)) : r.body; file = false; inherited = false }
+      } else if (r.op === 'text') { input = r.expand ? expand(() => expandScalar(heredocWord(r.body), ctx)) : r.body; file = false; inherited = false }
       // A here-string is expanded but neither split nor globbed (bash).
-      else if (r.op === 'herestring') { input = expand(() => expandScalar(r.word, ctx, warnings)) + '\n'; file = false; inherited = false }
+      else if (r.op === 'herestring') { input = expand(() => expandScalar(r.word, ctx)) + '\n'; file = false; inherited = false }
       else {
-        const t = expand(() => expandRedirect(r.word, ctx, warnings))
+        const t = expand(() => expandRedirect(r.word, ctx))
         const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, file ? origin : input)
         if (read.error) return done(read.error)
         input = read.content
@@ -144,11 +141,6 @@ function shellFailure(ctx, e) {
 
 function shellResult(ctx, fn) {
   try { return fn() } catch (e) { return shellFailure(ctx, e) }
-}
-
-// A nameless command's assignments have already applied when its redirect fails.
-function failedStage(error, expanded) {
-  return expanded?.argv.length === 0 ? { ...error, stderr: error.stderr + expanded.stderr } : error
 }
 
 // Closed descriptors propagate from enclosing groups. Leave stdinLeft
@@ -198,26 +190,25 @@ function readInput(path, ctx, stdin) {
 // Expand argv before applying prefix assignments. A nameless assignment
 // persists; a command's prefix assignments use temporary bindings.
 function runStage(ctx, expanded) {
-  const { argv, stderr } = expanded
+  const { argv } = expanded
   if (argv.length === 0) {
-    return { stdout: '', stderr, exitCode: ctx.substitutionExit ?? 0 }
+    return { stdout: '', stderr: '', exitCode: ctx.substitutionExit ?? 0 }
   }
   let r = withTemporaries(expanded.temps, ctx, () => ctx.invoke(argv[0], argv.slice(1), ctx.stdinLeft))
   if (ctx.closed.out && r.stdout !== '') r = writeError(argv[0], r, ctx)
-  const prefix = stderr
-  return prefix === '' ? r : { ...r, stderr: prefix + r.stderr, events: [{ fd: 2, text: prefix }, ...eventsOf(r)], unordered: unorderedOutput(r) }
+  return r
 }
 
 // Prefix values expand left to right. After dispatch, keep changes to other
 // variables and explicit assignments to temporary names, but not their unsets.
-function assignValues(assigns, ctx, warnings) {
-  for (const a of assigns) ctx.vars.set(a.name, expandScalar(a.word, ctx, warnings, true))
+function assignValues(assigns, ctx) {
+  for (const a of assigns) ctx.vars.set(a.name, expandScalar(a.word, ctx, true))
 }
 
-function temporaryValues(assigns, ctx, warnings) {
+function temporaryValues(assigns, ctx) {
   if (assigns.length === 0) return null
   const vars = new BindingMap(ctx.vars)
-  withState(ctx, { vars }, () => assignValues(assigns, ctx, warnings))
+  withState(ctx, { vars }, () => assignValues(assigns, ctx))
   return { vars, names: new Set(assigns.map((a) => a.name)) }
 }
 
@@ -240,7 +231,7 @@ function withTemporaries(prepared, ctx, fn) {
 // and nested break/continue signals propagate one level per enclosing loop.
 function runLoop(loop, ctx) {
   const expanded = expandWords(loop.words, ctx)
-  const result = emptyOutput(expanded.stderr)
+  const result = emptyOutput()
   const stream = { text: ctx.stdinLeft }
   ctx.loopDepth++
   try {

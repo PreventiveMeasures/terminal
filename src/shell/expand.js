@@ -9,30 +9,30 @@ import { UnsupportedError } from '../unsupported.js'
 import { expandBraces } from './braces.js'
 import { globPaths, hasGlobMeta } from '../glob.js'
 import { readExpansion, scanRef } from './lex.js'
+import { expansionStderr } from './output.js'
 
 const PROCESS_PARAMS = new Set(['$', '!', '0', '-', '_'])
 
 export function expandWords(words, ctx) {
   const out = []
-  const warnings = []
   for (const w of words) {
     for (const b of expandBraces(w)) {
       // An argument of `export` that looks like an assignment expands as
       // an assignment does — no splitting, no globbing (bash's rule for
       // the declaration builtins) — so `export x=$y` keeps a spaced value.
       const assignment = ctx.registry.resolveCommand(out[0] ?? '') === 'export' && assignmentOf(b)
-      if (assignment) out.push(expandAssignment(b, assignment.end, ctx, warnings))
-      else out.push(...expandArg(b, ctx, warnings))
+      if (assignment) out.push(expandAssignment(b, assignment.end, ctx))
+      else out.push(...expandArg(b, ctx))
     }
   }
-  return { argv: out, stderr: warnings.join('') }
+  return { argv: out }
 }
 
 // Drop unquoted empty results, retain quoted empties, and leave unmatched
 // globs literal. The command name undergoes pathname expansion too.
-function expandArg(b, ctx, warnings) {
+function expandArg(b, ctx) {
   const out = []
-  for (const word of substitute(tilde(b, ctx), ctx, warnings, true)) {
+  for (const word of substitute(tilde(b, ctx), ctx, true)) {
     if (hasGlobMeta(word)) {
       const matches = globPaths(word, ctx)
       if (matches.length > 0) { out.push(...matches); continue }
@@ -44,21 +44,21 @@ function expandArg(b, ctx, warnings) {
 
 // Redirect expansion must produce exactly one word; zero or several is an
 // ambiguous redirect, including results of splitting and pathname expansion.
-export function expandRedirect(word, ctx, warnings) {
+export function expandRedirect(word, ctx) {
   const out = []
-  for (const b of expandBraces(word)) out.push(...expandArg(b, ctx, warnings))
+  for (const b of expandBraces(word)) out.push(...expandArg(b, ctx))
   return out.length === 1 ? { value: out[0] } : { error: `${word.value}: ambiguous redirect` }
 }
 
-function expandAssignment(w, eq, ctx, warnings) {
+function expandAssignment(w, eq, ctx) {
   const rest = sliceWord(w, eq)
-  return w.value.slice(0, eq) + expandScalar(rest, ctx, warnings, true)
+  return w.value.slice(0, eq) + expandScalar(rest, ctx, true)
 }
 
 // Assignments and here-input expand without splitting or globbing.
 // assignmentValue additionally allows tilde prefixes after ':'.
-export function expandScalar(word, ctx, warnings = [], assignmentValue = false) {
-  return substitute(tilde(word, ctx, assignmentValue), ctx, warnings, false)[0].value
+export function expandScalar(word, ctx, assignmentValue = false) {
+  return substitute(tilde(word, ctx, assignmentValue), ctx, false)[0].value
 }
 
 export const homeOf = (ctx) => ctx.vars.get('HOME') ?? ctx.home
@@ -110,7 +110,7 @@ function add(word, text, m) {
 
 // Substitution retains per-character quoting for the later glob pass.
 // Each field also records quoted emptiness, so an empty "$x" survives.
-function substitute(w, ctx, warnings, split) {
+function substitute(w, ctx, split) {
   const words = []
   let cur = fresh()
   // `""`: nothing to add, but the word was quoted, so it survives.
@@ -124,7 +124,7 @@ function substitute(w, ctx, warnings, split) {
     const ref = active ? (w.value[i + 1] === '(' ? readExpansion(w.value, i) : scanRef(w.value, i, w.mask)) : null
     if (!ref) { add(cur, w.value[i], m); continue }
     i += ref.raw.length - 1
-    const r = ref.command === undefined ? lookup(ref.name, ctx, warnings) : { value: ctx.substitute(ref.command) }
+    const r = ref.command === undefined ? lookup(ref.name, ctx) : { value: ctx.substitute(ref.command) }
     if (r.literal) { add(cur, ref.raw, m); continue }
     // `"$@"` with no positional parameters is no word at all, where
     // `"$*"` is one empty word; only the quoting of the rest decides.
@@ -146,13 +146,13 @@ function substitute(w, ctx, warnings, split) {
   return words
 }
 
-function lookup(name, ctx, warnings) {
+function lookup(name, ctx) {
   if (name === '?') return { value: String(ctx.lastExit) }
   if (name === '#') return { value: '0' }
   if (name === '@') return { value: '', omit: true }
   if (name === '*' || /^[1-9]$/u.test(name)) return { value: '' }
   if (PROCESS_PARAMS.has(name)) {
-    report(ctx, warnings, `$${name}`, `warning: \`$${name}\` is not supported (this terminal runs no process); left as typed`)
+    report(ctx, `$${name}`, `warning: \`$${name}\` is not supported (this terminal runs no process); left as typed`)
     return { literal: true }
   }
   if (ctx.vars.has(name)) return { value: ctx.vars.get(name) }
@@ -160,11 +160,11 @@ function lookup(name, ctx, warnings) {
   if (name === 'PWD') return { value: ctx.cwd }
   if (name === 'HOME') return { value: ctx.home }
   if (name === 'USER' || name === 'LOGNAME') return { value: ctx.user }
-  report(ctx, warnings, `$${name}`, `warning: $${name} is unset (this shell has no environment variables; only \`for\` bindings and \`NAME=value\` assignments)`)
+  report(ctx, `$${name}`, `warning: $${name} is unset (this shell has no environment variables; only \`for\` bindings and \`NAME=value\` assignments)`)
   return { value: '' }
 }
 
-function report(ctx, warnings, detail, message) {
-  warnings.push(message + '\n')
+function report(ctx, detail, message) {
+  expansionStderr(ctx, message + '\n')
   ctx.unsupported.add({ kind: 'feature', command: null, detail, message })
 }
