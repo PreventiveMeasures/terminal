@@ -42,6 +42,19 @@ export function writableFs(base) {
       else if (!append) { observer?.write(inode); inode.bytes = new Uint8Array() }
       return writeHandle(absolute, inode, append, () => observer?.write(inode))
     },
+    copyWritable(cwd, source, target) {
+      const absolute = resolve(cwd, target)
+      if (!absolute.startsWith('/tmp/')) return false
+      checkTarget(fs, cwd, target)
+      const inode = files.get(source)
+      if (source === absolute || inode && inode === files.get(absolute)) throw new Error('source and destination are the same file')
+      observer?.read(inode ?? source)
+      // An overlay may contain byte sequences that have no string equivalent.
+      // Copy them directly while keeping truncation and writes observable.
+      const bytes = inode ? inode.bytes : encodeUtf8(base.readFile(source))
+      fs.openWritable(cwd, target).writeBytes(bytes)
+      return true
+    },
     replaceWritable(cwd, path, content, backupPath) {
       const absolute = resolve(cwd, path)
       const backup = backupPath === undefined ? null : resolve(cwd, backupPath)
@@ -89,6 +102,21 @@ function checkTarget(fs, cwd, path) {
 
 function writeHandle(path, inode, append, check) {
   let offset = 0
+  const store = (bytes) => {
+    const current = inode.bytes
+    const start = append ? current.length : offset
+    const length = Math.max(current.length, start + bytes.length)
+    let buffer = current.buffer
+    // Reuse capacity so commands writing one record at a time stay linear.
+    if (buffer.byteLength < length) {
+      buffer = new ArrayBuffer(Math.max(length, buffer.byteLength * 2))
+      new Uint8Array(buffer).set(current)
+    }
+    const next = new Uint8Array(buffer, 0, length)
+    next.set(bytes, start)
+    inode.bytes = next
+    offset = start + bytes.length
+  }
   return {
     path,
     identity: inode,
@@ -96,20 +124,12 @@ function writeHandle(path, inode, append, check) {
     write(text) {
       if (text === '') return
       check()
-      const bytes = encodeUtf8(text)
-      const current = inode.bytes
-      const start = append ? current.length : offset
-      const length = Math.max(current.length, start + bytes.length)
-      let buffer = current.buffer
-      // Reuse capacity so commands writing one record at a time stay linear.
-      if (buffer.byteLength < length) {
-        buffer = new ArrayBuffer(Math.max(length, buffer.byteLength * 2))
-        new Uint8Array(buffer).set(current)
-      }
-      const next = new Uint8Array(buffer, 0, length)
-      next.set(bytes, start)
-      inode.bytes = next
-      offset = start + bytes.length
+      store(encodeUtf8(text))
+    },
+    writeBytes(bytes) {
+      if (bytes.length === 0) return
+      check()
+      store(bytes)
     },
   }
 }

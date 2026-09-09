@@ -1,7 +1,7 @@
 // Script syntax is checked before reading input data.
 import { finishSedText, readSedText, readTransliteration, resumeSedText } from './sed-text.js'
 import { scriptGap } from './sed-common.js'
-import { checkRegexText, compilePattern, delimited, delimiter, resolvePattern, substitution } from './sed-regex.js'
+import { checkRegexText, compilePattern, delimited, delimiter, readWriteFile, resolvePattern, substitution } from './sed-regex.js'
 
 export { SED_SUBSET } from './sed-common.js'
 export { substituteLine } from './sed-regex.js'
@@ -31,7 +31,11 @@ export function parseSedScript(script, extended = false, byteLocale = false, tex
     }
     const kind = script[p.i++]
     const command = { kind, start, end, active, negated }
-    if (kind === 'p' || kind === 'P' || kind === 'n' || kind === 'N' || kind === 'd' || kind === '=') commands.push(command)
+    if (kind && 'pPnNdD=gGhHx'.includes(kind)) commands.push(command)
+    else if (kind === 'w') {
+      commands.push({ ...command, ...readWriteFile(p) })
+      continue
+    }
     else if (kind === ':' || kind === 'b' || kind === 't' || kind === 'T') {
       commands.push({ ...command, label: readLabel(p, command) })
       continue
@@ -56,7 +60,7 @@ export function parseSedScript(script, extended = false, byteLocale = false, tex
       commands.push(command)
     }
     else if (kind === undefined) throw new Error('missing command')
-    else if ('QlLDFgGhHzxrRwWev'.includes(kind)) scriptGap()
+    else if ('QlLFzrRWev'.includes(kind)) scriptGap()
     else throw new Error(`unknown command: '${kind}'`)
     while (/[ \t]/u.test(script[p.i] ?? '')) p.i++
     if (script[p.i] === '#') scriptGap('comments')
@@ -124,11 +128,17 @@ function parseAddress(p, relative = false) {
   } else if (p.script[p.i] === '/' || p.script[p.i] === '\\') {
     if (p.script[p.i] === '\\') p.i++
     const sep = delimiter(p, 'address regex')
-    result = { type: 'regex', ...compilePattern(delimited(p, sep, true, 'address regex'), p.extended, true) }
-    if (/^[ \t]*[IM]/u.test(p.script.slice(p.i))) {
-      if (result.re === null) throw new Error('cannot specify modifiers on empty regexp')
-      scriptGap('address regex flags')
+    const pattern = delimited(p, sep, true, 'address regex')
+    let ignoreCase = false
+    while (true) {
+      while (/[ \t]/u.test(p.script[p.i] ?? '')) p.i++
+      const flag = p.script[p.i]
+      if (flag !== 'I' && flag !== 'M') break
+      if (pattern === '') throw new Error('cannot specify modifiers on empty regexp')
+      if (flag === 'M') scriptGap('address regex flags')
+      ignoreCase = true; p.i++
     }
+    result = { type: 'regex', ...compilePattern(pattern, p.extended, true, ignoreCase) }
   }
   while (/[ \t]/u.test(p.script[p.i] ?? '')) p.i++
   return result

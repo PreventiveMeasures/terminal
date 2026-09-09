@@ -28,8 +28,8 @@ export const TEXT_WORKFLOWS = [
     expected: [{ kind: 'feature', command: 'grep', detail: '-o regex extent' }],
   },
   {
-    purpose: 'Read exported declarations case-insensitively through their closing brace',
-    command: String.raw`sed -n '/^export /I,/^}/p' src/index.js`,
+    purpose: 'Match exported declarations using multiline address anchors',
+    command: String.raw`sed -n '/^export /M,/^}/p' src/index.js`,
     expected: [{ kind: 'feature', command: 'sed', detail: 'address regex flags' }],
   },
   {
@@ -38,19 +38,19 @@ export const TEXT_WORKFLOWS = [
     expected: [{ kind: 'feature', command: 'sed', detail: 'script' }],
   },
   {
-    purpose: 'Collect input names into one comparison record using hold space',
-    command: "sed -n '1h;1!H;${g;s/\\n/ /g;p}' data/names.txt",
+    purpose: 'List records with control characters escaped',
+    command: "sed -n 'l' data/names.txt",
     expected: [{ kind: 'feature', command: 'sed', detail: 'script' }],
   },
   {
-    purpose: 'Normalize import and export prefixes case-insensitively with an extended expression',
-    command: String.raw`sed -E 's/^(export|import) /module /I' src/index.js`,
-    expected: [{ kind: 'feature', command: 'sed', detail: 'substitution flags' }],
+    purpose: 'Normalize import and export prefixes with multiline matching',
+    command: String.raw`sed -E 's/^(export|import) /module /M' src/index.js`,
+    expected: [{ kind: 'feature', command: 'sed', detail: 'substitution flag M' }],
   },
   {
-    purpose: 'Preview a case-insensitive replacement of TODO markers',
-    command: String.raw`sed 's/todo/DONE/I' README.md`,
-    expected: [{ kind: 'feature', command: 'sed', detail: 'substitution flags' }],
+    purpose: 'Preview replacement of TODO markers with multiline matching',
+    command: String.raw`sed 's/todo/DONE/m' README.md`,
+    expected: [{ kind: 'feature', command: 'sed', detail: 'substitution flag m' }],
   },
   {
     purpose: 'Uppercase selected names in a report without editing its input',

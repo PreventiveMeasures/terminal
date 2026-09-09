@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
+import { SED_SUBSET } from '../src/commands/sed-common.js'
 
 // GNU sed compiles -e expressions in option order and uses positional script
 // text only when no expression option was supplied:
@@ -122,14 +123,14 @@ describe('sed reports expression argument and option errors precisely', () => {
       assert.deepEqual(actual.unsupported, [])
     })
   }
-  for (const command of ['sed -e h input', 'sed -e H input']) {
+  for (const command of ['sed -e l input', 'sed -e F input']) {
     it(`attributes unsupported command text to the script: ${command}`, () => {
       const actual = createTerminal(FILES).run(command)
       assert.equal(actual.exitCode, 1)
       assert.equal(actual.unsupported.length, 1)
       assert.deepEqual(actual.unsupported[0], {
         kind: 'feature', command: 'sed', detail: 'script',
-        message: 'sed: supported commands are p, P, n, N, d, a, i, c, q, =, y, :, b, t, T, { }, and s/regexp/replacement/[Npgw]',
+        message: SED_SUBSET,
       })
       assert.equal(actual.stderr, actual.unsupported[0].message + '\n')
     })

@@ -12,7 +12,7 @@ export function commandSubstitution(command, ctx, runSteps) {
   const outputFds = { 1: 'out', 2: typeof stderr === 'object' || stderr === 'closed' ? stderr : 'err' }
   const result = withState(ctx, { substitutionDepth: depth, outputFds, closed: { out: false, err: stderr === 'closed' } }, () => isolated(ctx, () => {
     try {
-      const steps = parseLine(command, ctx.writable)
+      const steps = parseLine(command, ctx.writable, ctx.registry.has)
       const stage = steps.length === 1 && !steps[0].negate && steps[0].stages.length === 1 ? steps[0].stages[0] : null
       // Bash's $(<file) shorthand reads the file without a command name.
       if (stage && !stage.group && !stage.loop && !stage.conditional && stage.words.length === 0 && stage.assigns.length === 0 && stage.redirs.length === 1 && stage.redirs[0].op === 'read') stage.words.push({ value: 'cat', mask: null })

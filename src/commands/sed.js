@@ -19,7 +19,7 @@ export function sed(stdin, tokens, ctx) {
     const program = compileProgram(parsed, stdin, ctx, output.openWrite)
     if (program === null) return err(SED_SUBSET)
     if (program.error) return program.error
-    Object.assign(program, { output, delimiter, regexState: { last: null }, budget: { steps: 0 } })
+    Object.assign(program, { output, delimiter, hold: { text: '', terminator: delimiter }, regexState: { last: null }, budget: { steps: 0 } })
     program.stdin = refreshSedStdin(program.stdin, ctx)
     return inPlace === null ? runSed(program, parsed.flags, ctx)
       : runInPlace(program, parsed.flags, ctx, inPlace, (p, flags) => runSed(p, flags, ctx, true))

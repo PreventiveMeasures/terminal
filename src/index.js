@@ -73,7 +73,7 @@ function safeRun(line, ctx) {
   const feed = createUnsupportedFeed()
   return withState(ctx, { unsupported: feed, stdinFile: false, stdinOrigin: null, stdinHandle: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, () => {
     try {
-      return finish(runSteps(parseLine(line, ctx.writable), ctx, { text: '' }), ctx, feed)
+      return finish(runSteps(parseLine(line, ctx.writable, ctx.registry.has), ctx, { text: '' }), ctx, feed)
     } catch (e) {
       const note = unsupportedNote(e)
       if (note) feed.add(note)

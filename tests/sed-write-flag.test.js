@@ -151,7 +151,7 @@ describe('sed opens substitution output files while compiling the script', () =>
   it('preserves earlier file openings when a later command is unsupported', () => {
     const t = terminal()
     check(t, 'printf old >out')
-    const r = t.run(command('s/qwe/Z/w out\nH', '/repo/single') + ' 2>/dev/null | cat')
+    const r = t.run(command('s/qwe/Z/w out\nF', '/repo/single') + ' 2>/dev/null | cat')
     assert.equal(r.stdout, '')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)

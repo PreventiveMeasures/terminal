@@ -7,8 +7,9 @@
 import { assignmentOf, sliceWord } from './word.js'
 import { NAME_RE, tokenize } from './tokenize.js'
 import { UnsupportedError } from '../unsupported.js'
+import { advanceAliases } from './aliases.js'
 
-export function parseLine(line, writable = false) {
+export function parseLine(line, writable = false, hasCommand = () => false) {
   const raw = tokenize(line)
   for (const t of raw) {
     if (t.kind === 'amp') throw new UnsupportedError('feature', '&', 'background processes (`&`) are not supported')
@@ -17,10 +18,17 @@ export function parseLine(line, writable = false) {
   while (raw.length > 0 && raw.at(-1).kind === 'semi') raw.pop()
   // A comment-only line (or one of only separators) runs nothing.
   if (raw.length === 0) return []
-  const p = { raw, i: 0, emptyStage: false, writable }
-  const steps = buildSteps(p, null)
-  if (p.emptyStage) throw new Error('empty pipeline stage')
-  return steps
+  const p = { raw, i: 0, emptyStage: false, writable, aliases: new Set(), aliasUsed: false, hasCommand }
+  try {
+    const steps = buildSteps(p, null)
+    if (p.emptyStage) throw new Error('empty pipeline stage')
+    return steps
+  } catch (e) {
+    // Alias replacements can supply grammar tokens. A later parse failure
+    // must not hide the unavailable alias expansion that would supply them.
+    if (p.aliasUsed && !(e instanceof UnsupportedError)) throw new UnsupportedError('feature', 'alias expansion', 'alias expansion is not supported; input using aliases cannot be parsed')
+    throw e
+  }
 }
 
 // Record empty stages while building, but defer the error until the whole
@@ -66,11 +74,14 @@ const UNIMPLEMENTED_BLOCKS = new Map([
   ['coproc', '`coproc` is not supported'],
 ])
 
+const ASSIGNMENT_COMMANDS = new Set(['alias', 'declare', 'typeset', 'local', 'readonly', 'export', 'eval', 'let'])
+
 // Recursive readers share one cursor, positioned after any consumed closer.
 function buildSteps(p, end) {
   const { raw } = p
   const steps = [newStep('first')]
   if (end === null) p.unit = steps[0]
+  let unitStart = 0
   let stage = newStage()
   while (p.i < raw.length) {
     const t = raw[p.i]
@@ -90,7 +101,11 @@ function buildSteps(p, end) {
       stage = newStage()
       if (t.kind === 'and' || t.kind === 'or') steps.push(newStep(t.kind))
       else if (t.kind === 'semi') steps.push(newStep('seq'))
-      if (end === null && (t.newline || t.lineEnd)) p.unit = steps.at(-1)
+      if (end === null && (t.newline || t.lineEnd)) {
+        p.aliases = advanceAliases(steps.slice(unitStart, -1), p.aliases, p.hasCommand)
+        unitStart = steps.length - 1
+        p.unit = steps.at(-1)
+      }
       p.i++
       continue
     }
@@ -107,6 +122,7 @@ function buildSteps(p, end) {
     if (stage.group) throw new Error(`unexpected token after \`${stage.isolate ? ')' : '}'}\``)
     if (stage.loop) throw new Error('unexpected token after `done`')
     if (stage.conditional) throw new Error('unexpected token after `fi`')
+    if (!t.quoted && stage.words.length === 0 && p.aliases.has(t.value)) p.aliasUsed = true
     if (!t.quoted && commandPosition(stage)) {
       if (Array.isArray(end) ? end.includes(t.value) : t.value === end) { p.i++; return finishBlock(p, steps, stage, end) }
       if (commandWord(t, p, steps.at(-1), stage)) continue
@@ -129,11 +145,17 @@ function buildSteps(p, end) {
 function openParen(p, stage) {
   const { raw, i } = p
   const next = raw[i + 1]
-  if (stage.words.length <= 1 && raw[i].wordAdjacent && raw[i - 1]?.kind === 'word' && /^[A-Za-z_][A-Za-z0-9_]*\+?=$/u.test(raw[i - 1].value)) throw new UnsupportedError('feature', 'array assignment', 'shell array assignments are not supported')
+  const previous = raw[i - 1]
+  const first = stage.words[0]
+  const word = stage.words.at(-1)
+  const target = raw[i - 2]?.kind === 'redir' && !['dup', 'close'].includes(raw[i - 2].op)
+  const assignment = !target && ((stage.words.length === 0 && stage.assigns.length > 0) ||
+    (word && word.value === previous?.value && (stage.words.length === 1 || (first.mask === null && ASSIGNMENT_COMMANDS.has(first.value)))))
+  if (assignment && raw[i].wordAdjacent && previous?.kind === 'word' && !previous.quoted && /^[A-Za-z_][A-Za-z0-9_]*\+?=$/u.test(previous.value)) throw new UnsupportedError('feature', 'array assignment', 'shell array assignments are not supported')
   if (next?.kind === 'paren_open' && next.adjacent && commandPosition(stage)) {
     throw new UnsupportedError('feature', '((', 'arithmetic evaluation (`((…))`) is not supported')
   }
-  if (stage.words.length === 1 && stage.assigns.length === 0 && next?.kind === 'paren_close') {
+  if (stage.words.length === 1 && stage.assigns.length === 0 && stage.redirs.length === 0 && next?.kind === 'paren_close') {
     throw new UnsupportedError('feature', 'function', `shell functions (\`${stage.words[0].value}() { … }\`) are not supported`)
   }
   // A subshell occupies a whole stage, but retains any leading redirects.

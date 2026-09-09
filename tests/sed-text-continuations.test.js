@@ -149,7 +149,7 @@ describe('sed continuation syntax and normalization failures remain precise', ()
     assert.deepEqual(terminal.run(run + ' 2>/dev/null | cat'), expected('', 0, '', unsupported))
   })
   it('unsupported commands after completed text retain their diagnostic', () => {
-    const run = command(expressions('a\\', 'tail\nD'))
+    const run = command(expressions('a\\', 'tail\nF'))
     const terminal = createTerminal(FILES)
     const result = terminal.run(run)
     assert.equal(result.stdout, '')

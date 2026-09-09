@@ -88,13 +88,21 @@ describe('GNU sed audit — address ranges', () => {
   })
 })
 
+describe('GNU sed audit — hold space and first-line deletion', () => {
+  for (const [script, stdout] of [
+    ['D', ''], ['h', 'oak\n'], ['H', 'oak\n'], ['g', '\n'], ['G', 'oak\n\n'], ['x', '\n'],
+  ]) {
+    it(script, () => check(script, 'oak\n', stdout))
+  }
+})
+
 describe('GNU sed audit — unavailable features remain observable', () => {
   const scripts = [
-    's/oak/elm/I', 's/oak/elm/M', 's/oak/elm/e', 's/oak/elm/w output',
+    's/oak/elm/M', 's/oak/elm/e', 's/oak/elm/w output',
     String.raw`s/oak/\U&/`, String.raw`s/oak/\x41/`,
     String.raw`s/oak/\o101/`, String.raw`s/oak/\d65/`, String.raw`s/oak/\Q/`,
-    '1~2p', '2,~3p', '/oak/Ip', '/oak/Mp', 's/oak/elm/ # comment',
-    'D', 'h', 'H', 'g', 'G', 'x', 'r input', 'w output',
+    '1~2p', '2,~3p', '/oak/Mp', 's/oak/elm/ # comment',
+    'r input', 'w output',
     String.raw`s/\(oak\)\1/elm/`,
   ]
   for (const script of scripts) {

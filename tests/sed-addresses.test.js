@@ -55,9 +55,7 @@ describe('sed address and regex boundaries', () => {
 
 describe('sed unsupported features retain diagnostics', () => {
   const gaps = [
-    ["sed -n '/a/Ip' input", 'address regex flags'],
     ["sed -n '/a/Mp' input", 'address regex flags'],
-    ["sed -n '/a/ I p' input", 'address regex flags'],
     ["sed -n '/a/ M p' input", 'address regex flags'],
     ["sed -n '1~2p' input", 'step address'],
     ["sed -n '0~2p' input", 'step address'],
@@ -70,7 +68,6 @@ describe('sed unsupported features retain diagnostics', () => {
     ["sed -n 'p# comment' input", 'comments'],
     ["sed -n 'p;# comment' input", 'comments'],
     ["sed 's/a/x/ # comment' input", 'comments'],
-    ["sed -E 's/a/x/I' input", 'substitution flags'],
     [String.raw`sed -E 's/a/\U&/' input`, 'replacement escape'],
     [String.raw`sed -n '/[[:alpha:]]/p' unicode`, 'non-ASCII regex semantics'],
     ["sed -n '/^.$/p' unicode", 'non-ASCII regex semantics'],

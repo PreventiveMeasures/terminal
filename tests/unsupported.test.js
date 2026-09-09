@@ -99,7 +99,7 @@ describe('run().unsupported — what counts as a gap', () => {
   })
 
   it('kind `feature`: sed reports unsupported scripts', () => {
-    for (const line of ["sed -n '/a/H' f.txt", "sed -n 'h' f.txt"]) {
+    for (const line of ["sed -n '/a/F' f.txt", "sed -n 'l' f.txt"]) {
       assert.deepEqual(details(line), ['script'], line)
       assert.equal(gaps(line)[0].command, 'sed')
     }
