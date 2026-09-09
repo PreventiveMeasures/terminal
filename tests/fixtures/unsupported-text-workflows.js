@@ -38,8 +38,8 @@ export const TEXT_WORKFLOWS = [
     expected: [{ kind: 'feature', command: 'sed', detail: 'script' }],
   },
   {
-    purpose: 'Join pairs of input lines into comparison records',
-    command: String.raw`sed 'N;s/\n/ /' data/names.txt`,
+    purpose: 'Collect input names into one comparison record using hold space',
+    command: "sed -n '1h;1!H;${g;s/\\n/ /g;p}' data/names.txt",
     expected: [{ kind: 'feature', command: 'sed', detail: 'script' }],
   },
   {

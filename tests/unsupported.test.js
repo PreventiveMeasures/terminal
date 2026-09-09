@@ -104,7 +104,7 @@ describe('run().unsupported — what counts as a gap', () => {
       assert.equal(gaps(line)[0].command, 'sed')
     }
     assert.deepEqual(gaps("sed -i -e s/a/b/ f.txt"), [{
-      kind: 'option', command: 'sed', detail: '-i', message: 'sed: unknown option: -i',
+      kind: 'feature', command: 'sed', detail: '-i', message: 'sed: f.txt: file system is read-only',
     }])
   })
 

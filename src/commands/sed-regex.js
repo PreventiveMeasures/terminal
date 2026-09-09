@@ -4,6 +4,8 @@ import { ereClasses, grepSource, validateRegex } from './grep-pattern.js'
 import { asciiCompatible, hasUnicodeSpace } from '../regex-locale.js'
 import { scriptGap } from './sed-common.js'
 
+const controls = { n: '\n', t: '\t', r: '\r', a: '\u0007', f: '\f', v: '\v' }
+
 export function delimiter(p, label = 'substitute command') {
   const sep = p.script[p.i++]
   if (sep === undefined || sep === '\n') throw new Error(`unterminated ${label}`)
@@ -16,11 +18,12 @@ export function delimited(p, sep, pattern, label = 'substitute command') {
   let bracket = false
   while (p.i < p.script.length) {
     const c = p.script[p.i++]
-    if (c === '\n') scriptGap('multiline substitution')
+    if (c === '\n') throw new Error(`unterminated ${label}`)
     if (c === sep && !bracket) return out
     if (c === '\\') {
       const next = p.script[p.i++]
-      if (next === undefined || next === '\n') scriptGap('multiline substitution')
+      if (next === undefined || (next === '\n' && bracket)) throw new Error(`unterminated ${label}`)
+      if (next === '\n') { out += next; continue }
       // Delimiter quoting is removed before regex parsing, so \| with a
       // | delimiter becomes a literal in BRE and an alternative in ERE.
       out += !bracket && next === sep && (pattern || next !== '&') ? next : c + next
@@ -37,6 +40,7 @@ export function delimited(p, sep, pattern, label = 'substitute command') {
     if (pattern && bracket && c === '[' && /[:.=]/u.test(p.script[p.i] ?? '')) {
       const end = p.script.indexOf(p.script[p.i] + ']', p.i + 1)
       if (end < 0) throw new Error('unterminated character class')
+      if (p.script.slice(p.i, end).includes('\n')) throw new Error(`unterminated ${label}`)
       out += c + p.script.slice(p.i, end + 2); p.i = end + 2; continue
     }
     if (pattern && c === ']') bracket = false
@@ -49,27 +53,44 @@ export function substitution(p) {
   const sep = delimiter(p)
   const pattern = delimited(p, sep, true)
   const replacement = delimited(p, sep, false)
+  const parts = replacementParts(replacement)
+  // GNU opens w targets before validating the regexp or its references.
+  const flags = substitutionFlags(p, pattern === '')
   const compiled = compilePattern(pattern, p.extended)
-  const parts = replacementParts(replacement, compiled.re?.groupCount)
-  return { ...compiled, parts, ...substitutionFlags(p, compiled.re === null) }
+  for (const part of parts) {
+    if (typeof part === 'number' && part > compiled.re?.groupCount) throw new Error(`invalid reference \\${part} in replacement`)
+  }
+  return { ...compiled, parts, ...flags }
 }
 
 function substitutionFlags(p, previous) {
-  const suffix = /^[^;\n#}]*/u.exec(p.script.slice(p.i))[0]
-  p.i += suffix.length
   const flags = { global: false, print: false, nth: null }
-  for (const token of suffix.match(/\d+|[^ \t]/gu) ?? []) {
-    if (/^\d/u.test(token)) {
+  while (p.i < p.script.length) {
+    const token = p.script[p.i]
+    if (/[;\n#}]/u.test(token)) break
+    p.i++
+    if (/[ \t]/u.test(token)) continue
+    if (token === '\r' && p.script[p.i] === '\n') break
+    if (/\d/u.test(token)) {
       if (flags.nth !== null) throw new Error('multiple number options to substitute command')
-      flags.nth = Number(token)
+      const rest = /^\d*/u.exec(p.script.slice(p.i))[0]
+      p.i += rest.length
+      flags.nth = Number(token + rest)
       if (flags.nth === 0) throw new Error('number option to substitute command may not be zero')
       if (!Number.isSafeInteger(flags.nth)) scriptGap('substitution occurrence limit')
     } else if (token === 'g' || token === 'p') {
       const flag = token === 'g' ? 'global' : 'print'
       if (flags[flag]) throw new Error('multiple substitution flags')
       flags[flag] = true
+    } else if (token === 'w') {
+      const name = /^[ \t]*([^\n]*)/u.exec(p.script.slice(p.i))
+      p.i += name[0].length
+      if (name[1] === '') throw new Error('missing filename in r/R/w/W commands')
+      if (p.openWrite) flags.writer = p.openWrite(name[1])
+      else flags.writeName = name[1]
+      break
     } else if ('iImM'.includes(token) && previous) throw new Error('cannot specify modifiers on empty regexp')
-    else if ('iImMew'.includes(token)) scriptGap('substitution flags')
+    else if ('iImMe'.includes(token)) scriptGap('substitution flags')
     else throw new Error(`unknown option to substitute command: '${token}'`)
   }
   return flags
@@ -78,7 +99,6 @@ function substitutionFlags(p, previous) {
 export function compilePattern(pattern, extended, noSub = false) {
   if (!pattern) return { re: null }
   validateRegex(pattern, extended)
-  const controls = { n: '\n', t: '\t', r: '\r', a: '\u0007', f: '\f', v: '\v' }
   const normalized = pattern.replace(/\\(.)/gu, (s, c) => {
     if (c === 'o') scriptGap('regex escape')
     return Object.hasOwn(controls, c) ? controls[c] : s
@@ -130,7 +150,7 @@ function validateSedRegex(source, extended) {
   if (groups > 0) throw new Error('unmatched (')
 }
 
-function replacementParts(text, groupCount) {
+function replacementParts(text) {
   const parts = []
   for (let i = 0; i < text.length; i++) {
     const c = text[i]
@@ -138,11 +158,9 @@ function replacementParts(text, groupCount) {
     if (c !== '\\') { parts.push(c); continue }
     const next = text[++i]
     if (/[0-9]/u.test(next)) {
-      if (Number(next) > groupCount) throw new Error(`invalid reference \\${next} in replacement`)
       parts.push(Number(next))
     } else if (next === '\\' || next === '&') parts.push(next)
-    else if (next === 'n') parts.push('\n')
-    else if (next === 't') parts.push('\t')
+    else if (Object.hasOwn(controls, next)) parts.push(controls[next])
     else scriptGap('replacement escape')
   }
   return parts

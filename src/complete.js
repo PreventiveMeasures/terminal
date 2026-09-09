@@ -1,87 +1,124 @@
 // Completion suggests executable commands or paths without running them.
 
 import { lookup } from './fs.js'
+import { homeOf } from './shell/expand.js'
+import { tokenize } from './shell/tokenize.js'
 
-// Return complete replacement lines while preserving preceding commands.
-// Offer stdin readers after a pipe and directories only for cd operands.
 export function complete(line, ctx, reg) {
-  const { index: segStart, pipe } = lastCommandBoundary(line)
-  const segment = line.slice(segStart)
-  const wordStart = lastWordStart(segment)
-  const word = segment.slice(wordStart)
-  // `do` starts a command position inside a for loop.
-  const before = segment.slice(0, wordStart).trim().replace(/^do(?:\s+|$)/u, '')
-  // Only operators and redirects may follow `done`.
-  if (/^done(?:\s|$)/u.test(before)) return []
-  const commandPosition = before === ''
-  const command = commandPosition ? '' : reg.resolveCommand(before.split(/\s+/u)[0])
-  const head = line.slice(0, segStart + wordStart)
-  // Append a space after a bare pipe without inserting one into a typed word.
-  const sep = pipe && word === '' && head.endsWith('|') ? ' ' : ''
-  return completeWord(word, commandPosition, pipe, command, ctx, reg).map((w) => head + sep + w)
+  const scanned = completionContext(line)
+  if (!scanned) return []
+  const { start, pipe, quote, words } = scanned
+  if (words[0] === 'do') words.shift()
+  if (words[0] === 'done') return []
+  const raw = line.slice(start)
+  const word = literalWord(raw, quote)
+  if (!word) return []
+  const commandPosition = words.length === 0
+  const command = commandPosition ? '' : reg.resolveCommand(literalWord(words[0], null)?.value ?? '')
+  const candidates = commandPosition ? completeCommand(word.value, pipe, reg)
+    : pipe ? [] : completePath(word, ctx, command === 'cd')
+  const head = line.slice(0, start)
+  // A bare pipe benefits from a space; a typed command must keep its prefix.
+  const sep = pipe && raw === '' && head.endsWith('|') ? ' ' : ''
+  return candidates.map((candidate) => head + sep + raw + quoteSuffix(candidate.slice(word.value.length), quote))
 }
 
-// Bin prefixes complete registered commands. Arbitrary paths do not become
-// executables, and arguments after a pipe have no path completion.
-function completeWord(word, commandPosition, pipe, command, ctx, reg) {
-  if (!commandPosition) return pipe ? [] : completePath(word, ctx, command === 'cd')
+// Bin prefixes complete registered commands, not arbitrary executable paths.
+function completeCommand(word, pipe, reg) {
   const names = pipe ? reg.pipeNames : reg.names
   for (const prefix of reg.binPrefixes) {
-    if (word.startsWith(prefix)) {
-      const suffix = word.slice(prefix.length)
-      return names.filter((n) => n.startsWith(suffix)).map((n) => prefix + n)
-    }
+    if (word.startsWith(prefix)) return names.filter((n) => n.startsWith(word.slice(prefix.length))).map((n) => prefix + n)
   }
   if (word.startsWith('/') || word.startsWith('./')) return []
   return names.filter((n) => n.startsWith(word))
 }
 
-// Completion scans partial input permissively; this is not the shell lexer.
-function lastCommandBoundary(line) {
-  let index = 0
+// Read incomplete input while preserving original offsets. Quoted operators
+// and blanks belong to filenames, including newlines inside quotes.
+function completionContext(line) {
+  let start = 0
   let pipe = false
-  let i = 0
-  while (i < line.length) {
+  let quote = null
+  let inWord = false
+  const words = []
+  for (let i = 0; i < line.length; i++) {
     const c = line[i]
-    if (c === '|') {
-      const or = line[i + 1] === '|'
-      i += or ? 2 : 1
-      index = i
-      pipe = !or
-    } else if (c === '&' && line[i + 1] === '&') {
-      i += 2
-      index = i
-      pipe = false
-    } else if (c === ';' || c === '\n' || c === '(') {
-      i++
-      index = i
-      pipe = false
-    } else {
-      i++
+    if (quote === "'") { if (c === quote) quote = null; continue }
+    if (c === '\\' && (!quote || '$`"\\\n'.includes(line[i + 1]))) {
+      if (i + 1 === line.length) return null
+      if (line[++i] !== '\n') inWord = true
+      continue
     }
+    // Completing inside a substitution needs a separate parser context.
+    if (c === '`' || (c === '$' && line[i + 1] === '(')) return null
+    if (quote) { if (c === quote) quote = null; continue }
+    if (c === "'" || c === '"') { quote = c; inWord = true; continue }
+    if (c === '#' && !inWord) {
+      const end = line.indexOf('\n', i)
+      if (end === -1) return null
+      i = end - 1
+      continue
+    }
+    if (c === ' ' || c === '\t') {
+      if (inWord) words.push(line.slice(start, i))
+      start = i + 1
+      inWord = false
+      continue
+    }
+    const or = c === '|' && line[i + 1] === '|'
+    const and = c === '&' && line[i + 1] === '&'
+    if (c === '|' || and || c === ';' || c === '\n' || c === '(') {
+      if (or || and) i++
+      start = i + 1
+      pipe = c === '|' && !or
+      words.length = 0
+      inWord = false
+      continue
+    }
+    inWord = true
   }
-  return { index, pipe }
+  return { start, pipe, quote, words }
 }
 
-// Start index of the trailing run of non-whitespace characters.
-// `'cat foo '` → 8 (empty word after the space). `'cat foo'` → 4.
-function lastWordStart(s) {
-  for (let i = s.length - 1; i >= 0; i--) {
-    if (/\s/u.test(s[i])) return i + 1
-  }
-  return 0
+function literalWord(raw, quote) {
+  if (raw === '') return { value: '', mask: null }
+  try {
+    const tokens = tokenize(raw + (quote ?? ''))
+    if (tokens.length !== 1 || tokens[0].kind !== 'word') return null
+    const word = tokens[0]
+    // Do not guess which files an expansion in the typed prefix would select.
+    for (let i = 0; i < word.value.length; i++) {
+      const mask = word.mask?.[i] ?? '0'
+      if ((mask !== '1' && word.value[i] === '$') || (mask === '0' && '*?[{'.includes(word.value[i]))) return null
+    }
+    return word
+  } catch { return null }
+}
+
+function quoteSuffix(suffix, quote) {
+  if (quote === "'") return suffix.replaceAll("'", "'\\''") + "'"
+  if (quote === '"') return suffix.replace(/[\\$`"]/gu, '\\$&') + '"'
+  // Backslash-newline is a continuation, so a filename newline needs quotes.
+  return suffix.replace(/[\s\\'"`$&|;()<>*?[\]{}!#~]/gu, (c) => c === '\n' ? "'\n'" : '\\' + c)
 }
 
 function completePath(word, ctx, dirsOnly = false) {
-  const lastSlash = word.lastIndexOf('/')
-  const dirPart = word.slice(0, lastSlash + 1)
-  const partial = word.slice(lastSlash + 1)
-  const absDir = lookup(ctx.cwd, dirPart || '.', ctx.fs).path
+  const value = word.value
+  const home = value.startsWith('~') && (word.mask?.[0] ?? '0') === '0'
+    && !word.empty?.some((i) => i <= 1) && (value.length === 1 || (word.mask?.[1] ?? '0') === '0')
+  if (home && value === '~') return ctx.fs.isDir(lookup(ctx.cwd, homeOf(ctx), ctx.fs).path) ? ['~/'] : []
+  if (home && !value.startsWith('~/')) return []
+  const lastSlash = value.lastIndexOf('/')
+  const dirPart = value.slice(0, lastSlash + 1)
+  const partial = value.slice(lastSlash + 1)
+  const path = home ? homeOf(ctx) + dirPart.slice(1) : dirPart || '.'
+  const absDir = lookup(ctx.cwd, path, ctx.fs).path
   if (!ctx.fs.isDir(absDir)) return []
   const { dirs, files } = ctx.fs.listDir(absDir)
-  // A leading dot opts into hidden entries.
   const names = dirs.map((name) => name + '/')
   if (!dirsOnly) names.push(...files)
   return names.filter((name) => name.startsWith(partial) && (partial.startsWith('.') || !name.startsWith('.')))
-    .map((name) => dirPart + name)
+    // A bare dash filename would become an option (or stdin for commands like cat).
+    .filter((name) => dirPart !== '' || partial === '' || !name.startsWith('-'))
+    .map((name) => dirPart === '' && name.startsWith('-') ? './' + name : dirPart + name)
 }

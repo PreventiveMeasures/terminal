@@ -94,7 +94,7 @@ describe('GNU sed audit — unavailable features remain observable', () => {
     String.raw`s/oak/\U&/`, String.raw`s/oak/\x41/`,
     String.raw`s/oak/\o101/`, String.raw`s/oak/\d65/`, String.raw`s/oak/\Q/`,
     '1~2p', '2,~3p', '/oak/Ip', '/oak/Mp', 's/oak/elm/ # comment',
-    'D', 'N', 'h', 'H', 'g', 'G', 'x', 'r input', 'w output',
+    'D', 'h', 'H', 'g', 'G', 'x', 'r input', 'w output',
     String.raw`s/\(oak\)\1/elm/`,
   ]
   for (const script of scripts) {

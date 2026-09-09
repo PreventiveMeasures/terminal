@@ -39,6 +39,7 @@ describe('sed expression option spellings and ordering', () => {
     ["sed -n -e 2p 1p", 'two\n'],
     ["sed -e 's/a/A/' -- -e", 'A\n'],
     ["sed -n -- 1p input", 'a\n'],
+    ["sed -n -e N -e P input", 'a\n'],
   ]
   for (const [command, stdout] of cases) it(command, () => check(command, stdout))
 })
@@ -82,7 +83,6 @@ describe('sed reports expression argument and option errors precisely', () => {
     }
   }
   for (const [args, detail] of [
-    ['-i', '-i'], ['--in-place', '--in-place'], ['--in-place=backup', '--in-place'],
     ['--posix', '--posix'], ['--not-a-sed-option', '--not-a-sed-option'],
   ]) {
     it(`identifies ${detail} instead of blaming script syntax`, () => {
@@ -92,6 +92,17 @@ describe('sed reports expression argument and option errors precisely', () => {
       const terminal = createTerminal(FILES)
       assert.deepEqual(terminal.run(command), result('', 1, message + '\n', diagnostics))
       assert.deepEqual(terminal.run(command + ' 2>/dev/null | cat'), result('', 0, '', diagnostics))
+    })
+  }
+  for (const option of ['-i', '--in-place', '--in-place=backup']) {
+    it(`reports read-only in-place editing after accepting ${option}`, () => {
+      const command = `sed ${option} -e 's/a/A/' input`
+      const message = 'sed: input: file system is read-only'
+      const diagnostics = [{ kind: 'feature', command: 'sed', detail: '-i', message }]
+      const terminal = createTerminal(FILES)
+      assert.deepEqual(terminal.run(command), result('', 1, message + '\n', diagnostics))
+      assert.deepEqual(terminal.run(command + ' 2>/dev/null | cat'), result('', 0, '', diagnostics))
+      assert.deepEqual(terminal.run('cat input'), result(FILES.input))
     })
   }
   for (const command of [
@@ -111,14 +122,14 @@ describe('sed reports expression argument and option errors precisely', () => {
       assert.deepEqual(actual.unsupported, [])
     })
   }
-  for (const command of ['sed -e h input', 'sed -e N input']) {
+  for (const command of ['sed -e h input', 'sed -e H input']) {
     it(`attributes unsupported command text to the script: ${command}`, () => {
       const actual = createTerminal(FILES).run(command)
       assert.equal(actual.exitCode, 1)
       assert.equal(actual.unsupported.length, 1)
       assert.deepEqual(actual.unsupported[0], {
         kind: 'feature', command: 'sed', detail: 'script',
-        message: 'sed: only addressed p, d, a, i, c, q, =, y, { } and s/regexp/replacement/[Npg] scripts are supported',
+        message: 'sed: supported commands are p, P, n, N, d, a, i, c, q, =, y, :, b, t, T, { }, and s/regexp/replacement/[Npgw]',
       })
       assert.equal(actual.stderr, actual.unsupported[0].message + '\n')
     })

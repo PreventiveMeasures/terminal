@@ -1,4 +1,4 @@
-/** Virtual source tree: file paths (leading `/` optional) to file contents, as either a plain object or a `Map`. */
+/** Virtual source tree: file paths within the configured mount (leading `/` optional) to file contents, as either a plain object or a `Map`. */
 export type Sources = Record<string, string> | Map<string, string>
 
 /** Read-only view of the virtual source tree, handed to a {@link CommandRun} handler. Paths may be relative to {@link CommandIo.cwd}. */
@@ -108,6 +108,28 @@ export type Commands =
 
 /** Options for {@link createTerminal}. */
 export interface CreateTerminalOptions {
+  /**
+   * Directory at which the source tree is mounted. Defaults to `/`;
+   * relative paths are resolved from `/`. Source keys are normalized within
+   * this directory, including keys with a leading `/` or `..` components.
+   * The mount and its ancestors exist even when the source map is empty.
+   */
+  mount?: string
+  /**
+   * Home path used by `~`, `$HOME`, and argumentless `cd`. Defaults to `/`;
+   * relative paths are resolved from `/`. Does not create a directory or
+   * change cwd. A shell assignment to `HOME` overrides this value.
+   */
+  home?: string
+  /**
+   * Opt into a separate, persistent in-memory writable overlay at `/tmp/`.
+   * Only `/tmp/`, `false`, and `undefined` are accepted. Disabled by default.
+   * Requires mount to be neither `/`, `/tmp`, nor a descendant of `/tmp`.
+   * The source tree remains read-only. Missing parent directories are not
+   * created by output redirection. Unsupported streaming read/write overlap
+   * and changes to inherited input files reach the diagnostic channel.
+   */
+  writable?: '/tmp/' | false | undefined
   /** Initial working directory. Normalized to an absolute path; defaults to `/`. */
   cwd?: string
   /** User name reported by `whoami`. Defaults to `'user'`. */
@@ -135,7 +157,7 @@ export interface CreateTerminalOptions {
  *   builtins it lacks (`source`, `eval`, …), a variable
  *   nothing set (there is no environment: `$PATH` expands to nothing,
  *   with this entry), a redirect that would write a file against the
- *   read-only filesystem, unsupported `sed` commands or regex features,
+ *   filesystem without a writable overlay, unsupported `sed` commands or regex features,
  *   and the gawk features its `awk` refuses (`system()`, output pipes,
  *   writing to a file).
  */
@@ -198,8 +220,9 @@ export interface Terminal {
    * gates, `!`, `(...)` subshells and `{ …; }` groups, `for … in …; do …;
    * done` loops with `break` / `continue`, `exit`, `NAME=value`
    * assignments (`export` / `unset`, and in front of a command),
-   * redirects (`>` `>>` `2>` `&>` to `/dev/null` and the two stream
-   * devices, `2>&1`, `>&-`, `<`, `<<`, `<<<`),
+   * redirects (`>` `>>` `2>` `&>` to `/dev/null`, the two stream
+   * devices, or files in an enabled `/tmp/` overlay; `2>&1`, `>&-`,
+   * `<`, `<<`, `<<<`),
    * comments, bash quoting and backslash rules, brace expansion with
    * sequences, `~`, `$NAME` / `${NAME}` / `$?`, and globs with bracket
    * expressions. Variables and the working directory persist across calls.
@@ -218,8 +241,10 @@ export interface Terminal {
    * `|`, `&&`, `||`, `(`, or a `for` loop's `do` — completes command names
    * (including under bin prefixes like `/usr/bin/`). In argument position, walks the virtual
    * FS treating the trailing word as a path (relative to cwd unless it
-   * starts with `/`); directories carry a trailing `/`. Returns `[]`
-   * when nothing matches.
+   * starts with `/` or unquoted `~/`); directories carry a trailing `/`.
+   * Quoted and escaped filenames are supported, and suggested suffixes are
+   * quoted for literal shell use. Returns `[]` when nothing matches or when
+   * completing the prefix would require evaluating an expansion.
    */
   complete(line: string): string[]
 }
@@ -228,6 +253,10 @@ export interface Terminal {
  * Create an in-memory terminal over a `{ path: content }` source tree.
  *
  * @throws if `opts.cwd` does not resolve to an existing directory.
+ * @throws if `opts.mount`, `opts.home`, or `opts.cwd` is not a string or contains a NUL.
+ * @throws if a source path contains a NUL.
+ * @throws if `opts.writable` has another value or enables writes with a mount
+ * at `/`, `/tmp`, or inside `/tmp`.
  * @throws if `opts.commands` is not a plain object or a `Map`, or if an entry
  * in it has a non-string or unusable name, redefines a built-in command, or is
  * not a function or `{ run }` object.

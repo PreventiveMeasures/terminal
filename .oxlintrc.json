@@ -14,6 +14,8 @@
   "globals": {
     "TextDecoder": "readonly",
     "TextEncoder": "readonly",
+    "atob": "readonly",
+    "btoa": "readonly",
     "structuredClone": "readonly"
   },
   "rules": {

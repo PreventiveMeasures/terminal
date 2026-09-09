@@ -1,17 +1,17 @@
 // Script syntax is checked before reading input data.
-import { readSedText, readTransliteration } from './sed-text.js'
+import { finishSedText, readSedText, readTransliteration, resumeSedText } from './sed-text.js'
 import { scriptGap } from './sed-common.js'
 import { checkRegexText, compilePattern, delimited, delimiter, resolvePattern, substitution } from './sed-regex.js'
-import { INT32_MAX } from '../numeric.js'
 
 export { SED_SUBSET } from './sed-common.js'
 export { substituteLine } from './sed-regex.js'
 
-export function parseSedScript(script, extended = false, byteLocale = false) {
-  const p = { script, i: 0, extended, byteLocale }
+export function parseSedScript(script, extended = false, byteLocale = false, textState = null) {
+  const p = { script, i: 0, extended, byteLocale, textState: textState ?? {}, openWrite: textState?.openWrite }
   const commands = []
+  resumeSedText(p)
   while (p.i < script.length) {
-    if (/[;\n \t]/u.test(script[p.i])) { p.i++; continue }
+    if (/[;\n\r\f\v \t]/u.test(script[p.i])) { p.i++; continue }
     if (script[p.i] === '#') scriptGap('comments')
     const start = parseAddress(p)
     let end = null
@@ -31,31 +31,42 @@ export function parseSedScript(script, extended = false, byteLocale = false) {
     }
     const kind = script[p.i++]
     const command = { kind, start, end, active, negated }
-    if (kind === 'p' || kind === 'd' || kind === '=') commands.push(command)
+    if (kind === 'p' || kind === 'P' || kind === 'n' || kind === 'N' || kind === 'd' || kind === '=') commands.push(command)
+    else if (kind === ':' || kind === 'b' || kind === 't' || kind === 'T') {
+      commands.push({ ...command, label: readLabel(p, command) })
+      continue
+    }
     else if (kind === 's') commands.push({ ...command, ...substitution(p) })
-    else if (kind === 'a' || kind === 'i' || kind === 'c') commands.push({ ...command, text: readSedText(p) })
+    else if (kind === 'a' || kind === 'i' || kind === 'c') { readSedText(p, command); commands.push(command) }
     else if (kind === 'y') commands.push({ ...command, ...readTransliteration(p) })
     else if (kind === 'q') {
       if (end !== null) throw new Error('command only uses one address')
       const code = /^[ \t]*(\d*)/u.exec(script.slice(p.i))
       p.i += code[0].length
-      commands.push({ ...command, exitCode: Math.min(Number(code[1]), INT32_MAX) % 256 })
-    } else if (kind === '{') { commands.push(command); continue }
+      const status = BigInt.asIntN(32, BigInt(code[1] || '0'))
+      commands.push({ ...command, exitCode: status === -1n ? 0 : Number(BigInt.asUintN(8, status)) })
+    } else if (kind === '{') {
+      p.textState.blockDepth = (p.textState.blockDepth ?? 0) + 1
+      commands.push(command); continue
+    }
     else if (kind === '}') {
+      if (!p.textState.blockDepth) throw new Error("unexpected '}'")
       if (start !== null) throw new Error("'}' doesn't want any addresses")
+      p.textState.blockDepth--
       commands.push(command)
     }
     else if (kind === undefined) throw new Error('missing command')
-    else if (':btTQlLDFgGhHnNPzxrRwWev'.includes(kind)) scriptGap()
+    else if ('QlLDFgGhHzxrRwWev'.includes(kind)) scriptGap()
     else throw new Error(`unknown command: '${kind}'`)
     while (/[ \t]/u.test(script[p.i] ?? '')) p.i++
     if (script[p.i] === '#') scriptGap('comments')
     if (p.i < script.length && !/[;\n}]/u.test(script[p.i])) throw new Error('extra characters after command')
   }
+  if (textState === null) finishSedText(p.textState)
   return commands
 }
 
-export function finishSedProgram(commands) {
+export function finishSedProgram(commands, textState) {
   const blocks = []
   for (let i = 0; i < commands.length; i++) {
     const command = commands[i]
@@ -66,7 +77,33 @@ export function finishSedProgram(commands) {
     }
   }
   if (blocks.length) throw new Error("unmatched '{'")
+  finishSedText(textState)
+  linkLabels(commands)
   return commands
+}
+
+function readLabel(p, command) {
+  if (command.kind === ':' && command.start !== null) throw new Error("':' doesn't want any addresses")
+  const name = /^[ \t]*([^ \t\n;}#]*)/u.exec(p.script.slice(p.i))
+  p.i += name[0].length
+  const label = name[1].split('\0', 1)[0]
+  if (command.kind === ':' && label === '') throw new Error("':' lacks a label")
+  return label
+}
+
+function linkLabels(commands) {
+  const labels = new Map()
+  // GNU resolves duplicate labels to the last definition in the program.
+  for (let i = 0; i < commands.length; i++) {
+    if (commands[i].kind === ':') labels.set(commands[i].label, i)
+  }
+  for (let i = commands.length - 1; i >= 0; i--) {
+    const command = commands[i]
+    if (!['b', 't', 'T'].includes(command.kind)) continue
+    const jump = command.label === '' ? commands.length : labels.get(command.label)
+    if (jump === undefined) throw Object.assign(new Error(`can't find label for jump to \`${command.label}'`), { exitCode: 4 })
+    command.jump = jump
+  }
 }
 
 function parseAddress(p, relative = false) {

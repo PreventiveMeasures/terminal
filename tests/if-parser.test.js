@@ -68,7 +68,7 @@ describe('if parser structure', () => {
     const parsed = conditional('if !; then >/dev/null; else !; fi')
     assert.equal(parsed.branches[0].condition[0].negate, true)
     assert.deepEqual(parsed.branches[0].condition[0].stages, [])
-    assert.deepEqual(parsed.branches[0].body[0].stages[0].redirs, [{ fd: 1, op: 'to', target: '/dev/null', both: false }])
+    assert.deepEqual(parsed.branches[0].body[0].stages[0].redirs, [{ fd: 1, op: 'to', target: '/dev/null', both: false, append: false, label: '>' }])
     assert.equal(parsed.otherwise[0].negate, true)
   })
 })

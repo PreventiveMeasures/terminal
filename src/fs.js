@@ -78,14 +78,19 @@ export function relativeTo(root, abs) {
 
 // Ignore non-string contents. Map keys and object keys share normalization;
 // the directory index is built once for repeated listings and traversal.
-export function createFs(sources) {
+export function createFs(sources, mount = '/') {
   const files = new Map()
-  const it = sources instanceof Map ? sources.entries() : Object.entries(sources ?? {})
-  for (const [k, v] of it) {
+  for (const [k, v] of sourceEntries(sources)) {
     if (typeof v !== 'string') continue
-    files.set(normalize('/' + String(k)), v)
+    // Normalize inside the source root before mounting; leading / and ..
+    // in a source key cannot place a file outside its mount.
+    const key = String(k)
+    if (key.includes('\0')) throw new TypeError('createTerminal: source paths must not contain NUL characters')
+    const path = normalize('/' + key)
+    files.set(mount === '/' ? path : path === '/' ? mount : mount + path, v)
   }
   const childMap = new Map([['/', { dirs: [], files: [] }]])
+  ensureDir(childMap, mount)
   for (const f of files.keys()) {
     // File keys are already normalized, so split without normalizing again.
     const split = f.lastIndexOf('/')
@@ -109,6 +114,11 @@ export function createFs(sources) {
     walkFiles: (root) => walkFiles(fs, root),
   }
   return fs
+}
+
+function sourceEntries(sources) {
+  // A Map from another realm has the same internal storage but fails instanceof.
+  try { return Map.prototype.entries.call(sources) } catch { return Object.entries(sources ?? {}) }
 }
 
 // Iterative depth-first traversal. Yield before consulting shouldDescend so

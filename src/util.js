@@ -7,6 +7,10 @@ import { UINT64_MAX } from './numeric.js'
 // Byte operations encode JS strings as UTF-8. Preserve the BOM and refuse
 // slices that cannot be represented losslessly as string output.
 export const utf8 = new TextEncoder()
+export function encodeUtf8(text) {
+  if (!text.isWellFormed()) throw new UnsupportedError('feature', 'unpaired surrogate', 'unpaired UTF-16 surrogates cannot be encoded as UTF-8')
+  return utf8.encode(text)
+}
 const strictUtf8 = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true })
 export const utf8Decoder = {
   decode(bytes) {
@@ -52,6 +56,7 @@ export function lineRecords(text, delimiter = '\n') {
 
 // Readers record unconsumed stdin so later commands in a group share its offset.
 export function consumeStdin(ctx, rest = '') {
+  ctx.io?.read(ctx.stdinHandle?.identity)
   ctx.stdinLeft = rest
 }
 
@@ -65,7 +70,7 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   for (const name of files) {
     const entry = { name, content: '', kind: 'file' }
     let error
-    if (name === '/dev/stdin' && ctx.stdinFile) entry.content = ctx.stdinOrigin
+    if (name === '/dev/stdin' && ctx.stdinFile) { ctx.io?.read(ctx.stdinHandle?.identity); entry.content = ctx.stdinOrigin }
     else if (name === '-' || name === '/dev/stdin') {
       entry.content = pipe
       entry.shared = true

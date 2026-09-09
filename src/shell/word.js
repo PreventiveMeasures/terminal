@@ -13,6 +13,7 @@ export function sliceWord(w, start = 0, end = w.value.length) {
 export function assignmentOf(w) {
   const match = /^([A-Za-z_][A-Za-z0-9_]*)=/u.exec(w.value)
   if (!match || (w.mask !== null && /[12]/u.test(w.mask.slice(0, match[0].length)))) return null
+  if (w.empty?.some((i) => i < match[0].length)) return null
   return { name: match[1], end: match[0].length }
 }
 

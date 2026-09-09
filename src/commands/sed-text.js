@@ -1,35 +1,46 @@
-import { UnsupportedError } from '../unsupported.js'
 import { utf8, utf8Decoder } from '../util.js'
 import { delimiter } from './sed-regex.js'
 
 const CONTROLS = { a: 7, f: 12, n: 10, r: 13, t: 9, v: 11, '\n': 10 }
 const BASES = { d: 10, o: 8, x: 16 }
 
-export function readSedText(p) {
+export function readSedText(p, command) {
   while (/[ \t]/u.test(p.script[p.i] ?? '')) p.i++
   if (p.i === p.script.length) throw new Error("expected \\ after 'a', 'c' or 'i'")
-  let text = ''
+  command.text = null
+  p.textState.pending = { command, raw: '' }
   if (p.script[p.i] === '\\') {
     const first = p.script[++p.i]
-    if (first === undefined) continuedText()
+    if (first === undefined) return
     p.i++
-    if (first !== '\n') text = first
+    if (first !== '\n') p.textState.pending.raw = first
   }
+  resumeSedText(p)
+}
+
+export function resumeSedText(p) {
+  const pending = p.textState.pending
+  if (!pending) return
+  let text = pending.raw
   while (p.i < p.script.length && p.script[p.i] !== '\n') {
     const c = p.script[p.i++]
-    text += c
     if (c === '\\') {
-      if (p.i === p.script.length) continuedText()
-      text += p.script[p.i++]
-    }
+      if (p.i === p.script.length) { pending.raw = text + '\n'; return }
+      text += c + p.script[p.i++]
+    } else text += c
   }
   // a writes this text verbatim; i/c replace its last byte with the output
   // record delimiter. Text scripts always use LF, including under sed -z.
-  return normalizeText(text + '\n')
+  pending.command.text = normalizeText(text + '\n')
+  p.textState.pending = null
 }
 
-function continuedText() {
-  throw new UnsupportedError('feature', 'continued text between expressions', 'sed: text continued across script expressions is not supported')
+export function finishSedText(state) {
+  if (!state?.pending) return
+  // GNU's final EOF copies unfinished text without escape normalization;
+  // a bare a\ / i\ / c\ retains NULL instead of an empty output line.
+  state.pending.command.text = state.pending.raw || null
+  state.pending = null
 }
 
 function normalizeText(text) {
