@@ -8,7 +8,7 @@ const expected = (stdout = '', notes = [], extra = {}) => ({ stdout, stderr: '',
 function omission(pattern, paths) {
   const entries = paths.length === 1 ? 'entry' : 'entries'
   const list = paths.length < 10 ? ': ' + paths.map((path) => JSON.stringify(path)).join(', ') : ''
-  return `glob: omitted ${paths.length} hidden ${entries} while expanding ${JSON.stringify(pattern)}${list}. Dot-prefixed patterns can include hidden entries.`
+  return `glob: omitted ${paths.length} hidden ${entries} while expanding ${JSON.stringify(pattern)}${list}.`
 }
 
 const unmatched = (pattern) => `glob: no paths matched ${JSON.stringify(pattern)}; the pattern was left literal.`
@@ -20,14 +20,34 @@ describe('pathname glob notes describe the dotfile gate', () => {
     assert.deepEqual(createTerminal(FILES).run('printf "%s\\n" *'), expected('visible\n', [STAR_NOTE]))
   })
 
-  it('counts excluded candidates before checking the pattern', () => {
+  it('counts only the excluded candidates the pattern would have taken', () => {
+    // `.env` and `.cache` are hidden, but `*.ts` would have passed over them
+    // anyway; saying they were omitted would describe a gate that did nothing.
     const sources = { '.env': '', '.cache/config': '', 'main.ts': '', other: '' }
-    const note = omission('*.ts', ['/.cache', '/.env'])
-    assert.deepEqual(createTerminal(sources).run('printf "%s\\n" *.ts'), expected('main.ts\n', [note]))
+    assert.deepEqual(createTerminal(sources).run('printf "%s\\n" *.ts'), expected('main.ts\n'))
   })
 
-  it('counts only eligible directories at intermediate segments', () => {
+  it('counts a hidden candidate the pattern would have taken', () => {
+    const sources = { '.bar': '', '.hidden.bar': '', '.foo.txt': '', 'visible.bar': '' }
+    const note = omission('*.bar', ['/.bar', '/.hidden.bar'])
+    assert.deepEqual(createTerminal(sources).run('printf "%s\\n" *.bar'), expected('visible.bar\n', [note]))
+  })
+
+  it('says nothing when every hidden name fails the pattern', () => {
+    const sources = { '.foo.txt': '', 'visible.bar': '' }
+    assert.deepEqual(createTerminal(sources).run('printf "%s\\n" *.bar'), expected('visible.bar\n'))
+    assert.deepEqual(createTerminal(sources).run('printf "%s\\n" *.nope'), expected('*.nope\n', [unmatched('*.nope')]))
+  })
+
+  it('says nothing about a hidden directory the pattern would have found nothing in', () => {
+    // `*` would have entered `.hidden`, but there is no `.hidden/x` to find,
+    // so the gate cost this caller nothing and has nothing to report.
     const sources = { '.file': '', '.hidden/child': '', 'visible/x': '' }
+    assert.deepEqual(createTerminal(sources).run('printf "%s\\n" */x'), expected('visible/x\n'))
+  })
+
+  it('counts an intermediate directory a later segment would have matched in', () => {
+    const sources = { '.file': '', '.hidden/x': '', 'visible/x': '' }
     assert.deepEqual(createTerminal(sources).run('printf "%s\\n" */x'), expected('visible/x\n', [omission('*/x', ['/.hidden'])]))
   })
 
@@ -37,14 +57,17 @@ describe('pathname glob notes describe the dotfile gate', () => {
     assert.deepEqual(createTerminal(sources).run('printf "%s\\n" */../*'), expected('visible/../visible\n', [note]))
   })
 
-  it('aggregates exclusions from every traversed segment without visiting hidden descendants', () => {
+  it('aggregates exclusions from every traversed segment, hidden descendants included', () => {
+    // Reaching `.hidden/.unvisited` took two gated names, and both are named:
+    // adding a leading dot to only one of the two segments still finds nothing.
     const sources = { '.hidden/.unvisited': '', 'a/.local': '', 'a/x': '', 'b/.dir/deeper': '', 'b/x': '' }
-    const note = omission('*/*', ['/.hidden', '/a/.local', '/b/.dir'])
+    const note = omission('*/*', ['/.hidden', '/.hidden/.unvisited', '/a/.local', '/b/.dir'])
     assert.deepEqual(createTerminal(sources).run('printf "%s\\n" */*'), expected('a/x\nb/x\n', [note]))
   })
 
   it('keeps a note when visible candidates fail to match', () => {
-    assert.deepEqual(createTerminal(FILES).run('printf "%s\\n" *.ts'), expected('*.ts\n', [omission('*.ts', ['/.hidden']), unmatched('*.ts')]))
+    const sources = { '.hidden.ts': '', visible: '' }
+    assert.deepEqual(createTerminal(sources).run('printf "%s\\n" *.ts'), expected('*.ts\n', [omission('*.ts', ['/.hidden.ts']), unmatched('*.ts')]))
   })
 
   it('does not enumerate absent literal parent directories', () => {
@@ -151,9 +174,9 @@ describe('pathname notes survive shell execution and remain scoped per run', () 
   })
 
   it('aggregates each brace-expanded word independently', () => {
-    const sources = { '.env': '', 'a.js': '', 'b.ts': '' }
+    const sources = { '.env.ts': '', '.env.js': '', 'a.js': '', 'b.ts': '' }
     const result = createTerminal(sources).run('printf "%s\\n" {*.ts,*.js}')
-    assert.deepEqual(result, expected('b.ts\na.js\n', [omission('*.ts', ['/.env']), omission('*.js', ['/.env'])]))
+    assert.deepEqual(result, expected('b.ts\na.js\n', [omission('*.ts', ['/.env.ts']), omission('*.js', ['/.env.js'])]))
   })
 
   it('retains completed omissions if a later visible candidate triggers an unsupported matcher error', () => {

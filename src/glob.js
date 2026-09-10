@@ -2,7 +2,7 @@
 // globPaths expands pathname segments, respecting the word's quoting mask
 // and the shell's dotfile rule. Its empty result leaves the word literal.
 
-import { compareNames, lookup } from './fs.js'
+import { compareNames, lookup, resolve } from './fs.js'
 import { UnsupportedError } from './unsupported.js'
 import { POSIX_CLASSES, readPosixClass } from './charclass.js'
 import { hiddenEntryNotes } from './notes.js'
@@ -210,25 +210,39 @@ export function globPattern(word) {
 }
 
 // Expand one path segment at a time while preserving the operand's spelling.
+// The dotfile rule excludes hidden names, but which of them the caller was
+// actually deprived of is only known at the end, so expansion carries them
+// along marked instead of dropping them: a marked candidate that survives to
+// the last segment is a path the pattern would have produced, and the names
+// its marks name are the ones the note reports. `*/nope` therefore says
+// nothing about a hidden directory the pattern would have entered and found
+// nothing in — the gate cost that caller nothing.
 export function globPaths(word, ctx) {
   const pattern = globPattern(word)
   const segments = pattern.match(/[^/]+|\/+/gu) ?? []
   const hidden = hiddenEntryNotes()
-  let candidates = [''], matched
+  // Every gated name the walk touched, kept only for the case where no answer
+  // is reached at all: a matcher that refuses mid-expansion leaves no surviving
+  // candidate to learn from, and the omissions found before it are still real.
+  const gatedSoFar = new Set()
+  let candidates = [{ path: '', marks: null }], matched
   try {
     for (let s = 0; s < segments.length; s++) {
       const seg = segments[s]
       if (seg.startsWith('/') || !META.test(seg)) {
-        candidates = candidates.map((c) => c + unescape(seg))
+        candidates = candidates.map((c) => ({ ...c, path: c.path + unescape(seg) }))
         continue
       }
-      candidates = expandSegment(candidates, seg, s === segments.length - 1, ctx, hidden)
+      candidates = expandSegment(candidates, seg, s === segments.length - 1, ctx, gatedSoFar)
     }
     // lookup validates literal suffixes and requires a directory for trailing '/'.
-    matched = candidates.filter((c) => lookup(ctx.cwd, c, ctx.fs).path !== null).sort(compareNames)
+    const live = candidates.filter((c) => lookup(ctx.cwd, c.path, ctx.fs).path !== null)
+    for (const c of live) for (const mark of c.marks ?? []) hidden.add(mark)
+    matched = live.filter((c) => c.marks === null).map((c) => c.path).sort(compareNames)
     return matched
   } finally {
-    hidden.emit(ctx.notes, 'glob', 'Dot-prefixed patterns can include hidden entries.', ` while expanding ${JSON.stringify(pattern)}`)
+    if (matched === undefined) for (const mark of gatedSoFar) hidden.add(mark)
+    hidden.emit(ctx.notes, 'glob', '', ` while expanding ${JSON.stringify(pattern)}`)
     if (matched?.length === 0 && segments.some(hasPatternSyntax)) ctx.notes.add(`glob: no paths matched ${JSON.stringify(pattern)}; the pattern was left literal.`)
   }
 }
@@ -251,21 +265,36 @@ const unescape = (seg) => seg.replace(/\\(.)/gu, '$1')
 
 // Only the last segment may match files. Shell globbing excludes dotfiles
 // unless the segment starts with '.', and never yields '.' or '..'.
-function expandSegment(candidates, seg, isLast, ctx, hidden) {
+function expandSegment(candidates, seg, isLast, ctx, gatedSoFar) {
   const re = compileGlob(seg, { bash: true })
   const segStartsWithDot = seg.startsWith('.') || seg.startsWith('\\.')
-  const omitHidden = !segStartsWithDot && hasPatternSyntax(seg)
-  const matches = (name) => {
-    if (!segStartsWithDot && name.startsWith('.')) return false
-    return re.test(name)
-  }
   const next = []
   for (const c of candidates) {
-    const abs = lookup(ctx.cwd, c || '.', ctx.fs).path
+    const abs = lookup(ctx.cwd, c.path || '.', ctx.fs).path
     if (!ctx.fs.isDir(abs)) continue
     const { dirs, files } = ctx.fs.listDir(abs)
-    if (omitHidden) hidden.collect(abs, { dirs, files }, isLast)
-    for (const name of isLast ? [...dirs, ...files] : dirs) if (matches(name)) next.push(c + name)
+    for (const name of isLast ? [...dirs, ...files] : dirs) {
+      const gated = !segStartsWithDot && name.startsWith('.')
+      // A name the shell itself had to look at answers for its own matching
+      // errors. One reached only for the note's sake never raises: it is a
+      // name the expansion was never going to see, and a refusal from it
+      // would be the bookkeeping's, not the caller's.
+      if (!gated && c.marks === null) {
+        if (re.test(name)) next.push({ path: c.path + name, marks: null })
+      } else if (couldMatch(re, name)) {
+        if (!gated) { next.push({ path: c.path + name, marks: c.marks }); continue }
+        const mark = resolve(abs, name)
+        gatedSoFar.add(mark)
+        next.push({ path: c.path + name, marks: [...(c.marks ?? []), mark] })
+      }
+    }
   }
   return next
+}
+
+// A matcher that refuses rather than guesses — a locale question over a
+// non-ASCII name — leaves the answer unknown. Counting the name keeps the
+// omission visible, which is the safer of the two ways to be imprecise.
+function couldMatch(re, name) {
+  try { return re.test(name) } catch { return true }
 }

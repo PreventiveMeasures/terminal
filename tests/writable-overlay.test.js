@@ -141,9 +141,11 @@ describe('existing filesystem consumers see current overlay contents', () => {
     })
     check(t, 'ls -A /tmp', '.hidden\nalpha.txt\nzeta.js\n')
     check(t, 'find /tmp -type f', '/tmp/.hidden\n/tmp/alpha.txt\n/tmp/zeta.js\n')
-    assert.deepEqual(t.run("printf '%s\\n' /tmp/*.txt"), {
-      stdout: '/tmp/alpha.txt\n', stderr: '', exitCode: 0, cwd: '/repo', unsupported: [],
-      notes: ['glob: omitted 1 hidden entry while expanding "/tmp/*.txt": "/tmp/.hidden". Dot-prefixed patterns can include hidden entries.'],
+    // `.hidden` is not a `.txt` name, so the dotfile gate changed nothing here.
+    check(t, "printf '%s\\n' /tmp/*.txt", '/tmp/alpha.txt\n')
+    assert.deepEqual(t.run("printf '%s\\n' /tmp/*"), {
+      stdout: '/tmp/alpha.txt\n/tmp/zeta.js\n', stderr: '', exitCode: 0, cwd: '/repo', unsupported: [],
+      notes: ['glob: omitted 1 hidden entry while expanding "/tmp/*": "/tmp/.hidden".'],
     })
     check(t, 'cat /tmp/alpha.txt | sort', 'alpha\nbeta\n')
     check(t, 'grep -rn export /tmp', '/tmp/zeta.js:1:export x\n')

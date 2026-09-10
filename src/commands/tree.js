@@ -4,7 +4,7 @@ import { parseArgs } from '../args.js'
 import { err, parseNonNegativeInt } from '../util.js'
 import { unsupported } from '../unsupported.js'
 import { INT32_MAX } from '../numeric.js'
-import { lookupWithNote, omissionNote } from '../notes.js'
+import { hiddenEntryNotes, lookupWithNote, omissionNote } from '../notes.js'
 
 export function tree(_stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, { short: ['a', 'd', 'F'], long: ['noreport'], valueShort: ['L'] })
@@ -20,11 +20,13 @@ export function tree(_stdin, tokens, ctx) {
   const out = [start + (isDir ? rootSuffix : '  [error opening dir]')]
   if (isDir) {
     const omitted = new Set()
+    const hidden = hiddenEntryNotes()
     try {
-      const gap = walk(ctx.fs, root, out, flags, limit.value, count, omitted)
+      const gap = walk(ctx.fs, root, out, flags, limit.value, count, omitted, hidden)
       if (gap) return gap
     } finally {
       omissionNote(ctx.notes, { command: 'tree', action: 'depth limit omitted contents of', noun: ['directory', 'directories'], paths: omitted })
+      hidden.emit(ctx.notes, 'tree', 'Hidden entries are included with -a.')
     }
   }
   if (!flags.has('noreport')) {
@@ -35,8 +37,8 @@ export function tree(_stdin, tokens, ctx) {
   return { stdout: out.join('\n') + '\n', stderr: '', exitCode: error ? 2 : 0 }
 }
 
-function walk(fs, root, out, flags, limit, count, omitted) {
-  const stack = [{ dir: root, prefix: '', items: itemsFor(fs, root, flags), i: 0, depth: 0 }]
+function walk(fs, root, out, flags, limit, count, omitted, hidden) {
+  const stack = [{ dir: root, prefix: '', items: itemsFor(fs, root, flags, hidden), i: 0, depth: 0 }]
   while (stack.length) {
     const frame = stack.at(-1)
     if (frame.i >= frame.items.length) { stack.pop(); continue }
@@ -49,17 +51,23 @@ function walk(fs, root, out, flags, limit, count, omitted) {
     count[isDir ? 'dirs' : 'files']++
     if (!isDir) continue
     const dir = joinPath(frame.dir, n)
-    const items = itemsFor(fs, dir, flags)
     if (frame.depth + 1 >= limit) {
-      if (items.length) omitted.add(dir)
+      // The depth limit omits this directory's contents whole, and its own note
+      // says so; nothing here was passed over merely for being hidden.
+      if (itemsFor(fs, dir, flags).length) omitted.add(dir)
       continue
     }
+    const items = itemsFor(fs, dir, flags, hidden)
     stack.push({ dir, prefix: frame.prefix + (last ? '    ' : '│   '), items, i: 0, depth: frame.depth + 1 })
   }
 }
 
-function itemsFor(fs, dir, flags) {
+// A directory this listing walks reports the names the dot rule kept out of
+// both the tree and the totals under it. Files excluded by -d are left out for
+// a different reason, and are not this note's to claim.
+function itemsFor(fs, dir, flags, hidden = null) {
   const { dirs, files } = fs.listDir(dir)
+  if (hidden && !flags.has('a')) hidden.collect(dir, flags.has('d') ? dirs : [...dirs, ...files])
   return [...dirs.map((n) => ({ n, isDir: true })), ...(flags.has('d') ? [] : files.map((n) => ({ n, isDir: false })))]
     .filter(({ n }) => flags.has('a') || !n.startsWith('.')).sort((a, b) => compareNames(a.n, b.n))
 }
