@@ -1,0 +1,72 @@
+# grep behaviours the BusyBox grep testsuite exercises, written as this
+# project's own cases over its own fixtures. Upstream is GPLv2 and none of its
+# text is vendored here. Answers are GNU grep 3.11's in the C locale.
+
+@tree orchard
+grep pine input; echo $? => "1\n"
+grep oak nosuch 2>/dev/null; echo $? => "2\n"
+grep -s oak nosuch; echo $? => "2\n"
+grep -s oak nosuch input; echo $? => "input:oak\ninput:oak elm\n2\n"
+grep -q oak input; echo $? => "0\n"
+grep -q pine input; echo $? => "1\n"
+grep -q oak input nosuch 2>/dev/null; echo $? => "0\n"
+cat input | grep oak => "oak\noak elm\n"
+cat input | grep oak - => "oak\noak elm\n"
+grep oak input input => "input:oak\ninput:oak elm\ninput:oak\ninput:oak elm\n"
+printf pine | grep -e oak -e pine - input => "(standard input):pine\ninput:oak\ninput:oak elm\n"
+grep -e oak -e fir input => "oak\nfir\noak elm\n"
+
+@tree punct
+grep -F a/b input => "a/b/c\n"
+grep -F a.b input; echo $? => "1\n"
+
+@tree mixed
+grep -Fi oak input => "oak\nOAK\n"
+
+@tree patterns
+grep -f pats input => "oak\nfir\n"
+cat pats | grep -f - input => "oak\nfir\n"
+grep -v -f pats input; echo $? => "1\n"
+grep -vxf pats input; echo $? => "1\n"
+
+@tree orchard
+grep -x oak input => "oak\n"
+grep -x elm input; echo $? => "elm\n0\n"
+"grep -xF \"oak elm\" input" => "oak elm\n"
+grep -x -v -e oak -e fir input; echo $? => "elm\noak elm\n0\n"
+
+@tree words
+grep -w oak input => "oak\nan oak\n"
+grep -Fw oak input => "oak\nan oak\n"
+"grep -w \"^oak\" input" => "oak\n"
+"grep -w \"^\" input; echo $?" => "1\n"
+
+@tree leading
+"grep -w \"^\" input; echo $?" => "(oak)\n0\n"
+
+@tree words
+grep -w wood input; echo $? => "1\n"
+
+@tree orchard
+grep -L pine input; echo $? => "input\n1\n"
+grep -L oak input; echo $? => "0\n"
+grep -l oak input => "input\n"
+grep -c oak input => "2\n"
+"grep -E \"o+ak\" input" => "oak\noak elm\n"
+"egrep \"o+ak\" input" => "oak\noak elm\n"
+egrep pine input; [ $? -ne 0 ] && echo absent => "absent\n"
+"grep -oE \"[a-z]+\" input" => "oak\nelm\nfir\noak\nelm\n"
+
+@tree punct
+"grep -o \"[^/]*$\" input" => "c\nfir\n"
+
+@tree hex
+grep -oE '([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}' input => "de:ad:be:ef:00:11\n"
+
+@tree orchard
+"grep -o \"\" input; echo $?" => "0\n"
+
+@tree grove
+grep -r oak grove | sort => "grove/a.txt:oak\ngrove/sub/c.txt:oak\n"
+grep -r oak grove/a.txt => "oak\n"
+grep -rl oak grove | sort => "grove/a.txt\ngrove/sub/c.txt\n"

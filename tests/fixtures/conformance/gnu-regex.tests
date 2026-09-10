@@ -1,0 +1,108 @@
+# Regular expressions, answered by GNU grep 3.11 in the C locale. The cases
+# that carry `!` are the family the GNU and Spencer corpora still diverge on:
+# expressions POSIX leaves undefined, which GNU accepts by reinterpreting the
+# stray operator as a literal — warning as it does so. Guessing which literal
+# GNU picked is how an implementation returns a confidently wrong answer, so
+# each one is refused. The well-formed neighbours below them are the reason
+# that refusal has to stay narrow.
+
+@tree regex
+# a quantifier with nothing to repeat
+grep -E -e '*' input => ! GNU regex syntax 2
+grep -E -e '+' input => ! GNU regex syntax 2
+grep -E -e '?' input => ! GNU regex syntax 2
+grep -E -e '{1}' input => ! GNU regex syntax 2
+grep -E -e '*a' input => ! GNU regex syntax 2
+grep -E -e '**a' input => ! GNU regex syntax 2
+grep -E -e '***a' input => ! GNU regex syntax 2
+grep -E -e '^*' input => ! GNU regex syntax 2
+grep -E -e '^+' input => ! GNU regex syntax 2
+grep -E -e '^?' input => ! GNU regex syntax 2
+grep -E -e '^{1}' input => ! GNU regex syntax 2
+grep -E -e '$*' input => ! GNU regex syntax 2
+grep -E -e '(*a)' input => ! GNU regex syntax 2
+grep -E -e '(+a)' input => ! GNU regex syntax 2
+grep -E -e '(?a)' input => ! regex extension 2
+grep -E -e '({1}a)' input => ! GNU regex syntax 2
+grep -E -e '(a|*b)' input => ! GNU regex syntax 2
+grep -E -e '(a|+b)' input => ! GNU regex syntax 2
+grep -E -e '(a|?b)' input => ! GNU regex syntax 2
+grep -E -e '(a|{1}b)' input => ! GNU regex syntax 2
+grep -e '\(\{1\}a\)' input => ! GNU regex syntax 2
+grep -e '^\{1\}' input => ! GNU regex syntax 2
+
+# an unmatched group close
+grep -E -e ')' input => ! GNU regex syntax 2
+grep -E -e 'a)' input => ! GNU regex syntax 2
+grep -E -e 'abc)' input => ! GNU regex syntax 2
+
+# an interval that does not parse
+grep -E -e '{' input => ! GNU regex syntax 2
+grep -E -e '{abc' input => ! GNU regex syntax 2
+grep -E -e '{1' input => ! GNU regex syntax 2
+grep -E -e 'a{b' input => ! GNU regex syntax 2
+grep -E -e 'a{1' input => ! GNU regex syntax 2
+grep -E -e 'a{1a' input => ! GNU regex syntax 2
+grep -E -e 'a{1a}' input => ! GNU regex syntax 2
+grep -E -e 'a{1,x' input => ! GNU regex syntax 2
+grep -E -e 'a{1,x}' input => ! GNU regex syntax 2
+grep -E -e 'a{1,*}' input => ! GNU regex syntax 2
+grep -E -e 'a*{b}' input => ! GNU regex syntax 2
+
+# an unmatched bracket close
+grep -E -e 'a]' input => ! GNU regex syntax 2
+
+# bracket features GNU implements and this one does not
+grep -E -e 'a[[.x.]]' input => ! regex collating or equivalence class 2
+grep -E -e 'a[[=b=]]c' input => ! regex collating or equivalence class 2
+grep -E -e 'a[[.].]]b' input => ! regex collating or equivalence class 2
+grep -E -e 'a[[.-.]--]c' input => ! regex collating or equivalence class 2
+
+# a backreference to a repeatable empty capture
+grep -e 'a\(\(b\)*\2\)*d' input => ! conditional backreference 2
+
+# an escape with no GNU meaning
+grep -E -e 'a\x' input => ! regex escape 2
+
+# the same operators where POSIX defines them, still answered exactly
+grep -E -e 'a*' input => "BADRPT\n*a\na)\n{1\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e 'a+' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e 'a?' input => "BADRPT\n*a\na)\n{1\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e 'a{1}' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e 'a{1,2}' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e '(a|b)' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e '(a)+' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e '^a' input => "a)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e 'a$' input => "*a\naaa\n"
+grep -E -e '[a-z]' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e '[]a]' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e '[^a]' input => "BADRPT\n*a\na)\n{1\na{b\na]\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e 'a[.]b' input => "" 1
+grep -E -e 'a\)' input => "a)\n"
+grep -E -e 'a\{1' input => "" 1
+grep -E -e '[{]' input => "{1\na{b\n"
+grep -E -e '[[:alpha:]]' input => "BADRPT\n*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e '[a-c]' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e '[!a]' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e 'a|b' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e '(ab)*' input => "BADRPT\n*a\na)\n{1\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -E -e 'a.c' input => "abc\na-c\n"
+grep -e 'a*' input => "BADRPT\n*a\na)\n{1\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -e 'a\{1\}' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -e '\(a\)\1' input => "aaa\n"
+grep -e '\(a\|b\)' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -e 'a\]' input => "a]\na]b\n"
+grep -e 'a\{1,2\}' input => "*a\na)\na{b\na]\naaa\nabbbd\nax\nabc\na-c\na]b\n"
+grep -e '[[:digit:]]' input => "{1\n"
+grep -e 'a.c' input => "abc\na-c\n"
+
+# GNU intervals and brackets this implementation validates the way GNU does
+grep -E -e 'a{40000,}' input => % 2
+grep -E -e 'b{1000000000}' input => % 2
+grep -E -e '[a-c-e]' input => % 2
+grep -E -e '[[:alpha:]-z]' input => % 2
+grep -E -e '[[=a=]-z]' input => % 2
+grep -E -e 'a[[:alpha,:]' input => % 2
+grep -E -e 'a[a[:b]' input => % 2
+grep -e 'a\{32768\}' input => % 2
+grep -e '[1-3-5]' input => % 2
