@@ -7,7 +7,7 @@
 // quotes only $, backtick, quote, backslash and newline are escaped.
 // lex.js handles substitutions, operators, ANSI-C strings and here-documents.
 
-import { NAME_RE, backtickGap, decodeAnsiC, readExpansion, readHeredocBodies, readOperator, skipContinuations } from './lex.js'
+import { NAME_RE, decodeAnsiC, readBacktickSubstitution, readExpansion, readHeredocBodies, readOperator, skipContinuations } from './lex.js'
 import { UnsupportedError } from '../unsupported.js'
 import { readConditional } from './conditional-lex.js'
 
@@ -39,7 +39,7 @@ function scan(st, incremental) {
     if (st.quote === "'") { put(st, c, '1'); st.i++; continue }
     if (c === '\\') { readEscape(st); continue }
     if (c === '$') { readDollar(st); continue }
-    if (c === '`') throw backtickGap()
+    if (c === '`') { readBacktick(st); continue }
     if (st.quote) { put(st, c, '2'); st.i++; continue }
     if (c === "'" || c === '"') { openQuote(st, c); st.i++; continue }
     const inToken = st.cur !== '' || st.empty.length > 0
@@ -88,7 +88,7 @@ export function tokenizeFragment(line, quoted = false) {
     if (st.quote === "'") { put(st, c, '1'); st.i++; continue }
     if (c === '\\') { readEscape(st); continue }
     if (c === '$') { readDollar(st); continue }
-    if (c === '`') throw new UnsupportedError('feature', '`', 'command substitution (backticks) is not supported')
+    if (c === '`') { readBacktick(st); continue }
     if (st.quote) { put(st, c, '2'); st.i++; continue }
     if (c === '"' || (c === "'" && !quoted)) { openQuote(st, c); st.i++; continue }
     if (!quoted && (c === '<' || c === '>') && st.line[skipContinuations(st.line, st.i + 1)] === '(') {
@@ -211,6 +211,19 @@ function readDollar(st) {
     ? '${' + ref.name + '}' : ref.raw
   put(st, text, m)
   st.i += ref.raw.length
+}
+
+// Backticks carry the same command substitution as `$( )` and differ only in
+// how the source is quoted, so the source is kept in the word exactly as `$( )`
+// keeps its own and re-read at expansion. Rewriting it into `$(command)` here
+// would be simpler but wrong: unescaping can leave a trailing backslash, and
+// that backslash would escape the synthesised closing parenthesis.
+function readBacktick(st) {
+  const m = st.quote === '"' || st.fragmentQuoted ? '2' : '0'
+  const { raw } = readBacktickSubstitution(st.line, st.i)
+  put(st, '`', m)
+  put(st, raw.slice(1), '1', false)
+  st.i += raw.length
 }
 
 function skipComment(st) {

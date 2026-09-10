@@ -1,6 +1,29 @@
 import { UnsupportedError } from '../unsupported.js'
 
 export const MAX_SUBSTITUTION_DEPTH = 64
+
+// Backticks quote differently from `$( )`: a backslash escapes only `$`, a
+// backslash, a newline and a backtick, and every other backslash reaches the
+// inner command intact. An escaped backtick is how the form nests, and the
+// escape levels compound with the nesting, so those are refused rather than
+// half-implemented — callers get a diagnostic naming the escape.
+export function readBacktickSubstitution(line, start) {
+  let command = ''
+  for (let i = start + 1; i < line.length; i++) {
+    const c = line[i]
+    if (c === '`') return { command, raw: line.slice(start, i + 1) }
+    if (c !== '\\') { command += c; continue }
+    const next = line[i + 1]
+    if (next === '`') {
+      throw new UnsupportedError('feature', '\\`', 'nested backtick command substitution is not supported; use `$( )` instead')
+    }
+    if (next === '$' || next === '\\') { command += next; i++; continue }
+    if (next === '\n') { i++; continue }
+    command += c
+  }
+  throw new Error('unterminated backtick substitution')
+}
+
 const freshWord = () => ({ value: '', quoted: false, started: false })
 const depthGap = () => new UnsupportedError('feature', 'command substitution depth', `command substitution nesting above ${MAX_SUBSTITUTION_DEPTH} is not supported`)
 

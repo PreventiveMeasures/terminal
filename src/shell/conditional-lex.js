@@ -1,4 +1,5 @@
 import { UnsupportedError } from '../unsupported.js'
+import { readBacktickSubstitution } from './substitution.js'
 
 const UNARY = /^-[abcdefghknoprstuvwxzGLNORS]$/u
 const BINARY = new Set(['=', '==', '!=', '=~', '<', '>', '-eq', '-ne', '-lt', '-le', '-gt', '-ge', '-nt', '-ot', '-ef'])
@@ -123,7 +124,13 @@ function readWord(p) {
       dollar(p, word, quote)
       continue
     }
-    if (c === '`') throw new UnsupportedError('feature', '`', 'command substitution (backticks) is not supported')
+    if (c === '`') {
+      const backtick = readBacktickSubstitution(p.line, p.i)
+      put(word, '`', quote ? '2' : '0')
+      put(word, backtick.raw.slice(1), '1')
+      p.i += backtick.raw.length
+      continue
+    }
     if (quote) { put(word, c, '2'); p.i++; continue }
     if (c === "'" || c === '"') { quote = c; quoteStart = word.value.length; p.i++; continue }
     if (c === '(' && word.mask.at(-1) === '0' && /[?*+@!]/u.test(word.value.at(-1)) && !word.empty.includes(word.value.length)) {

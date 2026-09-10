@@ -165,9 +165,9 @@ export const SHELL_WORKFLOWS = [
     parseTime: true,
   },
   {
-    purpose: 'Capture a line count using legacy command-substitution syntax',
-    command: 'count=`wc -l < README.md`; echo "$count"',
-    expected: feature('`'),
+    purpose: 'Nest legacy command-substitution syntax, which needs escaped backticks',
+    command: 'count=`echo \\`wc -l < README.md\\``; echo "$count"',
+    expected: feature('\\`'),
     parseTime: true,
   },
 ]

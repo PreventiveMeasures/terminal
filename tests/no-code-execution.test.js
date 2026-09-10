@@ -281,14 +281,17 @@ describe('no JS execution — runtime', () => {
     assert.deepEqual(t.run('echo $((1+1))'), {
       stdout: '2\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
-    for (const line of ['echo `id`', 'echo $[1+1]']) {
+    for (const line of ['echo `echo \\`nested\\``', 'echo $[1+1]']) {
       const r = t.run(line)
       assert.equal(r.exitCode, 1, line)
       assert.equal(r.stdout, '', line)
       assert.match(r.stderr, /not supported/u, line)
       assert.equal(r.unsupported[0].kind, 'feature', line)
     }
-    for (const line of ["echo $(node -e 'process.exit(1)')", 'x=$(sh -c id)', 'echo "$(/bin/sh -c id)"']) {
+    // Backticks reach the same virtual registry as `$( )`, so a host command
+    // named in either form is reported missing rather than run.
+    for (const line of ["echo $(node -e 'process.exit(1)')", 'x=$(sh -c id)', 'echo "$(/bin/sh -c id)"',
+      'echo `id`', "echo `node -e 'process.exit(1)'`", 'x=`sh -c id`', 'echo "`/bin/sh -c id`"']) {
       const r = t.run(line)
       assert.match(r.stderr, /command not found/u, line)
       assert.equal(r.unsupported[0].kind, 'command', line)

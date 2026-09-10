@@ -180,7 +180,7 @@ describe('shell syntax — parameters', () => {
 
   it('the substitutions this shell lacks are refused, not passed through', () => {
     for (const [line, detail] of [
-      ['echo `pwd`', '`'],
+      ['echo `echo \\`nested\\``', '\\`'],
       ['echo $[1+2]', '$['],
       ['echo ${x@Q}', '${'],
       ['echo ${x[0]}', '${'],
@@ -416,7 +416,10 @@ describe('shell syntax — redirects', () => {
   })
 
   it('the substitutions this shell lacks are refused inside an unquoted here-document too', () => {
-    assert.deepEqual(gaps('cat <<EOF\n`echo owned`\nEOF'), ['feature:`'])
+    // A backtick is active in an unquoted body, as bash makes it, and runs
+    // through the same virtual registry as everywhere else.
+    assert.equal(out('cat <<EOF\n`echo body`\nEOF'), 'body\n')
+    assert.deepEqual(gaps('cat <<EOF\n`echo \\`nested\\``\nEOF'), ['feature:\\`'])
     assert.equal(out('cat <<EOF\n$((1+2))\nEOF'), '3\n')
     assert.deepEqual(gaps('cat <<EOF\n$[1+2]\nEOF'), ['feature:$['])
     assert.equal(out('x=5; cat <<EOF\n${x:-y}\nEOF'), '5\n')

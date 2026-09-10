@@ -8,7 +8,7 @@ import { assignmentOf, sliceWord } from './word.js'
 import { UnsupportedError } from '../unsupported.js'
 import { expandBraces } from './braces.js'
 import { globPaths, hasGlobMeta } from '../glob.js'
-import { readExpansion, scanRef } from './lex.js'
+import { readBacktickSubstitution, readExpansion, scanRef } from './lex.js'
 import { lookupParameter, probeParameter } from './variables.js'
 import { evaluateParameter } from './parameter.js'
 import { evaluateArithmetic } from './arithmetic.js'
@@ -134,9 +134,10 @@ function expandedWord(w, ctx, assignment = false) {
     if (w.empty?.includes(i)) out.empty.push(out.value.length)
     if (i === w.value.length) break
     const m = maskAt(w, i)
-    const active = m !== '1' && w.value[i] === '$'
+    const c = w.value[i]
+    const active = m !== '1' && (c === '$' || c === '`')
     const compound = w.value[i + 1] === '(' || w.value[i + 1] === '{'
-    const ref = active ? (compound ? readExpansion(w.value, i, 0, m === '2') : scanRef(w.value, i, w.mask)) : null
+    const ref = active ? substitutionRef(w, i, c, m, compound) : null
     if (!ref) { append(w.value[i], m); continue }
     i += ref.raw.length - 1
     const r = expansionValue(ref, ctx, m === '2', assignment)
@@ -154,6 +155,13 @@ function expandedWord(w, ctx, assignment = false) {
   }
   out.q = out.empty.length > 0 || /[12]/u.test(out.mask)
   return out
+}
+
+// A backtick opens the same substitution as `$( )` and owns its own end, so
+// it is read from the word here rather than rewritten into `$( )` earlier.
+function substitutionRef(w, i, c, m, compound) {
+  if (c === '`') return readBacktickSubstitution(w.value, i)
+  return compound ? readExpansion(w.value, i, 0, m === '2') : scanRef(w.value, i, w.mask)
 }
 
 function expansionValue(ref, ctx, quoted, assignment) {
