@@ -3,6 +3,7 @@ import { lookup } from '../fs.js'
 import { err, ok, reason } from '../util.js'
 import { unsupportedFrom } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
+import { missingPathNote } from '../notes.js'
 
 export function rm(_stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['f', 'v'], long: ['force', 'verbose'] })
@@ -17,6 +18,7 @@ export function rm(_stdin, tokens, ctx) {
       let error = found.error
       // GNU -f ignores ENOTDIR as well as ENOENT: neither names an existing file.
       if (force && (error === 'No such file or directory' || error === 'Not a directory')) continue
+      missingPathNote(ctx, 'rm', name, error)
       if (error === null && ctx.fs.isDir(found.path)) error = 'Is a directory'
       const shown = verbose || error !== null || !ctx.writable || !found.path?.startsWith('/tmp/') ? quoteName(name, ctx) : ''
       if (error === null && !ctx.fs.removeWritable?.(ctx.cwd, name)) error = 'Read-only file system'
@@ -31,6 +33,7 @@ export function rm(_stdin, tokens, ctx) {
       }
     }
   } catch (e) {
+    missingPathNote(ctx, 'rm', e?.path, e?.fsError)
     const result = unsupportedFrom(e, 'rm', 'rm: ' + reason(e))
     result.events = [...events, { fd: 2, text: result.stderr }]
     result.stdout = stdout

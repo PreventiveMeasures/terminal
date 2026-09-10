@@ -22,9 +22,9 @@ const FILES = {
   '-input': 'alpha\n',
 }
 
-function check(command, stdout, exitCode = 0, stderr = '', files = FILES) {
+function check(command, stdout, exitCode = 0, stderr = '', files = FILES, notes = []) {
   assert.deepEqual(createTerminal(files).run(command), {
-    stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [],
+    stdout, stderr, exitCode, cwd: '/', notes, unsupported: [],
   }, command)
 }
 
@@ -85,7 +85,10 @@ describe('grep — patterns from virtual files', () => {
     }
     check('grep -rn -f patterns.txt src README.md',
       'src/a.ts:1:// TODO: validate\nsrc/b.ts:1:// FIXME: parse\nsrc/c.js:1:// TODO: ignore\nREADME.md:2:TODO: document\n', 0, '', files)
-    check('grep -rlnf patterns.txt src --include=*.ts', 'src/a.ts\nsrc/b.ts\n', 0, '', files)
+    check('grep -rlnf patterns.txt src --include=*.ts', 'src/a.ts\nsrc/b.ts\n', 0, '', files, [
+      'glob: no paths matched "--include=*.ts"; the pattern was left literal.',
+      'grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/src/c.js".',
+    ])
   })
 })
 

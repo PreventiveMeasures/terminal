@@ -13,8 +13,8 @@ const FILES = {
 const options = { commands: { capture: ({ args }) => JSON.stringify(args) + '\n' } }
 const terminal = () => createTerminal(FILES, options)
 
-function check(command, stdout, exitCode = 0, stderr = '') {
-  assert.deepEqual(terminal().run(command), { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] }, command)
+function check(command, stdout, exitCode = 0, stderr = '', notes = []) {
+  assert.deepEqual(terminal().run(command), { stdout, stderr, exitCode, cwd: '/', notes, unsupported: [] }, command)
 }
 
 describe('command substitution — output and shell words', () => {
@@ -53,14 +53,14 @@ describe('command substitution — output and shell words', () => {
     [String.raw`capture pre$(printf '')post`, ['prepost']],
     [String.raw`capture $(printf 'src/*.js\n')`, ['src/a.js', 'src/b.js']],
     [String.raw`capture "$(printf 'src/*.js\n')"`, ['src/*.js']],
-    [String.raw`capture $(printf 'missing*.js\n')`, ['missing*.js']],
+    [String.raw`capture $(printf 'missing*.js\n')`, ['missing*.js'], ['glob: no paths matched "missing*.js"; the pattern was left literal.']],
     [String.raw`capture $(printf '%s' 'a\ b')`, ['a\\', 'b']],
     [String.raw`capture $(printf '%s' "'a b'")`, ["'a", "b'"]],
     [String.raw`capture $(printf 'a\rb')`, ['a\rb']],
     [String.raw`capture $(printf '%s' 'a b')`, ['a b']],
     ['capture $(cat syntax)', ['$HOME;', 'echo', 'injected', '|', 'cat']],
   ]
-  for (const [command, args] of words) it(command, () => check(command, JSON.stringify(args) + '\n'))
+  for (const [command, args, notes] of words) it(command, () => check(command, JSON.stringify(args) + '\n', 0, '', notes))
 
   it('does not split or glob command output in assignment values', () => {
     check(String.raw`x=$(printf ' src/*.js\nsecond\n'); capture "$x"`, '[" src/*.js\\nsecond"]\n')

@@ -1,6 +1,7 @@
 // Search defaults to BRE; -E selects ERE and -F selects literal patterns.
 
-import { basename, lookup, relativeTo } from '../fs.js'
+import { basename, relativeTo, resolve, walkTree } from '../fs.js'
+import { lookupWithNote, omissionNote } from '../notes.js'
 import { parseArgs } from '../args.js'
 import { consumeStdin, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, usage } from '../util.js'
 import { UnsupportedError, unsupported, unsupportedFrom } from '../unsupported.js'
@@ -40,17 +41,22 @@ export function grep(stdin, tokens, ctx) {
   if (counts.max === 0 && (!flags.has('L') || flags.has('q'))) return noMatch()
   if (counts.max !== 0 && ctx.stdinFile && (flags.has('q') || flags.has('l') || flags.has('L') || values.has('m')) && (rest.length === 0 || rest.includes('-'))) return unsupported('feature', 'grep', 'partial stdin reads', 'grep: early termination on shared file input is not supported', 2)
   const recursive = flags.has('r') || flags.has('R')
-  const filters = compileFilters(parsed)
+  const filters = compileFilters(parsed, ctx)
   const binaryMode = parsed.order.findLast((o) => ['a', 'I', 'text'].includes(o.name))?.name
   filters.ignoreBinary = binaryMode === 'I' && counts.max !== 0
   filters.forceText = binaryMode === 'a' || binaryMode === 'text'
   filters.silent = flags.has('s') || flags.has('no-messages')
+  try { return filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) }
+  finally { filterNotes(filters, ctx.notes) }
+}
+
+function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
   if (flags.has('q')) return grepQuiet(stdin, rest, ctx, recursive, filters, re.res, flags.has('v'))
   const r = grepInputs(recursive, stdin, rest, ctx, filters)
   if (counts.max === 0) consumeStdin(ctx, stdin)
   // Filename filters apply to named and recursively discovered files, but not stdin.
   let inputs = r.inputs
-  if (filters.name.length > 0) inputs = inputs.filter((inp) => inp.name === null || includedByName(basename(inp.name), filters.name))
+  if (filters.name.length > 0) inputs = inputs.filter((inp) => includedInput(inp, filters))
   if (counts.max !== 0) inputs = inputs.map((inp) => textInput(inp, filters, re.res, flags.has('v')))
   const gap = counts.max === 0 ? null : inputGap(inputs, re.res, flags.has('v'), filters.forceText)
   if (gap) return gap
@@ -81,7 +87,7 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
     failed ||= r.failed
     if (paths.includes('-') || (paths.includes('/dev/stdin') && !ctx.stdinFile)) stdin = ''
     for (const input of r.inputs) {
-      if (filters.name.length > 0 && input.name !== null && !includedByName(basename(input.name), filters.name)) continue
+      if (!includedInput(input, filters)) continue
       const inp = textInput(input, filters, res, invert)
       const gap = inputGap([inp], res, invert, filters.forceText)
       if (gap) { gap.stderr = stderr + gap.stderr; return gap }
@@ -104,7 +110,17 @@ function textInput(input, filters, res, invert) {
   // Later discovery may retain earlier output, counts, or a quiet success;
   // buffer growth and read boundaries are not represented by this runtime.
   if (encodeUtf8Loose(input.content.slice(0, input.content.indexOf('\0'))).length >= 96 * 1024) throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
+  const path = input.name === null || input.name === '/dev/stdin' ? filters.stdinPath : resolve(filters.cwd, input.name)
+  if (path) filters.binary.add(path)
+  else filters.binaryStdin = true
   return { ...input, content: '' }
+}
+
+function filterNotes(filters, notes) {
+  const explanation = 'Binary input is treated as text with -a.'
+  omissionNote(notes, { command: 'grep', action: 'skipped', noun: ['binary file', 'binary files'], paths: filters.binary, explanation })
+  if (filters.binaryStdin) notes.add('grep: skipped binary standard input. ' + explanation)
+  omissionNote(notes, { command: 'grep', action: 'excluded', noun: ['entry', 'entries'], paths: filters.excluded, context: ' by --include/--exclude/--exclude-dir rules' })
 }
 
 // Unsupported output/name combinations must be diagnosed; conflicting dialects
@@ -164,13 +180,19 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
       if (p === '-' || p === '/dev/stdin') stdin = ''
       continue
     }
-    const { path: abs, error } = lookup(ctx.cwd, p, ctx.fs)
+    const { path: abs, error } = lookupWithNote(ctx, 'grep', p)
     // Filename filters apply after collecting both explicit and discovered files.
     if (ctx.fs.isFile(abs)) { inputs.push({ name: p, content: ctx.fs.readFile(abs) }); continue }
     if (error) { stderr += `grep: ${p}: ${error.toLowerCase()}\n`; failed = true; continue }
-    if (excludedStartDir(p, filters.dir)) continue
-    for (const filePath of ctx.fs.walkFiles(abs)) {
-      if (excludedByDir(filePath, abs, filters.dir)) continue
+    if (excludedStartDir(p, filters.dir)) { filters.excluded.add(abs); continue }
+    const descend = (path) => {
+      if (path === abs || filters.dir.length === 0 || !someMatch(filters.dir, basename(path))) return true
+      filters.excluded.add(path)
+      return false
+    }
+    for (const entry of walkTree(ctx.fs, abs, Infinity, descend)) {
+      if (entry.kind !== 'file') continue
+      const filePath = entry.path
       // Preserve operand spelling; the implicit '.' root has no display prefix.
       inputs.push({ name: displayName(rest.length ? p : '', abs, filePath), content: ctx.fs.readFile(filePath), recursive: true })
     }
@@ -179,15 +201,21 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
 }
 
 // Name filters retain option order so the last matching include/exclude wins.
-function compileFilters(parsed) {
+function compileFilters(parsed, ctx) {
   const name = parsed.order
     .filter((o) => o.name === 'include' || o.name === 'exclude')
     .map((o) => ({ include: o.name === 'include', re: compileGlob(o.value) }))
   const dir = (parsed.values.get('exclude-dir') ?? []).map((g) => compileGlob(g))
-  return { name, dir }
+  return { name, dir, binary: new Set(), excluded: new Set(), cwd: ctx.cwd, stdinPath: ctx.stdinHandle?.path }
 }
 
 function someMatch(res, name) { return res.some((re) => re.test(name)) }
+
+function includedInput(input, filters) {
+  if (input.name === null || includedByName(basename(input.name), filters.name)) return true
+  filters.excluded.add(resolve(filters.cwd, input.name))
+  return false
+}
 
 // The last matching filter wins. If none matches, the first filter determines
 // whether unmatched names are included by default.
@@ -196,14 +224,6 @@ function includedByName(name, nameFilters) {
   let last = null
   for (const f of nameFilters) if (f.re.test(name)) last = f
   return last ? last.include : !nameFilters[0].include
-}
-
-// Exclude a file when any directory component below its search root matches.
-function excludedByDir(filePath, absRoot, dirRes) {
-  if (dirRes.length === 0) return false
-  const parts = relativeTo(absRoot, filePath).split('/')
-  parts.pop() // drop the file's own base name; keep the dir components
-  return parts.some((d) => someMatch(dirRes, d))
 }
 
 // GNU also prunes a NAMED start directory by its own trailing component,

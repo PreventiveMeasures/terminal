@@ -9,19 +9,19 @@ import { parseUnits } from './shell/parse.js'
 import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
 import { BindingMap } from './shell/bindings.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
-import { err, reason } from './util.js'
+import { err, missingPathNote, reason } from './util.js'
 import { complete } from './complete.js'
 import { commandSubstitution } from './shell/capture.js'
 import { isolated, withState } from './shell/state.js'
 import { commandWriteError, createIoGuard, routeExternalOutput, runSteps } from './shell/run.js'
 
 export function createTerminal(sources, opts = {}) {
-  const { fs, cwd, home, writable } = mountSources(sources, opts)
+  const { fs, cwd, home, mount, writable } = mountSources(sources, opts)
   // stdinLeft tracks consumption within a command list; stdinOrigin allows
   // /dev/stdin to reopen a redirected file independently of that offset.
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
   const ctx = {
-    cwd, fs, io: createIoGuard(fs), user: opts.user ?? 'user', home, writable, registry, outputFds: { 1: 'out', 2: 'err' },
+    cwd, fs, io: createIoGuard(fs), user: opts.user ?? 'user', home, mount, writable, registry, outputFds: { 1: 'out', 2: 'err' },
     vars: new BindingMap(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '',
     unsupported: createUnsupportedFeed(), notes: new Set(),
   }
@@ -52,6 +52,7 @@ function dispatch(name, tokens, stdin, ctx, external = false) {
   try {
     return ctx.io.run(resolved, () => route(run()))
   } catch (e) {
+    missingPathNote(ctx, name, e?.path, e?.fsError)
     const message = `${name}: ${reason(e)}`
     const note = unsupportedNote(e)
     // Shared parsers cannot name the command; complete their notes here.

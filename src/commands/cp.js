@@ -4,6 +4,7 @@ import { err, reason } from '../util.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
+import { lookupWithNote, missingPathNote } from '../notes.js'
 
 const SPECIAL_FILES = new Set(['/dev/null', '/dev/stdin', '/dev/stdout', '/dev/stderr'])
 
@@ -29,6 +30,7 @@ export function cp(_stdin, tokens, ctx) {
     // (such as xargs reading its arguments) still guard their own input.
     ctx.io.setReads([])
     try { copyFile(source, destination, state) } catch (e) {
+      missingPathNote(ctx, 'cp', e?.path, e?.fsError)
       const note = unsupportedNote(e)
       const message = 'cp: ' + reason(e)
       if (note) {
@@ -55,8 +57,10 @@ function copyOperands({ positional, flags, order }, ctx) {
   const target = explicit ?? positional.at(-1)
   const found = lookup(ctx.cwd, target, ctx.fs)
   const directory = !noDirectory && ctx.fs.isDir(found.path)
-  if (explicit !== undefined && !directory) return { error: `target directory ${quoteName(target, ctx)}: ${found.error ?? 'Not a directory'}` }
-  if (explicit === undefined && positional.length > 2 && !directory) return { error: `target ${quoteName(target, ctx)}: ${found.error ?? 'Not a directory'}` }
+  if (!directory && (explicit !== undefined || positional.length > 2)) {
+    missingPathNote(ctx, 'cp', target, found.error)
+    return { error: `${explicit === undefined ? 'target' : 'target directory'} ${quoteName(target, ctx)}: ${found.error ?? 'Not a directory'}` }
+  }
   return { target, directory, sources: explicit === undefined ? positional.slice(0, -1) : positional }
 }
 
@@ -65,7 +69,7 @@ function copyFile(source, destination, state) {
   if (isSpecialFile(source, ctx.cwd) || isSpecialFile(destination, ctx.cwd)) throw new UnsupportedError('feature', 'special file', 'copying special files is not supported')
   const shownSource = quoteName(source, ctx)
   const shownTarget = quoteName(destination, ctx)
-  const found = lookup(ctx.cwd, source, ctx.fs)
+  const found = lookupWithNote(ctx, 'cp', source)
   const fail = (message) => report(state, 'cp: ' + message + '\n', true)
   if (found.error) return fail(`cannot stat ${shownSource}: ${found.error}`)
   if (ctx.fs.isDir(found.path)) return fail(`-r not specified; omitting directory ${shownSource}`)
@@ -83,13 +87,17 @@ function copyFile(source, destination, state) {
     if (state.outputOverlap) throw new UnsupportedError('feature', 'copy output buffering', 'buffered verbose output sharing a copied file is not supported')
     report(state, `${shownSource} -> ${shownTarget}\n`)
   }
-  if (invalid) return fail(`cannot create regular file ${shownTarget}: ${invalid}`)
+  if (invalid) {
+    missingPathNote(ctx, 'cp', destination, invalid)
+    return fail(`cannot create regular file ${shownTarget}: ${invalid}`)
+  }
   try {
     if (!ctx.fs.copyWritable?.(ctx.cwd, found.path, destination)) {
       return fail(`${state.force && dest.path !== null ? 'cannot remove' : 'cannot create regular file'} ${shownTarget}: Read-only file system`)
     }
   } catch (e) {
     if (unsupportedNote(e)) throw e
+    missingPathNote(ctx, 'cp', e?.path, e?.fsError)
     const message = reason(e)
     return fail(`cannot create regular file ${shownTarget}: ${message.startsWith(destination + ': ') ? message.slice(destination.length + 2) : message}`)
   }

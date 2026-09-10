@@ -9,8 +9,8 @@ const FILES = {
   input: 'first\nsecond\n',
 }
 
-function check(command, stdout, exitCode = 0, stderr = '', cwd = '/') {
-  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd, notes: [], unsupported: [] }, command)
+function check(command, stdout, exitCode = 0, stderr = '', cwd = '/', notes = []) {
+  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd, notes, unsupported: [] }, command)
 }
 
 describe('shell if — branches and status', () => {
@@ -85,7 +85,7 @@ describe('shell if — source analysis and nested execution', () => {
   })
 
   it('shares redirected input between an evaluated condition and its body', () => {
-    check('if head -n1; then cat; fi < input', 'first\nsecond\n')
+    check('if head -n1; then cat; fi < input', 'first\nsecond\n', 0, '', '/', ['head: selected 1 of 2 lines from standard input.'])
   })
 
   it('applies redirection to the whole conditional', () => {

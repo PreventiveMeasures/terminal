@@ -32,6 +32,9 @@ const GREP_GAPS = new Map([
   ...[264, 270, 274, 297].map((line) => [line, 'regex collating or equivalence class']),
   [159, 'conditional backreference'],
 ])
+// These subjects contain further nonoverlapping matches after the corpus's
+// expected first extent: abc has three single-letter matches; the rest have two.
+const REPEATED_MATCHES = new Map([[39, 3], ...[213, 214, 215, 216, 346, 358, 363, 364, 365, 366].map((line) => [line, 2])])
 
 function expectedSpan(v) {
   if (v.match === undefined) return null
@@ -46,8 +49,8 @@ function expectedSpan(v) {
   return { start, end: start + text.length }
 }
 
-function result(stdout, exitCode = 0) {
-  return { stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] }
+function result(stdout, exitCode = 0, notes = []) {
+  return { stdout, stderr: '', exitCode, cwd: '/', notes, unsupported: [] }
 }
 
 function checkGap(actual, detail) {
@@ -92,7 +95,9 @@ describe('Spencer portable vectors through GNU grep syntax', () => {
         // First nonempty extent isolates the upstream oracle even when grep -o
         // emits additional nonoverlapping matches from the same selected line.
         const only = terminal.run(command.replace('grep ', 'grep -o ') + ' | head -1')
-        assert.deepEqual(only, result(input.slice(span.start, span.end) + '\n'))
+        const total = REPEATED_MATCHES.get(v.line)
+        const notes = total ? [`head: selected 1 of ${total} lines from standard input.`] : []
+        assert.deepEqual(only, result(input.slice(span.start, span.end) + '\n', 0, notes))
       })
     }
   }

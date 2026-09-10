@@ -1,6 +1,7 @@
 import { emptyOutput } from '../shell/output.js'
 import { UnsupportedError } from '../unsupported.js'
 import { MAX_SED_OUTPUT } from './sed-common.js'
+import { missingPathNote } from '../notes.js'
 
 export function lineWriter(write, delimiter) {
   let missing = false
@@ -46,7 +47,11 @@ export function sedOutput(ctx, delimiter) {
       else if (name === '/dev/stdout' || name === '/dev/stderr') write = (text) => stream(name === '/dev/stdout' ? 1 : 2, text)
       else {
         let handle
-        try { handle = ctx.writable && ctx.fs.openWritable(ctx.cwd, name) } catch (e) { e.exitCode = 4; throw e }
+        try { handle = ctx.writable && ctx.fs.openWritable(ctx.cwd, name) } catch (e) {
+          missingPathNote(ctx, 'sed', e?.path, e?.fsError)
+          e.exitCode = 4
+          throw e
+        }
         if (!handle) throw new UnsupportedError('feature', 'output file', `sed: ${name}: Read-only file system`)
         write = (text) => { account(text); syncReads(); handle.write(text) }
       }

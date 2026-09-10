@@ -10,8 +10,8 @@ const FILES = {
   unicode: 'é\n',
 }
 
-function check(command, stdout, exitCode = 0) {
-  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] }, command)
+function check(command, stdout, exitCode = 0, notes = []) {
+  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode, cwd: '/', notes, unsupported: [] }, command)
 }
 
 describe('egrep compatibility alias', () => {
@@ -29,7 +29,8 @@ describe('egrep compatibility alias', () => {
 
   it('retains repeated patterns and recursive filename filters', () => {
     check("egrep -n -e '^export ' -e TODO src/app.ts", '2:export const alpha = 1\n3:export function beta() {}\n4:// TODO gamma\n')
-    check("egrep -rn '^export ' src --include='*.ts'", 'src/app.ts:2:export const alpha = 1\nsrc/app.ts:3:export function beta() {}\nsrc/lib.ts:1:export const delta = 2\n')
+    check("egrep -rn '^export ' src --include='*.ts'", 'src/app.ts:2:export const alpha = 1\nsrc/app.ts:3:export function beta() {}\nsrc/lib.ts:1:export const delta = 2\n', 0,
+      ['grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/src/ignored.js".'])
   })
 
   it('accepts repeated -E and protects a leading-dash pattern after --', () => {

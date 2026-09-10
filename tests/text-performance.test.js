@@ -2,29 +2,31 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
-function check(command, input, stdout) {
+function check(command, input, stdout, notes = []) {
   assert.deepEqual(createTerminal({ input }).run(command), {
-    stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
+    stdout, stderr: '', exitCode: 0, cwd: '/', notes, unsupported: [],
   }, command)
 }
 
 describe('text processing preserves record and byte semantics', () => {
   it('head and tail preserve blank records, final terminators, and shared stdin offsets', () => {
-    for (const [command, input, stdout] of [
-      ['head -n1 input', '\nlast', '\n'],
-      ['tail -n1 input', 'first\n\n', '\n'],
-      ['head -n-1 input', 'first\n\n', 'first\n'],
-      ['tail -n+2 input', 'first\n\n', '\n'],
-      ['tail -n1 input', 'first\nlast', 'last'],
-      ['head -n-1 input', 'first\nlast', 'first\n'],
+    for (const [command, input, stdout, notes] of [
+      ['head -n1 input', '\nlast', '\n', ['head: selected 1 of 2 lines from "/input".']],
+      ['tail -n1 input', 'first\n\n', '\n', ['tail: selected 1 of 2 lines from "/input".']],
+      ['head -n-1 input', 'first\n\n', 'first\n', ['head: selected 1 of 2 lines from "/input".']],
+      ['tail -n+2 input', 'first\n\n', '\n', ['tail: selected 1 of 2 lines from "/input".']],
+      ['tail -n1 input', 'first\nlast', 'last', ['tail: selected 1 of 2 lines from "/input".']],
+      ['head -n-1 input', 'first\nlast', 'first\n', ['head: selected 1 of 2 lines from "/input".']],
       ['head -n-0 input', 'first\nlast', 'first\nlast'],
       ['tail -n+0 input', 'first\nlast', 'first\nlast'],
       ['tail -n2 input', '\n', '\n'],
-      ['head -n-2 input', '\n', ''],
+      ['head -n-2 input', '\n', '', ['head: selected 0 of 1 line from "/input".']],
       ['head -n999999999999999999 input', '', ''],
       ['tail -n999999999999999999 input', '\n', '\n'],
-      ['{ head -n1; head -n1; cat; } < input', 'first\n\nlast', 'first\n\nlast'],
-    ]) check(command, input, stdout)
+      ['{ head -n1; head -n1; cat; } < input', 'first\n\nlast', 'first\n\nlast', [
+        'head: selected 1 of 3 lines from standard input.', 'head: selected 1 of 2 lines from standard input.',
+      ]],
+    ]) check(command, input, stdout, notes)
   })
 
   it('wc keeps byte-based column widths when counting characters and lines', () => {

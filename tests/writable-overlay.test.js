@@ -137,11 +137,14 @@ describe('existing filesystem consumers see current overlay contents', () => {
     check(t, "printf 'beta\\nalpha\\n' >/tmp/alpha.txt; printf 'export x\\n' >/tmp/zeta.js; printf hidden >/tmp/.hidden")
     assert.deepEqual(t.run('ls /tmp'), {
       stdout: 'alpha.txt\nzeta.js\n', stderr: '', exitCode: 0, cwd: '/repo', unsupported: [],
-      notes: ['ls: omitted 1 hidden entry: "/tmp/.hidden". Use -a to include hidden entries.'],
+      notes: ['ls: omitted 1 hidden entry: "/tmp/.hidden". Hidden entries are included with -a.'],
     })
     check(t, 'ls -A /tmp', '.hidden\nalpha.txt\nzeta.js\n')
     check(t, 'find /tmp -type f', '/tmp/.hidden\n/tmp/alpha.txt\n/tmp/zeta.js\n')
-    check(t, "printf '%s\\n' /tmp/*.txt", '/tmp/alpha.txt\n')
+    assert.deepEqual(t.run("printf '%s\\n' /tmp/*.txt"), {
+      stdout: '/tmp/alpha.txt\n', stderr: '', exitCode: 0, cwd: '/repo', unsupported: [],
+      notes: ['glob: omitted 1 hidden entry while expanding "/tmp/*.txt": "/tmp/.hidden". Dot-prefixed patterns can include hidden entries.'],
+    })
     check(t, 'cat /tmp/alpha.txt | sort', 'alpha\nbeta\n')
     check(t, 'grep -rn export /tmp', '/tmp/zeta.js:1:export x\n')
     check(t, 'cat </tmp/alpha.txt', 'beta\nalpha\n')

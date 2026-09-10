@@ -107,7 +107,10 @@ describe('likely agent commands — diagnostic boundaries', () => {
     const command = String.raw`grep -rn "b.a\|c.a\|X(\"b\")" dir/ --include=*.txt`
     assert.deepEqual(t.run(command), {
       stdout: 'dir/a.txt:1:b.a\ndir/a.txt:2:c.a\ndir/a.txt:3:X("b")\ndir/sub/b.txt:1:bza\ndir/sub/b.txt:2:cza\n',
-      stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
+      stderr: '', exitCode: 0, cwd: '/', unsupported: [], notes: [
+        'glob: no paths matched "--include=*.txt"; the pattern was left literal.',
+        'grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/dir/skip.js".',
+      ],
     })
   })
 

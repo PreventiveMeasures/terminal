@@ -16,38 +16,38 @@ const FILES = {
   'field-file': 'maple:birch\n',
 }
 
-function check(command, input, stdout, exitCode = 0) {
+function check(command, input, stdout, exitCode = 0, notes = []) {
   const files = input === null ? FILES : { ...FILES, input }
   const line = input === null ? command : `${command} < input`
-  assert.deepEqual(createTerminal(files).run(line), { stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
+  assert.deepEqual(createTerminal(files).run(line), { stdout, stderr: '', exitCode, cwd: '/', notes, unsupported: [] })
 }
 
 function cases(rows) {
-  for (const [name, command, input, stdout, status] of rows) {
-    it(name, () => check(command, input, stdout, status))
+  for (const [name, command, input, stdout, status, notes] of rows) {
+    it(name, () => check(command, input, stdout, status, notes))
   }
 }
 
 describe('upstream BusyBox audit — head and tail', () => {
   const rows = Array.from({ length: 13 }, (_, i) => `entry-${i + 1}\n`)
   cases([
-    ['head default record count', 'head', rows.join(''), rows.slice(0, 10).join('')],
-    ['head positive record count', 'head -n 3', rows.join(''), rows.slice(0, 3).join('')],
-    ['head negative record count', 'head -n -4', rows.join(''), rows.slice(0, -4).join('')],
-    ['head drops all records', 'head -n -20', rows.join(''), ''],
+    ['head default record count', 'head', rows.join(''), rows.slice(0, 10).join(''), 0, ['head: selected 10 of 13 lines from standard input.']],
+    ['head positive record count', 'head -n 3', rows.join(''), rows.slice(0, 3).join(''), 0, ['head: selected 3 of 13 lines from standard input.']],
+    ['head negative record count', 'head -n -4', rows.join(''), rows.slice(0, -4).join(''), 0, ['head: selected 9 of 13 lines from standard input.']],
+    ['head drops all records', 'head -n -20', rows.join(''), '', 0, ['head: selected 0 of 13 lines from standard input.']],
     ['head preserves unterminated last record', 'head -n 3', 'red\nblue', 'red\nblue'],
-    ['head removes unterminated last record', 'head -n -1', 'red\nblue', 'red\n'],
-    ['head byte count', 'head -c 4', 'planet\norbit', 'plan'],
-    ['head negative byte count', 'head -c -4', 'planet\norbit', 'planet\no'],
-    ['tail positive offset beyond end', 'tail -c +80', 'orbit', ''],
+    ['head removes unterminated last record', 'head -n -1', 'red\nblue', 'red\n', 0, ['head: selected 1 of 2 lines from standard input.']],
+    ['head byte count', 'head -c 4', 'planet\norbit', 'plan', 0, ['head: selected 4 of 12 bytes from standard input.']],
+    ['head negative byte count', 'head -c -4', 'planet\norbit', 'planet\no', 0, ['head: selected 8 of 12 bytes from standard input.']],
+    ['tail positive offset beyond end', 'tail -c +80', 'orbit', '', 0, ['tail: selected 0 of 5 bytes from standard input.']],
     ['tail offset starts at byte one', 'tail -c +1', 'orbit', 'orbit'],
     ['tail zero start offset', 'tail -c +0', 'orbit', 'orbit'],
-    ['tail positive byte offset', 'tail -c +4', 'planet', 'net'],
-    ['tail large positive byte offset', 'tail -c +12290', 'x'.repeat(20000), 'x'.repeat(7711)],
-    ['tail last bytes', 'tail -c 4', 'planet\norbit', 'rbit'],
-    ['tail from a record number', 'tail -n +3', 'one\ntwo\nthree\nfour', 'three\nfour'],
-    ['tail ignores absent record', 'tail -n +9', 'one\ntwo', ''],
-    ['tail last unterminated record', 'tail -n 1', 'one\ntwo', 'two'],
+    ['tail positive byte offset', 'tail -c +4', 'planet', 'net', 0, ['tail: selected 3 of 6 bytes from standard input.']],
+    ['tail large positive byte offset', 'tail -c +12290', 'x'.repeat(20000), 'x'.repeat(7711), 0, ['tail: selected 7711 of 20000 bytes from standard input.']],
+    ['tail last bytes', 'tail -c 4', 'planet\norbit', 'rbit', 0, ['tail: selected 4 of 12 bytes from standard input.']],
+    ['tail from a record number', 'tail -n +3', 'one\ntwo\nthree\nfour', 'three\nfour', 0, ['tail: selected 2 of 4 lines from standard input.']],
+    ['tail ignores absent record', 'tail -n +9', 'one\ntwo', '', 0, ['tail: selected 0 of 2 lines from standard input.']],
+    ['tail last unterminated record', 'tail -n 1', 'one\ntwo', 'two', 0, ['tail: selected 1 of 2 lines from standard input.']],
     ['tail empty input', 'tail -n 3', '', ''],
   ])
 })
@@ -163,10 +163,10 @@ describe('upstream BusyBox audit — find', () => {
     ['failed individual exec is a false predicate, not an error', 'find project/main.js -exec false {} \\;', null, ''],
     ['successful batched exec', 'find project/main.js -exec true {} +', null, ''],
     ['failed batched exec fails find', 'find project/main.js -exec false {} +', null, '', 1],
-    ['root name ignores repeated slashes', 'find /// -maxdepth 0 -name /', null, '///\n'],
-    ['root name is not its repeated slash spelling', 'find /// -maxdepth 0 -name ///', null, ''],
-    ['dot root name ignores trailing slashes', 'find .//// -maxdepth 0 -name .', null, './///\n'],
-    ['dot root name is not its path spelling', 'find .//// -maxdepth 0 -name .////', null, ''],
+    ['root name ignores repeated slashes', 'find /// -maxdepth 0 -name /', null, '///\n', 0, ['find: depth limit omitted contents of 1 directory: "/".']],
+    ['root name is not its repeated slash spelling', 'find /// -maxdepth 0 -name ///', null, '', 0, ['find: depth limit omitted contents of 1 directory: "/".']],
+    ['dot root name ignores trailing slashes', 'find .//// -maxdepth 0 -name .', null, './///\n', 0, ['find: depth limit omitted contents of 1 directory: "/".']],
+    ['dot root name is not its path spelling', 'find .//// -maxdepth 0 -name .////', null, '', 0, ['find: depth limit omitted contents of 1 directory: "/".']],
   ])
 })
 

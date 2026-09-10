@@ -19,7 +19,8 @@ describe('closed stdout is validated for commands entering any dispatch path', (
   for (const command of ['true', 'grep missing /input', 'head -n0 /input', 'hexdump /input', 'tree /']) {
     it(`does not fabricate failures for ${command}`, () => {
       const status = command === 'grep missing /input' ? 1 : 0
-      assert.deepEqual(setup().run(command + ' 1>&-'), result('', status))
+      const notes = command === 'head -n0 /input' ? ['head: selected 0 of 2 lines from "/input".'] : []
+      assert.deepEqual(setup().run(command + ' 1>&-'), { ...result('', status), notes })
     })
   }
   it('handles inherited closure without duplicated errors', () => {

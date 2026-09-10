@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 // execute_cmd.c execute_cond_node and test.c arithcomp. The upstream cond.tests
 // fixture also covers predicate ambiguity, quoting, and arithmetic precedence.
 const terminal = () => createTerminal({ data: 'input\n', dir: { file: '' } })
-const expected = (exitCode = 0, stdout = '', stderr = '') => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
+const expected = (exitCode = 0, stdout = '', stderr = '', notes = []) => ({ stdout, stderr, exitCode, cwd: '/', notes, unsupported: [] })
 
 describe('conditional quoting survives continuations and concatenated words', () => {
   for (const [source, status] of [
@@ -55,7 +55,7 @@ describe('conditional predicates retain the Bash expression grammar', () => {
 })
 
 describe('conditional operands expand in order with lazy state and input consumption', () => {
-  for (const [source, status, stdout] of [
+  for (const [source, status, stdout, notes] of [
     ['n=1; [[ n -eq $((n=2)) ]]; echo "$? $n"', 0, '0 2\n'],
     ['n=1; [[ n++ -eq $n ]]; echo "$? $n"', 0, '0 2\n'],
     ['n=1; [[ $((n=2)) -eq $((n=3)) ]]; echo "$? $n"', 0, '1 3\n'],
@@ -66,11 +66,11 @@ describe('conditional operands expand in order with lazy state and input consump
     ['printf input | { [[ -z "" || -n "$(cat)" ]]; cat; }', 0, 'input'],
     ['printf input | { [[ -n "" && -n "$(cat)" ]]; cat; }', 0, 'input'],
     ['printf input | { [[ -n "$(cat)" || -n "$(cat)" ]]; cat; }', 0, ''],
-    ['printf input | [[ "$(head -c 1)" == i && "$(cat)" == nput ]]', 0, ''],
-    ['{ [[ "$(head -c 1)" == i && "$(cat)" == $\'nput\\n\' ]]; } < data', 1, ''],
-    ['{ [[ "$(head -c 1)" == i && "$(cat)" == nput ]]; } < data', 0, ''],
+    ['printf input | [[ "$(head -c 1)" == i && "$(cat)" == nput ]]', 0, '', ['head: selected 1 of 5 bytes from standard input.']],
+    ['{ [[ "$(head -c 1)" == i && "$(cat)" == $\'nput\\n\' ]]; } < data', 1, '', ['head: selected 1 of 6 bytes from standard input.']],
+    ['{ [[ "$(head -c 1)" == i && "$(cat)" == nput ]]; } < data', 0, '', ['head: selected 1 of 6 bytes from standard input.']],
   ]) {
-    it(source, () => { assert.deepEqual(terminal().run(source), expected(status, stdout)) })
+    it(source, () => { assert.deepEqual(terminal().run(source), expected(status, stdout, '', notes)) })
   }
 
   it('preserves ordinary inner command errors without inventing unsupported notes', () => {

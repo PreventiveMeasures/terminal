@@ -8,7 +8,7 @@ import { AwkError, MAX_STEPS } from './common.js'
 import { unescapeAwkString } from './lex.js'
 import { AwkRegex, compileRegex, nonEmptyMatch, splitByRegex, stepAt } from './regex.js'
 import { StrNum, checkText, ignoreCase, toNum, toStr } from './value.js'
-import { lookup } from '../fs.js'
+import { lookupWithNote } from '../notes.js'
 import { consumeStdin } from '../util.js'
 import { UINT32_MAX } from '../numeric.js'
 
@@ -192,7 +192,7 @@ export class Input {
     if (name === '-' || name === '/dev/stdin') {
       return { text: name === '/dev/stdin' && this.ctx.stdinFile ? this.ctx.stdinOrigin : this.takeStdin() }
     }
-    const { path, error } = lookup(this.ctx.cwd, name, this.ctx.fs)
+    const { path, error } = lookupWithNote(this.ctx, 'awk', name)
     if (this.ctx.fs.isDir(path)) return { error: 'Is a directory' }
     return error ? { error } : { text: this.ctx.fs.readFile(path) }
   }

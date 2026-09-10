@@ -3,12 +3,12 @@ import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
 const HIDDEN = { '.hidden': 'hidden\n', visible: 'visible\n' }
-const ONE_NOTE = 'ls: omitted 1 hidden entry: "/.hidden". Use -a to include hidden entries.'
+const ONE_NOTE = 'ls: omitted 1 hidden entry: "/.hidden". Hidden entries are included with -a.'
 const expected = (stdout = '', notes = [], extra = {}) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [], notes, ...extra })
 
 function noteFor(paths) {
   const count = paths.length
-  return `ls: omitted ${count} hidden ${count === 1 ? 'entry' : 'entries'}: ${paths.map((path) => JSON.stringify(path)).join(', ')}. Use -a to include hidden entries.`
+  return `ls: omitted ${count} hidden ${count === 1 ? 'entry' : 'entries'}: ${paths.map((path) => JSON.stringify(path)).join(', ')}. Hidden entries are included with -a.`
 }
 
 describe('RunResult notes describe actual ls omissions', () => {
@@ -69,7 +69,7 @@ describe('RunResult notes describe actual ls omissions', () => {
     it('formats the ' + count + '-entry boundary', () => {
       const paths = Array.from({ length: count }, (_, index) => '/.hidden' + index)
       const sources = Object.fromEntries(paths.map((path) => [path, '']))
-      const message = count === 9 ? noteFor(paths) : 'ls: omitted 10 hidden entries. Use -a to include hidden entries.'
+      const message = count === 9 ? noteFor(paths) : 'ls: omitted 10 hidden entries. Hidden entries are included with -a.'
       assert.deepEqual(createTerminal(sources).run('ls'), expected('', [message]))
     })
   }
@@ -90,19 +90,19 @@ describe('RunResult notes describe actual ls omissions', () => {
 })
 
 describe('notes survive nested shell execution and output routing', () => {
-  for (const [command, stdout] of [
+  for (const [command, stdout, extraNotes = []] of [
     ['ls | wc -l', '1\n'],
     ['ls >/dev/null', ''],
     ['ls 2>/dev/null | cat', 'visible\n'],
     ['(ls)', 'visible\n'],
     ['{ ls; } >/dev/null', ''],
     ['value=$(ls); printf "%s" "$value"', 'visible'],
-    ['find . -maxdepth 0 -exec ls {} \\;', 'visible\n'],
+    ['find . -maxdepth 0 -exec ls {} \\;', 'visible\n', ['find: depth limit omitted contents of 1 directory: "/".']],
     ["printf '%s\\n' / | xargs ls", 'visible\n'],
     ['for dir in / /; do ls "$dir"; done', 'visible\nvisible\n'],
     ['ls; ls', 'visible\nvisible\n'],
   ]) {
-    it(command, () => assert.deepEqual(createTerminal(HIDDEN).run(command), expected(stdout, [ONE_NOTE])))
+    it(command, () => assert.deepEqual(createTerminal(HIDDEN).run(command), expected(stdout, [ONE_NOTE, ...extraNotes])))
   }
 
   it('retains notes from earlier input units after a later parse error', () => {

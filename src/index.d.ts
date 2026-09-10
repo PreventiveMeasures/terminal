@@ -212,12 +212,21 @@ export interface RunResult {
    */
   unsupported: readonly Unsupported[]
   /**
-   * Informational notes from commands that ran, independent of stdout, stderr,
+   * Informational notes from execution and expansion, independent of stdout, stderr,
    * and exit status. Frozen and deduplicated per run; redirects, pipelines,
    * and nested shell commands cannot suppress them.
    *
-   * `ls` notes when it omits hidden entries, suggests `-a`, and includes
-   * absolute paths when fewer than 10 entries were omitted by that invocation.
+   * Notes cover hidden entries omitted by `ls` or pathname globs, unmatched
+   * globs passed literally, input shortened by `head`/`tail`, depth-limited
+   * traversal, grep binary/filter exclusions, and NUL bytes discarded by
+   * command substitution. Omission lists include absolute paths for fewer
+   * than 10 entries, otherwise a count. Notes describe what happened and
+   * explain relevant option behavior, such as `ls -a` including hidden entries.
+   *
+   * Failed relative file lookups also note verified alternatives at `/` or
+   * the mount point when the current directory caused the missing path.
+   * These hints preserve the original error and do not accompany silent
+   * existence probes. Notes never enable features or change command results.
    */
   notes: readonly string[]
 }
