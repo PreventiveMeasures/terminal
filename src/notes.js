@@ -16,8 +16,15 @@ export function missingPathNote(ctx, command, path, error) {
     if (!found.error) alternatives.add(found.path)
   }
   if (!alternatives.size) return
-  const paths = [...alternatives].sort(compareNames).map((name) => JSON.stringify(name)).join(' or ')
-  ctx.notes?.add(`${command}: relative path ${JSON.stringify(path)} was not found from cwd ${JSON.stringify(ctx.cwd)}. It exists at ${paths}.`)
+  const [first, second] = [...alternatives].sort(compareNames)
+  let description
+  if (second === undefined) description = `A ${ctx.fs.isDir(first) ? 'dir' : 'file'} exists at ${JSON.stringify(first)}.`
+  else {
+    const files = !ctx.fs.isDir(first) && !ctx.fs.isDir(second) && ctx.fs.isFile(first) && ctx.fs.isFile(second)
+    const differ = files && !ctx.fs.sameFileContents(first, second)
+    description = `Both of ${JSON.stringify(first)} and ${JSON.stringify(second)} exist${differ ? ', and they differ in contents' : ''}.`
+  }
+  ctx.notes?.add(`${command}: relative path ${JSON.stringify(path)} was not found from cwd ${JSON.stringify(ctx.cwd)}. ${description}`)
 }
 
 // A directory can be revisited with different glob suffixes or ls operands.

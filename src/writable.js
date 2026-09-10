@@ -25,6 +25,7 @@ export function writableFs(base) {
       observer?.read(inode ?? path)
       return inode ? decodeUtf8(inode.bytes) : base.readFile(path)
     },
+    sameFileContents: (a, b) => sameFileContents(base, files, a, b),
     listDir: (path) => {
       if (path === '/') return rootEntries
       if (path !== '/tmp') return base.listDir(path)
@@ -82,6 +83,20 @@ export function writableFs(base) {
     },
   }
   return fs
+}
+
+// Informational comparisons must not register command input reads or decode
+// overlay bytes: malformed UTF-8 must not turn a missing-path hint into an error.
+function sameFileContents(base, files, a, b) {
+  const first = files.get(a), second = files.get(b)
+  if (!first && !second) return base.sameFileContents(a, b)
+  const bytes = (path, inode) => {
+    if (inode) return inode.bytes
+    const text = base.readFile(path)
+    return text.isWellFormed() ? encodeUtf8(text) : null
+  }
+  const left = bytes(a, first), right = bytes(b, second)
+  return left !== null && right !== null && left.length === right.length && left.every((byte, i) => byte === right[i])
 }
 
 function checkTarget(fs, cwd, path) {

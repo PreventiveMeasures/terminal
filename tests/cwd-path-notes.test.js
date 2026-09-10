@@ -10,8 +10,10 @@ const SOURCES = {
 }
 const OPTIONS = { mount: '/repo', cwd: '/repo/sub' }
 
-function note(command, path, alternatives, cwd = '/repo/sub') {
-  return `${command}: relative path ${JSON.stringify(path)} was not found from cwd ${JSON.stringify(cwd)}. It exists at ${alternatives.map((name) => JSON.stringify(name)).join(' or ')}.`
+function note(command, path, alternatives, cwd = '/repo/sub', kind = 'file', differ = false) {
+  const paths = alternatives.map((name) => JSON.stringify(name))
+  const location = paths.length === 1 ? `A ${kind} exists at ${paths[0]}` : `Both of ${paths.join(' and ')} exist${differ ? ', and they differ in contents' : ''}`
+  return `${command}: relative path ${JSON.stringify(path)} was not found from cwd ${JSON.stringify(cwd)}. ${location}.`
 }
 
 const cases = [
@@ -53,7 +55,7 @@ describe('cwd notes accompany actual relative-path lookup failures', () => {
       assert.equal(result.stderr, stderr)
       assert.deepEqual(result.unsupported, [])
       assert.equal(result.cwd, '/repo/sub')
-      assert.deepEqual(result.notes, [note(command, path, ['/repo/' + path])])
+      assert.deepEqual(result.notes, [note(command, path, ['/repo/' + path], undefined, path === 'dir' ? 'dir' : 'file')])
     })
   }
 
@@ -62,7 +64,7 @@ describe('cwd notes accompany actual relative-path lookup failures', () => {
     assert.equal(result.exitCode, 2)
     assert.equal(result.stderr, '')
     assert.equal(result.stdout, 'dir  [error opening dir]\n\n0 directories, 0 files\n')
-    assert.deepEqual(result.notes, [note('tree', 'dir', ['/repo/dir'])])
+    assert.deepEqual(result.notes, [note('tree', 'dir', ['/repo/dir'], undefined, 'dir')])
   })
 
   it('retains successful file output alongside a missing operand', () => {
@@ -116,7 +118,7 @@ describe('cwd alternatives use real filesystem lookups', () => {
     const terminal = createTerminal({ ...SOURCES, 'tmp/file': 'mounted\n' }, { ...OPTIONS, writable: '/tmp/' })
     terminal.run('printf overlay >/tmp/file')
     const result = terminal.run('cat tmp/file')
-    assert.deepEqual(result.notes, [note('cat', 'tmp/file', ['/repo/tmp/file', '/tmp/file'])])
+    assert.deepEqual(result.notes, [note('cat', 'tmp/file', ['/repo/tmp/file', '/tmp/file'], undefined, 'file', true)])
   })
 
   it('checks intermediate components before simplifying dot-dot', () => {
@@ -232,7 +234,7 @@ describe('custom commands and writable failures use the shared cwd note path', (
     const listed = terminal.run('list dir')
     assert.equal(listed.stderr, 'list: dir: no such file or directory\n')
     assert.equal(listed.exitCode, 1)
-    assert.deepEqual(listed.notes, [note('list', 'dir', ['/repo/dir'])])
+    assert.deepEqual(listed.notes, [note('list', 'dir', ['/repo/dir'], undefined, 'dir')])
     const probed = terminal.run('probe')
     assert.equal(probed.stdout, 'false')
     assert.deepEqual(probed.notes, [])
@@ -263,11 +265,11 @@ describe('custom commands and writable failures use the shared cwd note path', (
       assert.deepEqual(first.notes, [])
       const second = terminal.run('use')
       assert.notEqual(second.exitCode, 0)
-      assert.deepEqual(second.notes, [note('save', 'dir', ['/repo/dir'])])
+      assert.deepEqual(second.notes, [note('save', 'dir', ['/repo/dir'], undefined, 'dir')])
       assert.deepEqual(first.notes, [])
       const outer = terminal.run('reenter')
       assert.deepEqual(outer.notes, [])
-      assert.deepEqual(nested.notes, [note('save', 'dir', ['/repo/dir'])])
+      assert.deepEqual(nested.notes, [note('save', 'dir', ['/repo/dir'], undefined, 'dir')])
       assert.deepEqual(terminal.run('true').notes, [])
     })
   }
