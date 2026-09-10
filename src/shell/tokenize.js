@@ -7,8 +7,9 @@
 // quotes only $, backtick, quote, backslash and newline are escaped.
 // lex.js handles substitutions, operators, ANSI-C strings and here-documents.
 
-import { NAME_RE, backtickGap, decodeAnsiC, readExpansion, readHeredocBodies, readOperator } from './lex.js'
+import { NAME_RE, backtickGap, decodeAnsiC, readExpansion, readHeredocBodies, readOperator, skipContinuations } from './lex.js'
 import { UnsupportedError } from '../unsupported.js'
+import { readConditional } from './conditional-lex.js'
 
 export { NAME_RE }
 
@@ -21,7 +22,7 @@ const isBlank = (c) => c === ' ' || c === '\t'
 
 export function tokenize(line) {
   // Reference scanning splices backslash-newline out of st.line.
-  const st = { line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoted: false, quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2 }
+  const st = newScanner(line)
   while (st.i < st.line.length) {
     const c = st.line[st.i]
     if (st.quote && c === st.quote) { closeQuote(st); st.i++; continue }
@@ -32,6 +33,12 @@ export function tokenize(line) {
     if (st.quote) { put(st, c, '2'); st.i++; continue }
     if (c === "'" || c === '"') { openQuote(st, c); st.i++; continue }
     const inToken = st.cur !== '' || st.empty.length > 0
+    if (!inToken && st.line.startsWith('[[', st.i) && /[ \t\n()<>;&|]|^$/u.test(st.line[st.i + 2] ?? '') && conditionalPosition(st.tokens)) {
+      const r = readConditional(st.line, st.i, { readExpansion, decodeAnsiC })
+      emit(st, { kind: 'condition', expression: r.expression })
+      st.i += r.raw.length
+      continue
+    }
     if (c === '#' && !inToken) { skipComment(st); continue }
     if (c === '\n') { newline(st); continue }
     if (isBlank(c)) { flush(st); st.i++; continue }
@@ -48,6 +55,45 @@ export function tokenize(line) {
   flush(st)
   if (st.heredocs.length > 0) readHeredocBodies(st.line, st.line.length, st.heredocs)
   return st.tokens
+}
+
+function newScanner(line) {
+  return { line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoted: false, quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2 }
+}
+
+// Parameter operands are a single shell word even when they contain spaces or
+// operators. Their own quotes protect only the corresponding fragments.
+export function tokenizeFragment(line, quoted = false) {
+  const st = { ...newScanner(line), fragment: true, fragmentQuoted: quoted }
+  while (st.i < st.line.length) {
+    const c = st.line[st.i]
+    if (st.quote && c === st.quote) { closeQuote(st); st.i++; continue }
+    if (st.quote === "'") { put(st, c, '1'); st.i++; continue }
+    if (c === '\\') { readEscape(st); continue }
+    if (c === '$') { readDollar(st); continue }
+    if (c === '`') throw new UnsupportedError('feature', '`', 'command substitution (backticks) is not supported')
+    if (st.quote) { put(st, c, '2'); st.i++; continue }
+    if (c === '"' || (c === "'" && !quoted)) { openQuote(st, c); st.i++; continue }
+    if (!quoted && (c === '<' || c === '>') && st.line[skipContinuations(st.line, st.i + 1)] === '(') {
+      throw new UnsupportedError('feature', `${c}(`, 'process substitution in parameter operands is not supported')
+    }
+    put(st, c, quoted ? '2' : '0')
+    st.i++
+  }
+  if (st.quote) throw new UnsupportedError('feature', '${', 'unterminated quote in parameter operand')
+  flush(st)
+  return st.tokens[0] ?? { value: '', mask: quoted ? '' : null }
+}
+
+function conditionalPosition(tokens) {
+  let command = true, target = false
+  for (const t of tokens) {
+    if (['semi', 'and', 'or', 'pipe', 'pipe_err', 'paren_open'].includes(t.kind)) { command = true; target = false; continue }
+    if (t.kind === 'redir') { command = false; target = !['dup', 'close'].includes(t.op); continue }
+    if (target) { target = false; continue }
+    if (!command || t.kind !== 'word' || t.quoted || !['!', '{', 'if', 'then', 'else', 'elif', 'do'].includes(t.value)) command = false
+  }
+  return command && !target
 }
 
 // Empty quotes are significant even when no character gets a quoting mask.
@@ -85,7 +131,7 @@ function flush(st) {
 
 function emit(st, token) {
   if (token.kind === 'paren_open') {
-    token.adjacent = st.lastParenAt === st.i - 1
+    token.adjacent = skipContinuations(st.line, st.lastParenAt + 1) === st.i
     st.lastParenAt = st.i
   }
   if (token.kind === 'redir' && token.op === 'heredoc') st.heredocs.push(token)
@@ -97,11 +143,11 @@ function emit(st, token) {
 function readEscape(st) {
   const n = st.line[st.i + 1]
   if (n === '\n') { st.i += 2; return }
-  if (n !== undefined && (!st.quote || '$`"\\'.includes(n))) {
+  if (n !== undefined && (!(st.quote || st.fragmentQuoted) || '$`"\\'.includes(n) || (st.fragment && n === '}'))) {
     put(st, n, '1')
     st.i += 2
   } else {
-    put(st, '\\', st.quote ? '2' : '1')
+    put(st, '\\', st.quote || st.fragmentQuoted ? '2' : '1')
     st.i++
   }
 }
@@ -112,7 +158,8 @@ function readEscape(st) {
 // tokenizer has already recorded valid. Single-quoted text never reaches
 // here, which is why the pair is always a continuation.
 function spliceContinuations(st, at) {
-  while (st.line[at] === '\\' && st.line[at + 1] === '\n') st.line = st.line.slice(0, at) + st.line.slice(at + 2)
+  const end = skipContinuations(st.line, at)
+  if (end !== at) st.line = st.line.slice(0, at) + st.line.slice(end)
 }
 
 // References keep their source text and 0/2 mask for later expansion.
@@ -120,19 +167,22 @@ function spliceContinuations(st, at) {
 function readDollar(st) {
   spliceContinuations(st, st.i + 1)
   const { line } = st
-  const m = st.quote === '"' ? '2' : '0'
+  const m = st.quote === '"' || st.fragmentQuoted ? '2' : '0'
   const n = line[st.i + 1]
-  if (m === '0' && n === "'") {
+  if ((m === '0' || (st.fragmentQuoted && !st.quote)) && n === "'") {
     const r = decodeAnsiC(line, st.i + 2)
+    if (st.fragmentQuoted && /[$`"\\]/u.test(r.text)) {
+      throw new UnsupportedError('feature', '${', 'active characters in ANSI-C quoted parameter operands are not supported')
+    }
     if (r.text === '') st.empty.push(st.cur.length)
     put(st, r.text, '1')
     st.i = r.end
     return
   }
-  if (m === '0' && n === '"') { openQuote(st, '"'); st.i += 2; return }
-  const ref = readExpansion(line, st.i)
+  if ((m === '0' || (st.fragmentQuoted && !st.quote)) && n === '"') { openQuote(st, '"'); st.i += 2; return }
+  const ref = readExpansion(line, st.i, 0, m === '2')
   if (!ref) { put(st, '$', '1'); st.i++; return }
-  if (ref.command !== undefined) {
+  if (ref.command !== undefined || ref.parameter !== undefined || ref.arithmetic !== undefined) {
     put(st, '$', m)
     put(st, ref.raw.slice(1), '1', false)
     st.i += ref.raw.length

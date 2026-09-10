@@ -278,7 +278,10 @@ describe('no JS execution — runtime', () => {
     assert.deepEqual(t.run('echo "$(cat a.js)"'), {
       stdout: 'hello\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
     })
-    for (const line of ['echo `id`', 'echo $((1+1))']) {
+    assert.deepEqual(t.run('echo $((1+1))'), {
+      stdout: '2\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+    })
+    for (const line of ['echo `id`', 'echo $[1+1]']) {
       const r = t.run(line)
       assert.equal(r.exitCode, 1, line)
       assert.equal(r.stdout, '', line)

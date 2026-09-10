@@ -7,6 +7,7 @@ import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { err, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
+import { evaluateConditional } from './conditional.js'
 
 export { createIoGuard } from './io.js'
 export { commandWriteError } from './output.js'
@@ -66,7 +67,7 @@ function runPipeline(stages, ctx, stream) {
 function pipelineStage(stage, ctx, stdin, stdinFile, fds) {
   const initial = { fds, stdin, stdinFile, stdinOrigin: stdinFile ? ctx.stdinOrigin : null, stdinHandle: stdinFile ? ctx.stdinHandle : null }
   return withState(ctx, { substitutionExit: null, expansionOutput: emptyOutput(), expansionFds: fds }, () => withStreams(initial, ctx, () => {
-    const simple = !stage.group && !stage.loop && !stage.conditional
+    const simple = !stage.group && !stage.loop && !stage.conditional && !stage.test
     let expanded, expansionError
     try {
       if (simple) {
@@ -77,14 +78,17 @@ function pipelineStage(stage, ctx, stdin, stdinFile, fds) {
     } catch (e) {
       expansionError = shellFailure(ctx, e)
     }
+    if (expansionError) {
+      appendOutput(ctx.expansionOutput, routeStageOutput(expansionError, initial, ctx))
+      return { ...ctx.expansionOutput, inputLeft: ctx.stdinLeft, halt: expansionError.halt }
+    }
     const io = resolveRedirs(stage, ctx, ctx.stdinLeft, stdinFile, fds)
     ctx.expansionFds = io.fds
     let routed = false
     const result = withStreams(io, ctx, () => shellResult(ctx, () => {
-      if (expansionError) return expansionError
       if (io.error) return io.error
       if (!simple) {
-        const r = stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx) : runConditional(stage.conditional, ctx, io.stdin)
+        const r = stage.test ? evaluateConditional(stage.test, ctx) : stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx) : runConditional(stage.conditional, ctx, io.stdin)
         routed = true
         return r
       }
@@ -167,7 +171,7 @@ function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
 function shellFailure(ctx, e) {
   const note = unsupportedNote(e)
   if (note) ctx.unsupported.add(note)
-  return err(`error: ${reason(e)}`, 1)
+  return { ...err(`error: ${reason(e)}`, 1), ...(e?.halt ? { halt: true } : {}) }
 }
 
 function shellResult(ctx, fn) {
@@ -193,8 +197,8 @@ function heredocWord(body) {
     if (c === '\\' && (n === '$' || n === '\\' || n === '`')) { value += n; mask += '1'; i++; continue }
     if (c === '`') throw backtickGap()
     if (c === '$') {
-      const ref = readExpansion(body, i)
-      if (ref?.command !== undefined) {
+      const ref = readExpansion(body, i, 0, true)
+      if (ref?.command !== undefined || ref?.parameter !== undefined || ref?.arithmetic !== undefined) {
         value += ref.raw
         mask += '2' + '1'.repeat(ref.raw.length - 1)
         i += ref.raw.length - 1
@@ -238,15 +242,32 @@ function assignValues(assigns, ctx) {
 
 function temporaryValues(assigns, ctx) {
   if (assigns.length === 0) return null
-  const vars = new BindingMap(ctx.vars)
-  withState(ctx, { vars }, () => assignValues(assigns, ctx))
-  return { vars, names: new Set(assigns.map((a) => a.name)) }
+  const outer = ctx.vars, vars = new BindingMap(outer)
+  const names = new Set(assigns.map((a) => a.name))
+  vars.bound = new Set()
+  try {
+    withState(ctx, { vars }, () => {
+      for (const a of assigns) {
+        vars.expansionTargets = names
+        const value = expandScalar(a.word, ctx, true)
+        vars.expansionTargets = null
+        vars.set(a.name, value)
+      }
+    })
+  } finally {
+    // RHS mutations of ordinary variables survive failed redirects or later
+    // expansion errors; the command's temporary names remain scoped.
+    vars.expansionTargets = null
+    for (const name of vars.bound) if (!names.has(name)) outer.set(name, vars.get(name))
+  }
+  return { vars, names }
 }
 
 function withTemporaries(prepared, ctx, fn) {
   if (!prepared) return fn()
   const outer = ctx.vars
-  const { names: temps, vars: inner } = prepared
+  const inner = new BindingMap(outer), temps = prepared.names
+  for (const name of temps) inner.set(name, prepared.vars.get(name))
   ctx.vars = inner
   try {
     inner.bound = new Set()

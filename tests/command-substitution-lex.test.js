@@ -47,13 +47,18 @@ describe('command substitution lexical boundaries', () => {
     })
   }
 
+  it('scans arithmetic expansions without interpreting their expression', () => {
+    for (const source of ['$((1 + 2))', '$\\\n((1 + 2))']) {
+      assert.deepEqual(readExpansion(source, 0), { raw: source, arithmetic: '1 + 2' })
+    }
+  })
+
   for (const [source, detail] of [
-    ['$((1 + 2))', '$(('], ['$\\\n((1 + 2))', '$(('],
     ['$(case value in value) echo match;; esac)', 'case'],
     ['$(if case value in value) echo match;; esac; then echo yes; fi)', 'case'],
     ['$(while case value in value) echo match;; esac; do echo yes; done)', 'case'],
-    ['$( [[ x =~ [)] ]] && echo yes)', '[['],
-    ['$(if [[ x =~ [)] ]]; then echo yes; fi)', '[['],
+    ['$( [[ x =~ [)] ]] && echo yes)', '[[ =~'],
+    ['$(if [[ x =~ [)] ]]; then echo yes; fi)', '[[ =~'],
     ['$('.repeat(65) + 'echo value' + ')'.repeat(65), 'command substitution depth'],
   ]) {
     it(`diagnoses ${detail}`, () => {

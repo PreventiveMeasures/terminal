@@ -9,30 +9,35 @@ import { UnsupportedError } from '../unsupported.js'
 import { expandBraces } from './braces.js'
 import { globPaths, hasGlobMeta } from '../glob.js'
 import { readExpansion, scanRef } from './lex.js'
-import { expansionStderr } from './output.js'
-
-const PROCESS_PARAMS = new Set(['$', '!', '0', '-', '_'])
+import { lookupParameter, probeParameter } from './variables.js'
+import { evaluateParameter } from './parameter.js'
+import { evaluateArithmetic } from './arithmetic.js'
+import { tokenizeFragment } from './tokenize.js'
+import { withState } from './state.js'
 
 export function expandWords(words, ctx) {
   const out = []
+  const command = words[0]
+  const declaration = command?.value === 'export' && !/[12]/u.test(command.mask ?? '') && !command.empty?.length
   for (const w of words) {
     for (const b of expandBraces(w)) {
-      // An argument of `export` that looks like an assignment expands as
-      // an assignment does — no splitting, no globbing (bash's rule for
-      // the declaration builtins) — so `export x=$y` keeps a spaced value.
-      const assignment = ctx.registry.resolveCommand(out[0] ?? '') === 'export' && assignmentOf(b)
-      if (assignment) out.push(expandAssignment(b, assignment.end, ctx))
-      else out.push(...expandArg(b, ctx))
+      // Bash marks declaration arguments before expansion. Changing a word
+      // through brace expansion discards its assignment expansion flags.
+      const assignment = declaration && b === w && assignmentOf(w)
+      if (assignment) {
+        const value = expandAssignment(b, assignment.end, ctx)
+        out.push({ value, mask: '1'.repeat(value.length), q: true })
+      } else out.push(...substitute(tilde(b, ctx, b === w ? false : 'word'), ctx, true))
     }
   }
-  return { argv: out }
+  return { argv: globWords(out, ctx) }
 }
 
 // Drop unquoted empty results, retain quoted empties, and leave unmatched
 // globs literal. The command name undergoes pathname expansion too.
-function expandArg(b, ctx) {
+function globWords(words, ctx) {
   const out = []
-  for (const word of substitute(tilde(b, ctx), ctx, true)) {
+  for (const word of words) {
     if (hasGlobMeta(word)) {
       const matches = globPaths(word, ctx)
       if (matches.length > 0) { out.push(...matches); continue }
@@ -45,8 +50,7 @@ function expandArg(b, ctx) {
 // Redirect expansion must produce exactly one word; zero or several is an
 // ambiguous redirect, including results of splitting and pathname expansion.
 export function expandRedirect(word, ctx) {
-  const out = []
-  for (const b of expandBraces(word)) out.push(...expandArg(b, ctx))
+  const { argv: out } = expandWords([word], ctx)
   return out.length === 1 ? { value: out[0] } : { error: `${word.value}: ambiguous redirect` }
 }
 
@@ -58,7 +62,7 @@ function expandAssignment(w, eq, ctx) {
 // Assignments and here-input expand without splitting or globbing.
 // assignmentValue additionally allows tilde prefixes after ':'.
 export function expandScalar(word, ctx, assignmentValue = false) {
-  return substitute(tilde(word, ctx, assignmentValue), ctx, false)[0].value
+  return substitute(tilde(word, ctx, assignmentValue), ctx, false, assignmentValue)[0].value
 }
 
 export const homeOf = (ctx) => ctx.vars.get('HOME') ?? ctx.home
@@ -73,7 +77,7 @@ function tilde(w, ctx, assignmentValue = false) {
   const v = w.value
   const bare = (i) => maskAt(w, i) === '0'
   const eqLen = assignmentValue ? null : assignmentOf(w)?.end ?? null
-  const inValue = (i) => assignmentValue || (eqLen !== null && i >= eqLen)
+  const inValue = (i) => assignmentValue === true || (eqLen !== null && i >= eqLen)
   const home = homeOf(ctx)
   let value = ''
   let mask = ''
@@ -81,10 +85,10 @@ function tilde(w, ctx, assignmentValue = false) {
   for (let i = 0; i < v.length; i++) {
     if (w.empty?.includes(i)) empty.push(value.length)
     const prefixStart = i === 0 || i === eqLen || (inValue(i) && v[i - 1] === ':' && bare(i - 1))
-    if (prefixStart && v[i] === '~' && bare(i) && unquotedTilde(w, i, inValue(i))) {
+    if (prefixStart && v[i] === '~' && bare(i) && unquotedTilde(w, i, inValue(i) || assignmentValue === 'parameterAssign')) {
       const n = v[i + 1]
       if (n && n !== '/' && n !== ':' && bare(i + 1)) throw new UnsupportedError('feature', 'tilde prefix', 'named-user and directory-stack tilde prefixes are not supported')
-      const ends = n === undefined || (bare(i + 1) && (n === '/' || (n === ':' && inValue(i))))
+      const ends = n === undefined || (bare(i + 1) && (n === '/' || (n === ':' && (inValue(i) || assignmentValue === 'parameterAssign'))))
       if (ends) {
         // A root home makes `~/x` `/x`, not `//x`.
         const h = home === '/' && n === '/' ? '' : home
@@ -111,71 +115,90 @@ function unquotedTilde(w, start, assignment) {
   return true
 }
 
-const fresh = () => ({ value: '', mask: '', q: false })
-
-function add(word, text, m) {
-  word.value += text
-  word.mask += m.repeat(text.length)
-  if (m !== '0') word.q = true
+// Keep quoting until both conditional pattern matching and ordinary shell
+// splitting have consumed it. Scalar expansion returns the same value only.
+export function expandPattern(word, ctx) {
+  return withState(ctx, { strictExpansion: true }, () => expandedWord(tilde(word, ctx), ctx))
 }
 
-// Substitution retains per-character quoting for the later glob pass.
-// Each field also records quoted emptiness, so an empty "$x" survives.
-function substitute(w, ctx, split) {
-  const words = []
-  let cur = fresh()
-  // `""`: nothing to add, but the word was quoted, so it survives.
-  if (w.value === '' && w.mask !== null) cur.q = true
-  const push = () => { words.push(cur); cur = fresh() }
+function substitute(word, ctx, split, assignment = false) {
+  const expanded = expandedWord(word, ctx, assignment)
+  return split ? splitFields(expanded, ctx) : [expanded]
+}
+
+function expandedWord(w, ctx, assignment = false) {
+  const out = { value: '', mask: '', empty: [], split: false }
+  const append = (value, mask) => { out.value += value; out.mask += mask }
+  if (w.value === '' && w.mask !== null) out.empty.push(0)
   for (let i = 0; i <= w.value.length; i++) {
-    if (w.empty?.includes(i)) cur.q = true
+    if (w.empty?.includes(i)) out.empty.push(out.value.length)
     if (i === w.value.length) break
     const m = maskAt(w, i)
     const active = m !== '1' && w.value[i] === '$'
-    const ref = active ? (w.value[i + 1] === '(' ? readExpansion(w.value, i) : scanRef(w.value, i, w.mask)) : null
-    if (!ref) { add(cur, w.value[i], m); continue }
+    const compound = w.value[i + 1] === '(' || w.value[i + 1] === '{'
+    const ref = active ? (compound ? readExpansion(w.value, i, 0, m === '2') : scanRef(w.value, i, w.mask)) : null
+    if (!ref) { append(w.value[i], m); continue }
     i += ref.raw.length - 1
-    const r = ref.command === undefined ? lookup(ref.name, ctx) : { value: ctx.substitute(ref.command) }
-    if (r.literal) { add(cur, ref.raw, m); continue }
-    // `"$@"` with no positional parameters is no word at all, where
-    // `"$*"` is one empty word; only the quoting of the rest decides.
+    const r = expansionValue(ref, ctx, m === '2', assignment)
+    if (r.literal) { append(ref.raw, m.repeat(ref.raw.length)); continue }
     if (r.omit) continue
-    if (m === '2' || !split) { add(cur, r.value, '2'); continue }
-    // IFS splitting of a bare expansion. Leading blanks end the current
-    // word (an empty one is dropped, not emitted); each inner piece is a
-    // word of its own; the last piece starts the next word.
-    const ifs = ctx.vars.get('IFS') ?? ' \t\n'
-    if (ifs !== '' && ifs !== ' \t\n') throw new UnsupportedError('feature', 'IFS', 'custom IFS separators are not supported')
-    const pieces = ifs === '' ? [r.value] : r.value.split(/[ \t\n]+/u)
-    if (pieces.length === 1) { add(cur, pieces[0], '0'); continue }
-    add(cur, pieces[0], '0')
-    if (cur.value !== '' || cur.q) push()
-    for (let k = 1; k < pieces.length - 1; k++) words.push({ value: pieces[k], mask: '0'.repeat(pieces[k].length), q: false })
-    add(cur, pieces.at(-1), '0')
+    if (m === '2') {
+      if (r.value === '') out.empty.push(out.value.length)
+      append(r.value, '2'.repeat(r.value.length))
+    } else {
+      out.split = true
+      for (const offset of r.empty ?? []) out.empty.push(out.value.length + offset)
+      if (r.q && !r.value && !r.empty?.length) out.empty.push(out.value.length)
+      append(r.value, r.mask ?? '0'.repeat(r.value.length))
+    }
   }
-  if (cur.value !== '' || cur.q || words.length === 0) push()
+  out.q = out.empty.length > 0 || /[12]/u.test(out.mask)
+  return out
+}
+
+function expansionValue(ref, ctx, quoted, assignment) {
+  if (ref.command !== undefined) return { value: ctx.substitute(ref.command) }
+  if (ref.arithmetic !== undefined) {
+    try {
+      const source = withState(ctx, { strictExpansion: true }, () => expandScalar(tokenizeFragment(ref.arithmetic, true), ctx))
+      return { value: String(evaluateArithmetic(source, ctx)) }
+    } catch (error) { error.halt = true; throw error }
+  }
+  if (ref.parameter !== undefined) {
+    if (ref.parameter.operator === '' && !ctx.strictExpansion && !/^[0-9]{2,}$/u.test(ref.parameter.name)) return lookupParameter(ref.parameter.name, ctx)
+    return evaluateParameter(ref.parameter, ctx, {
+      lookup: (name) => probeParameter(name, ctx),
+      expand: (source, options = {}) => {
+        const word = tokenizeFragment(source, !options.pattern && !options.error && quoted)
+        const assign = !options.pattern && !options.error && (options.assignment || assignment)
+        const mode = options.assignment ? 'parameterAssign' : assign ? true : 'parameter'
+        return withState(ctx, { strictExpansion: true }, () => expandedWord(tilde(word, ctx, mode), ctx, assign))
+      },
+    })
+  }
+  return ctx.strictExpansion ? probeParameter(ref.name, ctx) : lookupParameter(ref.name, ctx)
+}
+
+function splitFields(word, ctx) {
+  if (!word.split) return word.value !== '' || word.q ? [word] : []
+  const ifs = ctx.vars.get('IFS') ?? ' \t\n'
+  if (ifs !== '' && ifs !== ' \t\n') throw new UnsupportedError('feature', 'IFS', 'custom IFS separators are not supported')
+  const words = []
+  let cur = { value: '', mask: '', q: false }
+  const push = () => {
+    if (cur.value !== '' || cur.q) words.push(cur)
+    cur = { value: '', mask: '', q: false }
+  }
+  const empties = new Set(word.empty)
+  for (let i = 0; i <= word.value.length; i++) {
+    if (empties.has(i)) cur.q = true
+    if (i === word.value.length) break
+    const c = word.value[i], m = word.mask[i]
+    if (ifs !== '' && m === '0' && /[ \t\n]/u.test(c)) { push(); continue }
+    cur.value += c
+    cur.mask += m
+    cur.q ||= m !== '0'
+  }
+  push()
   return words
-}
-
-function lookup(name, ctx) {
-  if (name === '?') return { value: String(ctx.lastExit) }
-  if (name === '#') return { value: '0' }
-  if (name === '@') return { value: '', omit: true }
-  if (name === '*' || /^[1-9]$/u.test(name)) return { value: '' }
-  if (PROCESS_PARAMS.has(name)) {
-    report(ctx, `$${name}`, `warning: \`$${name}\` is not supported (this terminal runs no process); left as typed`)
-    return { literal: true }
-  }
-  if (ctx.vars.has(name)) return { value: ctx.vars.get(name) }
-  if (ctx.vars.unsetNames.has(name)) return { value: '' }
-  if (name === 'PWD') return { value: ctx.cwd }
-  if (name === 'HOME') return { value: ctx.home }
-  if (name === 'USER' || name === 'LOGNAME') return { value: ctx.user }
-  report(ctx, `$${name}`, `warning: $${name} is unset (this shell has no environment variables; only \`for\` bindings and \`NAME=value\` assignments)`)
-  return { value: '' }
-}
-
-function report(ctx, detail, message) {
-  expansionStderr(ctx, message + '\n')
-  ctx.unsupported.add({ kind: 'feature', command: null, detail, message })
 }

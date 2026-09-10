@@ -220,12 +220,16 @@ export interface Terminal {
    * gates, `!`, `(...)` subshells and `{ …; }` groups, `for … in …; do …;
    * done` loops with `break` / `continue`, `exit`, `NAME=value`
    * assignments (`export` / `unset`, and in front of a command),
+   * `if` branches and `[[ … ]]` file/string/integer conditionals,
    * redirects (`>` `>>` `2>` `&>` to `/dev/null`, the two stream
    * devices, or files in an enabled `/tmp/` overlay; `2>&1`, `>&-`,
    * `<`, `<<`, `<<<`),
    * comments, bash quoting and backslash rules, brace expansion with
-   * sequences, `~`, `$NAME` / `${NAME}` / `$?`, and globs with bracket
-   * expressions. Variables and the working directory persist across calls.
+   * sequences, `~`, `$NAME` / `$?`, command substitution, scalar `$(( … ))`
+   * arithmetic, `${…}` defaults, assignment, length and prefix/suffix removal,
+   * and globs with bracket expressions. Other expansion operators, arrays,
+   * and `[[ … =~ … ]]` report unsupported diagnostics. Variables and the
+   * working directory persist across calls.
    */
   run(line: string): RunResult
   /** Current working directory. */

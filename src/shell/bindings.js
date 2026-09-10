@@ -1,6 +1,6 @@
 import { UnsupportedError } from '../unsupported.js'
 
-const UNMODELED = new Set(['CDPATH', 'GLOBIGNORE', 'GLOBSORT', 'BASH_COMPAT', 'POSIXLY_CORRECT', 'PATH', 'RANDOM', 'SRANDOM', 'SECONDS', 'EPOCHSECONDS', 'EPOCHREALTIME', 'BASHOPTS', 'SHELLOPTS', 'OPTIND'])
+export const UNMODELED_VARIABLES = new Set(['CDPATH', 'GLOBIGNORE', 'GLOBSORT', 'BASH_COMPAT', 'POSIXLY_CORRECT', 'PATH', 'RANDOM', 'SRANDOM', 'SECONDS', 'EPOCHSECONDS', 'EPOCHREALTIME', 'BASHOPTS', 'SHELLOPTS', 'OPTIND'])
 
 // Track explicit absence as well as values. An unset variable is known to be
 // empty, whereas an unknown environment name still needs a diagnostic.
@@ -11,7 +11,10 @@ export class BindingMap extends Map {
   }
 
   set(name, value) {
-    if (UNMODELED.has(name) || (name === 'TZ' && !['UTC', 'UTC0', ''].includes(value)) || ((name === 'LANG' || name.startsWith('LC_')) && !['C', 'POSIX', ''].includes(value))) {
+    if (this.expansionTargets?.has(name)) {
+      throw new UnsupportedError('feature', 'temporary assignment side effects', 'modifying a temporary assignment target while expanding assignment values is not supported')
+    }
+    if (UNMODELED_VARIABLES.has(name) || (name === 'TZ' && !['UTC', 'UTC0', ''].includes(value)) || ((name === 'LANG' || name.startsWith('LC_')) && !['C', 'POSIX', ''].includes(value))) {
       throw new UnsupportedError('feature', name, `shell variable ${name} is not supported with this value`)
     }
     this.bound?.add(name)

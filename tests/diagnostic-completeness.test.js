@@ -139,8 +139,8 @@ describe('diagnostic completeness — runtime and parser limitations', () => {
     ['a=(one two)', 'array assignment'],
     ['a+=(one two)', 'array assignment'],
     ['a=(); a+=(one)', 'array assignment'],
-    ['echo ${x:-default}', '${'],
-    ['echo $((1+2))', '$(('],
+    ['echo ${x:1}', '${'],
+    ['echo $((a[0]+2))', 'arithmetic arrays'],
     ['cat <(cat f)', '<('],
     ['cat f > out', '>'],
     ['while true; do cat f; done', 'while'],
@@ -153,6 +153,15 @@ describe('diagnostic completeness — runtime and parser limitations', () => {
       assert.deepEqual(r.unsupported.map((u) => u.detail), [detail])
     })
   }
+  it('does not diagnose implemented default and arithmetic expansion', () => {
+    for (const [command, stdout] of [['echo ${x:-default}', 'default\n'], ['echo $((1+2))', '3\n']]) {
+      const result = run(command)
+      assert.equal(result.stdout, stdout)
+      assert.equal(result.stderr, '')
+      assert.equal(result.exitCode, 0)
+      assert.deepEqual(result.unsupported, [])
+    }
+  })
   it('preserves output before a computed redirect fails', () => {
     const r = run(String.raw`awk 'BEGIN {print "before";x="out";print "lost" > x}' 2>/dev/null | cat`)
     assert.equal(r.stdout, 'before\n')
