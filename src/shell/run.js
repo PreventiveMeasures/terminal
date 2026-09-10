@@ -2,7 +2,7 @@ import { expandRedirect, expandScalar, expandWords } from './expand.js'
 import { readBacktickSubstitution, readExpansion } from './lex.js'
 import { refusedWrite } from './parse.js'
 import { BindingMap } from './bindings.js'
-import { lookupWithNote, missingPathNote } from '../notes.js'
+import { gateBlame, lookupWithNote, missingPathNote, shortCircuitTracker } from '../notes.js'
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { err, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
@@ -26,16 +26,25 @@ export function routeExternalOutput(result, ctx) {
 // `exit` bypasses pipeline negation; break/continue still carry its status.
 export function runSteps(steps, ctx, stream) {
   const result = emptyOutput()
+  // What an `&&` gate skipped, reported once the run of skipped steps ends.
+  // The blame is the last command dispatched, whose status the gate read; a
+  // step that failed before dispatching one says nothing here.
+  const gate = shortCircuitTracker(ctx)
   for (const step of steps) {
     if (step.warnings) appendOutput(result, routeOutput({ ...emptyOutput(step.warnings), exitCode: result.exitCode }, { fds: ctx.outputFds }, ctx))
-    if (step.gate === 'and' && result.exitCode !== 0) continue
+    if (step.gate === 'and' && result.exitCode !== 0) { gate.skip(result.exitCode); continue }
     if (step.gate === 'or' && result.exitCode === 0) continue
+    gate.flush()
+    ctx.ranCommand = null
     const r = runPipeline(step.stages, ctx, stream)
     appendOutput(result, r)
     if (step.negate && !r.halt) result.exitCode = r.exitCode === 0 ? 1 : 0
+    // `!` inverts the status, so the command no longer explains a gate reading it.
+    if (step.negate) ctx.ranCommand = null
     ctx.lastExit = result.exitCode
     if (r.halt || r.control) { Object.assign(result, { halt: r.halt, control: r.control }); break }
   }
+  gate.flush()
   ctx.stdinLeft = stream.text
   return result
 }
@@ -238,6 +247,7 @@ function runStage(ctx, expanded) {
   if (argv.length === 0) {
     return { stdout: '', stderr: '', exitCode: ctx.substitutionExit ?? 0 }
   }
+  ctx.ranCommand = gateBlame(argv)
   return withTemporaries(expanded.temps, ctx, () => ctx.invoke(argv[0], argv.slice(1), ctx.stdinLeft))
 }
 

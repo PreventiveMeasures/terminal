@@ -22,7 +22,7 @@ export function createTerminal(sources, opts = {}) {
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
   const ctx = {
     cwd, fs, io: createIoGuard(fs), user: opts.user ?? 'user', home, mount, writable, registry, outputFds: { 1: 'out', 2: 'err' },
-    vars: new BindingMap(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '',
+    vars: new BindingMap(), lastExit: 0, loopDepth: 0, ranCommand: null, closed: { out: false, err: false }, stdinFile: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '',
     unsupported: createUnsupportedFeed(), notes: new Set(),
   }
   // find -exec and xargs dispatch externally in isolated shell state.

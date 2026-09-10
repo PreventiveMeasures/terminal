@@ -43,6 +43,52 @@ export function hiddenEntryNotes() {
   }
 }
 
+// Chaining `&&` behind a command whose only product is a status is the idiom
+// rather than an oversight, so a gate those close goes unremarked. A search
+// asked for with -q is the same intent said with a flag.
+const STATUS_ONLY = new Set(['test', '[', 'true', 'false'])
+const SEARCHES = new Set(['grep', 'egrep', 'fgrep'])
+const QUIET = /^-[A-Za-z]*q/u
+
+export function gateBlame(argv) {
+  const [name, ...args] = argv
+  if (STATUS_ONLY.has(name)) return null
+  const search = SEARCHES.has(name)
+  return search && args.some((arg) => QUIET.test(arg)) ? null : { name, search }
+}
+
+// A failing command in an `&&` chain cancels what follows it. That is the
+// shell working as designed, and it is worth saying only where it actually
+// stopped work from happening: a search that found nothing, or a read of a
+// file that was not there, silently swallowing the commands the caller
+// chained behind it.
+// Tracks a run of steps an `&&` gate skipped, so one note can name both the
+// command that closed the gate and how much of the chain it cancelled.
+export function shortCircuitTracker(ctx) {
+  let blame = null, skipped = 0
+  return {
+    skip(exitCode) {
+      if (skipped === 0 && ctx.ranCommand) blame = { ...ctx.ranCommand, exitCode }
+      skipped++
+    },
+    flush() {
+      if (skipped) shortCircuitNote(ctx.notes, blame, skipped)
+      blame = null
+      skipped = 0
+    },
+  }
+}
+
+function shortCircuitNote(notes, blame, skipped) {
+  if (!blame) return
+  const commands = skipped === 1 ? 'the command' : `the ${skipped} commands`
+  // grep separates "found nothing" (1) from "went wrong" (2), and the first
+  // is the one callers chain behind without meaning to.
+  const search = blame.search && blame.exitCode === 1
+    ? ' A search that selects no lines exits 1, which is not a failure.' : ''
+  notes.add(`${blame.name}: exited ${blame.exitCode}, so ${commands} after && did not run.${search}`)
+}
+
 export function omissionNote(notes, options) {
   emitOmission(notes, options, options.paths.size, options.paths)
 }
