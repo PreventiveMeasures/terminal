@@ -36,6 +36,15 @@ echo ${u:=assigned}${u} => "assignedassigned\n"
 "v=abcd; echo \"${v}s\"" => "abcds\n"
 v=abcd; echo ${v}s => "abcds\n"
 echo ${u}empty => "empty\n" 0 +$u
+echo $$ => ! $$ 1
+echo $! => ! $! 1
+echo $0 => ! $0 1
+echo $- => ! $- 1
+echo $_ => ! $_ 1
+"echo \"pre$$post\"" => ! $$ 1
+echo ${$:-fallback} => ! $$ 1
+echo $$; echo after => ! $$ 0 "after\n"
+"echo \"pre$_post\"" => "pre\n" 0 +$_post
 v=abcd; echo ${v^^} => ! ${ 1
 v=ABCD; echo ${v,,} => ! ${ 1
 v=abcd; echo ${v@Q} => ! ${ 1
@@ -189,6 +198,12 @@ echo '`' => "`\n"
 [[ `echo a` == a ]] && echo yes || echo no => "yes\n"
 [[ -n `echo x` ]] && echo yes || echo no => "yes\n"
 echo `echo \`nested\`` => ! \` 1
+echo `if true` => "\n" 0 %
+echo `for` => "\n" 0 %
+echo `echo )` => "\n" 0 %
+"`if true`; echo \"status=$?\"" => "status=2\n" 0 %
+echo pre`if true`post => "prepost\n" 0 %
+echo `if true` `echo ok` => "ok\n" 0 %
 echo ${x:-`echo d`} => ! ` 1
 echo $(( `echo 2` + 1 )) => ! ` 1
 

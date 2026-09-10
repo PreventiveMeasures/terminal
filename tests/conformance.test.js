@@ -14,6 +14,7 @@ import { TREES } from './fixtures/conformance/trees.js'
 //   command       => "stdout"           that output, exit 0, nothing on the feed
 //   command       => "stdout" 2         that output and that status
 //   command       => "stdout" 0 +$u     that output, and an advisory note on the feed
+//   command       => "stdout" 0 %       that output, and something on stderr too
 //   command       => ! detail 1         refused: that note on the feed, that status
 //   command       => ! detail 0 "no\n"   a refusal inside a compound command, whose
 //                                        surviving branch still printed
@@ -33,7 +34,9 @@ import { TREES } from './fixtures/conformance/trees.js'
 // ordinary runtime error a real tool also produces — a malformed pattern, a
 // missing file — carried on stderr and off the feed, because it is the
 // caller's mistake rather than a missing feature. `+` is neither: the answer
-// is right and the feed carries advice alongside it.
+// is right and the feed carries advice alongside it, and a trailing `%` on an
+// answer says the command also wrote to stderr while still succeeding — bash
+// does that too, for a syntax error inside a backtick.
 //
 // A refusal is the other half of correctness: where an answer would depend
 // on something this implementation does not have — a locale, a GNU regex
@@ -107,13 +110,15 @@ function expectation(expect, at) {
   }
   const end = closingQuote(expect, at)
   const stdout = JSON.parse(expect.slice(0, end + 1))
-  const rest = expect.slice(end + 1).trim()
-  const [status, note] = rest.split(/\s+(?=\+)/u)
-  return {
-    stdout,
-    exitCode: status === undefined || status === '' ? 0 : Number(status),
-    note: note === undefined ? undefined : note.slice(1),
+  // The tail is order-free: a status, `+detail` for a note, `%` for stderr.
+  const result = { stdout, exitCode: 0 }
+  for (const token of expect.slice(end + 1).trim().split(/\s+/u)) {
+    if (token === '') continue
+    else if (token === '%') result.stderrExpected = true
+    else if (token.startsWith('+')) result.note = token.slice(1)
+    else result.exitCode = Number(token)
   }
+  return result
 }
 
 // The stdout field is a JSON string; find its close without tripping on an
@@ -182,10 +187,14 @@ function check(entry) {
     { stdout: entry.stdout, exitCode: entry.exitCode }, entry.at)
   if (entry.note === undefined) {
     assert.deepEqual(result.unsupported, [], `${entry.at}: a plain answer carries nothing on the feed`)
-    assert.equal(result.stderr, '', entry.at)
+    // `%` says the command wrote to stderr and still answered, as bash does
+    // for a syntax error inside a backtick; without it stderr must be silent.
+    if (entry.stderrExpected) assert.notEqual(result.stderr.trim(), '', `${entry.at}: expected something on stderr`)
+    else assert.equal(result.stderr, '', entry.at)
   } else {
     assert.equal(result.unsupported.length, 1, `${entry.at}: expected a note on the feed`)
     assert.equal(result.unsupported[0].detail, entry.note, entry.at)
+    assert.ok(result.stderr.includes(result.unsupported[0].message), `${entry.at}: stderr must carry the note`)
   }
 }
 
@@ -194,7 +203,7 @@ function describeExpectation(entry) {
   if (entry.errorExit !== undefined) return '% ' + entry.errorExit
   if (entry.budgetMs !== undefined) return '~ ' + entry.budgetMs
   return JSON.stringify(entry.stdout) + (entry.exitCode ? ' ' + entry.exitCode : '') +
-    (entry.note === undefined ? '' : ' +' + entry.note)
+    (entry.note === undefined ? '' : ' +' + entry.note) + (entry.stderrExpected ? ' %' : '')
 }
 
 describe('conformance corpus', () => {

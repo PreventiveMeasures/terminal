@@ -33,11 +33,11 @@ describe('expansion diagnostics follow lexical order', () => {
     ['a failed substitution does not change a successful ordinary command status', 'true "$MISSING$(cat nope)"', '', missing + nope],
   ])
 
-  it('process-parameter warnings also precede later substitution diagnostics', () => {
-    const message = 'warning: `$$` is not supported (this terminal runs no process); left as typed'
+  it('a process parameter refuses before a later substitution runs', () => {
+    const message = 'error: shell parameter $ is not supported (this terminal runs no process)'
     assert.deepEqual(terminal().run('echo "$$$(cat nope)"'), {
-      stdout: '$$\n', stderr: message + '\n' + nope, exitCode: 0, cwd: '/',
-      notes: [], unsupported: [{ kind: 'feature', command: null, detail: '$$', message }],
+      stdout: '', stderr: message + '\n', exitCode: 1, cwd: '/',
+      notes: [], unsupported: [{ kind: 'feature', command: null, detail: '$$', message: message.slice('error: '.length) }],
     })
   })
 })

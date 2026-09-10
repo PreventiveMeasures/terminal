@@ -5,7 +5,7 @@ import { err } from '../util.js'
 import { parseLine } from './parse.js'
 import { MAX_SUBSTITUTION_DEPTH } from './substitution.js'
 
-export function commandSubstitution(command, ctx, runSteps) {
+export function commandSubstitution(command, ctx, runSteps, backtick = false) {
   const depth = (ctx.substitutionDepth ?? 0) + 1
   if (depth > MAX_SUBSTITUTION_DEPTH) throw new UnsupportedError('feature', 'command substitution nesting limit', `command substitution nesting beyond ${MAX_SUBSTITUTION_DEPTH} levels is not supported`)
   const stderr = ctx.expansionFds[2]
@@ -17,9 +17,14 @@ export function commandSubstitution(command, ctx, runSteps) {
     } catch (e) {
       const note = unsupportedNote(e)
       if (!note) {
-        // Literal substitutions are validated with their enclosing input unit.
-        // Heredoc bodies are parsed during expansion, where Bash's recovery
-        // depends on builtin versus external-command execution scopes.
+        // Bash parses a backtick lazily, at expansion, so a syntax error
+        // inside one is reported and the substitution yields nothing while
+        // the enclosing command carries on — status 2 when the substitution
+        // is the whole command. `$( )` is parsed with its enclosing input
+        // unit instead, where the error takes the line down with it, so that
+        // form keeps failing. Heredoc bodies are parsed during expansion,
+        // where Bash's recovery depends on builtin versus external scopes.
+        if (backtick) return err(`error: command substitution: ${e.message}`, 2)
         throw new UnsupportedError('feature', 'command substitution syntax', `runtime command substitution syntax errors are not supported: ${e.message}`)
       }
       ctx.unsupported.add(note)

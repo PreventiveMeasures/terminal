@@ -97,12 +97,12 @@ grep -e '[[:digit:]]' input => "{1\n"
 grep -e 'a.c' input => "abc\na-c\n"
 
 # GNU intervals and brackets this implementation validates the way GNU does
-grep -E -e 'a{40000,}' input => % 2
-grep -E -e 'b{1000000000}' input => % 2
-grep -E -e '[a-c-e]' input => % 2
-grep -E -e '[[:alpha:]-z]' input => % 2
-grep -E -e '[[=a=]-z]' input => % 2
-grep -E -e 'a[[:alpha,:]' input => % 2
-grep -E -e 'a[a[:b]' input => % 2
-grep -e 'a\{32768\}' input => % 2
-grep -e '[1-3-5]' input => % 2
+grep -E -e 'a{40000,}' input => "" 2 %
+grep -E -e 'b{1000000000}' input => "" 2 %
+grep -E -e '[a-c-e]' input => "" 2 %
+grep -E -e '[[:alpha:]-z]' input => "" 2 %
+grep -E -e '[[=a=]-z]' input => "" 2 %
+grep -E -e 'a[[:alpha,:]' input => "" 2 %
+grep -E -e 'a[a[:b]' input => "" 2 %
+grep -e 'a\{32768\}' input => "" 2 %
+grep -e '[1-3-5]' input => "" 2 %

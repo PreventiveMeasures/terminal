@@ -11,7 +11,7 @@ export function readBacktickSubstitution(line, start) {
   let command = ''
   for (let i = start + 1; i < line.length; i++) {
     const c = line[i]
-    if (c === '`') return { command, raw: line.slice(start, i + 1) }
+    if (c === '`') return { command, raw: line.slice(start, i + 1), backtick: true }
     if (c !== '\\') { command += c; continue }
     const next = line[i + 1]
     if (next === '`') {

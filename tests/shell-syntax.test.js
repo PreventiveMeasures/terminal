@@ -105,10 +105,23 @@ describe('shell syntax — parameters', () => {
     assert.deepEqual(unset.unsupported, [{ kind: 'feature', command: null, detail: '$PATH', message: unset.stderr.trimEnd() }])
   })
 
-  it('`$$`, `$!`, `$0`, `$-` and `$_` stay as typed, with a warning', () => {
-    const r = term().run('echo $$ $0')
-    assert.equal(r.stdout, '$$ $0\n')
-    assert.deepEqual(r.unsupported.map((u) => u.detail), ['$$', '$0'])
+  it('`$$`, `$!`, `$0`, `$-` and `$_` are refused, not answered with their own text', () => {
+    // A pid, a shell name and the option flags have no honest substitute
+    // here, and leaving the text as typed answered `$$` where bash answers a
+    // number. Both the plain reference and an operand refuse.
+    for (const name of ['$', '!', '0', '-', '_']) {
+      const r = term().run(`echo $${name}`)
+      assert.equal(r.stdout, '', name)
+      assert.notEqual(r.exitCode, 0, name)
+      assert.deepEqual(r.unsupported.map((u) => u.detail), [`$${name}`], name)
+    }
+    // `$_post` names the variable `_post`, so only the four that cannot begin
+    // a name are still a process parameter when a word continues after them.
+    assert.equal(term().run('echo "pre$$post"').stdout, '')
+    assert.equal(out('echo "pre$_post"'), 'pre\n')
+    assert.equal(term().run('echo ${$:-fallback}').exitCode, 1)
+    // A refusal stops its own command, and the list carries on as bash's does.
+    assert.equal(out('echo $$; echo after'), 'after\n')
   })
 
   it('assignments set variables that persist; a subshell gets a copy', () => {
