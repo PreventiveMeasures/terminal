@@ -11,7 +11,7 @@ const FILES = {
   input: 'a\nb\na\n', first: 'a\n', second: 'b\na\n',
   dialect: 'a+\naa\n', '1p': 'one\ntwo\n', '-e': 'a\n',
 }
-const result = (stdout, exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', unsupported })
+const result = (stdout, exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
 
 function check(command, stdout) {
   assert.deepEqual(createTerminal(FILES).run(command), result(stdout), command)

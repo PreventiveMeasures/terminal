@@ -20,9 +20,19 @@ const NEWLINE_ABSORB = new Set(['semi', 'and', 'or', 'pipe', 'pipe_err', 'paren_
 // Shell token boundaries are space and tab; CR and Unicode spaces stay literal.
 const isBlank = (c) => c === ' ' || c === '\t'
 
-export function tokenize(line) {
+export function tokenize(line, options = {}) {
+  return scan(newScanner(line, options), false).tokens
+}
+
+// Keep unfinished grammar in the token buffer. The parser clears it only after
+// accepting an input unit, before this scanner reads any of the next unit.
+export function createTokenizer(line, options = {}) {
+  const st = newScanner(line, options)
+  return { read: () => scan(st, true), reset: () => { st.tokens = [] } }
+}
+
+function scan(st, incremental) {
   // Reference scanning splices backslash-newline out of st.line.
-  const st = newScanner(line)
   while (st.i < st.line.length) {
     const c = st.line[st.i]
     if (st.quote && c === st.quote) { closeQuote(st); st.i++; continue }
@@ -34,13 +44,17 @@ export function tokenize(line) {
     if (c === "'" || c === '"') { openQuote(st, c); st.i++; continue }
     const inToken = st.cur !== '' || st.empty.length > 0
     if (!inToken && st.line.startsWith('[[', st.i) && /[ \t\n()<>;&|]|^$/u.test(st.line[st.i + 2] ?? '') && conditionalPosition(st.tokens)) {
-      const r = readConditional(st.line, st.i, { readExpansion, decodeAnsiC })
+      const r = readConditional(st.line, st.i, { readExpansion: st.readExpansion, decodeAnsiC })
       emit(st, { kind: 'condition', expression: r.expression })
       st.i += r.raw.length
       continue
     }
     if (c === '#' && !inToken) { skipComment(st); continue }
-    if (c === '\n') { newline(st); continue }
+    if (c === '\n') {
+      newline(st)
+      if (incremental) return { tokens: st.tokens, done: st.i >= st.line.length }
+      continue
+    }
     if (isBlank(c)) { flush(st); st.i++; continue }
     if (c === '(' && st.mask.at(-1) === '0' && /[?*+@!]/u.test(st.cur.at(-1)) && !st.empty.includes(st.cur.length)) {
       throw new UnsupportedError('feature', 'extglob', 'extended glob patterns are not supported')
@@ -54,11 +68,14 @@ export function tokenize(line) {
   if (st.quote) throw new Error(`unterminated ${st.quote === "'" ? 'single' : 'double'} quote`)
   flush(st)
   if (st.heredocs.length > 0) readHeredocBodies(st.line, st.line.length, st.heredocs)
-  return st.tokens
+  return { tokens: st.tokens, done: true }
 }
 
-function newScanner(line) {
-  return { line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoted: false, quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2 }
+function newScanner(line, options = {}) {
+  return {
+    line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoted: false, quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2,
+    readExpansion: (source, at, depth = 0, quoted = false) => readExpansion(source, at, depth, quoted, options),
+  }
 }
 
 // Parameter operands are a single shell word even when they contain spaces or
@@ -180,7 +197,7 @@ function readDollar(st) {
     return
   }
   if ((m === '0' || (st.fragmentQuoted && !st.quote)) && n === '"') { openQuote(st, '"'); st.i += 2; return }
-  const ref = readExpansion(line, st.i, 0, m === '2')
+  const ref = st.readExpansion(line, st.i, 0, m === '2')
   if (!ref) { put(st, '$', '1'); st.i++; return }
   if (ref.command !== undefined || ref.parameter !== undefined || ref.arithmetic !== undefined) {
     put(st, '$', m)

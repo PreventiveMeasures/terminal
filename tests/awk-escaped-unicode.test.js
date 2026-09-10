@@ -18,7 +18,7 @@ describe('awk escaped Unicode characters', () => {
   ]
   for (const [command, input, stdout] of cases) {
     it(command, () => {
-      assert.deepEqual(createTerminal({ input }).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+      assert.deepEqual(createTerminal({ input }).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
     })
   }
 

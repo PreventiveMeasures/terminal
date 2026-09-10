@@ -5,7 +5,7 @@ import { createTerminal } from '@preventive/terminal'
 const ERROR = 'cat: missing: no such file or directory\n'
 const options = { mount: '/repo', cwd: '/repo', writable: '/tmp/' }
 const terminal = (extra = {}) => createTerminal({ input: 'source\n' }, { ...options, ...extra })
-const result = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/repo', unsupported })
+const result = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/repo', notes: [], unsupported })
 const check = (t, command, stdout = '') => assert.deepEqual(t.run(command), result(stdout), command)
 
 // Output redirects open left-to-right. Duplicated descriptors share a write

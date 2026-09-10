@@ -24,7 +24,7 @@ const FILES = {
 
 function check(command, stdout, exitCode = 0, stderr = '', files = FILES) {
   assert.deepEqual(createTerminal(files).run(command), {
-    stdout, stderr, exitCode, cwd: '/', unsupported: [],
+    stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [],
   }, command)
 }
 
@@ -155,7 +155,7 @@ describe('grep — pattern file errors and diagnostics', () => {
       kind: 'feature', command: 'grep', detail: 'regex escape', message: result.stderr.trimEnd(),
     }])
     assert.deepEqual(term.run('grep -sf patterns/unsupported data 2>/dev/null | true'), {
-      stdout: '', stderr: '', exitCode: 0, cwd: '/', unsupported: result.unsupported,
+      stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: result.unsupported,
     })
   })
 })

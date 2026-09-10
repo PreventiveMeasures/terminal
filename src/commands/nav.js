@@ -41,7 +41,8 @@ function ls(_stdin, tokens, ctx) {
   if (flags.has('l')) return unsupported('feature', 'ls', '-l metadata', 'ls: long listings require permissions, ownership and timestamps absent from this virtual filesystem')
   const targets = (positional.length ? positional : ['.']).toSorted(compareNames)
   if (flags.has('r')) targets.reverse()
-  const dirs = [], errors = [], files = []
+  const dirs = [], errors = [], files = [], listed = new Set()
+  const hidden = { count: 0, paths: [] }
   const display = (name, abs) => flags.has('F') && ctx.fs.isDir(abs) && !name.endsWith('/') ? name + '/' : name
   for (const target of targets) {
     const { path: abs, error } = lookup(ctx.cwd, target, ctx.fs)
@@ -56,7 +57,16 @@ function ls(_stdin, tokens, ctx) {
       const path = stack.pop()
       const abs = resolve(ctx.cwd, path)
       const entries = ctx.fs.listDir(abs)
-      const names = [...entries.dirs, ...entries.files].filter((n) => flags.has('a') || flags.has('A') || !n.startsWith('.'))
+      const fresh = !listed.has(abs)
+      const names = [...entries.dirs, ...entries.files].filter((n) => {
+        if (flags.has('a') || flags.has('A') || !n.startsWith('.')) return true
+        if (fresh) {
+          listed.add(abs)
+          hidden.count++
+          if (hidden.paths.length < 9) hidden.paths.push(resolve(abs, n))
+        }
+        return false
+      })
       if (flags.has('a')) names.push('.', '..')
       names.sort(compareNames)
       if (flags.has('r')) names.reverse()
@@ -69,6 +79,10 @@ function ls(_stdin, tokens, ctx) {
         stack.push(path.endsWith('/') ? path + name : path + '/' + name)
       }
     }
+  }
+  if (hidden.count) {
+    const paths = hidden.count < 10 ? ': ' + hidden.paths.sort(compareNames).map((path) => JSON.stringify(path)).join(', ') : ''
+    ctx.notes.add(`ls: omitted ${hidden.count} hidden ${hidden.count === 1 ? 'entry' : 'entries'}${paths}. Use -a to include hidden entries.`)
   }
   return { stdout: blocks.length ? blocks.join('\n\n') + '\n' : '', stderr: errors.length ? errors.join('\n') + '\n' : '', exitCode: errors.length ? 2 : 0 }
 }

@@ -81,11 +81,20 @@ describe('100 likely agent commands — unsupported channel', () => {
 })
 
 describe('likely agent commands — diagnostic boundaries', () => {
+  for (const [command, stdout] of [
+    ['name=src/index.js; echo "${name//\\//_}"', 'src_index.js\n'],
+    ['file=src/index.js; echo "${file:0:3}"', 'src\n'],
+  ]) {
+    it(command, () => {
+      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+    })
+  }
+
   it('accepts the reported find -exec spelling with an escaped semicolon', () => {
     const t = createTerminal({ 'a.txt': 'one\ntwo\n', 'sub/a.txt': 'three\n', 'other.txt': 'ignored\n' })
     const command = String.raw`find . -name "a.txt" -exec wc -l {} \;`
     assert.deepEqual(t.run(command), {
-      stdout: '2 ./a.txt\n1 ./sub/a.txt\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stdout: '2 ./a.txt\n1 ./sub/a.txt\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
     assert.deepEqual(t.run(command), t.run(String.raw`find . -name "a.txt" -exec wc -l {} ';'`))
   })
@@ -98,7 +107,7 @@ describe('likely agent commands — diagnostic boundaries', () => {
     const command = String.raw`grep -rn "b.a\|c.a\|X(\"b\")" dir/ --include=*.txt`
     assert.deepEqual(t.run(command), {
       stdout: 'dir/a.txt:1:b.a\ndir/a.txt:2:c.a\ndir/a.txt:3:X("b")\ndir/sub/b.txt:1:bza\ndir/sub/b.txt:2:cza\n',
-      stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 

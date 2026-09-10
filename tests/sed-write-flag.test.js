@@ -15,7 +15,7 @@ const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const command = (script, input = '/repo/input', flags = '') => `sed ${flags} ${quote(script)} ${input}`
 
 function check(t, text, stdout = '', stderr = '', exitCode = 0) {
-  assert.deepEqual(t.run(text), { stdout, stderr, exitCode, cwd: '/tmp', unsupported: [] }, text)
+  assert.deepEqual(t.run(text), { stdout, stderr, exitCode, cwd: '/tmp', notes: [], unsupported: [] }, text)
 }
 
 function written(t, path, content) {

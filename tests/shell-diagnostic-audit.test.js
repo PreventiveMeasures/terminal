@@ -8,17 +8,17 @@ import { createTerminal } from '@preventive/terminal'
 const terminal = (commands) => createTerminal({}, { commands })
 const notes = (result) => result.unsupported.map(({ kind, detail }) => [kind, detail])
 
-function syntaxError(command, commands) {
+function syntaxError(command, commands, prior = []) {
   const result = terminal(commands).run(command)
   assert.equal(result.exitCode, 2, command)
   assert.equal(result.stdout, '', command)
-  assert.match(result.stderr, /^error: /u, command)
-  assert.deepEqual(result.unsupported, [], command)
+  assert.match(result.stderr, /^error: /mu, command)
+  assert.deepEqual(notes(result), prior.map((detail) => ['feature', detail]), command)
 }
 
-function feature(command, detail, commands) {
+function feature(command, detail, commands, prior = []) {
   const result = terminal(commands).run(command)
-  assert.deepEqual(notes(result), [['feature', detail]], command)
+  assert.deepEqual(notes(result), [...prior, detail].map((value) => ['feature', value]), command)
   assert.notEqual(result.exitCode, 0, command)
   return result
 }
@@ -51,25 +51,25 @@ describe('compound assignment diagnostics use the command operand position', () 
 })
 
 describe('alias diagnostic candidates follow input boundaries and scopes', () => {
-  for (const command of [
-    "alias LEFT='('; LEFT echo one )",
-    "alias LEFT='(' && LEFT echo one )",
-    "{ alias LEFT='(';\nLEFT echo one ); }",
-    "if true; then alias LEFT='(';\nLEFT echo one ); fi",
-    "{ alias LEFT='('; } | cat\nLEFT echo one )",
-    "echo data | { alias LEFT='('; }\nLEFT echo one )",
-    "for name in one; do alias LEFT='('; done | cat\nLEFT echo one )",
-    "( { alias LEFT='('; } )\nLEFT echo one )",
-    "if false; then alias LEFT='('; fi\nLEFT echo one )",
-    "if true; then :; else alias LEFT='('; fi\nLEFT echo one )",
-    "if false; then :; elif false; then alias LEFT='('; fi\nLEFT echo one )",
-    "false && alias LEFT='('\nLEFT echo one )",
-    "true || alias LEFT='('\nLEFT echo one )",
-    "! true && alias LEFT='('\nLEFT echo one )",
-    "for name in; do alias LEFT='('; done\nLEFT echo one )",
-    "alias -x LEFT='('\nLEFT echo one )",
+  for (const [command, prior] of [
+    ["alias LEFT='('; LEFT echo one )"],
+    ["alias LEFT='(' && LEFT echo one )"],
+    ["{ alias LEFT='(';\nLEFT echo one ); }"],
+    ["if true; then alias LEFT='(';\nLEFT echo one ); fi"],
+    ["{ alias LEFT='('; } | cat\nLEFT echo one )", ['alias']],
+    ["echo data | { alias LEFT='('; }\nLEFT echo one )", ['alias']],
+    ["for name in one; do alias LEFT='('; done | cat\nLEFT echo one )", ['alias']],
+    ["( { alias LEFT='('; } )\nLEFT echo one )", ['alias']],
+    ["if false; then alias LEFT='('; fi\nLEFT echo one )"],
+    ["if true; then :; else alias LEFT='('; fi\nLEFT echo one )"],
+    ["if false; then :; elif false; then alias LEFT='('; fi\nLEFT echo one )"],
+    ["false && alias LEFT='('\nLEFT echo one )"],
+    ["true || alias LEFT='('\nLEFT echo one )"],
+    ["! true && alias LEFT='('\nLEFT echo one )"],
+    ["for name in; do alias LEFT='('; done\nLEFT echo one )"],
+    ["alias -x LEFT='('\nLEFT echo one )", ['alias']],
   ]) {
-    it(`ordinary syntax: ${command}`, () => { syntaxError(command) })
+    it(`ordinary syntax: ${command}`, () => { syntaxError(command, undefined, prior) })
   }
 
   for (const command of [
@@ -92,7 +92,10 @@ describe('alias diagnostic candidates follow input boundaries and scopes', () =>
     "alias LEFT='('\n{ unalias LEFT; } | cat\nLEFT echo one )",
     "alias LEFT='('\n{ LEFT echo one ) ; }",
   ]) {
-    it(`alias gap: ${command}`, () => { feature(command, 'alias expansion') })
+    it(`alias gap: ${command}`, () => {
+      const unaliasRuns = /\n(?:unalias -x|\(unalias|\{ unalias)/u.test(command)
+      feature(command, 'alias expansion', undefined, unaliasRuns ? ['alias', 'unalias'] : ['alias'])
+    })
   }
 
   it('retains alias evidence across boundaries that its replacement can change', () => {
@@ -103,7 +106,10 @@ describe('alias diagnostic candidates follow input boundaries and scopes', () =>
       "alias LEFT='('\nLEFT\necho one )",
       "alias LEFT='('\n{ LEFT; }\necho one )",
       "alias LEFT='('\n(LEFT)\necho one )",
-    ]) feature(command, 'alias expansion')
+    ]) {
+      const result = terminal().run(command)
+      assert.deepEqual(notes(result), [['feature', 'alias'], ['command', 'LEFT'], ['feature', 'alias expansion']])
+    }
   })
 
   it('does not assign builtin behavior to a custom alias command', () => {
@@ -111,30 +117,30 @@ describe('alias diagnostic candidates follow input boundaries and scopes', () =>
   })
 
   it('does not remove builtin alias candidates through custom unalias commands', () => {
-    feature("alias LEFT='('\nunalias LEFT\nLEFT echo one )", 'alias expansion', { unalias: () => '' })
+    feature("alias LEFT='('\nunalias LEFT\nLEFT echo one )", 'alias expansion', { unalias: () => '' }, ['alias'])
   })
 
   it('keeps possible definitions when a custom command status is unknown while parsing', () => {
-    feature("probe && alias LEFT='('\nLEFT echo one )", 'alias expansion', { probe: () => '' })
+    feature("probe && alias LEFT='('\nLEFT echo one )", 'alias expansion', { probe: () => '' }, ['alias'])
   })
 
   it('does not mistake a dynamic alias name for a literal definition', () => {
-    syntaxError('alias "$name=("\nname echo one )')
+    syntaxError('alias "$name=("\nname echo one )', undefined, ['$name', 'alias'])
   })
 
   it('retains non-ASCII alias names that Bash allows without quoting', () => {
-    feature("alias LEFT\u00A0='('\nLEFT\u00A0 echo one )", 'alias expansion')
+    feature("alias LEFT\u00A0='('\nLEFT\u00A0 echo one )", 'alias expansion', undefined, ['alias'])
   })
 })
 
 describe('deferred command substitutions preserve diagnostic and quoting boundaries', () => {
   for (const inner of ['echo @(a|b)', 'alias LEFT=(one two)']) {
-    it(`does not inspect skipped ${inner}`, () => {
+    it(`validates skipped substitution syntax: ${inner}`, () => {
       const result = terminal().run(`true || printf '%s' "$(${inner})"`)
       assert.equal(result.stdout, '')
-      assert.equal(result.stderr, '')
-      assert.equal(result.exitCode, 0)
-      assert.deepEqual(result.unsupported, [])
+      assert.notEqual(result.stderr, '')
+      assert.notEqual(result.exitCode, 0)
+      assert.deepEqual(notes(result), [['feature', inner.startsWith('echo') ? 'extglob' : 'array assignment']])
     })
   }
 
@@ -148,10 +154,10 @@ describe('deferred command substitutions preserve diagnostic and quoting boundar
     })
   }
 
-  it('retains the executed inner extglob diagnostic when stderr is hidden', () => {
+  it('reports inner extglob syntax before applying enclosing redirects', () => {
     const result = terminal().run(`{ printf '%s' "$(echo @(a|b) 2>/dev/null)"; } 2>/dev/null | cat`)
     assert.equal(result.stdout, '')
-    assert.equal(result.stderr, '')
+    assert.notEqual(result.stderr, '')
     assert.deepEqual(notes(result), [['feature', 'extglob']])
   })
 })

@@ -9,7 +9,7 @@ import { createTerminal } from '@preventive/terminal'
 // https://github.com/mirror/sed/blob/v4.9/sed/execute.c
 // https://github.com/mirror/sed/blob/v4.9/sed/regexp.c
 const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'"
-const result = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+const result = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 
 function check(script, input, stdout, flags = '') {
   const actual = createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)

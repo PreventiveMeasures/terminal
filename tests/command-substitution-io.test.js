@@ -15,7 +15,7 @@ const READ_ERROR = 'cat: missing: no such file or directory\n'
 const NUL_WARNING = 'warning: command substitution: ignored null byte in input\n'
 
 function check(command, stdout, exitCode = 0, stderr = '') {
-  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd: '/', unsupported: [] }, command)
+  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] }, command)
 }
 
 describe('command substitution — Bash file shorthand', () => {
@@ -79,7 +79,7 @@ describe('command substitution — expansion order and stderr', () => {
     const r = createTerminal(FILES).run('{ x=$(grep --unknown x input); } 2>/dev/null')
     assert.deepEqual(r, {
       stdout: '', stderr: '', exitCode: 2, cwd: '/',
-      unsupported: [{ kind: 'option', command: 'grep', detail: '--unknown', message: 'grep: unknown option: --unknown' }],
+      notes: [], unsupported: [{ kind: 'option', command: 'grep', detail: '--unknown', message: 'grep: unknown option: --unknown' }],
     })
   })
 })

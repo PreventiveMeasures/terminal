@@ -7,7 +7,7 @@ const terminal = () => createTerminal(SOURCES, { mount: '/repo', cwd: '/repo', w
 const diagnostic = (name = '/tmp/log') => `cat: ${name}: input file is output file\n`
 
 function check(t, command, stdout = '', stderr = '', exitCode = 0) {
-  assert.deepEqual(t.run(command), { stdout, stderr, exitCode, cwd: '/repo', unsupported: [] }, command)
+  assert.deepEqual(t.run(command), { stdout, stderr, exitCode, cwd: '/repo', notes: [], unsupported: [] }, command)
 }
 
 // GNU coreutils src/cat.c compares input position against stdout's current

@@ -1,10 +1,11 @@
 // In-memory shell over a { path: content } source tree; no host I/O.
 // cwd and variables persist across run() calls. Unsupported constructs also
 // reach a diagnostic feed that redirects and pipelines cannot suppress.
+// Informational notes share that scope without changing the command's streams.
 // Caller-provided command handlers use the contract in custom.js.
 
 import { mountSources } from './mount.js'
-import { parseLine } from './shell/parse.js'
+import { parseUnits } from './shell/parse.js'
 import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
 import { BindingMap } from './shell/bindings.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
@@ -22,7 +23,7 @@ export function createTerminal(sources, opts = {}) {
   const ctx = {
     cwd, fs, io: createIoGuard(fs), user: opts.user ?? 'user', home, writable, registry, outputFds: { 1: 'out', 2: 'err' },
     vars: new BindingMap(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '',
-    unsupported: createUnsupportedFeed(),
+    unsupported: createUnsupportedFeed(), notes: new Set(),
   }
   // find -exec and xargs dispatch externally in isolated shell state.
   ctx.dispatch = (name, tokens, stdin) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinFile: false, stdinOrigin: null, stdinHandle: null },
@@ -71,17 +72,27 @@ function record(ctx, result, resolved) {
 // Syntax errors exit 2; unsupported constructs exit 1.
 function safeRun(line, ctx) {
   const feed = createUnsupportedFeed()
-  return withState(ctx, { unsupported: feed, stdinFile: false, stdinOrigin: null, stdinHandle: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, () => {
+  return withState(ctx, { unsupported: feed, notes: new Set(), stdinFile: false, stdinOrigin: null, stdinHandle: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, () => {
+    const result = { stdout: '', stderr: '', exitCode: 0 }
+    const stream = { text: '' }
     try {
-      return finish(runSteps(parseLine(line, ctx.writable, ctx.registry.has), ctx, { text: '' }), ctx, feed)
+      for (const steps of parseUnits(line, ctx.writable, ctx.registry.has)) {
+        const r = runSteps(steps, ctx, stream)
+        result.stdout += r.stdout
+        result.stderr += r.stderr
+        result.exitCode = r.exitCode
+        if (r.halt || r.control) break
+      }
     } catch (e) {
       const note = unsupportedNote(e)
       if (note) feed.add(note)
-      ctx.lastExit = note ? 1 : 2
-      return finish(err(`error: ${e.message}`, ctx.lastExit), ctx, feed)
+      ctx.lastExit = e.exitCode ?? (note ? 1 : 2)
+      result.stderr += `error: ${e.message}\n`
+      result.exitCode = ctx.lastExit
     }
+    return finish(result, ctx, feed)
   })
 }
 
 // Do not expose internal halt/control fields or mutable diagnostic entries.
-const finish = (r, ctx, feed) => ({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, cwd: ctx.cwd, unsupported: Object.freeze(feed.entries) })
+const finish = (r, ctx, feed) => ({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, cwd: ctx.cwd, unsupported: Object.freeze(feed.entries), notes: Object.freeze([...ctx.notes]) })

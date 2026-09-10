@@ -38,7 +38,7 @@ describe('sed address and regex boundaries', () => {
   for (const [command, input, stdout] of CASES) {
     it(command, () => {
       const terminal = createTerminal({ input })
-      const expected = { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] }
+      const expected = { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }
       assert.deepEqual(terminal.run(command), expected)
       assert.deepEqual(terminal.run(command), expected, 'range state resets between invocations')
     })
@@ -118,7 +118,7 @@ describe('sed unsupported features retain diagnostics', () => {
       it(`empty address modifiers fail before reading ${input ? 'nonempty' : 'empty'} input: ${script}`, () => {
         assert.deepEqual(createTerminal({ input }).run(`sed -n '${script}' input`), {
           stdout: '', stderr: 'sed: cannot specify modifiers on empty regexp\n',
-          exitCode: 1, cwd: '/', unsupported: [],
+          exitCode: 1, cwd: '/', notes: [], unsupported: [],
         })
       })
     }

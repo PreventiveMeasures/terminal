@@ -1,5 +1,6 @@
 import { UnsupportedError } from '../unsupported.js'
 import { trimParameter } from './parameter-pattern.js'
+import { transformParameter } from './parameter-transform.js'
 
 const NAME = /^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[?*@#$!-])(?![\s\S])/u
 const VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/u
@@ -23,7 +24,7 @@ export function parseParameter(content) {
   const suffix = logical.slice(name.length)
   if (!suffix) return { name: normalizeName(name), operator: '' }
   if (name === '#' && /^[%:=+/]$/u.test(suffix)) throw parameterError(content)
-  const operator = /^(?::[-+=?]|[-+=?]|##?|%%?)/u.exec(suffix)?.[0]
+  const operator = /^(?::[-+=?]|[-+=?]|##?|%%?|:|\/\/?)/u.exec(suffix)?.[0]
   if (!operator) throw parameterError(content)
   return { name: normalizeName(name), operator, word: content.slice(prefixEnd(content, name.length + operator.length)) }
 }
@@ -37,11 +38,13 @@ function prefixEnd(source, count) {
   return at
 }
 
-export function evaluateParameter(ref, ctx, { lookup, expand }) {
+export function evaluateParameter(ref, ctx, options) {
+  const { lookup, expand } = options
   const { name, operator, word = '' } = ref
   const found = lookup(name, { quiet: operator !== '' })
   if (!operator) return found
   if (operator === 'length') return parameterLength(name, found.value)
+  if (operator === ':' || operator.startsWith('/')) return transformParameter(ref, found, ctx, options)
   if (operator[0] === '#' || operator[0] === '%') {
     // Bash does not expand a removal pattern when there is no value to trim.
     if (!found.value || !word) return found

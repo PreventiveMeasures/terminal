@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 function check(program, stdout, files = {}, operands = '', exitCode = 0) {
   const terminal = createTerminal({ 'program.awk': program, ...files })
   assert.deepEqual(terminal.run(`awk -f program.awk ${operands}`), {
-    stdout, stderr: '', exitCode, cwd: '/', unsupported: [],
+    stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [],
   })
 }
 

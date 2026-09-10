@@ -124,7 +124,7 @@ function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
   try {
     for (const r of stage.redirs) {
       if (r.op === 'dup') {
-        if (fds[r.toFd] === 'closed') return done(err(`error: ${r.toFd}: Bad file descriptor`))
+        if (fds[r.toFd] === undefined || fds[r.toFd] === 'closed') return done(err(`error: ${r.toFd}: Bad file descriptor`))
         fds[r.fd] = fds[r.toFd]
       } else if (r.op === 'close') fds[r.fd] = 'closed'
       else if (r.op === 'to') {

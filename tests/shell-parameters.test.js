@@ -39,6 +39,12 @@ describe('parameter parser distinguishes supported operators', () => {
     ['x:-${y:-z}', { name: 'x', operator: ':-', word: '${y:-z}' }],
     ['x##a#b', { name: 'x', operator: '##', word: 'a#b' }],
     ['x%%a%b', { name: 'x', operator: '%%', word: 'a%b' }],
+    ['x:1', { name: 'x', operator: ':', word: '1' }],
+    ['x: -1', { name: 'x', operator: ':', word: ' -1' }],
+    ['x:1:2', { name: 'x', operator: ':', word: '1:2' }],
+    ['x:', { name: 'x', operator: ':', word: '' }],
+    ['x/a/b', { name: 'x', operator: '/', word: 'a/b' }],
+    ['x//a/b', { name: 'x', operator: '//', word: 'a/b' }],
     ['na\\\nme', { name: 'name', operator: '' }],
     ['#na\\\nme', { name: 'name', operator: 'length' }],
     ['x:\\\n-default', { name: 'x', operator: ':-', word: 'default' }],
@@ -53,7 +59,7 @@ describe('parameter parser distinguishes supported operators', () => {
     })
   }
 
-  for (const content of ['', ' x', 'x ', 'x y', 'x[0]', 'x[@]', '!name', '!prefix*', '!name[@]', '#x:-word', '#x#p', 'x:1', 'x: -1', 'x:1:2', 'x:', 'x/a/b', 'x//a/b', 'x^', 'x^^', 'x,', 'x,,', 'x@Q', 'x@a', '#%', '#=', '#+', '#/', '#:', '1x', '.']) {
+  for (const content of ['', ' x', 'x ', 'x y', 'x[0]', 'x[@]', '!name', '!prefix*', '!name[@]', '#x:-word', '#x#p', 'x^', 'x^^', 'x,', 'x,,', 'x@Q', 'x@a', '#%', '#=', '#+', '#/', '#:', '1x', '.']) {
     it(`reports malformed or unimplemented ${content}`, () => {
       assert.throws(() => parseParameter(content), (error) => unsupportedNote(error)?.detail === '${')
     })
@@ -277,7 +283,7 @@ describe('parameter pathname expansion and failures', () => {
     })
   }
 
-  for (const content of ['x:1', 'x/a/b', 'x^^', 'x@Q', '!x', 'x[@]', '#x:-word', '']) {
+  for (const content of ['x^^', 'x@Q', '!x', 'x[@]', '#x:-word', '']) {
     it(`diagnoses unsupported ${content} through the public shell`, () => {
       const result = createTerminal({}).run('echo "${' + content + '}" 2>/dev/null | cat')
       assert.equal(result.stdout, '')

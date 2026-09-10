@@ -12,7 +12,7 @@ const OPTIONS = { mount: '/workspace', home: '/workspace/home', cwd: '/workspace
 const terminal = (options = {}) => createTerminal(SOURCES, { ...OPTIONS, ...options })
 
 function check(t, command, stdout, cwd = t.cwd()) {
-  assert.deepEqual(t.run(command), { stdout, stderr: '', exitCode: 0, cwd, unsupported: [] }, command)
+  assert.deepEqual(t.run(command), { stdout, stderr: '', exitCode: 0, cwd, notes: [], unsupported: [] }, command)
 }
 
 describe('createTerminal source mount', () => {
@@ -81,7 +81,7 @@ describe('createTerminal source mount', () => {
   it('retains existing root file and directory collision behavior at the mount', () => {
     const t = createTerminal({ '/': 'mounted root', child: 'child' }, { mount: '/workspace' })
     assert.deepEqual(t.run('cat /workspace /workspace/child'), {
-      stdout: 'child', stderr: 'cat: /workspace: is a directory\n', exitCode: 1, cwd: '/', unsupported: [],
+      stdout: 'child', stderr: 'cat: /workspace: is a directory\n', exitCode: 1, cwd: '/', notes: [], unsupported: [],
     })
     check(t, 'cd /workspace; pwd', '/workspace\n', '/workspace')
   })

@@ -7,7 +7,7 @@ import { createTerminal } from '@preventive/terminal'
 // by a substitution. These fixtures exercise scripts as data, without a shell oracle.
 // https://github.com/mirror/sed/blob/v4.9/sed/compile.c
 // https://github.com/mirror/sed/blob/v4.9/sed/regexp.c
-const expected = (stdout = '', stderr = '', exitCode = 0) => ({ stdout, stderr, exitCode, cwd: '/', unsupported: [] })
+const expected = (stdout = '', stderr = '', exitCode = 0) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
 const terminal = (program, files = {}) => createTerminal({ program, input: 'aAa\n', ...files }, { mount: '/src', writable: '/tmp/' })
 
 describe('sed write filenames in script files', () => {

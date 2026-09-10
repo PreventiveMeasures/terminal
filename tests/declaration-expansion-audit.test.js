@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
 const files = { 'X=one': '', 'X=two': '', 'X=alpha-end': '', 'X=beta-end': '' }
-const success = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+const success = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 
 // Bash execute_cmd.c fix_assignment_words recognizes the original command
 // spelling, before substitutions and quote removal can produce its name.

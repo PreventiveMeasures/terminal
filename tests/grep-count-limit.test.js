@@ -12,7 +12,7 @@ const FILES = {
 
 function check(command, stdout, exitCode = 0, stderr = '') {
   assert.deepEqual(createTerminal(FILES).run(command), {
-    stdout, stderr, exitCode, cwd: '/', unsupported: [],
+    stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [],
   }, command)
 }
 
@@ -75,7 +75,7 @@ describe('grep count and attached match limits', () => {
       const result = createTerminal(FILES).run(command + ' 2>/dev/null | cat')
       assert.deepEqual(result, {
         stdout: '', stderr: '', exitCode: 0, cwd: '/',
-        unsupported: [{ kind, command: 'grep', detail, message }],
+        notes: [], unsupported: [{ kind, command: 'grep', detail, message }],
       }, command)
     }
   })

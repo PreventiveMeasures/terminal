@@ -9,7 +9,7 @@ const files = {
 
 function check(command, stdout, exitCode = 0) {
   assert.deepEqual(createTerminal(files).run(command), {
-    stdout, stderr: '', exitCode, cwd: '/', unsupported: [],
+    stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [],
   }, command)
 }
 
@@ -41,7 +41,7 @@ describe('grep line scanning', () => {
         const command = 'grep ' + mode + ' ' + operands
         assert.deepEqual(createTerminal(inputs).run(command), {
           stdout: '', stderr: message + '\n', exitCode: 2, cwd: '/',
-          unsupported: [{ kind: 'feature', command: 'grep', detail, message }],
+          notes: [], unsupported: [{ kind: 'feature', command: 'grep', detail, message }],
         }, command)
       }
     }

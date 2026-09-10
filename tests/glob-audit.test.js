@@ -6,7 +6,7 @@ import { compileGlob, hasExtglob } from '../src/glob.js'
 // Bash5.2.37 lib/glob/sm_loop.c BRACKMATCH finds raw ':]' before
 // dequoting class names; glob.c udequote_pathname also drops a trailing '\\'.
 // smatch.c cclass_name includes the GNU ascii and word classes.
-const result = (exitCode = 0, stdout = '') => ({ stdout, stderr: '', exitCode, cwd: '/', unsupported: [] })
+const result = (exitCode = 0, stdout = '') => ({ stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
 
 describe('glob named classes use shell matching rules', () => {
   for (const [pattern, matched, rejected] of [

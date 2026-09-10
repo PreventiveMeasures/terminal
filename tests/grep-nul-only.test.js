@@ -17,7 +17,7 @@ const FILES = {
 
 function check(command, stdout = '', exitCode = 1, stderr = '', files = FILES) {
   assert.deepEqual(createTerminal(files).run(command), {
-    stdout, stderr, exitCode, cwd: '/', unsupported: [],
+    stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [],
   }, command)
 }
 

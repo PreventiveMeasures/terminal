@@ -34,7 +34,7 @@ function builtinGap(command) {
 
 function assertUnchanged(term) {
   assert.deepEqual(term.run('echo "$AUDIT"; echo alive'), {
-    stdout: 'original\nalive\n', stderr: '', exitCode: 0, cwd: '/start', unsupported: [],
+    stdout: 'original\nalive\n', stderr: '', exitCode: 0, cwd: '/start', notes: [], unsupported: [],
   })
 }
 
@@ -48,14 +48,14 @@ describe('xargs — unavailable external command exit statuses', () => {
           const direct = terminal(input)
           direct.run('AUDIT=original')
           assert.deepEqual(direct.run(invocation(mode, command)), {
-            stdout: '', stderr: gap.message + '\n', exitCode: 127, cwd: '/start', unsupported: [gap],
+            stdout: '', stderr: gap.message + '\n', exitCode: 127, cwd: '/start', notes: [], unsupported: [gap],
           }, mode)
           assertUnchanged(direct)
 
           const hidden = terminal(input)
           hidden.run('AUDIT=original')
           assert.deepEqual(hidden.run(invocation(mode, command) + ' 2>/dev/null | cat'), {
-            stdout: '', stderr: '', exitCode: 0, cwd: '/start', unsupported: [gap],
+            stdout: '', stderr: '', exitCode: 0, cwd: '/start', notes: [], unsupported: [gap],
           }, mode + ': suppressing stderr must preserve the diagnostic')
           assertUnchanged(hidden)
         }
@@ -94,7 +94,7 @@ describe('xargs — registered commands returning unsuccessful statuses', () => 
         assert.deepEqual(term.run(invocation(mode, command)), {
           stdout: ITEMS,
           stderr: 'worker: deliberate failure\nworker: deliberate failure\nworker: deliberate failure\n',
-          exitCode: 123, cwd: '/start', unsupported: [],
+          exitCode: 123, cwd: '/start', notes: [], unsupported: [],
         })
         assert.deepEqual(calls, ALL_CALLS)
       })
@@ -104,7 +104,7 @@ describe('xargs — registered commands returning unsuccessful statuses', () => 
   for (const mode of MODES) {
     it(mode + ' maps false to 123 without an unsupported diagnostic', () => {
       assert.deepEqual(terminal(ITEMS).run(invocation(mode, 'false')), {
-        stdout: '', stderr: '', exitCode: 123, cwd: '/start', unsupported: [],
+        stdout: '', stderr: '', exitCode: 123, cwd: '/start', notes: [], unsupported: [],
       })
     })
 
@@ -119,7 +119,7 @@ describe('xargs — registered commands returning unsuccessful statuses', () => 
       assert.deepEqual(term.run(invocation(mode, '/usr/bin/worker')), {
         stdout: 'first\n',
         stderr: 'worker: stop\nxargs: /usr/bin/worker: exited with status 255; aborting\n',
-        exitCode: 124, cwd: '/start', unsupported: [],
+        exitCode: 124, cwd: '/start', notes: [], unsupported: [],
       })
       assert.deepEqual(calls, [['first']])
     })

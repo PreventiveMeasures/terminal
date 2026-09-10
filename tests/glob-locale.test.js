@@ -13,7 +13,7 @@ describe('glob locale diagnostics', () => {
       ["find . -name '[a-[:digit:]][[.a.]]'", ''],
     ]
     for (const [command, stdout] of cases) {
-      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] }, command)
+      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
     }
   })
 
@@ -25,7 +25,7 @@ describe('glob locale diagnostics', () => {
     ]) {
       assert.deepEqual(createTerminal(FILES).run(command), {
         stdout: '', stderr: '', exitCode: 0, cwd: '/',
-        unsupported: [{
+        notes: [], unsupported: [{
           kind: 'feature', command: 'find', detail: 'non-ASCII glob matching',
           message: 'find: locale-dependent glob matching of non-ASCII names is not supported',
         }],
@@ -36,7 +36,7 @@ describe('glob locale diagnostics', () => {
   it('reports unsupported collating classes before locale-dependent matching', () => {
     assert.deepEqual(createTerminal(FILES).run("find . -name 'é[[.a.]]' 2>/dev/null | cat"), {
       stdout: '', stderr: '', exitCode: 0, cwd: '/',
-      unsupported: [{
+      notes: [], unsupported: [{
         kind: 'feature', command: 'find', detail: 'glob collating or equivalence class',
         message: 'find: glob collating symbols and equivalence classes are not supported',
       }],

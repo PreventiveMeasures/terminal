@@ -47,7 +47,7 @@ function expectedSpan(v) {
 }
 
 function result(stdout, exitCode = 0) {
-  return { stdout, stderr: '', exitCode, cwd: '/', unsupported: [] }
+  return { stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] }
 }
 
 function checkGap(actual, detail) {

@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
 const FILES = { 'a.txt': 'alpha\nbeta\nalpha\n', 'b.txt': 'gamma\n' }
-const expected = (stdout = '', exitCode = 0, stderr = '', unsupported = [], cwd = '/') => ({ stdout, stderr, exitCode, cwd, unsupported })
+const expected = (stdout = '', exitCode = 0, stderr = '', unsupported = [], cwd = '/') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported })
 const terminal = () => createTerminal(FILES, { mount: '/src/', writable: '/tmp/' })
 
 describe('writable tmp output redirection', () => {

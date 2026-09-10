@@ -12,7 +12,7 @@ const FILES = {
 const terminal = () => createTerminal(FILES, { mount: '/repo/', cwd: '/tmp', writable: '/tmp/' })
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const command = (script, input = '/repo/input', flags = '') => `sed ${flags} ${quote(script)} ${input}`
-const expected = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/tmp', unsupported: [] })
+const expected = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/tmp', notes: [], unsupported: [] })
 const check = (t, text, stdout = '', exitCode = 0, stderr = '') => assert.deepEqual(t.run(text), expected(stdout, exitCode, stderr), text)
 const written = (t, name, content) => check(t, `cat ${quote(name)}`, content)
 

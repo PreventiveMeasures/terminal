@@ -153,7 +153,7 @@ describe('sed — substitutions from agent logs', () => {
   for (const { purpose, command, input, stdout } of CASES) {
     it(purpose, () => {
       assert.deepEqual(createTerminal({ input }).run(`cat input | ${command}`), {
-        stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+        stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
       }, command)
     })
   }
@@ -162,7 +162,7 @@ describe('sed — substitutions from agent logs', () => {
     const command = String.raw`f=src/file.ts; cat input | sed "s|^|$f:|"`
     assert.deepEqual(createTerminal({ input: 'one\n\nlast' }).run(command), {
       stdout: 'src/file.ts:one\nsrc/file.ts:\nsrc/file.ts:last',
-      stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 
@@ -177,7 +177,7 @@ describe('sed — substitutions from agent logs', () => {
     const command = String.raw`grep -rn "a" b/ | sed 's#.*x/##; s#/[^/]*$##' | sort | uniq -c`
     assert.deepEqual(createTerminal(files).run(command), {
       stdout: '      3 alpha\n      2 beta\n',
-      stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 })

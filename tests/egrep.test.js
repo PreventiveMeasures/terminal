@@ -11,7 +11,7 @@ const FILES = {
 }
 
 function check(command, stdout, exitCode = 0) {
-  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode, cwd: '/', unsupported: [] }, command)
+  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] }, command)
 }
 
 describe('egrep compatibility alias', () => {

@@ -7,7 +7,7 @@ import { createTerminal } from '@preventive/terminal'
 // backslash/newline in parameter operands; variables.c supplies Bash state.
 const FILES = { '[[': 'literal\n', 'a.txt': 'data\n', 'space file': 'space\n', 'a.js': 'a', 'b.js': 'b' }
 const terminal = () => createTerminal(FILES, { commands: { argv: ({ args }) => JSON.stringify(args) } })
-const success = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+const success = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 
 describe('conditional keywords and compound expansion boundaries', () => {
   for (const [command, stdout] of [
@@ -76,7 +76,7 @@ describe('unsupported expansion paths retain independent diagnostics', () => {
     'printf "%s" "${BASH:-fallback}"',
     '{ argv ${missing:-<(printf data)}; } 2>/dev/null | cat',
     'for path in a.txt; do [[ -r "$path" ]] 2>/dev/null; done | cat',
-    'for value in "${x/old/new}"; do printf "%s" "$value"; done 2>/dev/null | cat',
+    'for value in "${x@P}"; do printf "%s" "$value"; done 2>/dev/null | cat',
     'printf "%s" "$(printf "%s" "${x@Q}")" 2>/dev/null | cat',
     '[[ ${x:-$((1 / 0))} == anything ]] 2>/dev/null | cat',
   ]) {

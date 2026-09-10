@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 // unchanged. The slash after the quote class is a literal match character.
 // https://www.gnu.org/software/grep/manual/html_node/Special-Backslash-Expressions.html
 const command = String.raw`grep -vE "=>|function|async|,$|^\S+-[0-9]+-\s*['\`\"]/"`
-const result = (stdout, exitCode = 0) => ({ stdout, stderr: '', exitCode, cwd: '/', unsupported: [] })
+const result = (stdout, exitCode = 0) => ({ stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
 const excluded = [
   'const arrow = () => value',
   'function run() {}',

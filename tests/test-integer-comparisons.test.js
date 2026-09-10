@@ -13,7 +13,7 @@ const OPERATORS = ['-eq', '-ne', '-lt', '-le', '-gt', '-ge']
 const COMMANDS = ['test', '[']
 const FILES = { lines: 'hit\nmiss\nhit\n' }
 const invocation = (name, expression) => `${name} ${expression}${name === '[' ? ' ]' : ''}`
-const result = (exitCode, stdout = '', stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', unsupported })
+const result = (exitCode, stdout = '', stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
 
 function check(expression, exitCode) {
   for (const name of COMMANDS) {

@@ -88,14 +88,14 @@ export const SHELL_WORKFLOWS = [
     parseTime: true,
   },
   {
-    purpose: 'Replace source path separators with parameter expansion',
-    command: 'name=src/index.js; echo "${name//\\//_}"',
+    purpose: 'Normalize a source identifier to uppercase with parameter expansion',
+    command: 'name=src/index.js; echo "${name^^}"',
     expected: feature('${'),
     parseTime: true,
   },
   {
-    purpose: 'Extract a fixed-width source path prefix with parameter expansion',
-    command: 'file=src/index.js; echo "${file:0:3}"',
+    purpose: 'Quote a source path for reuse with parameter expansion',
+    command: 'file=src/index.js; echo "${file@Q}"',
     expected: feature('${'),
     parseTime: true,
   },

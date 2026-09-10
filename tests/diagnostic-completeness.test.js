@@ -139,7 +139,7 @@ describe('diagnostic completeness — runtime and parser limitations', () => {
     ['a=(one two)', 'array assignment'],
     ['a+=(one two)', 'array assignment'],
     ['a=(); a+=(one)', 'array assignment'],
-    ['echo ${x:1}', '${'],
+    ['echo ${x@Q}', '${'],
     ['echo $((a[0]+2))', 'arithmetic arrays'],
     ['cat <(cat f)', '<('],
     ['cat f > out', '>'],

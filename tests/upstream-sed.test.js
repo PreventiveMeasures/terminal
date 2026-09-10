@@ -11,7 +11,7 @@ const quote = (text) => `'${text.replaceAll("'", "'\\''")}'`
 function check(script, input, stdout, flags = '') {
   const terminal = createTerminal({ input })
   assert.deepEqual(terminal.run(`sed ${flags} ${quote(script)} input`), {
-    stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+    stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
   })
 }
 
@@ -84,7 +84,7 @@ describe('GNU sed audit — address ranges', () => {
 
   it('uses cumulative addresses and separates missing final newlines across operands', () => {
     const result = createTerminal({ first: 'oak', empty: '', last: 'elm\nfir' }).run("sed -n '2,$p' first empty last")
-    assert.deepEqual(result, { stdout: 'elm\nfir', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+    assert.deepEqual(result, { stdout: 'elm\nfir', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 })
 

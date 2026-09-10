@@ -276,10 +276,10 @@ describe('no JS execution — runtime', () => {
   it('runs command substitution through the virtual registry and rejects unsupported expansion forms', () => {
     const t = createTerminal(SOURCES)
     assert.deepEqual(t.run('echo "$(cat a.js)"'), {
-      stdout: 'hello\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stdout: 'hello\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
     assert.deepEqual(t.run('echo $((1+1))'), {
-      stdout: '2\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stdout: '2\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
     for (const line of ['echo `id`', 'echo $[1+1]']) {
       const r = t.run(line)

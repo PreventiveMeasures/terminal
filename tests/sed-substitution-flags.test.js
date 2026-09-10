@@ -8,7 +8,7 @@ import { createTerminal } from '@preventive/terminal'
 // https://github.com/mirror/sed/blob/v4.9/sed/compile.c
 // https://github.com/mirror/sed/blob/v4.9/sed/regexp.c
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
-const expected = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/', unsupported: [] })
+const expected = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
 const run = (script, input, flags = '') => createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
 
 describe('sed case-insensitive substitution flags', () => {
@@ -116,7 +116,7 @@ describe('sed regex flag errors and engine limitations', () => {
       assert.equal(result.exitCode, 1)
       assert.equal(result.unsupported.length, 1)
       assert.equal(result.unsupported[0].detail, script.includes('(a)') ? 'regex capture semantics' : 'non-ASCII regex semantics')
-      assert.deepEqual(t.run(`sed -E ${quote(script)} input 2>/dev/null | cat`), { ...expected(), unsupported: result.unsupported })
+      assert.deepEqual(t.run(`sed -E ${quote(script)} input 2>/dev/null | cat`), { ...expected(), notes: [], unsupported: result.unsupported })
     })
   }
 })

@@ -73,7 +73,7 @@ describe('cp preserves file bytes without weakening shared write guards', () => 
 
   it('copies an invalid byte sequence created through shell descriptors successfully', () => {
     const terminal = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
-    const success = { stdout: '', stderr: '', exitCode: 0, cwd: '/', unsupported: [] }
+    const success = { stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }
     assert.deepEqual(terminal.run('{ printf é >/tmp/raw; printf X; } >/tmp/raw'), success)
     assert.deepEqual(terminal.run('cp /tmp/raw /tmp/copy'), success)
     assert.deepEqual(terminal.run('printf changed >/tmp/raw'), success)

@@ -21,7 +21,7 @@ describe('Unicode boundaries in echo and printf escapes', () => {
     [String.raw`printf '%b' '\é\😀\n'`, '\\é\\😀\n'],
   ]
   for (const [command, stdout] of cases) {
-    it(command, () => assert.deepEqual(createTerminal().run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] }))
+    it(command, () => assert.deepEqual(createTerminal().run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }))
   }
 
   it('still diagnoses precision that splits a multibyte character', () => {

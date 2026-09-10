@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
 const terminal = () => createTerminal({}, { mount: '/src', writable: '/tmp/', commands: { argv: ({ args }) => JSON.stringify(args) } })
-const success = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+const success = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 
 // Bash execute_simple_command expands words before calling do_redirections;
 // subst.c aborts that expansion on a fatal arithmetic or required-value error.

@@ -6,7 +6,7 @@ import { writableFs } from '../src/writable.js'
 
 // GNU remove.c defines -f's ignorable missing errors and -v's per-file output.
 // https://github.com/coreutils/coreutils/blob/master/src/remove.c
-const result = (stdout = '', exitCode = 0, stderr = '', cwd = '/') => ({ stdout, stderr, exitCode, cwd, unsupported: [] })
+const result = (stdout = '', exitCode = 0, stderr = '', cwd = '/') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported: [] })
 const makeTerminal = () => createTerminal({ source: 'original\n' }, { mount: '/src/', writable: '/tmp/' })
 const setup = () => {
   const terminal = makeTerminal()

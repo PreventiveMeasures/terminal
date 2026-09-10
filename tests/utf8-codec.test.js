@@ -9,7 +9,7 @@ import { unsupportedNote } from '../src/unsupported.js'
 // https://github.com/ExodusOSS/bytes#exodusbytesutf8js
 const partialMessage = 'byte output that is not valid UTF-8 cannot be represented by this string-based terminal'
 const surrogateMessage = 'unpaired UTF-16 surrogates cannot be encoded as UTF-8'
-const result = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', unsupported })
+const result = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
 const vectors = [
   ['', []], ['\0', [0]], ['\u007F', [0x7F]], ['\u0080', [0xC2, 0x80]],
   ['\u07FF', [0xDF, 0xBF]], ['\u0800', [0xE0, 0xA0, 0x80]],

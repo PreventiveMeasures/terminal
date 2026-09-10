@@ -4,7 +4,7 @@ import { createTerminal } from '@preventive/terminal'
 
 function check(command, input, stdout) {
   const result = createTerminal({ input }).run(`cat input | ${command}`)
-  assert.deepEqual(result, { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] }, command)
+  assert.deepEqual(result, { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
 }
 
 const REGEX_RANGES = [
@@ -124,7 +124,7 @@ describe('sed — range selection semantics', () => {
     const terminal = createTerminal({ first: 'one\nstart', second: 'three\nfour', empty: '' })
     for (const [script, stdout] of [["'2,3p'", 'start\nthree\n'], ["'/start/,$p'", 'start\nthree\nfour'], ["'$p'", 'four']]) {
       assert.deepEqual(terminal.run(`sed -n ${script} first empty second empty`), {
-        stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+        stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
       })
     }
   })

@@ -5,10 +5,10 @@ import { createTerminal } from '@preventive/terminal'
 function diagnoses(command, files, detail, message, exitCode = 2) {
   const unsupported = [{ kind: 'feature', command: 'grep', detail, message }]
   assert.deepEqual(createTerminal(files).run(command), {
-    stdout: '', stderr: message + '\n', exitCode, cwd: '/', unsupported,
+    stdout: '', stderr: message + '\n', exitCode, cwd: '/', notes: [], unsupported,
   }, command)
   assert.deepEqual(createTerminal(files).run(`${command} 2>/dev/null | cat`), {
-    stdout: '', stderr: '', exitCode: 0, cwd: '/', unsupported,
+    stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported,
   }, command)
 }
 
@@ -18,7 +18,7 @@ describe('grep input preprocessing', () => {
   it('checks Unicode whitespace in every relevant pattern when a literal also matches', () => {
     const files = { text: 'TODO café\n', space: 'TODO\u2003\n' }
     assert.deepEqual(createTerminal(files).run("grep -e TODO -e '[[:space:]]' text"), {
-      stdout: 'TODO café\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stdout: 'TODO café\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
     diagnoses("grep -e TODO -e '[[:space:]]' space", files, 'non-ASCII regex semantics', localeMessage)
   })

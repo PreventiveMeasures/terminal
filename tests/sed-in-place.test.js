@@ -8,7 +8,7 @@ import { preprocessInPlace } from '../src/commands/sed-in-place.js'
 // https://git.savannah.gnu.org/cgit/sed.git/tree/sed/sed.c?h=v4.9
 // https://git.savannah.gnu.org/cgit/sed.git/tree/sed/execute.c?h=v4.9
 const FILES = { input: 'a\nb\na\n', second: 'c\nd\n', script: 's/a/A/\n' }
-const expected = (stdout = '', exitCode = 0, stderr = '', unsupported = [], cwd = '/') => ({ stdout, stderr, exitCode, cwd, unsupported })
+const expected = (stdout = '', exitCode = 0, stderr = '', unsupported = [], cwd = '/') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported })
 
 function terminal() {
   const t = createTerminal(FILES, { mount: '/src/', writable: '/tmp/' })

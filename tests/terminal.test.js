@@ -2335,13 +2335,10 @@ describe('createTerminal — `2>&1` fd-to-fd redirects', () => {
   })
 
   it('malformed `N>&` forms surface a redirect-target error, not "background processes"', () => {
-    // Per Copilot review: previously each of these tokenized as
-    // `2>` + a stray `&...` token, with the `&` triggering the
-    // background-process branch and producing a misleading error.
+    // A malformed duplication must not split into `2>` and a background `&`.
     const t = createTerminal(SOURCES)
     for (const cmd of [
       'echo hi 2>&',         // missing fd
-      'echo hi 2>&3',        // invalid fd (only 1 / 2 supported)
       'echo hi 2>&1foo',     // valid fd but no token boundary after
     ]) {
       const r = t.run(cmd)
@@ -4454,7 +4451,7 @@ describe('createTerminal — ls -d/-r/-A/-F, find -iname/-print0/-empty', () => 
   it('find -iname combines case-insensitive exclusions and file matching without diagnostics', () => {
     const t = createTerminal({ 'src/index.JS': 'main\n', 'src/other.txt': 'other\n', 'NODE_MODULES/dep.js': 'excluded\n' })
     assert.deepEqual(t.run('find . -iname node_modules -prune -o -type f -iname "*.js" -print'), {
-      stdout: './src/index.JS\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stdout: './src/index.JS\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 
@@ -6365,7 +6362,7 @@ describe('createTerminal — awk', () => {
       }
       print outer, inner, steps
     }'`)
-    assert.deepEqual(result, { stdout: '0 0\n3 3\n2 0 3\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+    assert.deepEqual(result, { stdout: '0 0\n3 3\n2 0 3\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 
   it('control flow: if / else chains, while, do, for, for-in, break, continue, nested blocks, empty statements', () => {
@@ -6679,7 +6676,7 @@ describe('createTerminal — awk', () => {
   it('evaluates 640 nested parentheses without unsupported diagnostics', () => {
     const expression = '('.repeat(640) + '42' + ')'.repeat(640)
     const result = run("awk 'BEGIN { print " + expression + " }'")
-    assert.deepEqual(result, { stdout: '42\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+    assert.deepEqual(result, { stdout: '42\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 
   it('grammar corners follow gawk: comparisons do not chain, `~` does, a space before a call is an error, empty rules are errors', () => {

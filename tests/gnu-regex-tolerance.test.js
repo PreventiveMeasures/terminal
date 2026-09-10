@@ -147,7 +147,7 @@ describe('GNU tolerance — the well-formed neighbours still match GNU', () => {
   for (const [ere, pattern, stdout, exitCode = 0] of WELL_FORMED) {
     it(`${ere ? 'ERE' : 'BRE'} ${pattern}`, () => {
       assert.deepEqual(run(command(ere, pattern)),
-        { stdout, stderr: '', exitCode, cwd: '/', unsupported: [] })
+        { stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
     })
   }
 })

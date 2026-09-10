@@ -7,7 +7,7 @@ import { createTerminal } from '@preventive/terminal'
 // branches expand lazily, and numeric operands use shell arithmetic.
 const FILES = { 'plain.txt': 'data\n', 'empty.txt': '', 'dir/a b.txt': 'x', 'dir/a.js': '' }
 const terminal = (options) => createTerminal(FILES, options)
-const result = (exitCode = 0, stdout = '') => ({ stdout, stderr: '', exitCode, cwd: '/', unsupported: [] })
+const result = (exitCode = 0, stdout = '') => ({ stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
 
 function check(command, exitCode = 0, stdout = '') {
   assert.deepEqual(terminal().run(command), result(exitCode, stdout), command)

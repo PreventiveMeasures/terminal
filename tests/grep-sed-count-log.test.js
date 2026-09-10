@@ -82,7 +82,7 @@ describe('grep and sed — logged package-count pipeline', () => {
   for (const { purpose, command, files, cwd, stdout } of CASES) {
     it(purpose, () => {
       const result = createTerminal(files, { cwd }).run(command)
-      assert.deepEqual(result, { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] }, command)
+      assert.deepEqual(result, { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
     })
   }
 })
