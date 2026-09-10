@@ -194,14 +194,14 @@ describe('grep — quoted assignment fragments', () => {
   it('the reported command preserves all five BRE alternatives and literal quotes, semicolons and plus signs', () => {
     assert.deepEqual(createTerminal(files).run(command), {
       stdout: selected.map((line, i) => `${i + 2}:${line}\n`).join(''),
-      stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 
   it('retains the longest alternative when a shorter one starts at the same position', () => {
     assert.deepEqual(createTerminal(files).run(command.replace('grep -n', 'grep -on')), {
       stdout: selected.map((line, i) => `${i + 2}:${line}\n`).join(''),
-      stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 })

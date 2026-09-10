@@ -211,6 +211,15 @@ export interface RunResult {
    * way; they stay on stderr and never appear here.
    */
   unsupported: readonly Unsupported[]
+  /**
+   * Informational notes from commands that ran, independent of stdout, stderr,
+   * and exit status. Frozen and deduplicated per run; redirects, pipelines,
+   * and nested shell commands cannot suppress them.
+   *
+   * `ls` notes when it omits hidden entries, suggests `-a`, and includes
+   * absolute paths when fewer than 10 entries were omitted by that invocation.
+   */
+  notes: readonly string[]
 }
 
 /** A virtual terminal instance with a mutable cwd carried across {@link Terminal.run} calls. */

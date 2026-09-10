@@ -15,7 +15,7 @@ const sed = (script, input = 'single', flags = '') => `sed ${flags} ${quote(scri
 function examples(rows) {
   for (const [name, command, stdout] of rows) {
     it(name, () => {
-      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] }, command)
+      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
     })
   }
 }
@@ -103,7 +103,7 @@ describe('sed branch errors and execution limits reach the right channel', () =>
 
   it('does not execute a backward branch with no input cycle', () => {
     assert.deepEqual(createTerminal(FILES).run(sed(':loop;b loop', 'empty')), {
-      stdout: '', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 })

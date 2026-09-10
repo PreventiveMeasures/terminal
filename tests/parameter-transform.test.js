@@ -5,7 +5,7 @@ import { createTerminal } from '@preventive/terminal'
 // Independently expressed from Bash5.2.37 subst.c verify_substring_values,
 // match_upattern, pat_subst, parameter_brace_patsub, and quote_string_for_repl.
 // The upstream new-exp.tests/new-exp16.sub fixtures cover these same families.
-const expected = (stdout = '', exitCode = 0) => ({ stdout, stderr: '', exitCode, cwd: '/', unsupported: [] })
+const expected = (stdout = '', exitCode = 0) => ({ stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
 const check = (source, stdout, files = {}) => assert.deepEqual(createTerminal(files).run(source), expected(stdout), source)
 
 describe('scalar substring bounds and arithmetic', () => {

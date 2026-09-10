@@ -7,7 +7,7 @@ import { createTerminal } from '@preventive/terminal'
 // backslash/newline in parameter operands; variables.c supplies Bash state.
 const FILES = { '[[': 'literal\n', 'a.txt': 'data\n', 'space file': 'space\n', 'a.js': 'a', 'b.js': 'b' }
 const terminal = () => createTerminal(FILES, { commands: { argv: ({ args }) => JSON.stringify(args) } })
-const success = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+const success = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 
 describe('conditional keywords and compound expansion boundaries', () => {
   for (const [command, stdout] of [

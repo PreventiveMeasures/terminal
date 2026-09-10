@@ -4,7 +4,7 @@ import { runInNewContext } from 'node:vm'
 import { createTerminal } from '@preventive/terminal'
 
 function check(t, command, stdout, cwd = t.cwd()) {
-  assert.deepEqual(t.run(command), { stdout, stderr: '', exitCode: 0, cwd, unsupported: [] }, command)
+  assert.deepEqual(t.run(command), { stdout, stderr: '', exitCode: 0, cwd, notes: [], unsupported: [] }, command)
 }
 
 const options = { mount: '/work [x]', cwd: '/work [x]', home: '/work [x]/home', writable: '/tmp/' }
@@ -104,7 +104,7 @@ describe('mounted sources and custom filesystem views remain isolated', () => {
         ...options, commands: { listing: ({ fs, args }) => { fs.listDir(args[0]) } },
       })
       assert.deepEqual(t.run(`listing ${path}`), {
-        stdout: '', stderr: `listing: ${path}: ${error}\n`, exitCode: 1, cwd: options.cwd, unsupported: [],
+        stdout: '', stderr: `listing: ${path}: ${error}\n`, exitCode: 1, cwd: options.cwd, notes: [], unsupported: [],
       })
       assert.deepEqual(t.complete(`cat ${path}/l`), [])
     })

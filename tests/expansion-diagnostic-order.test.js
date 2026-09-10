@@ -15,7 +15,7 @@ function examples(rows) {
     it(name, () => {
       assert.deepEqual(terminal().run(command), {
         stdout, stderr, exitCode, cwd: '/',
-        unsupported: names.map((variable) => ({ kind: 'feature', command: null, detail: '$' + variable, message: warning(variable).trimEnd() })),
+        notes: [], unsupported: names.map((variable) => ({ kind: 'feature', command: null, detail: '$' + variable, message: warning(variable).trimEnd() })),
       }, command)
     })
   }
@@ -37,7 +37,7 @@ describe('expansion diagnostics follow lexical order', () => {
     const message = 'warning: `$$` is not supported (this terminal runs no process); left as typed'
     assert.deepEqual(terminal().run('echo "$$$(cat nope)"'), {
       stdout: '$$\n', stderr: message + '\n' + nope, exitCode: 0, cwd: '/',
-      unsupported: [{ kind: 'feature', command: null, detail: '$$', message }],
+      notes: [], unsupported: [{ kind: 'feature', command: null, detail: '$$', message }],
     })
   })
 })

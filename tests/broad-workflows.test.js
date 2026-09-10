@@ -83,7 +83,7 @@ describe('broad audit — readers preserve shared input', () => {
     const t = createTerminal(FILES)
     assert.deepEqual(t.run('od -N1 f missing'), t.run('od -N1 f'))
     assert.deepEqual(t.run('hexdump -n1 f missing'), t.run('hexdump -n1 f'))
-    assert.deepEqual(t.run('head -n0 dir'), { stdout: '', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+    assert.deepEqual(t.run('head -n0 dir'), { stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
   it('distinguishes absolute xxd/hexdump seeks from relative od skips', () => {
     const t = createTerminal(FILES)

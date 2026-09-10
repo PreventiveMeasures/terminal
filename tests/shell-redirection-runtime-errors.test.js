@@ -23,7 +23,7 @@ describe('unopened descriptors fail during command execution', () => {
   ]) {
     it(command, () => {
       const result = terminal().run(command)
-      assert.deepEqual(result, { stdout, stderr, exitCode, cwd: '/', unsupported: [] })
+      assert.deepEqual(result, { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
     })
   }
 
@@ -54,12 +54,12 @@ describe('substitution descriptor failures retain normal command status rules', 
   ]) {
     it(command, () => {
       const result = terminal().run(command)
-      assert.deepEqual(result, { stdout, stderr: badFd, exitCode, cwd: '/', unsupported: [] })
+      assert.deepEqual(result, { stdout, stderr: badFd, exitCode, cwd: '/', notes: [], unsupported: [] })
     })
   }
 
   it('does not evaluate command substitutions in a skipped command', () => {
     const result = terminal().run('true || echo "$(echo bad >&3)"; false && echo "$(echo bad >&3)"')
-    assert.deepEqual(result, { stdout: '', stderr: '', exitCode: 1, cwd: '/', unsupported: [] })
+    assert.deepEqual(result, { stdout: '', stderr: '', exitCode: 1, cwd: '/', notes: [], unsupported: [] })
   })
 })

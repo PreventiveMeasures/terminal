@@ -15,7 +15,7 @@ const FILES = {
 }
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const expressions = (...scripts) => scripts.map((script) => '-e ' + quote(script)).join(' ')
-const expected = (stdout, exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', unsupported })
+const expected = (stdout, exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
 const command = (args, file = 'input', flags = '') => `sed ${flags} ${args} ${file}`
 
 function check(args, stdout, file = 'input', flags = '') {

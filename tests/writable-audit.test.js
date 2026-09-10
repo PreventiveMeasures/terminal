@@ -9,7 +9,7 @@ function terminal() {
   assert.equal(t.run('cat /repo/input >/tmp/file').exitCode, 0)
   return t
 }
-const expected = (stdout = '', exitCode = 0) => ({ stdout, stderr: '', exitCode, cwd: '/', unsupported: [] })
+const expected = (stdout = '', exitCode = 0) => ({ stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
 
 function gap(t, command, detail) {
   const r = t.run(command)

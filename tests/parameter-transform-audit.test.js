@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
-const expected = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+const expected = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 const continuation = '\\\n'
 
 describe('replacement delimiters use logical characters after continuations', () => {

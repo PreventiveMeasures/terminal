@@ -15,7 +15,7 @@ const sed = (script, input = 'input', flags = '') => `sed ${flags} ${quote(scrip
 function examples(rows) {
   for (const [name, command, stdout] of rows) {
     it(name, () => {
-      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] }, command)
+      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
     })
   }
 }

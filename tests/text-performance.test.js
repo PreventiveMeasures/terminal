@@ -4,7 +4,7 @@ import { createTerminal } from '@preventive/terminal'
 
 function check(command, input, stdout) {
   assert.deepEqual(createTerminal({ input }).run(command), {
-    stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+    stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
   }, command)
 }
 

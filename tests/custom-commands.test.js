@@ -105,18 +105,18 @@ describe('createTerminal — opts.commands: the handler contract', () => {
   const run = (spec, line) => createTerminal(SOURCES, { commands: { probe: spec } }).run(line)
 
   it('a returned string is stdout with exit 0', () => {
-    assert.deepEqual(run(() => 'hi\n', 'probe'), { stdout: 'hi\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+    assert.deepEqual(run(() => 'hi\n', 'probe'), { stdout: 'hi\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 
   it('returning nothing is a silent success, so a no-op handler works', () => {
-    assert.deepEqual(run(() => {}, 'probe'), { stdout: '', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
-    assert.deepEqual(run(() => null, 'probe'), { stdout: '', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+    assert.deepEqual(run(() => {}, 'probe'), { stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+    assert.deepEqual(run(() => null, 'probe'), { stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 
   it('a returned object fills in its missing fields', () => {
     assert.deepEqual(
       run(() => ({ stderr: 'bad\n', exitCode: 3 }), 'probe'),
-      { stdout: '', stderr: 'bad\n', exitCode: 3, cwd: '/', unsupported: [] },
+      { stdout: '', stderr: 'bad\n', exitCode: 3, cwd: '/', notes: [], unsupported: [] },
     )
     assert.equal(run(() => ({ stdout: 'x' }), 'probe').exitCode, 0)
     // A non-zero status from a handler gates the rest of the line.

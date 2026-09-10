@@ -7,7 +7,7 @@ import { createTerminal } from '@preventive/terminal'
 // https://www.rfc-editor.org/rfc/rfc4648#section-10
 // https://github.com/coreutils/coreutils/blob/v9.11/src/basenc.c
 // https://github.com/coreutils/gnulib/blob/master/lib/base64.c
-const expected = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', unsupported })
+const expected = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
 const vectors = [
   ['', ''], ['f', 'Zg=='], ['fo', 'Zm8='], ['foo', 'Zm9v'],
   ['foob', 'Zm9vYg=='], ['fooba', 'Zm9vYmE='], ['foobar', 'Zm9vYmFy'],

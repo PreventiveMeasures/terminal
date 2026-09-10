@@ -10,7 +10,7 @@ const FILES = {
 }
 
 function check(command, stdout, exitCode = 0, stderr = '', cwd = '/') {
-  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd, unsupported: [] }, command)
+  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd, notes: [], unsupported: [] }, command)
 }
 
 describe('shell if — branches and status', () => {
@@ -105,7 +105,7 @@ describe('shell if — diagnostics and malformed syntax', () => {
     const r = createTerminal(FILES).run('if grep --unknown x input; then echo lost; else echo fallback; fi 2>/dev/null')
     assert.deepEqual(r, {
       stdout: 'fallback\n', stderr: '', exitCode: 0, cwd: '/',
-      unsupported: [{ kind: 'option', command: 'grep', detail: '--unknown', message: 'grep: unknown option: --unknown' }],
+      notes: [], unsupported: [{ kind: 'option', command: 'grep', detail: '--unknown', message: 'grep: unknown option: --unknown' }],
     })
   })
 

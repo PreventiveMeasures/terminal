@@ -14,7 +14,7 @@ const options = { commands: { capture: ({ args }) => JSON.stringify(args) + '\n'
 const terminal = () => createTerminal(FILES, options)
 
 function check(command, stdout, exitCode = 0, stderr = '') {
-  assert.deepEqual(terminal().run(command), { stdout, stderr, exitCode, cwd: '/', unsupported: [] }, command)
+  assert.deepEqual(terminal().run(command), { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] }, command)
 }
 
 describe('command substitution — output and shell words', () => {
@@ -134,7 +134,7 @@ describe('command substitution — redirects and diagnostics', () => {
     const message = 'grep: unknown option: --unknown'
     assert.deepEqual(terminal().run(command), {
       stdout: '', stderr: '', exitCode: 0, cwd: '/',
-      unsupported: [{ kind: 'option', command: 'grep', detail: '--unknown', message }],
+      notes: [], unsupported: [{ kind: 'option', command: 'grep', detail: '--unknown', message }],
     })
   })
 
@@ -148,7 +148,7 @@ describe('command substitution — redirects and diagnostics', () => {
 
   it('does not execute substitutions in skipped branches', () => {
     const r = terminal().run('false && echo "$(grep --unknown x src/a.js)"; true || echo "$(grep --unknown x src/a.js)"')
-    assert.deepEqual(r, { stdout: '', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+    assert.deepEqual(r, { stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 
   it('reports malformed substitution syntax as an error without throwing', () => {

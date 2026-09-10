@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
-const result = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/', unsupported: [] })
+const result = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
 const writeError = (name) => `${name}: write error: Bad file descriptor\n`
 const setup = () => createTerminal({ input: 'a\nb\n' })
 

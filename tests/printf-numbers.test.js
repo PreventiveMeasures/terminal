@@ -19,7 +19,7 @@ describe('printf floating-point representation boundaries', () => {
   for (const [command, stdout] of supported) {
     it(command, () => {
       assert.deepEqual(createTerminal({}).run(command), {
-        stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+        stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
       })
     })
   }
@@ -47,7 +47,7 @@ describe('printf floating-point representation boundaries', () => {
       assert.equal(plain.unsupported[0].detail, detail)
       const hidden = terminal.run(command + ' 2>/dev/null | cat')
       assert.deepEqual(hidden, {
-        stdout: '', stderr: '', exitCode: 0, cwd: '/', unsupported: plain.unsupported,
+        stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: plain.unsupported,
       })
     })
   }
@@ -56,14 +56,14 @@ describe('printf floating-point representation boundaries', () => {
 describe('printf missing and empty numeric operands', () => {
   it('fills missing numeric operands with zero without reporting an error', () => {
     assert.deepEqual(createTerminal({}).run("printf '%d %u %f'"), {
-      stdout: '0 0 0.000000', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stdout: '0 0 0.000000', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 
   it('reports explicit empty numeric operands as ordinary conversion errors', () => {
     assert.deepEqual(createTerminal({}).run("printf '%d %f' '' ''"), {
       stdout: '0 0.000000', stderr: 'printf: : invalid number\nprintf: : invalid number\n',
-      exitCode: 1, cwd: '/', unsupported: [],
+      exitCode: 1, cwd: '/', notes: [], unsupported: [],
     })
   })
 })

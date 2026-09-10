@@ -13,7 +13,7 @@ const SECOND = "3:  'eight': 8\n"
 
 function check(command, stdout) {
   assert.deepEqual(createTerminal(FILES).run(command), {
-    stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+    stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
   })
 }
 
@@ -45,7 +45,7 @@ describe('source discovery loop from agent logs', () => {
       'a/ignored.js': 'abc\n',
     }, { cwd: '/a' })
     assert.deepEqual(terminal.run(String.raw`cd / && for f in $(find a -name "*.txt"); do c=$(grep -c "a\|b\|c" $f); if [ "$c" != "0" ]; then echo "$f: $c"; fi; done`), {
-      stdout: 'a/nested/three.txt: 2\na/one.txt: 2\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stdout: 'a/nested/three.txt: 2\na/one.txt: 2\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 })

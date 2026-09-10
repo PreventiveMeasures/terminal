@@ -7,7 +7,7 @@ import { quoteName } from '../src/commands/quote-name.js'
 // can flush that output after copying has already changed an aliased file.
 // https://github.com/coreutils/coreutils/blob/v9.11/src/copy.c
 const makeTerminal = () => createTerminal({ a: 'alpha', b: 'beta', 'dir/file': 'nested' }, { mount: '/repo', writable: '/tmp/', cwd: '/repo' })
-const expected = (stdout = '', stderr = '', exitCode = 0) => ({ stdout, stderr, exitCode, cwd: '/repo', unsupported: [] })
+const expected = (stdout = '', stderr = '', exitCode = 0) => ({ stdout, stderr, exitCode, cwd: '/repo', notes: [], unsupported: [] })
 
 describe('cp does not invent a verbose-output buffering order', () => {
   for (const operator of ['>', '>>']) {

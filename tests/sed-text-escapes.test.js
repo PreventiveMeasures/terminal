@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 // bytes; unknown escapes lose the slash. Expectations are source-derived.
 // https://github.com/mirror/sed/blob/0c1fe22ccacf4887e0be6c11deb4e9c83acc287d/sed/compile.c
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
-const expected = (stdout, exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', unsupported })
+const expected = (stdout, exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
 
 describe('sed text commands normalize escapes as GNU text buffers', () => {
   const cases = [

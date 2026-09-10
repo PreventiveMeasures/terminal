@@ -752,7 +752,7 @@ describe('shell syntax — command conventions', () => {
       ['echo -- "---abc---"', '-- ---abc---\n'],
       ['echo "---abc---" 2>/dev/null | cat', '---abc---\n'],
     ]) {
-      assert.deepEqual(term().run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] }, command)
+      assert.deepEqual(term().run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
     }
   })
 

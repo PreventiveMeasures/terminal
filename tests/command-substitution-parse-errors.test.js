@@ -5,7 +5,7 @@ import { createTerminal } from '@preventive/terminal'
 // Bash parse.y parse_comsub invokes yyparse before executing the outer input
 // unit. report_syntax_error sets EX_BADUSAGE (2), and parse_comsub aborts it.
 // eval.c's reader_loop executes earlier complete input units independently.
-const expected = (stdout, exitCode = 0) => ({ stdout, stderr: '', exitCode, cwd: '/', unsupported: [] })
+const expected = (stdout, exitCode = 0) => ({ stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
 
 function syntaxError(result, stdout = '') {
   assert.equal(result.stdout, stdout)

@@ -4451,7 +4451,7 @@ describe('createTerminal — ls -d/-r/-A/-F, find -iname/-print0/-empty', () => 
   it('find -iname combines case-insensitive exclusions and file matching without diagnostics', () => {
     const t = createTerminal({ 'src/index.JS': 'main\n', 'src/other.txt': 'other\n', 'NODE_MODULES/dep.js': 'excluded\n' })
     assert.deepEqual(t.run('find . -iname node_modules -prune -o -type f -iname "*.js" -print'), {
-      stdout: './src/index.JS\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stdout: './src/index.JS\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 
@@ -6362,7 +6362,7 @@ describe('createTerminal — awk', () => {
       }
       print outer, inner, steps
     }'`)
-    assert.deepEqual(result, { stdout: '0 0\n3 3\n2 0 3\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+    assert.deepEqual(result, { stdout: '0 0\n3 3\n2 0 3\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 
   it('control flow: if / else chains, while, do, for, for-in, break, continue, nested blocks, empty statements', () => {
@@ -6676,7 +6676,7 @@ describe('createTerminal — awk', () => {
   it('evaluates 640 nested parentheses without unsupported diagnostics', () => {
     const expression = '('.repeat(640) + '42' + ')'.repeat(640)
     const result = run("awk 'BEGIN { print " + expression + " }'")
-    assert.deepEqual(result, { stdout: '42\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+    assert.deepEqual(result, { stdout: '42\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 
   it('grammar corners follow gawk: comparisons do not chain, `~` does, a space before a call is an error, empty rules are errors', () => {

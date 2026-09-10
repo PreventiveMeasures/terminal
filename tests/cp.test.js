@@ -8,7 +8,7 @@ import { createTerminal } from '@preventive/terminal'
 // https://github.com/coreutils/coreutils/blob/v9.11/src/copy.c
 const SOURCES = { a: 'alpha\n', b: 'beta\0😀', empty: '', 'dir/leaf': 'leaf', 'one/shared': 'first', 'two/shared': 'second', '-f': 'literal', bad: '\uD800' }
 const terminal = (options = {}) => createTerminal(SOURCES, { mount: '/repo', cwd: '/repo', writable: '/tmp/', ...options })
-const expected = (stdout = '', stderr = '', exitCode = 0) => ({ stdout, stderr, exitCode, cwd: '/repo', unsupported: [] })
+const expected = (stdout = '', stderr = '', exitCode = 0) => ({ stdout, stderr, exitCode, cwd: '/repo', notes: [], unsupported: [] })
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 
 function check(t, command, stdout = '', stderr = '', exitCode = 0) {

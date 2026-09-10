@@ -22,7 +22,7 @@ function examples(rows) {
   for (const [name, command, stdout, exitCode = 0] of rows) {
     it(name, () => {
       assert.deepEqual(createTerminal(FILES).run(command), {
-        stdout, stderr: '', exitCode, cwd: '/', unsupported: [],
+        stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [],
       }, command)
     })
   }

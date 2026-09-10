@@ -9,7 +9,7 @@ import { unsupportedNote } from '../src/unsupported.js'
 // assignment ordering and noeval behavior for short-circuited branches.
 // https://www.gnu.org/software/bash/manual/html_node/Shell-Arithmetic.html
 const context = (values = {}) => ({ vars: new BindingMap(Object.entries(values)), cwd: '/', home: '/', user: 'user', lastExit: 0 })
-const expected = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+const expected = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 const cases = [
   ['', 0n], [' \t\n', 0n], ['42', 42n], ['010', 8n], ['0xFf', 255n], ['0Xff', 255n],
   ['2#10101', 21n], ['16#ff', 255n], ['16#FF', 255n], ['36#z', 35n], ['36#Z', 35n],

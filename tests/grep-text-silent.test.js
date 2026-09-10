@@ -15,7 +15,7 @@ const FILES = {
 
 function check(command, stdout, exitCode = 0, stderr = '', files = FILES) {
   assert.deepEqual(createTerminal(files).run(command), {
-    stdout, stderr, exitCode, cwd: '/', unsupported: [],
+    stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [],
   }, command)
 }
 
@@ -127,7 +127,7 @@ describe('grep — suppress input read errors', () => {
     const message = 'grep: locale-sensitive regular expression matching on non-ASCII input is not supported'
     assert.deepEqual(result, {
       stdout: '', stderr: '', exitCode: 0, cwd: '/',
-      unsupported: [{ kind: 'feature', command: 'grep', detail: 'non-ASCII regex semantics', message }],
+      notes: [], unsupported: [{ kind: 'feature', command: 'grep', detail: 'non-ASCII regex semantics', message }],
     })
   })
 })

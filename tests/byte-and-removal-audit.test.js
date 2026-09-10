@@ -8,7 +8,7 @@ import { createTerminal } from '@preventive/terminal'
 // https://github.com/coreutils/gnulib/blob/master/lib/base64.c
 // https://github.com/coreutils/coreutils/blob/v9.11/src/remove.c
 // https://github.com/coreutils/gnulib/blob/master/lib/quotearg.c
-const result = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', unsupported })
+const result = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const writable = (files = {}) => createTerminal(files, { mount: '/src/', writable: '/tmp/' })
 

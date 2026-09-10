@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 // chomped flag. read_pattern_space resets only hold.length for separate files.
 // https://github.com/mirror/sed/blob/v4.9/sed/execute.c
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
-const result = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+const result = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 const run = (script, input, flags = '') => createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
 
 describe('sed hold commands copy, append, and exchange complete records', () => {

@@ -19,7 +19,7 @@ const FILES = {
 function check(command, input, stdout, exitCode = 0) {
   const files = input === null ? FILES : { ...FILES, input }
   const line = input === null ? command : `${command} < input`
-  assert.deepEqual(createTerminal(files).run(line), { stdout, stderr: '', exitCode, cwd: '/', unsupported: [] })
+  assert.deepEqual(createTerminal(files).run(line), { stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
 }
 
 function cases(rows) {

@@ -265,7 +265,7 @@ describe('run().unsupported — the contract', () => {
     const r = term().run('ls -t')
     assert.deepEqual(Object.getOwnPropertySymbols(r), [])
     assert.deepEqual(Object.getOwnPropertySymbols(r.unsupported[0]), [])
-    assert.deepEqual(Object.keys(r).sort(), ['cwd', 'exitCode', 'stderr', 'stdout', 'unsupported'])
+    assert.deepEqual(Object.keys(r).sort(), ['cwd', 'exitCode', 'notes', 'stderr', 'stdout', 'unsupported'])
     assert.deepEqual(JSON.parse(JSON.stringify(r.unsupported[0])), {
       kind: 'option', command: 'ls', detail: '-t', message: 'ls: unknown option: -t',
     })

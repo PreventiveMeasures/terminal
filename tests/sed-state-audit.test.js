@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 // state through D. Hold buffers and each output stream retain terminators.
 // https://github.com/mirror/sed/blob/v4.9/sed/execute.c
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
-const result = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+const result = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 const run = (script, input, flags = '-n') => createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
 
 describe('sed restart state survives addressed blocks and held pattern spaces', () => {

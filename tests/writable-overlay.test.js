@@ -7,7 +7,7 @@ const OPTIONS = { mount: '/repo', cwd: '/repo', writable: '/tmp/' }
 const terminal = (options = {}) => createTerminal(SOURCES, { ...OPTIONS, ...options })
 
 function check(t, command, stdout = '', cwd = t.cwd()) {
-  assert.deepEqual(t.run(command), { stdout, stderr: '', exitCode: 0, cwd, unsupported: [] }, command)
+  assert.deepEqual(t.run(command), { stdout, stderr: '', exitCode: 0, cwd, notes: [], unsupported: [] }, command)
 }
 
 describe('writable option validation', () => {
@@ -135,7 +135,10 @@ describe('existing filesystem consumers see current overlay contents', () => {
     check(t, 'ls /tmp')
     assert.deepEqual(t.complete('cat /tmp/'), [])
     check(t, "printf 'beta\\nalpha\\n' >/tmp/alpha.txt; printf 'export x\\n' >/tmp/zeta.js; printf hidden >/tmp/.hidden")
-    check(t, 'ls /tmp', 'alpha.txt\nzeta.js\n')
+    assert.deepEqual(t.run('ls /tmp'), {
+      stdout: 'alpha.txt\nzeta.js\n', stderr: '', exitCode: 0, cwd: '/repo', unsupported: [],
+      notes: ['ls: omitted 1 hidden entry: "/tmp/.hidden". Use -a to include hidden entries.'],
+    })
     check(t, 'ls -A /tmp', '.hidden\nalpha.txt\nzeta.js\n')
     check(t, 'find /tmp -type f', '/tmp/.hidden\n/tmp/alpha.txt\n/tmp/zeta.js\n')
     check(t, "printf '%s\\n' /tmp/*.txt", '/tmp/alpha.txt\n')

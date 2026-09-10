@@ -20,7 +20,7 @@ describe('Bash here-document EOF handling', () => {
     it(`does not invent a record at EOF: ${JSON.stringify(suffix)}`, () => {
       assert.deepEqual(terminal().run('cat <<END' + suffix), {
         stdout, stderr: "warning: here-document delimited by end-of-file (wanted `END')\n",
-        exitCode: 0, cwd: '/', unsupported: [],
+        exitCode: 0, cwd: '/', notes: [], unsupported: [],
       })
     })
   }
@@ -32,7 +32,7 @@ describe('Bash here-document EOF handling', () => {
   })
   it('accepts a delimiter without a final newline', () => {
     assert.deepEqual(terminal().run('cat <<END\ntext\nEND'), {
-      stdout: 'text\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [],
+      stdout: 'text\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
   for (const separator of ['\n', ';\n', '; # comment\n']) {
@@ -56,7 +56,7 @@ describe('Bash here-document EOF handling', () => {
   })
   it('does not warn about input after exit on an earlier line', () => {
     assert.deepEqual(terminal().run('exit 7\ncat <<END\ntext\n'), {
-      stdout: '', stderr: '', exitCode: 7, cwd: '/', unsupported: [],
+      stdout: '', stderr: '', exitCode: 7, cwd: '/', notes: [], unsupported: [],
     })
   })
 })
@@ -64,7 +64,7 @@ describe('Bash here-document EOF handling', () => {
 function cases(rows) {
   for (const [name, command, stdout, exitCode = 0, stderr = ''] of rows) {
     it(name, () => {
-      assert.deepEqual(terminal().run(command), { stdout, stderr, exitCode, cwd: '/', unsupported: [] }, command)
+      assert.deepEqual(terminal().run(command), { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] }, command)
     })
   }
 }

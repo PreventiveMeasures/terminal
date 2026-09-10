@@ -7,7 +7,7 @@ import { createTerminal } from '@preventive/terminal'
 // setup_replacement treats \0 as the whole match, not an octal escape.
 // https://github.com/mirror/sed/blob/v4.9/sed/compile.c
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
-const result = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+const result = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 const continued = '\\\n'
 
 describe('sed substitutes literal newlines continued within a script', () => {

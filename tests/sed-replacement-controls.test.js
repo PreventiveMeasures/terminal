@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 // interprets references and ampersands; quoting a backslash keeps it literal.
 // https://github.com/mirror/sed/blob/v4.9/sed/compile.c
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
-const result = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+const result = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 const controls = [['a', '\u0007'], ['f', '\f'], ['n', '\n'], ['r', '\r'], ['t', '\t'], ['v', '\v']]
 
 describe('sed replacement control escapes', () => {

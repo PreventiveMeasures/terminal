@@ -167,7 +167,7 @@ const SED = [
 
 function check(files, command, stdout, exitCode) {
   const terminal = createTerminal(files)
-  assert.deepEqual(terminal.run(command), { stdout, stderr: '', exitCode, cwd: '/', unsupported: [] })
+  assert.deepEqual(terminal.run(command), { stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
 }
 
 describe('upstream BusyBox audit — grep', () => {
