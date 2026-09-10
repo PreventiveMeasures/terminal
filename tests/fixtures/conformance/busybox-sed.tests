@@ -1,0 +1,144 @@
+# sed behaviours the BusyBox sed testsuite exercises, written as this
+# project's own cases. Answers are GNU sed 4.9's in the C locale. The cases
+# that write are in busybox-sed-writable.tests, which needs somewhere to write.
+
+sed '' input => "oak\nelm\nfir\n"
+cat input | sed '' => "oak\nelm\nfir\n"
+
+@tree scripted
+sed -f prog input => "pine\nelm\nfir\n"
+cat prog | sed -f - input => "pine\nelm\nfir\n"
+
+@tree trees
+sed -e s/oak/elm/ -e s/elm/fir/ input => "fir\nfir\nfir\n"
+sed -e s/oak/pine/ -e s/nothing/x/ input => "pine\nelm\nfir\n"
+"sed 's/oak/elm/\ns/elm/fir/' input" => "fir\nfir\nfir\n"
+sed 's/oak/elm/;s/elm/fir/' input => "fir\nfir\nfir\n"
+
+@tree noeol
+sed 's/elm/fir/' input => "oak\nfir"
+
+@tree trees
+sed -n s/oak/pine/p input => "pine\n"
+sed -n '$=' input input => "6\n"
+cat input | sed -n '$p' input - => "fir\n"
+sed -e '1 d' input => "elm\nfir\n"
+sed -n '$p' input => "fir\n"
+sed -n /elm/p input => "elm\n"
+
+@tree nums
+sed -n '2,4p' input => "2\n3\n4\n"
+sed -n '1,/3/p' input => "1\n2\n3\n"
+sed -n '2d;2,1p' input => ""
+sed -n '1d;1,3p' input => "2\n3\n"
+sed '/^2/,+2{d}' input => "1\n5\n"
+sed '/^2/,+0{d}' input => "1\n3\n4\n5\n"
+sed '/^2/,+0d' input => "1\n3\n4\n5\n"
+sed -n '/2/,+1 p' input => "2\n3\n"
+
+@tree trees
+sed -n '/elm/{//p}' input => "elm\n"
+sed -n '2!p' input => "oak\nfir\n"
+sed s/oak/pine/ input => "pine\nelm\nfir\n"
+
+@tree repeat
+sed s/oak/pine/g input => "pine pine\nelm\n"
+sed 's/oak/pine/2' input => "oak pine\nelm\n"
+sed -e 's/oak/pine/2; s/oak/fir/g' input => "fir pine\nelm\n"
+
+@tree trees
+sed -n s/oak/pine/p input => "pine\n"
+sed s/oak/pine/p input => "pine\npine\nelm\nfir\n"
+
+@tree upper
+sed 's/oak/pine/I' input => "pine\n"
+
+@tree abc
+sed 's/z*/-/g' input => "-a-b-c-\n"
+
+@tree hello
+sed 's/l*/@/g' input => "@h@e@o@\n"
+
+@tree trees
+sed 's oak pine ' input => "pine\nelm\nfir\n"
+
+@tree atsign
+sed 's@[@]@-@' input => "-oak@\n"
+
+@tree digits
+sed 's+9\++X+' input => "X8=17\n"
+sed 's&9&X\&&' input => "X&+8=17\n"
+sed 's1\(9\)1X\11' input => "X1+8=17\n"
+
+@tree slashed
+sed 's,\(^/\|\)[^/][^/]*,>\0<,g' input => ">/usr</>bin<\n>local<\n"
+
+@tree trees
+sed 's/oak/[&]/' input => "[oak]\nelm\nfir\n"
+sed -n '/elm/s//[\0]/p' input => "[elm]\n"
+sed 's/\(o\)\(ak\)/\2\1/' input => "ako\nelm\nfir\n"
+sed 's/^o\|m//g' input => "ak\nel\nfir\n"
+
+@tree tabbed
+sed 's/\t/ /' input => "oak elm\n"
+
+@tree trees
+sed 's/oak/a\nb/' input => "a\nb\nelm\nfir\n"
+sed 's/oak/a\rb/' input | cat -v => "a^Mb\nelm\nfir\n"
+
+@tree spaced
+sed 's/[[:space:]]*/,/g' input => ",o,a,k,\n,e,l,m,\n"
+sed 's/ *$/_/g' input => "oak_\nelm_\n"
+
+@tree trees
+sed 's [^ .]* x g' input => "x\nx\nx\n"
+sed 's/oak/[/' input => "[\nelm\nfir\n"
+sed '/elm/a pine' input => "oak\nelm\npine\nfir\n"
+sed '/elm/i pine' input => "oak\npine\nelm\nfir\n"
+sed '/elm/c pine' input => "oak\npine\nfir\n"
+sed crepl input => "repl\nrepl\nrepl\n"
+sed -e '/elm/a\' -e pine input => "oak\nelm\npine\nfir\n"
+
+@tree pairs
+sed -e '/one/a 111' -e '/two/i 222' -e p input => "one\none\n111\n222\ntwo\ntwo\nthree\nthree\n"
+sed '/one/a\tzero' input | cat -v => "one\ntzero\ntwo\nthree\n"
+sed '/one/i\tzero' input | cat -v => "tzero\none\ntwo\nthree\n"
+
+@tree trees
+sed 'y/oak/OAK/' input => "OAK\nelm\nfir\n"
+
+@tree pairs
+sed -n 'n;p' input => "two\n"
+sed 'N;s/\n/ /' input => "one two\nthree\n"
+sed -n 'N;P;p' input => "one\none\ntwo\n"
+
+@tree nums
+sed -n '1{N;N;d};1p;2,3p;3p;4p' input => "4\n"
+
+@tree pairs
+sed ':a;N;s/\n/ /;ta' input => "one two three\n"
+sed '/one/N;/one\ntwo/i joined' input => "joined\none\ntwo\nthree\n"
+
+@tree trees
+sed G input => "oak\n\nelm\n\nfir\n\n"
+sed -n '1!G;h;$p' input => "fir\nelm\noak\n"
+sed -n 'x;$p' input => "elm\n"
+sed -n 'H;${x;s/\n/,/g;p}' input => ",oak,elm,fir\n"
+
+@tree pairs
+sed -n 'N;P;D' input => "one\ntwo\n"
+
+@tree trees
+sed -e 'b one;p;: one' input => "oak\nelm\nfir\n"
+sed -e 'b;p' input => "oak\nelm\nfir\n"
+sed -e 's/oak/pine/;t one;p;: one;p' input => "pine\npine\nelm\nelm\nelm\nfir\nfir\nfir\n"
+sed -e 's/oak/pine/;T none;p;: none;p' input => "pine\npine\npine\nelm\nelm\nfir\nfir\n"
+sed -n '/elm/{p;/l/{s/l/L/};p;q}' input => "elm\neLm\n"
+sed '2q' input => "oak\nelm\n"
+
+@tree cont
+sed ': more; /\\$/{ =; N; b more }' input => "1\noak \\\nelm\nfir\n"
+
+@tree trees
+sed -e '/elm/d;s/elm/x/p;i here' input => "here\noak\nhere\nfir\n"
+sed -e 'b nowhere' input 2>/dev/null; echo $? => "4\n"

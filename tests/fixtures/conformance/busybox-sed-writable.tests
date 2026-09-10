@@ -1,0 +1,29 @@
+# The BusyBox sed behaviours that need somewhere to write: -i, the s///w
+# flag, the w command and redirects. The overlay copies the fixtures into /tmp
+# first, because the mounted sources are never writable.
+
+@mode overlay
+sed -i s/oak/pine/ input; cat input => "pine\nelm\nfir\n"
+sed -i s/oak/pine/ input; echo $? => "0\n"
+sed -i -e '1s/oak/pine/' input; cat input => "pine\nelm\nfir\n"
+
+@tree nums
+sed '1,2d' -i input; echo $?; cat input => "0\n3\n4\n5\n"
+
+@tree trees
+cp input other; sed -i -e '1s/oak/pine/' input other; cat input other => "pine\nelm\nfir\npine\nelm\nfir\n"
+
+@tree nums
+cp input other; sed '/^4/,+0d' -i input other; echo $?; cat input other => "0\n1\n2\n3\n5\n1\n2\n3\n5\n"
+
+@tree trees
+sed -e '$a pine' -i input; cat input => "oak\nelm\nfir\npine\n"
+sed -i s/pine/oak/ input; cat input => "oak\nelm\nfir\n"
+sed 's/oak/pine/w out' input; cat out => "pine\nelm\nfir\npine\n"
+sed -n 's/oak/pine/w out' input; cat out => "pine\n"
+sed -n '/elm/w out' input; cat out => "elm\n"
+sed -n -e '/oak/w out' -e '/fir/w out' input; cat out => "oak\nfir\n"
+sed -n '/oak/w out' input; sed -n '/fir/w out' input; cat out => "fir\n"
+sed s/oak/pine/ input > out; cat out => "pine\nelm\nfir\n"
+sed -n 1p input > out; sed -n 2p input >> out; cat out => "oak\nelm\n"
+cp input copy; sed -i s/oak/pine/ copy; cat copy input => "pine\nelm\nfir\noak\nelm\nfir\n"

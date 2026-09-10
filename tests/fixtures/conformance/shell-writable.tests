@@ -1,0 +1,22 @@
+# The shell cases that write, run in the overlay: sources stay read-only and
+# /tmp is the only place a command may write, so the fixtures are copied there
+# first. shell.tests holds the same commands aimed at the read-only mount.
+
+@mode overlay
+echo made > out; cat out => "made\n"
+echo one > out; echo two >> out; cat out => "one\ntwo\n"
+"printf \"a\\nb\\n\" > out; wc -l out" => "2 out\n"
+cat input > copy; cat copy => "oak\nelm\nfir\n"
+cat input | sed s/oak/pine/ > out; cat out => "pine\nelm\nfir\n"
+echo x > out; echo y > out; cat out => "y\n"
+grep oak input > hits; cat hits => "oak\n"
+sed -n 2p input > two; cat two => "elm\n"
+cp input copy; sed -i s/oak/pine/ copy; cat copy input => "pine\nelm\nfir\noak\nelm\nfir\n"
+for f in input; do cat $f > out; done; cat out => "oak\nelm\nfir\n"
+"echo a > out; rm out; ls out 2>/dev/null; echo \"exit=$?\"" => "exit=2\n"
+v=$(cat input | head -1); echo $v > out; cat out => "oak\n"
+"awk \"{ print NR, \\$0 }\" input > numbered; cat numbered" => "1 oak\n2 elm\n3 fir\n"
+sort input > sorted; cat sorted => "elm\nfir\noak\n"
+cut -c1-2 input > cut.txt; cat cut.txt => "oa\nel\nfi\n"
+find . -name input > found; cat found => "./input\n"
+echo nested > out; cat < out => "nested\n"

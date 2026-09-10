@@ -28,8 +28,14 @@ function compilePattern(pattern, opts) {
       const next = pattern[i + 1]
       re += literal(next, opts.ignoreCase)
       i++
-    } else if (c === '*') re += '.*'
-    else if (c === '?') re += '.'
+    } else if (c === '*') {
+      // A run of stars matches exactly what one star matches, and emitting
+      // `.*` for each of them makes the backtracking matcher exponential in
+      // the length of the run: `echo ************b` against a 30-character
+      // name took over two minutes before the run was collapsed here.
+      while (pattern[i + 1] === '*') i++
+      re += '.*'
+    } else if (c === '?') re += '.'
     else if (c === '[') {
       const bracket = readBracket(pattern, i, opts)
       if (bracket?.voided) return /^(?!)$/u

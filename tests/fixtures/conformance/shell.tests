@@ -1,0 +1,165 @@
+# Shell constructs the Oils bash spec suite exercises, written as one-line
+# cases. Answers are bash 5.2.21's in the C locale. A construct this project
+# does not implement is refused with a diagnostic rather than approximated,
+# and those refusals are cases too — they are what keeps a gap visible.
+
+# parameter expansion
+echo ${u:-fallback} => "fallback\n"
+v=set; echo ${v:-fallback} => "set\n"
+echo ${u-fallback} => "fallback\n"
+v=; echo ${v-fallback} => "\n"
+v=set; echo ${v:+yes} => "yes\n"
+echo ${u:+yes} => "\n"
+v=; echo ${v:+yes} => "\n"
+v=; echo ${v+yes} => "yes\n"
+echo ${#u} => "0\n"
+v=abcd; echo ${#v} => "4\n"
+v=abcd; echo ${v#a} => "bcd\n"
+v=abcd; echo ${v#x} => "abcd\n"
+v=a.b.c; echo ${v#*.} => "b.c\n"
+v=a.b.c; echo ${v##*.} => "c\n"
+v=a.b.c; echo ${v%.*} => "a.b\n"
+v=a.b.c; echo ${v%%.*} => "a\n"
+v=abcd; echo ${v:1} => "bcd\n"
+v=abcd; echo ${v:1:2} => "bc\n"
+v=abcd; echo ${v:0:0} => "\n"
+v=abcd; echo ${v: -2} => "cd\n"
+v=abcd; echo ${v/b/X} => "aXcd\n"
+v=abab; echo ${v//b/X} => "aXaX\n"
+v=abab; echo ${v/#a/X} => "Xbab\n"
+v=abab; echo ${v/%b/X} => "abaX\n"
+v=abab; echo ${v//b} => "aa\n"
+v=abcd; echo ${v/[bc]/X} => "aXcd\n"
+echo ${1:-none} => "none\n"
+"echo \"${@}\"" => "\n"
+echo ${u:=assigned}${u} => "assignedassigned\n"
+"v=abcd; echo \"${v}s\"" => "abcds\n"
+v=abcd; echo ${v}s => "abcds\n"
+echo ${u}empty => "empty\n" 0 +$u
+v=abcd; echo ${v^^} => ! ${ 1
+v=ABCD; echo ${v,,} => ! ${ 1
+v=abcd; echo ${v@Q} => ! ${ 1
+u=v; v=x; echo ${!u} => ! ${ 1
+a=(1 2); echo ${a[@]} => ! ${ 1
+echo ${#a[@]} => ! ${ 1
+echo ${@:1:2} => ! ${ 1
+
+# arithmetic expansion
+echo $(( 1 + 2 )) => "3\n"
+echo $(( 2 * 3 + 4 )) => "10\n"
+echo $(( (2 + 3) * 4 )) => "20\n"
+echo $(( 7 / 2 )) => "3\n"
+echo $(( 7 % 3 )) => "1\n"
+echo $(( 2 ** 8 )) => "256\n"
+echo $(( -3 + 1 )) => "-2\n"
+echo $(( 1 < 2 )) => "1\n"
+echo $(( 1 > 2 )) => "0\n"
+echo $(( 1 == 1 )) => "1\n"
+echo $(( 1 != 1 )) => "0\n"
+echo $(( 1 && 0 )) => "0\n"
+echo $(( 1 || 0 )) => "1\n"
+echo $(( ! 0 )) => "1\n"
+echo $(( 1 ? 20 : 30 )) => "20\n"
+echo $(( 0 ? 20 : 30 )) => "30\n"
+n=5; echo $(( n + 1 )) => "6\n"
+n=5; echo $(( $n * 2 )) => "10\n"
+echo $(( 0x10 )) => "16\n"
+echo $(( 010 )) => "8\n"
+echo $(( 1 << 4 )) => "16\n"
+echo $(( 256 >> 4 )) => "16\n"
+echo $(( 6 & 3 )) => "2\n"
+echo $(( 6 | 3 )) => "7\n"
+echo $(( 6 ^ 3 )) => "5\n"
+echo $((1+2))$((3+4)) => "37\n"
+"echo \"$(( 1 + 1 ))\"" => "2\n"
+
+# conditionals
+[[ a == a ]] && echo yes || echo no => "yes\n"
+[[ a == b ]] && echo yes || echo no => "no\n"
+[[ a != b ]] && echo yes || echo no => "yes\n"
+[[ abc == a* ]] && echo yes || echo no => "yes\n"
+"[[ abc == \"a*\" ]] && echo yes || echo no" => "no\n"
+"[[ -z \"\" ]] && echo yes || echo no" => "yes\n"
+"[[ -n \"x\" ]] && echo yes || echo no" => "yes\n"
+[[ 1 -lt 2 ]] && echo yes || echo no => "yes\n"
+[[ 2 -le 2 ]] && echo yes || echo no => "yes\n"
+[[ 3 -gt 2 ]] && echo yes || echo no => "yes\n"
+[[ a < b ]] && echo yes || echo no => ! [[ < 0 "no\n"
+[[ b > a ]] && echo yes || echo no => ! [[ > 0 "no\n"
+[[ -f input ]] && echo yes || echo no => "yes\n"
+[[ -d input ]] && echo yes || echo no => "no\n"
+[[ -e nosuch ]] && echo yes || echo no => "no\n"
+[[ a == a && b == b ]] && echo yes || echo no => "yes\n"
+[[ a == a || b == c ]] && echo yes || echo no => "yes\n"
+[[ ! a == b ]] && echo yes || echo no => "yes\n"
+[[ ( a == a ) ]] && echo yes || echo no => "yes\n"
+[ a = a ] && echo yes || echo no => "yes\n"
+[ a != b ] && echo yes || echo no => "yes\n"
+test -f input && echo yes || echo no => "yes\n"
+"[ -z \"\" ] && echo yes || echo no" => "yes\n"
+[ 1 -eq 1 ] && echo yes || echo no => "yes\n"
+[[ abc =~ b ]] && echo yes || echo no => ! [[ =~ 1
+[[ abc == @(a|b)* ]] && echo yes || echo no => ! [[ extglob 1
+
+# quoting and word splitting
+"echo \"a  b\"" => "a  b\n"
+echo 'a  b' => "a  b\n"
+echo a  b => "a b\n"
+"echo \"a'b\"" => "a'b\n"
+"echo 'a\"b'" => "a\"b\n"
+echo \$HOME => "$HOME\n"
+"v=x; echo \"$v\"" => "x\n"
+v=x; echo '$v' => "$v\n"
+"v=\"a b\"; echo $v" => "a b\n"
+"v=\"a b\"; echo \"$v\"" => "a b\n"
+"echo \"$(echo nested)\"" => "nested\n"
+echo $(echo nested) => "nested\n"
+"echo \"a$(echo b)c\"" => "abc\n"
+"v=x; echo ${v}\"y\"" => "xy\n"
+"echo \"\"" => "\n"
+"echo \"\" \"\"" => " \n"
+"echo a\"b\"c" => "abc\n"
+echo a'b'c => "abc\n"
+"echo \"\\$v\"" => "$v\n"
+"echo \"\\\\\"" => "\\\n"
+"printf \"%s\\n\" \"a b\"" => "a b\n"
+"printf \"%s|\" a b; echo" => "a|b|\n"
+
+# control flow, pipelines and substitution
+for i in a b c; do echo $i; done => "a\nb\nc\n"
+for i in 1 2; do for j in x y; do echo $i$j; done; done => "1x\n1y\n2x\n2y\n"
+if true; then echo yes; fi => "yes\n"
+if false; then echo yes; else echo no; fi => "no\n"
+if false; then echo a; elif true; then echo b; else echo c; fi => "b\n"
+true && echo yes => "yes\n"
+false || echo no => "no\n"
+true; echo $? => "0\n"
+false; echo $? => "1\n"
+! true; echo $? => "1\n"
+! false; echo $? => "0\n"
+{ echo a; echo b; } => "a\nb\n"
+( echo a; echo b ) => "a\nb\n"
+echo a | cat => "a\n"
+echo a | cat | cat => "a\n"
+"echo one two | cut -d\" \" -f2" => "two\n"
+v=$(echo captured); echo $v => "captured\n"
+v=`echo backtick`; echo $v => ! ` 1
+for f in input; do cat $f; done => "oak\nelm\nfir\n"
+if [ -f input ]; then echo present; fi => "present\n"
+while true; do break; done => ! while 1
+case a in a) echo yes;; esac => ! case 1
+f() { echo hi; }; f => ! function 1
+set -e => ! set 127
+shopt -s nullglob => ! shopt 127
+"trap \"echo bye\" EXIT" => ! trap 127
+
+# writing to a read-only mount is refused, never half-applied
+echo made > out => ! > 1
+echo made >> out => ! >> 1
+echo made 2> err => ! 2> 1
+sed -i s/oak/pine/ input => ! -i 1
+sed 's/oak/pine/w out' input => ! output file 1
+sed -n '/elm/w out' input => ! output file 1
+cat input > copy => ! > 1
+cp input copy => % 1
+rm input => % 1
