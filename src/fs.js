@@ -106,6 +106,7 @@ export function createFs(sources, mount = '/') {
     isFile: (p) => files.has(p),
     isDir: (p) => childMap.has(p),
     readFile: (p) => files.get(p),
+    sameFileContents: (a, b) => files.get(a) === files.get(b),
     listDir: (p) => {
       const entry = childMap.get(p)
       if (!entry) throw new Error(`not a directory: ${p}`)

@@ -225,6 +225,9 @@ export interface RunResult {
    *
    * Failed relative file lookups also note verified alternatives at `/` or
    * the mount point when the current directory caused the missing path.
+   * A single alternative is identified as a file or dir. Two alternatives
+   * are listed together, with content differences noted when both are files;
+   * directory contents are not compared.
    * These hints preserve the original error and do not accompany silent
    * existence probes. Notes never enable features or change command results.
    */
