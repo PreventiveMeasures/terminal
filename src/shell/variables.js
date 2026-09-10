@@ -29,12 +29,13 @@ function parameterValue(name, ctx) {
   return null
 }
 
-// Plain references warn about unavailable environment state. Operators use
-// probeParameter so unsupported process state cannot masquerade as data.
+// Process state has no value here and no honest substitute: `$$` is a pid,
+// `$0` a shell name, `$-` the option flags. Leaving the text as typed put a
+// note on the feed and still answered `$$` where bash answers a number, which
+// is a wrong result wearing a diagnostic. Both entry points refuse now.
 export function lookupParameter(name, ctx) {
   if (PROCESS_PARAMS.has(name)) {
-    report(ctx, `$${name}`, `warning: \`$${name}\` is not supported (this terminal runs no process); left as typed`)
-    return { literal: true }
+    throw new UnsupportedError('feature', `$${name}`, `shell parameter ${name} is not supported (this terminal runs no process)`)
   }
   const found = parameterValue(name, ctx)
   if (found) return found

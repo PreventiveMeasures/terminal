@@ -165,7 +165,7 @@ function substitutionRef(w, i, c, m, compound) {
 }
 
 function expansionValue(ref, ctx, quoted, assignment) {
-  if (ref.command !== undefined) return { value: ctx.substitute(ref.command) }
+  if (ref.command !== undefined) return { value: ctx.substitute(ref.command, ref.backtick) }
   if (ref.arithmetic !== undefined) {
     try {
       const source = withState(ctx, { strictExpansion: true }, () => expandScalar(tokenizeFragment(ref.arithmetic, true), ctx))

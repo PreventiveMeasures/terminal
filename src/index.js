@@ -31,7 +31,7 @@ export function createTerminal(sources, opts = {}) {
   ctx.flushOutput = (result) => routeExternalOutput(result, ctx)
   ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)
   ctx.invoke = (name, tokens, stdin) => dispatch(name, tokens, stdin, ctx)
-  ctx.substitute = (command) => commandSubstitution(command, ctx, runSteps)
+  ctx.substitute = (command, backtick) => commandSubstitution(command, ctx, runSteps, backtick)
   if (!fs.isDir(ctx.cwd)) throw new Error(`createTerminal: cwd is not a directory: ${ctx.cwd}`)
   return {
     run: (line) => safeRun(line, ctx),
