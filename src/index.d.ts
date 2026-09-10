@@ -226,7 +226,8 @@ export interface Terminal {
    * `<`, `<<`, `<<<`),
    * comments, bash quoting and backslash rules, brace expansion with
    * sequences, `~`, `$NAME` / `$?`, command substitution, scalar `$(( … ))`
-   * arithmetic, `${…}` defaults, assignment, length and prefix/suffix removal,
+   * arithmetic, `${…}` defaults, assignment, length, substring extraction,
+   * pattern replacement and prefix/suffix removal,
    * and globs with bracket expressions. Other expansion operators, arrays,
    * and `[[ … =~ … ]]` report unsupported diagnostics. Variables and the
    * working directory persist across calls.

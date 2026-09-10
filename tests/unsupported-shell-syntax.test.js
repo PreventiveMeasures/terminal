@@ -50,7 +50,7 @@ describe('unsupported extended glob syntax', () => {
     }
     assert.equal(terminal().run('! (false)').exitCode, 0)
     assert.equal(terminal().run('echo "$(echo ok)"').stdout, 'ok\n')
-    assert.deepEqual(terminal().run('false && echo "$(echo @(a|b))"').unsupported, [])
+    gap('false && echo "$(echo @(a|b))"', 'extglob')
   })
 })
 
@@ -85,7 +85,7 @@ describe('unsupported compound array assignments', () => {
   })
 })
 
-describe('alias expansion and whole-input parsing', () => {
+describe('alias expansion across completed input units', () => {
   for (const command of [
     "shopt -s expand_aliases\nalias LEFT='('\nLEFT echo one; echo two )",
     "alias LEFT='('\nLEFT echo one ) 2>/dev/null | head",
@@ -93,7 +93,10 @@ describe('alias expansion and whole-input parsing', () => {
     "alias 'LEFT=('\nLEFT echo one )",
     "alias LEFT='echo one; ('\nX=1 LEFT echo two )",
   ]) {
-    it(command, () => { gap(command, 'alias expansion') })
+    it(command, () => {
+      const expected = [...(command.startsWith('shopt') ? ['shopt'] : []), 'alias', 'alias expansion']
+      assert.deepEqual(details(terminal().run(command)), expected.map((detail) => ['feature', detail]))
+    })
   }
 
   it('keeps dispatch-time diagnostics and skipped commands for parseable alias invocations', () => {
@@ -112,7 +115,7 @@ describe('alias expansion and whole-input parsing', () => {
     for (const line of ["echo alias LEFT='('\nLEFT echo one )", "alias LEFT='('\necho LEFT )", "alias LEFT='('\n'LEFT' echo one )"]) {
       const failed = terminal().run(line)
       assert.equal(failed.exitCode, 2, line)
-      assert.deepEqual(failed.unsupported, [], line)
+      assert.deepEqual(details(failed), line.startsWith('echo') ? [] : [['feature', 'alias']], line)
     }
   })
 
@@ -126,7 +129,8 @@ describe('alias expansion and whole-input parsing', () => {
     ]) {
       const failed = terminal().run(line)
       assert.equal(failed.exitCode, 2, line)
-      assert.deepEqual(failed.unsupported, [], line)
+      const expected = ['alias', ...(line.includes('\nunalias') ? ['unalias'] : [])]
+      assert.deepEqual(details(failed), expected.map((detail) => ['feature', detail]), line)
     }
   })
 })

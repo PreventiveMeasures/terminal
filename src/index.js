@@ -4,7 +4,7 @@
 // Caller-provided command handlers use the contract in custom.js.
 
 import { mountSources } from './mount.js'
-import { parseLine } from './shell/parse.js'
+import { parseUnits } from './shell/parse.js'
 import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
 import { BindingMap } from './shell/bindings.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
@@ -72,14 +72,24 @@ function record(ctx, result, resolved) {
 function safeRun(line, ctx) {
   const feed = createUnsupportedFeed()
   return withState(ctx, { unsupported: feed, stdinFile: false, stdinOrigin: null, stdinHandle: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, () => {
+    const result = { stdout: '', stderr: '', exitCode: 0 }
+    const stream = { text: '' }
     try {
-      return finish(runSteps(parseLine(line, ctx.writable, ctx.registry.has), ctx, { text: '' }), ctx, feed)
+      for (const steps of parseUnits(line, ctx.writable, ctx.registry.has)) {
+        const r = runSteps(steps, ctx, stream)
+        result.stdout += r.stdout
+        result.stderr += r.stderr
+        result.exitCode = r.exitCode
+        if (r.halt || r.control) break
+      }
     } catch (e) {
       const note = unsupportedNote(e)
       if (note) feed.add(note)
-      ctx.lastExit = note ? 1 : 2
-      return finish(err(`error: ${e.message}`, ctx.lastExit), ctx, feed)
+      ctx.lastExit = e.exitCode ?? (note ? 1 : 2)
+      result.stderr += `error: ${e.message}\n`
+      result.exitCode = ctx.lastExit
     }
+    return finish(result, ctx, feed)
   })
 }
 

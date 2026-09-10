@@ -35,15 +35,18 @@ export function scanRef(line, i, mask = null) {
 }
 
 // Called wherever substitution is active, including unquoted here-documents.
-export function readExpansion(line, i, depth = 0, quoted = false) {
+export function readExpansion(line, i, depth = 0, quoted = false, options = {}) {
+  const nested = (source, at, level, inQuotes) => readExpansion(source, at, level, inQuotes, options)
   const next = skipContinuations(line, i + 1)
   const n = line[next]
   if (n === '(') {
     const second = skipContinuations(line, next + 1)
-    if (line[second] === '(') return readArithmeticExpansion(line, i, second, depth, { readExpansion })
-    return readCommandSubstitution(line, i, next, depth, { readExpansion, decodeAnsiC, readHeredocBodies, readOperator, readConditional, skipContinuations })
+    if (line[second] === '(') return readArithmeticExpansion(line, i, second, depth, { readExpansion: nested })
+    const result = readCommandSubstitution(line, i, next, depth, { readExpansion: nested, decodeAnsiC, readHeredocBodies, readOperator, readConditional, skipContinuations })
+    options.validateSubstitution?.(result.command)
+    return result
   }
-  if (n === '{') return readBracedExpansion(line, i, next, depth, quoted, { readExpansion, decodeAnsiC })
+  if (n === '{') return readBracedExpansion(line, i, next, depth, quoted, { readExpansion: nested, decodeAnsiC })
   if (n === '[') throw new UnsupportedError('feature', '$[', 'arithmetic expansion (`$[…]`) is not supported')
   return scanRef(line, i)
 }

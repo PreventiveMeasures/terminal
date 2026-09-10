@@ -5,28 +5,39 @@
 // Token kinds and quoting distinguish operators/keywords from literal words.
 
 import { assignmentOf, sliceWord } from './word.js'
-import { NAME_RE, tokenize } from './tokenize.js'
+import { NAME_RE } from './tokenize.js'
 import { UnsupportedError } from '../unsupported.js'
 import { advanceAliases } from './aliases.js'
+import { IncompleteInput, incomplete, readLine, readUnits } from './parse-input.js'
 
-export function parseLine(line, writable = false, hasCommand = () => false) {
-  const raw = tokenize(line)
+export const parseLine = (line, writable = false, hasCommand = () => false, options = {}) => readLine(line, writable, hasCommand, options, parseTokens)
+export const parseUnits = (line, writable = false, hasCommand = () => false) => readUnits(line, writable, hasCommand, parseTokens)
+
+function parseTokens(tokens, writable, hasCommand, options) {
+  const raw = tokens.slice()
   for (const t of raw) {
     if (t.kind === 'amp') throw new UnsupportedError('feature', '&', 'background processes (`&`) are not supported')
   }
-  // Trailing semicolons are harmless; trailing &&/|| remain incomplete.
-  while (raw.length > 0 && raw.at(-1).kind === 'semi') raw.pop()
-  // A comment-only line (or one of only separators) runs nothing.
+  // One trailing separator is harmless; an empty command before it is not.
+  if (raw.at(-1)?.kind === 'semi') {
+    if (raw.length === 1 || ['semi', 'and', 'or', 'pipe', 'pipe_err', 'paren_open'].includes(raw.at(-2)?.kind)) throw new Error('syntax error near unexpected token `;`')
+    raw.pop()
+  }
+  // A blank or comment-only line runs nothing.
   if (raw.length === 0) return []
-  const p = { raw, i: 0, emptyStage: false, writable, aliases: new Set(), aliasUsed: false, hasCommand }
+  const p = { raw, i: 0, emptyStage: false, writable, aliases: options.aliases ?? new Set(), aliasUsed: options.aliasUsed ?? false, hasCommand, syntaxOnly: options.syntaxOnly }
   try {
     const steps = buildSteps(p, null)
     if (p.emptyStage) throw new Error('empty pipeline stage')
+    options.aliasUsed = p.aliasUsed
     return steps
   } catch (e) {
     // Alias replacements can supply grammar tokens. A later parse failure
     // must not hide the unavailable alias expansion that would supply them.
-    if (p.aliasUsed && !(e instanceof UnsupportedError)) throw new UnsupportedError('feature', 'alias expansion', 'alias expansion is not supported; input using aliases cannot be parsed')
+    if (p.aliasUsed && !(e instanceof UnsupportedError)) {
+      const gap = new UnsupportedError('feature', 'alias expansion', 'alias expansion is not supported; input using aliases cannot be parsed')
+      throw e instanceof IncompleteInput ? new IncompleteInput(gap) : gap
+    }
     throw e
   }
 }
@@ -138,10 +149,11 @@ function buildSteps(p, end) {
     else stage.assigns.push({ name: assign.name, word: sliceWord(t, assign.end) })
     p.i++
   }
-  if (end === ')') throw new Error('unmatched `(`')
-  if (end === '}') throw new Error('unmatched `{`')
-  if (end === 'done') throw new Error('for: missing `done`')
-  if (end) throw new Error(`if: missing \`${end === 'then' ? 'then' : 'fi'}\``)
+  if (end === ')') throw incomplete('unmatched `(`')
+  if (end === '}') throw incomplete('unmatched `{`')
+  if (end === 'done') throw incomplete('for: missing `done`')
+  if (end) throw incomplete(`if: missing \`${end === 'then' ? 'then' : 'fi'}\``)
+  if (!p.emptyStage && !isBlock(stage) && !isCommand(stage) && ['and', 'or', 'pipe', 'pipe_err'].includes(raw.at(-1)?.kind)) throw incomplete('empty pipeline stage')
   if (!bareBang(steps.at(-1), stage)) appendStage(p, steps.at(-1), stage)
   return steps
 }
@@ -231,9 +243,14 @@ function parseFor(p) {
   const name = nameTok.value
   if (nameTok.quoted || !NAME_RE.test(name)) throw new Error(`for: \`${name}\` is not a valid variable name`)
   p.i++
+  const semicolon = raw[p.i]?.kind === 'semi' && !raw[p.i].newline
   if (raw[p.i]?.kind === 'semi') p.i++
+  if (semicolon && isWord(raw[p.i], 'in')) throw new Error('for: unexpected `in` after `;`')
   if (!isWord(raw[p.i], 'in')) {
-    if (isWord(raw[p.i], 'do') || raw[p.i] === undefined) throw new UnsupportedError('feature', 'for NAME; do', `\`for ${name}; do …\` iterates the positional parameters, which this shell does not have; write \`for ${name} in WORD...\``)
+    if (isWord(raw[p.i], 'do') || raw[p.i] === undefined) {
+      const gap = new UnsupportedError('feature', 'for NAME; do', `\`for ${name}; do …\` iterates the positional parameters, which this shell does not have; write \`for ${name} in WORD...\``)
+      throw raw[p.i] === undefined ? new IncompleteInput(gap) : gap
+    }
     throw new Error(`for: expected \`in\` after \`${name}\``)
   }
   p.i++
@@ -249,8 +266,8 @@ function parseFor(p) {
   }
   if (raw[p.i]?.kind === 'semi') p.i++
   if (!isWord(raw[p.i], 'do')) {
+    if (p.i >= raw.length) throw incomplete(sawDo ? 'for: expected `;` or newline before `do`' : 'for: missing `do`')
     if (sawDo) throw new Error('for: expected `;` or newline before `do`')
-    if (p.i >= raw.length) throw new Error('for: missing `do`')
     throw new Error(`for: expected \`do\`, got \`${tokenLabel(raw[p.i])}\``)
   }
   p.i++
@@ -309,10 +326,13 @@ const DEVICES = new Set(['/dev/null', '/dev/stdout', '/dev/stderr'])
 function parseRedirect(p) {
   const op = p.raw[p.i++]
   const label = tokenLabel(op)
-  // Duplicating an fd nothing opened is bash's own error (`>&3`: "Bad
-  // file descriptor"); opening one (`3>/dev/null`) is legal there and a
-  // gap here.
-  if (op.op === 'dup' && op.toFd > 2) throw new Error(`${label}: Bad file descriptor`)
+  if (p.syntaxOnly) {
+    if (!['dup', 'close'].includes(op.op)) {
+      const target = p.raw[p.i++]
+      if (!target || target.kind !== 'word') throw new Error(`redirect \`${label}\` requires a target`)
+    }
+    return op
+  }
   if (op.fd > 2) {
     throw new UnsupportedError('feature', label, `only file descriptors 0, 1 and 2 are supported (got \`${label}\`)`)
   }

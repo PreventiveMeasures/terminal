@@ -168,11 +168,13 @@ function expansionValue(ref, ctx, quoted, assignment) {
     if (ref.parameter.operator === '' && !ctx.strictExpansion && !/^[0-9]{2,}$/u.test(ref.parameter.name)) return lookupParameter(ref.parameter.name, ctx)
     return evaluateParameter(ref.parameter, ctx, {
       lookup: (name) => probeParameter(name, ctx),
+      readExpansion,
       expand: (source, options = {}) => {
-        const word = tokenizeFragment(source, !options.pattern && !options.error && quoted)
-        const assign = !options.pattern && !options.error && (options.assignment || assignment)
+        const operand = options.pattern || options.error || options.replacement || options.arithmetic
+        const word = tokenizeFragment(source, options.arithmetic || !operand && quoted)
+        const assign = !operand && (options.assignment || assignment)
         const mode = options.assignment ? 'parameterAssign' : assign ? true : 'parameter'
-        return withState(ctx, { strictExpansion: true }, () => expandedWord(tilde(word, ctx, mode), ctx, assign))
+        return withState(ctx, { strictExpansion: true }, () => expandedWord(options.arithmetic ? word : tilde(word, ctx, mode), ctx, assign))
       },
     })
   }

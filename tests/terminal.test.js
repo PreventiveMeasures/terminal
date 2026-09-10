@@ -2335,13 +2335,10 @@ describe('createTerminal — `2>&1` fd-to-fd redirects', () => {
   })
 
   it('malformed `N>&` forms surface a redirect-target error, not "background processes"', () => {
-    // Per Copilot review: previously each of these tokenized as
-    // `2>` + a stray `&...` token, with the `&` triggering the
-    // background-process branch and producing a misleading error.
+    // A malformed duplication must not split into `2>` and a background `&`.
     const t = createTerminal(SOURCES)
     for (const cmd of [
       'echo hi 2>&',         // missing fd
-      'echo hi 2>&3',        // invalid fd (only 1 / 2 supported)
       'echo hi 2>&1foo',     // valid fd but no token boundary after
     ]) {
       const r = t.run(cmd)

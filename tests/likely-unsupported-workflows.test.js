@@ -81,6 +81,15 @@ describe('100 likely agent commands — unsupported channel', () => {
 })
 
 describe('likely agent commands — diagnostic boundaries', () => {
+  for (const [command, stdout] of [
+    ['name=src/index.js; echo "${name//\\//_}"', 'src_index.js\n'],
+    ['file=src/index.js; echo "${file:0:3}"', 'src\n'],
+  ]) {
+    it(command, () => {
+      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [] })
+    })
+  }
+
   it('accepts the reported find -exec spelling with an escaped semicolon', () => {
     const t = createTerminal({ 'a.txt': 'one\ntwo\n', 'sub/a.txt': 'three\n', 'other.txt': 'ignored\n' })
     const command = String.raw`find . -name "a.txt" -exec wc -l {} \;`
