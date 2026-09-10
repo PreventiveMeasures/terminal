@@ -143,7 +143,7 @@ echo a | cat => "a\n"
 echo a | cat | cat => "a\n"
 "echo one two | cut -d\" \" -f2" => "two\n"
 v=$(echo captured); echo $v => "captured\n"
-v=`echo backtick`; echo $v => ! ` 1
+v=`echo backtick`; echo $v => "backtick\n"
 for f in input; do cat $f; done => "oak\nelm\nfir\n"
 if [ -f input ]; then echo present; fi => "present\n"
 while true; do break; done => ! while 1
@@ -152,6 +152,45 @@ f() { echo hi; }; f => ! function 1
 set -e => ! set 127
 shopt -s nullglob => ! shopt 127
 "trap \"echo bye\" EXIT" => ! trap 127
+
+# backtick command substitution, which quotes differently from $( )
+echo `echo hi` => "hi\n"
+v=`echo hi`; echo $v => "hi\n"
+"echo \"`echo hi`\"" => "hi\n"
+echo a`echo b`c => "abc\n"
+echo `echo a``echo b` => "ab\n"
+grep `echo oak` input => "oak\n"
+"for i in `echo a b`; do echo \"<$i>\"; done" => "<a>\n<b>\n"
+echo `cat input` => "oak elm fir\n"
+"echo \"`cat input`\"" => "oak\nelm\nfir\n"
+echo `echo a; echo b` => "a b\n"
+"echo `echo one two | cut -d\" \" -f2`" => "two\n"
+echo $(echo `echo nested-in-dollar`) => "nested-in-dollar\n"
+echo `echo $(echo dollar-in-backtick)` => "dollar-in-backtick\n"
+if `true`; then echo yes; fi => "yes\n"
+echo `false`; echo $? => "\n0\n"
+echo `echo` => "\n"
+"echo \"before `echo mid` after\"" => "before mid after\n"
+"echo `echo \"quoted inside\"`" => "quoted inside\n"
+echo `echo 'single inside'` => "single inside\n"
+"echo `printf \"a b  c\"`" => "a b c\n"
+"echo \"`printf \"a b  c\"`\"" => "a b  c\n"
+echo `echo \$HOME` => "/\n"
+echo `echo \\` => "\\\n"
+echo `echo \n` => "n\n"
+echo `echo \\n` => "n\n"
+"echo \"`echo \\$HOME`\"" => "/\n"
+echo '`echo hi`' => "`echo hi`\n"
+echo \`echo hi\` => "`echo hi`\n"
+echo '`' => "`\n"
+"cat <<EOF\n`echo hi`\nEOF" => "hi\n"
+"cat <<'EOF'\n`echo hi`\nEOF" => "`echo hi`\n"
+"cat <<EOF\nbefore `echo mid` after\nEOF" => "before mid after\n"
+[[ `echo a` == a ]] && echo yes || echo no => "yes\n"
+[[ -n `echo x` ]] && echo yes || echo no => "yes\n"
+echo `echo \`nested\`` => ! \` 1
+echo ${x:-`echo d`} => ! ` 1
+echo $(( `echo 2` + 1 )) => ! ` 1
 
 # writing to a read-only mount is refused, never half-applied
 echo made > out => ! > 1

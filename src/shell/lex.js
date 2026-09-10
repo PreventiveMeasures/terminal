@@ -52,7 +52,9 @@ export function readExpansion(line, i, depth = 0, quoted = false, options = {}) 
 }
 
 // A backtick outside single quotes opens the other command substitution.
+export { readBacktickSubstitution } from './substitution.js'
 export const backtickGap = () => new UnsupportedError('feature', '`', 'command substitution (backticks) is not supported')
+
 
 // ANSI-C quoting decodes through bytes. NUL ends the result, but scanning must
 // continue to the closing quote: $'a\0b' is 'a', not an unterminated string.

@@ -8,7 +8,7 @@ const terminal = () => createTerminal({ 'dir/file': 'contents\n' }, { mount: '/s
 // Bash parse.y accepts a complete inputunit at newline/EOF; eval.c executes it
 // before asking the parser for another. Semicolons remain within that unit.
 describe('complete shell input units run before later parse failures', () => {
-  for (const failure of ['echo )', 'echo "', 'echo `bad`', 'echo @(bad)', 'echo ${!value}']) {
+  for (const failure of ['echo )', 'echo "', 'echo `unterminated', 'echo @(bad)', 'echo ${!value}']) {
     it(`retains prior unsupported diagnostics before ${failure}`, () => {
       const result = terminal().run(`set -o errexit\necho before\n${failure}`)
       assert.equal(result.stdout, 'before\n')
@@ -49,7 +49,7 @@ describe('complete shell input units run before later parse failures', () => {
     assert.deepEqual(result.unsupported, [])
   })
 
-  for (const suffix of ['echo "', 'echo )', 'echo `bad`', 'echo ${value:1}', 'echo $(echo ))']) {
+  for (const suffix of ['echo "', 'echo )', 'echo `unterminated', 'echo ${value:1}', 'echo $(echo ))']) {
     it(`does not read after exit: ${suffix}`, () => {
       const result = terminal().run('echo before\nexit 7\n' + suffix)
       assert.equal(result.stdout, 'before\n')

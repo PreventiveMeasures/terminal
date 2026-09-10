@@ -209,7 +209,7 @@ describe('upstream shell audit — arithmetic, parameter operators and condition
 
 describe('upstream shell audit — explicit unsupported constructs', () => {
   const rows = [
-    ['legacy substitution', 'echo `printf value`', '`'],
+    ['nested legacy substitution', 'echo `echo \\`printf value\\``', '\\`'],
     ['case pattern syntax in substitution', 'echo "$(case word in word) echo yes;; esac)"', 'case'],
     ['custom IFS', 'IFS=:; x=red:blue; echo $x', 'IFS'],
     ['shell function declaration', 'show() { echo value; }; show', 'function'],

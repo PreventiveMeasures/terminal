@@ -1,5 +1,5 @@
 import { expandRedirect, expandScalar, expandWords } from './expand.js'
-import { backtickGap, readExpansion } from './lex.js'
+import { readBacktickSubstitution, readExpansion } from './lex.js'
 import { refusedWrite } from './parse.js'
 import { BindingMap } from './bindings.js'
 import { lookup } from '../fs.js'
@@ -195,7 +195,13 @@ function heredocWord(body) {
     const c = body[i]
     const n = body[i + 1]
     if (c === '\\' && (n === '$' || n === '\\' || n === '`')) { value += n; mask += '1'; i++; continue }
-    if (c === '`') throw backtickGap()
+    if (c === '`') {
+      const backtick = readBacktickSubstitution(body, i)
+      value += backtick.raw
+      mask += '2' + '1'.repeat(backtick.raw.length - 1)
+      i += backtick.raw.length - 1
+      continue
+    }
     if (c === '$') {
       const ref = readExpansion(body, i, 0, true)
       if (ref?.command !== undefined || ref?.parameter !== undefined || ref?.arithmetic !== undefined) {
