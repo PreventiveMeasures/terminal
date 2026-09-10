@@ -19,9 +19,16 @@ function note(command, paths) {
   return `${command}: depth limit omitted contents of ${paths.length} ${paths.length === 1 ? 'directory' : 'directories'}${suffix}.`
 }
 
-function check(command, paths, files = FILES) {
+const hiddenNote = (paths) => `tree: omitted ${paths.length} hidden ${paths.length === 1 ? 'entry' : 'entries'}: ` +
+  paths.map((path) => JSON.stringify(path)).join(', ') + '. Hidden entries are included with -a.'
+
+// tree drops dot-prefixed names from the listing and from the totals under it,
+// so a walked directory reports them; find shows them and never does.
+function check(command, paths, files = FILES, hidden = []) {
   const result = createTerminal(files).run(command)
-  assert.deepEqual(result.notes, paths.length ? [note(command.startsWith('tree') ? 'tree' : 'find', paths)] : [], command)
+  const expected = paths.length ? [note(command.startsWith('tree') ? 'tree' : 'find', paths)] : []
+  if (hidden.length) expected.push(hiddenNote(hidden))
+  assert.deepEqual(result.notes, expected, command)
   assert.equal(result.stderr, '', command)
   assert.equal(result.exitCode, 0, command)
   assert.deepEqual(result.unsupported, [], command)
@@ -29,25 +36,32 @@ function check(command, paths, files = FILES) {
 }
 
 describe('tree depth omission notes', () => {
-  for (const [command, paths] of [
-    ['tree -L1', ['/a', '/c']],
-    ['tree -L2', ['/a/one']],
+  for (const [command, paths, hidden = []] of [
+    ['tree -L1', ['/a', '/c'], ['/.hidden']],
+    ['tree -L2', ['/a/one'], ['/.hidden', '/b/.hidden']],
     ['tree -aL1', ['/.hidden', '/a', '/b', '/c']],
-    ['tree -dL1', ['/a']],
+    ['tree -dL1', ['/a'], ['/.hidden']],
     ['tree -adL1', ['/.hidden', '/a']],
-    ['tree -dL2', []],
-    ['tree -L99', []],
-    ['tree', []],
+    ['tree -dL2', [], ['/.hidden']],
+    ['tree -L99', [], ['/.hidden', '/b/.hidden']],
+    ['tree', [], ['/.hidden', '/b/.hidden']],
     ['tree -a', []],
     ['tree -L1 a', ['/a/one']],
     ['tree -L1 .hidden', ['/.hidden/inner']],
-    ['tree -FL1 --noreport', ['/a', '/c']],
+    ['tree -FL1 --noreport', ['/a', '/c'], ['/.hidden']],
   ]) {
-    it(command + ' reports only eligible omitted contents', () => check(command, paths))
+    it(command + ' reports only eligible omitted contents', () => check(command, paths, FILES, hidden))
   }
 
+  it('does not claim a hidden entry the depth limit had already cut off', () => {
+    // `/dir` stops at the frontier, so its `.child` was never a name this
+    // listing passed over for being hidden — the depth note covers it whole.
+    check('tree -L1', ['/dir'], { 'dir/.child': '', 'dir/shown': '' })
+    check('tree -L2', [], { 'dir/.child': '', 'dir/shown': '' }, ['/dir/.child'])
+  })
+
   it('leaves output and report totals unchanged', () => {
-    const result = check('tree -L1', ['/a', '/c'])
+    const result = check('tree -L1', ['/a', '/c'], FILES, ['/.hidden'])
     assert.equal(result.stdout, '.\n├── a\n├── b\n├── c\n└── root\n\n4 directories, 1 file\n')
   })
 
@@ -74,6 +88,21 @@ describe('tree depth omission notes', () => {
     assert.deepEqual(result.notes, [note('tree', ['/a'])])
     assert.ok(result.unsupported.some(({ command, detail }) => command === 'tree' && detail === 'filename escaping'))
   })
+
+  it('keeps the hidden note when a displayed name aborts the walk', () => {
+    const result = createTerminal({ '.hidden': '', 'a/file': '', 'z\nname': '' }).run('tree 2>/dev/null | true')
+    assert.equal(result.stderr, '')
+    assert.deepEqual(result.notes, [hiddenNote(['/.hidden'])])
+    assert.ok(result.unsupported.some(({ detail }) => detail === 'filename escaping'))
+  })
+
+  for (const command of ['tree >/dev/null', 'tree | wc -l', 'value=$(tree); true', '(tree)']) {
+    it(command + ' retains the hidden note independently of output routing', () => {
+      const result = createTerminal({ '.hidden': '', visible: '' }).run(command)
+      assert.deepEqual(result.notes, [hiddenNote(['/.hidden'])])
+      assert.equal(result.exitCode, 0)
+    })
+  }
 
   it('never inspects unsupported names below the displayed frontier', () => {
     check('tree -L1', ['/dir'], { 'dir/name\nwith\nnewlines': '' })
@@ -217,7 +246,7 @@ describe('depth notes retain full paths, bounded details, and shell channel sema
   it('does not carry notes into later runs', () => {
     const terminal = createTerminal(FILES)
     assert.ok(terminal.run('tree -L1; find . -maxdepth 0').notes.length > 0)
-    assert.deepEqual(terminal.run('tree; find .').notes, [])
+    assert.deepEqual(terminal.run('tree -a; find .').notes, [])
   })
 })
 

@@ -58,7 +58,7 @@ function ls(_stdin, tokens, ctx) {
       const path = stack.pop()
       const abs = resolve(ctx.cwd, path)
       const entries = ctx.fs.listDir(abs)
-      if (!flags.has('a') && !flags.has('A')) hidden.collect(abs, entries)
+      if (!flags.has('a') && !flags.has('A')) hidden.collect(abs, [...entries.dirs, ...entries.files])
       const names = [...entries.dirs, ...entries.files].filter((n) => flags.has('a') || flags.has('A') || !n.startsWith('.'))
       if (flags.has('a')) names.push('.', '..')
       names.sort(compareNames)

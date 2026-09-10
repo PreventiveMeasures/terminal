@@ -27,28 +27,18 @@ export function missingPathNote(ctx, command, path, error) {
   ctx.notes?.add(`${command}: relative path ${JSON.stringify(path)} was not found from cwd ${JSON.stringify(ctx.cwd)}. ${description}`)
 }
 
-// A directory can be revisited with different glob suffixes or ls operands.
-// Count each eligible entry once, retaining paths only below the display limit.
+// ls, tree and pathname globbing all drop dot-prefixed names silently. Each
+// collects the names it dropped so a run can say what it did not show, and a
+// name is only collected where its absence actually changed the answer.
 export function hiddenEntryNotes() {
-  const paths = [], seen = new Map()
-  let count = 0
+  const paths = new Set()
   return {
-    collect(directory, entries, includeFiles = true) {
-      // Intermediate glob segments consider directories, not files.
-      const previous = seen.get(directory) ?? 0
-      const add = (names) => {
-        for (const name of names) {
-          if (!name.startsWith('.')) continue
-          count++
-          if (paths.length < 9) paths.push(resolve(directory, name))
-        }
-      }
-      if (!(previous & 1)) add(entries.dirs)
-      if (includeFiles && !(previous & 2)) add(entries.files)
-      seen.set(directory, previous | (includeFiles ? 3 : 1))
+    add: (path) => paths.add(path),
+    collect(directory, names) {
+      for (const name of names) if (name.startsWith('.')) paths.add(resolve(directory, name))
     },
     emit(notes, command, explanation, context = '') {
-      emitOmission(notes, { command, action: 'omitted', noun: ['hidden entry', 'hidden entries'], explanation, context }, count, paths)
+      omissionNote(notes, { command, action: 'omitted', noun: ['hidden entry', 'hidden entries'], explanation, context, paths })
     },
   }
 }

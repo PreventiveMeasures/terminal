@@ -216,12 +216,15 @@ export interface RunResult {
    * and exit status. Frozen and deduplicated per run; redirects, pipelines,
    * and nested shell commands cannot suppress them.
    *
-   * Notes cover hidden entries omitted by `ls` or pathname globs, unmatched
-   * globs passed literally, input shortened by `head`/`tail`, depth-limited
-   * traversal, grep binary/filter exclusions, and NUL bytes discarded by
-   * command substitution. Omission lists include absolute paths for fewer
-   * than 10 entries, otherwise a count. Notes describe what happened and
-   * explain relevant option behavior, such as `ls -a` including hidden entries.
+   * Notes cover hidden entries omitted by `ls`, `tree` or pathname globs,
+   * unmatched globs passed literally, input shortened by `head`/`tail`,
+   * depth-limited traversal, grep binary/filter exclusions, and NUL bytes
+   * discarded by command substitution. Omission lists include absolute paths
+   * for fewer than 10 entries, otherwise a count. Notes describe what
+   * happened and explain relevant option behavior, such as `ls -a` including
+   * hidden entries. A glob names only the hidden entries its own pattern
+   * would otherwise have taken, so `*.bar` reports `.bar` and says nothing
+   * about `.foo.txt`.
    *
    * Failed relative file lookups also note verified alternatives at `/` or
    * the mount point when the current directory caused the missing path.

@@ -45,7 +45,7 @@ describe('rm removes writable files', () => {
     const terminal = setup()
     assert.deepEqual(terminal.run('printf H >/tmp/.hidden; rm /tmp/*; ls -A /tmp'), {
       ...result('.hidden\n'),
-      notes: ['glob: omitted 1 hidden entry while expanding "/tmp/*": "/tmp/.hidden". Dot-prefixed patterns can include hidden entries.'],
+      notes: ['glob: omitted 1 hidden entry while expanding "/tmp/*": "/tmp/.hidden".'],
     })
   })
   it('supports agent cleanup through xargs and find -exec', () => {
