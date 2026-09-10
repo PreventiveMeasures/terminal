@@ -9,7 +9,7 @@ import { unsupportedNote } from '../src/unsupported.js'
 // https://github.com/ExodusOSS/bytes#exodusbytesutf8js
 const partialMessage = 'byte output that is not valid UTF-8 cannot be represented by this string-based terminal'
 const surrogateMessage = 'unpaired UTF-16 surrogates cannot be encoded as UTF-8'
-const result = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
+const result = (stdout = '', exitCode = 0, stderr = '', unsupported = [], notes = []) => ({ stdout, stderr, exitCode, cwd: '/', notes, unsupported })
 const vectors = [
   ['', []], ['\0', [0]], ['\u007F', [0x7F]], ['\u0080', [0xC2, 0x80]],
   ['\u07FF', [0xDF, 0xBF]], ['\u0800', [0xE0, 0xA0, 0x80]],
@@ -99,7 +99,7 @@ describe('loose encoding and strict file bytes retain their distinct contracts',
 
   it('preserves existing loose byte-reader behavior while strict encoders diagnose it', () => {
     const t = createTerminal({ input: '\uD800x' })
-    assert.deepEqual(t.run('head -c3 input'), result('\uFFFD'))
+    assert.deepEqual(t.run('head -c3 input'), result('\uFFFD', 0, '', [], ['head: selected 3 of 4 bytes from "/input".']))
     assert.deepEqual(t.run('wc -c input'), result('4 input\n'))
     const failed = t.run('base64 input')
     assert.equal(failed.stdout, '')
@@ -121,10 +121,11 @@ describe('loose encoding and strict file bytes retain their distinct contracts',
 
 describe('shell byte operations retain BOMs and UTF-8 diagnostics', () => {
   const text = '\uFEFFAé😀\0'
-  for (const [command, stdout] of [
+  for (const [command, stdout, notes] of [
     ['base64 -w0 input', '77u/QcOp8J+YgAA='],
     ['base64 input | base64 -d', text], ['base64 -d encoded', text],
-    ['head -c3 input', '\uFEFF'], ['tail -c+4 input', 'Aé😀\0'],
+    ['head -c3 input', '\uFEFF', ['head: selected 3 of 11 bytes from "/input".']],
+    ['tail -c+4 input', 'Aé😀\0', ['tail: selected 8 of 11 bytes from "/input".']],
     ['cut -c1-3 input', '\uFEFF\n'], ['cut -c4-6 input', 'Aé\n'],
     ['wc -c input', '11 input\n'],
     [String.raw`printf '%b%b%b' '\357' '\273' '\277'`, '\uFEFF'],
@@ -135,7 +136,7 @@ describe('shell byte operations retain BOMs and UTF-8 diagnostics', () => {
   ]) {
     it(command, () => {
       const t = createTerminal({ input: text, encoded: '77u/QcOp8J+YgAA=' })
-      assert.deepEqual(t.run(command), result(stdout))
+      assert.deepEqual(t.run(command), result(stdout, 0, '', [], notes))
     })
   }
 

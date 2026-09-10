@@ -4,6 +4,7 @@
 
 import { lookup, resolve } from './fs.js'
 import { consumeStdin, ok, readInputs } from './util.js'
+import { lookupWithNote } from './notes.js'
 
 // Slash paths are reserved for bin aliases.
 const NAME_RE = /^[a-zA-Z0-9][\w.+-]*$/u
@@ -93,7 +94,8 @@ function invoke(name, run, stdin, tokens, ctx) {
   // A wired command is handed its stdin outright, so it is taken to
   // have read it: the next command in a group starts at its end.
   consumeStdin(ctx)
-  const scope = { cwd: ctx.cwd, fs: ctx.fs, stdinFile: ctx.stdinFile, stdinOrigin: ctx.stdinOrigin }
+  // Retained I/O views report notes to the run performing the operation.
+  const scope = { cwd: ctx.cwd, fs: ctx.fs, mount: ctx.mount, get notes() { return ctx.notes }, command: name, stdinFile: ctx.stdinFile, stdinOrigin: ctx.stdinOrigin }
   const io = {
     name,
     args: tokens,
@@ -119,7 +121,7 @@ function fsView(scope) {
     isDir: (path) => scope.fs.isDir(at(path)),
     readFile: (path) => scope.fs.readFile(at(path)),
     listDir: (path) => {
-      const { path: abs, error } = lookup(scope.cwd, path, scope.fs)
+      const { path: abs, error } = lookupWithNote(scope, scope.command, path)
       // Report the original operand, distinguishing missing files from files
       // passed where a directory is required.
       if (!scope.fs.isDir(abs)) {

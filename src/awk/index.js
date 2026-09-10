@@ -18,7 +18,7 @@ import { unescapeAwkString } from './lex.js'
 import { parseProgram } from './parse.js'
 import { createMachine, runProgram } from './run.js'
 import { StrNum, byteLocale, checkText } from './value.js'
-import { lookup } from '../fs.js'
+import { lookupWithNote } from '../notes.js'
 import { parseArgs } from '../args.js'
 import { err, usage } from '../util.js'
 
@@ -104,7 +104,7 @@ function programSource(progFiles, positional, ctx) {
   }
   const parts = []
   for (const f of progFiles) {
-    const { path: abs, error } = lookup(ctx.cwd, f, ctx.fs)
+    const { path: abs, error } = lookupWithNote(ctx, 'awk', f)
     if (error || !ctx.fs.isFile(abs)) return { error: err(`awk: cannot open program file \`${f}\`: ${error ?? 'Is a directory'}`, 2) }
     parts.push(ctx.fs.readFile(abs))
   }

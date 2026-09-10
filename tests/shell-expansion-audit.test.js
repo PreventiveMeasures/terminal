@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
 const terminal = () => createTerminal({}, { mount: '/src', writable: '/tmp/', commands: { argv: ({ args }) => JSON.stringify(args) } })
-const success = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+const success = (stdout, notes = []) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes, unsupported: [] })
 
 // Bash execute_simple_command expands words before calling do_redirections;
 // subst.c aborts that expansion on a fatal arithmetic or required-value error.
@@ -61,7 +61,7 @@ describe('pathname expansion follows all argument substitutions', () => {
   it('an earlier glob observes a later removal', () => {
     const t = terminal()
     t.run('printf hi >/tmp/a.txt')
-    assert.deepEqual(t.run('argv /tmp/*.txt "$(rm /tmp/a.txt)"'), success('["/tmp/*.txt",""]'))
+    assert.deepEqual(t.run('argv /tmp/*.txt "$(rm /tmp/a.txt)"'), success('["/tmp/*.txt",""]', ['glob: no paths matched "/tmp/*.txt"; the pattern was left literal.']))
   })
 })
 

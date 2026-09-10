@@ -6,7 +6,7 @@ import { compileGlob, hasExtglob } from '../src/glob.js'
 // Bash5.2.37 lib/glob/sm_loop.c BRACKMATCH finds raw ':]' before
 // dequoting class names; glob.c udequote_pathname also drops a trailing '\\'.
 // smatch.c cclass_name includes the GNU ascii and word classes.
-const result = (exitCode = 0, stdout = '') => ({ stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
+const result = (exitCode = 0, stdout = '', notes = []) => ({ stdout, stderr: '', exitCode, cwd: '/', notes, unsupported: [] })
 
 describe('glob named classes use shell matching rules', () => {
   for (const [pattern, matched, rejected] of [
@@ -47,13 +47,13 @@ describe('glob named classes use shell matching rules', () => {
 
   it('preserves the different Bash pathname and GNU fnmatch class dialects', () => {
     const files = { 1: '', a: '', 'B]': '', 'd]': '' }
-    for (const [command, stdout] of [
+    for (const [command, stdout, notes] of [
       ["printf '<%s>' [[:di'git':]]", '<1>'],
-      ["printf '<%s>' [[:BOGUS:]]", '<[[:BOGUS:]]>'],
+      ["printf '<%s>' [[:BOGUS:]]", '<[[:BOGUS:]]>', ['glob: no paths matched "[[:BOGUS:]]"; the pattern was left literal.']],
       ["find . -name '[[:di\\git:]]'", './d]\n'],
       ["find . -name '[[:BOGUS:]]'", './B]\n'],
     ]) {
-      assert.deepEqual(createTerminal(files).run(command), result(0, stdout), command)
+      assert.deepEqual(createTerminal(files).run(command), result(0, stdout, notes), command)
     }
   })
 })
@@ -66,15 +66,15 @@ describe('glob matching consumes a complete filename including final newlines', 
     })
   }
 
-  for (const [command, stdout] of [
+  for (const [command, stdout, notes] of [
     ["find . -name 'file'", './file\n'],
     ["find . -iname 'FILE'", './file\n'],
     ["printf '<%s>' fi*e", '<file>'],
-    ["grep -rl x . --include='file'", './file\n'],
+    ["grep -rl x . --include='file'", './file\n', ['grep: excluded 2 entries by --include/--exclude/--exclude-dir rules: "/file\\n", "/file\\r\\n".']],
   ]) {
     it(command, () => {
       const files = { file: 'x\n', 'file\n': 'x\n', 'file\r\n': 'x\n' }
-      assert.deepEqual(createTerminal(files).run(command), result(0, stdout))
+      assert.deepEqual(createTerminal(files).run(command), result(0, stdout, notes))
     })
   }
 })

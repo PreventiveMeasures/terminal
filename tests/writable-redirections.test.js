@@ -141,7 +141,7 @@ describe('streaming commands cannot silently consume their own new output', () =
     const t = terminal()
     t.run('cat src/a.txt >/tmp/out')
     assert.deepEqual(t.run('grep -q alpha /tmp/out >>/tmp/out'), expected())
-    assert.deepEqual(t.run('head -n 0 /tmp/out >>/tmp/out'), expected())
+    assert.deepEqual(t.run('head -n 0 /tmp/out >>/tmp/out'), { ...expected(), notes: ['head: selected 0 of 3 lines from "/tmp/out".'] })
     assert.deepEqual(t.run('grep absent /tmp/out >>/tmp/out'), expected('', 1))
   })
   it('command substitution finishes reading before the outer append', () => {

@@ -6,8 +6,8 @@ const SOURCES = { first: 'first\n', second: 'second\n', empty: '', unicode: 'é�
 const terminal = () => createTerminal(SOURCES, { mount: '/repo', cwd: '/repo', writable: '/tmp/' })
 const diagnostic = (name = '/tmp/log') => `cat: ${name}: input file is output file\n`
 
-function check(t, command, stdout = '', stderr = '', exitCode = 0) {
-  assert.deepEqual(t.run(command), { stdout, stderr, exitCode, cwd: '/repo', notes: [], unsupported: [] }, command)
+function check(t, command, stdout = '', stderr = '', exitCode = 0, notes = []) {
+  assert.deepEqual(t.run(command), { stdout, stderr, exitCode, cwd: '/repo', notes, unsupported: [] }, command)
 }
 
 // GNU coreutils src/cat.c compares input position against stdout's current
@@ -67,7 +67,7 @@ describe('cat rejects a file that is behind its own output position', () => {
   it('preserves the unread portion of partially consumed input', () => {
     const t = terminal()
     check(t, 'cat unicode >/tmp/log')
-    check(t, '{ head -c2 >/dev/null; cat >>/tmp/log; cat; } </tmp/log', '😀\n', diagnostic('-'))
+    check(t, '{ head -c2 >/dev/null; cat >>/tmp/log; cat; } </tmp/log', '😀\n', diagnostic('-'), 0, ['head: selected 2 of 7 bytes from "/tmp/log".'])
     check(t, 'cat /tmp/log', 'é😀\n')
   })
 
@@ -147,7 +147,7 @@ describe('cat allows empty inputs and safe descriptor positions', () => {
 
   it('allows a nonappend output offset behind the unread input position', () => {
     const t = terminal()
-    check(t, "{ printf abcdef >/tmp/log; { head -c2 >/dev/null; cat; } </tmp/log; } >/tmp/log")
+    check(t, "{ printf abcdef >/tmp/log; { head -c2 >/dev/null; cat; } </tmp/log; } >/tmp/log", '', '', 0, ['head: selected 2 of 6 bytes from "/tmp/log".'])
     check(t, 'cat /tmp/log', 'cdefef')
   })
 

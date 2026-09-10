@@ -1,12 +1,13 @@
 // Commands that navigate or query the virtual filesystem.
 
-import { compareNames, lookup, resolve } from '../fs.js'
+import { compareNames, resolve } from '../fs.js'
 import { unsupported } from '../unsupported.js'
 import { tree } from './tree.js'
 import { find } from './find.js'
 import { homeOf } from '../shell/expand.js'
 import { parseArgs } from '../args.js'
 import { err, ok, usage } from '../util.js'
+import { hiddenEntryNotes, lookupWithNote } from '../notes.js'
 
 function pwd(_stdin, tokens, ctx) {
   parseArgs(tokens)
@@ -25,7 +26,7 @@ function cd(_stdin, tokens, ctx) {
   }
   const printed = positional[0] === '-' ? target + '\n' : ''
   if (target === '') return ok(printed)
-  const { path: abs, error } = lookup(ctx.cwd, target, ctx.fs)
+  const { path: abs, error } = lookupWithNote(ctx, 'cd', target)
   if (error) return err(`cd: ${target}: ${error}`)
   if (!ctx.fs.isDir(abs)) return err(`cd: ${target}: Not a directory`)
   ctx.vars.set('OLDPWD', ctx.cwd)
@@ -41,11 +42,11 @@ function ls(_stdin, tokens, ctx) {
   if (flags.has('l')) return unsupported('feature', 'ls', '-l metadata', 'ls: long listings require permissions, ownership and timestamps absent from this virtual filesystem')
   const targets = (positional.length ? positional : ['.']).toSorted(compareNames)
   if (flags.has('r')) targets.reverse()
-  const dirs = [], errors = [], files = [], listed = new Set()
-  const hidden = { count: 0, paths: [] }
+  const dirs = [], errors = [], files = []
+  const hidden = hiddenEntryNotes()
   const display = (name, abs) => flags.has('F') && ctx.fs.isDir(abs) && !name.endsWith('/') ? name + '/' : name
   for (const target of targets) {
-    const { path: abs, error } = lookup(ctx.cwd, target, ctx.fs)
+    const { path: abs, error } = lookupWithNote(ctx, 'ls', target)
     if (error) errors.push(`ls: ${target}: ${error.toLowerCase()}`)
     else if (flags.has('d') || ctx.fs.isFile(abs)) files.push(display(target, abs))
     else dirs.push(target)
@@ -57,16 +58,8 @@ function ls(_stdin, tokens, ctx) {
       const path = stack.pop()
       const abs = resolve(ctx.cwd, path)
       const entries = ctx.fs.listDir(abs)
-      const fresh = !listed.has(abs)
-      const names = [...entries.dirs, ...entries.files].filter((n) => {
-        if (flags.has('a') || flags.has('A') || !n.startsWith('.')) return true
-        if (fresh) {
-          listed.add(abs)
-          hidden.count++
-          if (hidden.paths.length < 9) hidden.paths.push(resolve(abs, n))
-        }
-        return false
-      })
+      if (!flags.has('a') && !flags.has('A')) hidden.collect(abs, entries)
+      const names = [...entries.dirs, ...entries.files].filter((n) => flags.has('a') || flags.has('A') || !n.startsWith('.'))
       if (flags.has('a')) names.push('.', '..')
       names.sort(compareNames)
       if (flags.has('r')) names.reverse()
@@ -80,10 +73,7 @@ function ls(_stdin, tokens, ctx) {
       }
     }
   }
-  if (hidden.count) {
-    const paths = hidden.count < 10 ? ': ' + hidden.paths.sort(compareNames).map((path) => JSON.stringify(path)).join(', ') : ''
-    ctx.notes.add(`ls: omitted ${hidden.count} hidden ${hidden.count === 1 ? 'entry' : 'entries'}${paths}. Use -a to include hidden entries.`)
-  }
+  hidden.emit(ctx.notes, 'ls', 'Hidden entries are included with -a.')
   return { stdout: blocks.length ? blocks.join('\n\n') + '\n' : '', stderr: errors.length ? errors.join('\n') + '\n' : '', exitCode: errors.length ? 2 : 0 }
 }
 

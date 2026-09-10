@@ -93,6 +93,7 @@
     "src/index.d.ts",
     "src/index.js",
     "src/mount.js",
+    "src/notes.js",
     "src/numeric.js",
     "src/regex-locale.js",
     "src/registry.js",

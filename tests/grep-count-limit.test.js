@@ -10,9 +10,11 @@ const FILES = {
   empty: '',
 }
 
-function check(command, stdout, exitCode = 0, stderr = '') {
+const FILTER_NOTES = ['grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/src/d.txt".']
+
+function check(command, stdout, exitCode = 0, stderr = '', notes = []) {
   assert.deepEqual(createTerminal(FILES).run(command), {
-    stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [],
+    stdout, stderr, exitCode, cwd: '/', notes, unsupported: [],
   }, command)
 }
 
@@ -28,7 +30,7 @@ describe('grep count and attached match limits', () => {
     ['grep -c hit src/c.js empty', 'src/c.js:0\nempty:0\n', 1],
     ['grep -ch hit src/a.js src/c.js', '2\n0\n'],
     ['grep -cH hit src/a.js', 'src/a.js:2\n'],
-    ["grep -rc hit src --include='*.js'", 'src/a.js:2\nsrc/b.js:2\nsrc/c.js:0\n'],
+    ["grep -rc hit src --include='*.js'", 'src/a.js:2\nsrc/b.js:2\nsrc/c.js:0\n', 0, FILTER_NOTES],
     ['cat src/a.js | grep -c hit', '2\n'],
     ['grep -c hit < src/a.js', '2\n'],
     ['cat src/a.js | grep -cH hit', '(standard input):2\n'],
@@ -42,7 +44,7 @@ describe('grep count and attached match limits', () => {
     ['grep -vm1 hit src/a.js', 'skip\n'],
     ['grep -cm1 hit src/a.js src/b.js src/c.js', 'src/a.js:1\nsrc/b.js:1\nsrc/c.js:0\n'],
     ['grep -m1 hit src/a.js src/b.js', 'src/a.js:hit hit\nsrc/b.js:hit second\n'],
-    ["grep -rnm1 hit src --include='*.js'", 'src/a.js:2:hit hit\nsrc/b.js:1:hit second\n'],
+    ["grep -rnm1 hit src --include='*.js'", 'src/a.js:2:hit hit\nsrc/b.js:1:hit second\n', 0, FILTER_NOTES],
     ['grep -nm1 -A2 hit src/a.js', '2:hit hit\n3-skip\n4-hit\n'],
     ['grep -nm1 -B1 hit src/a.js', '1-skip\n2:hit hit\n'],
     ['grep -m1 hit src/c.js', '', 1],
@@ -53,8 +55,8 @@ describe('grep count and attached match limits', () => {
     ['{ grep -m1 hit /dev/stdin; cat; } < src/a.js', 'hit hit\n' + FILES['src/a.js']],
   ]
 
-  for (const [command, stdout, exitCode] of cases) {
-    it(command, () => check(command, stdout, exitCode))
+  for (const [command, stdout, exitCode, notes] of cases) {
+    it(command, () => check(command, stdout, exitCode, '', notes))
   }
 
   it('keeps successful counts and capped matches when another operand cannot be read', () => {

@@ -5,6 +5,7 @@
 import { compareNames, lookup } from './fs.js'
 import { UnsupportedError } from './unsupported.js'
 import { POSIX_CLASSES, readPosixClass } from './charclass.js'
+import { hiddenEntryNotes } from './notes.js'
 
 const META = /[*?[]/u
 const NON_ASCII = /\P{ASCII}/u
@@ -212,17 +213,36 @@ export function globPattern(word) {
 export function globPaths(word, ctx) {
   const pattern = globPattern(word)
   const segments = pattern.match(/[^/]+|\/+/gu) ?? []
-  let candidates = ['']
-  for (let s = 0; s < segments.length; s++) {
-    const seg = segments[s]
-    if (seg.startsWith('/') || !META.test(seg)) {
-      candidates = candidates.map((c) => c + unescape(seg))
-      continue
+  const hidden = hiddenEntryNotes()
+  let candidates = [''], matched
+  try {
+    for (let s = 0; s < segments.length; s++) {
+      const seg = segments[s]
+      if (seg.startsWith('/') || !META.test(seg)) {
+        candidates = candidates.map((c) => c + unescape(seg))
+        continue
+      }
+      candidates = expandSegment(candidates, seg, s === segments.length - 1, ctx, hidden)
     }
-    candidates = expandSegment(candidates, seg, s === segments.length - 1, ctx)
+    // lookup validates literal suffixes and requires a directory for trailing '/'.
+    matched = candidates.filter((c) => lookup(ctx.cwd, c, ctx.fs).path !== null).sort(compareNames)
+    return matched
+  } finally {
+    hidden.emit(ctx.notes, 'glob', 'Dot-prefixed patterns can include hidden entries.', ` while expanding ${JSON.stringify(pattern)}`)
+    if (matched?.length === 0 && segments.some(hasPatternSyntax)) ctx.notes.add(`glob: no paths matched ${JSON.stringify(pattern)}; the pattern was left literal.`)
   }
-  // lookup validates literal suffixes and requires a directory for trailing '/'.
-  return candidates.filter((c) => lookup(ctx.cwd, c, ctx.fs).path !== null).sort(compareNames)
+}
+
+// An unmatched bracket is literal, including the `[` command itself.
+function hasPatternSyntax(pattern) {
+  for (let i = 0; i < pattern.length; i++) {
+    if (pattern[i] === '\\') i++
+    else if (pattern[i] === '*' || pattern[i] === '?') return true
+    else if (pattern[i] === '[') {
+      try { if (readBracket(pattern, i, { bash: true })) return true } catch { return true }
+    }
+  }
+  return false
 }
 
 // A literal segment may still carry escapes from globPattern (a quoted
@@ -231,9 +251,10 @@ const unescape = (seg) => seg.replace(/\\(.)/gu, '$1')
 
 // Only the last segment may match files. Shell globbing excludes dotfiles
 // unless the segment starts with '.', and never yields '.' or '..'.
-function expandSegment(candidates, seg, isLast, ctx) {
+function expandSegment(candidates, seg, isLast, ctx, hidden) {
   const re = compileGlob(seg, { bash: true })
   const segStartsWithDot = seg.startsWith('.') || seg.startsWith('\\.')
+  const omitHidden = !segStartsWithDot && hasPatternSyntax(seg)
   const matches = (name) => {
     if (!segStartsWithDot && name.startsWith('.')) return false
     return re.test(name)
@@ -243,6 +264,7 @@ function expandSegment(candidates, seg, isLast, ctx) {
     const abs = lookup(ctx.cwd, c || '.', ctx.fs).path
     if (!ctx.fs.isDir(abs)) continue
     const { dirs, files } = ctx.fs.listDir(abs)
+    if (omitHidden) hidden.collect(abs, { dirs, files }, isLast)
     for (const name of isLast ? [...dirs, ...files] : dirs) if (matches(name)) next.push(c + name)
   }
   return next

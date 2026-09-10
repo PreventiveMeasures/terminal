@@ -43,7 +43,10 @@ describe('rm removes writable files', () => {
   })
   it('keeps hidden files out of star expansion', () => {
     const terminal = setup()
-    assert.deepEqual(terminal.run('printf H >/tmp/.hidden; rm /tmp/*; ls -A /tmp'), result('.hidden\n'))
+    assert.deepEqual(terminal.run('printf H >/tmp/.hidden; rm /tmp/*; ls -A /tmp'), {
+      ...result('.hidden\n'),
+      notes: ['glob: omitted 1 hidden entry while expanding "/tmp/*": "/tmp/.hidden". Dot-prefixed patterns can include hidden entries.'],
+    })
   })
   it('supports agent cleanup through xargs and find -exec', () => {
     const terminal = setup()

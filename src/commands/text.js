@@ -5,7 +5,7 @@ import { echo } from './echo.js'
 import { printf } from './printf.js'
 import { parseArgs } from '../args.js'
 import { formatWc } from './wc-format.js'
-import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines } from '../util.js'
+import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines } from '../util.js'
 import { awk } from '../awk/index.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
@@ -23,9 +23,16 @@ function headTail(cmd, stdin, tokens, ctx) {
   const fromStart = count.sign === '+'
   // head opens zero-count operands; tail's last-zero form opens nothing.
   if (isHead && count.value === 0 && count.sign !== '-') {
-    return takeFrom(cmd, stdin, positional, ctx, () => '', banner, (content) => content, { noRead: true })
+    return takeFrom(cmd, stdin, positional, ctx, () => '', { unit, banner, leftover: (content) => content, readOptions: { noRead: true } })
   }
-  if (!isHead && count.value === 0 && !fromStart) return ok()
+  if (!isHead && count.value === 0 && !fromStart) {
+    // A file snapshot may be stale; only buffered pipes can be counted unread.
+    if (!ctx.stdinFile && (!positional.length || positional.includes('-') || positional.includes('/dev/stdin'))) {
+      const note = truncationNote(cmd, stdin, '', unit, 'standard input')
+      if (note) ctx.notes.add(note)
+    }
+    return ok()
+  }
   const range = (total) => {
     if (isHead) return [0, count.sign === '-' ? Math.max(0, total - count.value) : count.value]
     const start = fromStart ? Math.min(total, Math.max(0, count.value - 1)) : Math.max(0, total - count.value)
@@ -39,7 +46,8 @@ function headTail(cmd, stdin, tokens, ctx) {
     return isHead ? content.slice(0, boundary) : content.slice(boundary)
   }
   const leftover = isHead ? headLeftover(count, unit, ctx) : undefined
-  return takeFrom(cmd, stdin, positional, ctx, pick, banner, leftover, !isHead && fromStart ? { stopOnDir: true } : undefined)
+  const readOptions = !isHead && fromStart ? { stopOnDir: true } : undefined
+  return takeFrom(cmd, stdin, positional, ctx, pick, { unit, banner, leftover, readOptions })
 }
 
 // head -c leaves exactly the unread bytes. On file-backed stdin, -n also leaves
@@ -91,13 +99,13 @@ function sliceBytes(content, range) {
 // Banner presence depends on named operands, including missing ones. Only opened
 // operands get banners; directories get an empty body. A later banner terminates
 // the preceding body if needed. Shared stdin operands consume sequentially.
-function takeFrom(cmd, stdin, files, ctx, pick, banner = null, leftover = () => '', readOptions) {
+function takeFrom(cmd, stdin, files, ctx, pick, { unit, banner, leftover = () => '', readOptions }) {
   const r = readInputs(cmd, files, stdin, ctx, readOptions)
   // `-q` / `-v` override the operand-count rule outright; `banner` is
   // null when neither was given.
   const showHeader = banner ?? files.length > 1
   const opened = r.entries.filter((e) => e.kind !== 'missing')
-  const blocks = []
+  const blocks = [], notes = []
   let rest = null
   for (let i = 0; i < opened.length; i++) {
     const { name, kind, shared } = opened[i]
@@ -110,11 +118,31 @@ function takeFrom(cmd, stdin, files, ctx, pick, banner = null, leftover = () => 
     // A directory yields no body at all — not even the newline an empty
     // line-pick would append — so `pick` is skipped for it entirely.
     const body = kind === 'dir' ? '' : pick(content)
+    if (kind === 'file' && body !== content) {
+      const note = truncationNote(cmd, content, body, unit, inputLabel(name, ctx))
+      if (note) notes.push(note)
+    }
     // Both implicit stdin and an explicit - operand use the standard-input label.
     const label = name === null || name === '-' ? 'standard input' : name
     blocks.push(showHeader ? `${i > 0 ? '\n' : ''}==> ${label} <==\n${body}` : body)
   }
+  // A later slice may reject partial UTF-8 and discard the buffered output.
+  for (const note of notes) ctx.notes.add(note)
   return okWith(blocks.join(''), r)
+}
+
+function countRecords(text) {
+  let count = Number(text.length > 0 && !text.endsWith('\n'))
+  for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) count++
+  return count
+}
+
+function truncationNote(cmd, content, body, unit, input) {
+  const count = unit === 'c' ? (text) => encodeUtf8Loose(text).length : countRecords
+  const selected = count(body), total = count(content)
+  if (selected >= total) return null
+  const label = (unit === 'c' ? 'byte' : 'line') + (total === 1 ? '' : 's')
+  return `${cmd}: selected ${selected} of ${total} ${label} from ${input}.`
 }
 
 function wc(stdin, tokens, ctx) {

@@ -2,7 +2,7 @@ import { expandRedirect, expandScalar, expandWords } from './expand.js'
 import { readBacktickSubstitution, readExpansion } from './lex.js'
 import { refusedWrite } from './parse.js'
 import { BindingMap } from './bindings.js'
-import { lookup } from '../fs.js'
+import { lookupWithNote, missingPathNote } from '../notes.js'
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { err, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
@@ -169,6 +169,7 @@ function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
 // Expansion errors belong to the failing stage: earlier output and later
 // pipeline stages survive, and redirections may silence only stderr.
 function shellFailure(ctx, e) {
+  missingPathNote(ctx, 'shell', e?.path, e?.fsError)
   const note = unsupportedNote(e)
   if (note) ctx.unsupported.add(note)
   return { ...err(`error: ${reason(e)}`, 1), ...(e?.halt ? { halt: true } : {}) }
@@ -221,7 +222,7 @@ function heredocWord(body) {
 function readInput(path, ctx, stdin) {
   if (path === '/dev/null') return { content: '' }
   if (path === '/dev/stdin') return { content: stdin }
-  const { path: abs, error } = lookup(ctx.cwd, path, ctx.fs)
+  const { path: abs, error } = lookupWithNote(ctx, 'shell', path)
   if (error) return { error: err(`error: ${path}: ${error}`) }
   if (ctx.fs.isFile(abs)) {
     const content = ctx.fs.readFile(abs)

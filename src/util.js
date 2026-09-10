@@ -4,8 +4,10 @@ import { UnsupportedError } from './unsupported.js'
 import { lookup } from './fs.js'
 import { UINT64_MAX } from './numeric.js'
 import { utf8fromString, utf8toString } from '@exodus/bytes/utf8.js'
+import { lookupWithNote } from './notes.js'
 
 export { utf8fromStringLoose as encodeUtf8Loose } from '@exodus/bytes/utf8.js'
+export { missingPathNote } from './notes.js'
 
 // Byte operations encode JS strings as UTF-8. Preserve the BOM and refuse
 // slices that cannot be represented losslessly as string output.
@@ -78,7 +80,7 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
       pipe = ''
       consumeStdin(ctx)
     } else if (name !== '/dev/null') {
-      const found = lookup(ctx.cwd, name, ctx.fs)
+      const found = lookupWithNote(ctx, cmd, name)
       if (found.error) { entry.kind = 'missing'; error = found.error.toLowerCase() }
       else if (ctx.fs.isDir(found.path)) {
         entry.kind = 'dir'
@@ -99,6 +101,11 @@ export function readInputs(cmd, files, stdin, ctx, options) {
     return { inputs: only, entries: only, stderr: '', failed: false }
   }
   return readFilesFor(cmd, files, ctx, stdin, options)
+}
+
+export function inputLabel(name, ctx) {
+  if (name === null || name === '-' || name === '/dev/stdin') return ctx.stdinHandle?.path ? JSON.stringify(ctx.stdinHandle.path) : 'standard input'
+  return JSON.stringify(lookup(ctx.cwd, name, ctx.fs).path ?? name)
 }
 
 export function readContent(cmd, files, stdin, ctx) {

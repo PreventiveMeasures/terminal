@@ -11,11 +11,11 @@ const gone = 'cat: gone: no such file or directory\n'
 const tildeError = 'error: named-user and directory-stack tilde prefixes are not supported\n'
 
 function examples(rows) {
-  for (const [name, command, stdout, stderr, names = ['MISSING'], exitCode = 0] of rows) {
+  for (const [name, command, stdout, stderr, names = ['MISSING'], exitCode = 0, notes = []] of rows) {
     it(name, () => {
       assert.deepEqual(terminal().run(command), {
         stdout, stderr, exitCode, cwd: '/',
-        notes: [], unsupported: names.map((variable) => ({ kind: 'feature', command: null, detail: '$' + variable, message: warning(variable).trimEnd() })),
+        notes, unsupported: names.map((variable) => ({ kind: 'feature', command: null, detail: '$' + variable, message: warning(variable).trimEnd() })),
       }, command)
     })
   }
@@ -87,7 +87,7 @@ describe('nested expansion diagnostic order', () => {
     ['a group preserves expansion and command output event ordering when merged', '{ echo before; echo "$MISSING$(cat nope)"; echo after >&2; } 2>&1', 'before\n' + missing + nope + '\nafter\n', ''],
     ['nested substitutions retain inner lexical order', 'printf "%s" "$(printf "%s" "$MISSING$(cat nope)$OTHER")"', '', missing + nope + other, ['MISSING', 'OTHER']],
     ['outer and inner expansion diagnostics retain their boundaries', 'printf "%s" "$MISSING$(printf "%s" "$OTHER$(cat nope)")$LAST"', '', missing + other + nope + warning('LAST'), ['MISSING', 'OTHER', 'LAST']],
-    ['substitution NUL diagnostics stay between surrounding parameter warnings', String.raw`printf "%s" "$MISSING$(printf 'a\0b'; cat nope)$OTHER"`, 'ab', missing + nope + 'warning: command substitution: ignored null byte in input\n' + other, ['MISSING', 'OTHER']],
+    ['substitution NUL diagnostics stay between surrounding parameter warnings', String.raw`printf "%s" "$MISSING$(printf 'a\0b'; cat nope)$OTHER"`, 'ab', missing + nope + 'warning: command substitution: ignored null byte in input\n' + other, ['MISSING', 'OTHER'], 0, ['command substitution: discarded 1 NUL byte.']],
     ['conditional execution does not emit diagnostics for a skipped branch', 'if true; then echo "$MISSING$(cat nope)"; else echo "$OTHER$(cat gone)"; fi', '\n', missing + nope],
     ['an enclosing redirect suppresses nested warnings but keeps their unsupported entries', '{ printf "%s" "$MISSING$(printf "%s" "$OTHER$(cat nope)")"; } 2>/dev/null | cat', '', '', ['MISSING', 'OTHER']],
   ])

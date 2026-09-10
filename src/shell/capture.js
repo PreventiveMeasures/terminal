@@ -34,7 +34,10 @@ export function commandSubstitution(command, ctx, runSteps) {
   let value = result.stdout
   let errors = result.stderr
   if (value.includes('\0')) {
+    const length = value.length
     value = value.replaceAll('\0', '')
+    const count = length - value.length
+    ctx.notes.add(`command substitution: discarded ${count} NUL ${count === 1 ? 'byte' : 'bytes'}.`)
     errors += 'warning: command substitution: ignored null byte in input\n'
   }
   expansionStderr(ctx, errors)

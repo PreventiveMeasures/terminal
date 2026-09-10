@@ -15,9 +15,9 @@ const FILES = {
   'dir/text.txt': 'hit\n',
 }
 
-function check(command, stdout = '', exitCode = 1, stderr = '', files = FILES) {
+function check(command, stdout = '', exitCode = 1, stderr = '', files = FILES, notes = []) {
   assert.deepEqual(createTerminal(files).run(command), {
-    stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [],
+    stdout, stderr, exitCode, cwd: '/', notes, unsupported: [],
   }, command)
 }
 
@@ -54,10 +54,10 @@ describe('grep binary inputs containing only empty records', () => {
     ['grep -L . zero text', 'zero\n', 0],
     ['grep -q . zero text', '', 0],
     ['grep -r . dir', 'dir/text.txt:hit\n', 0],
-    ['grep -r . dir --include=zero.txt'],
+    ['grep -r . dir --include=zero.txt', '', 1, ['grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/dir/text.txt".']],
   ]
-  for (const [command, stdout, exitCode] of cases) {
-    it(command, () => check(command, stdout, exitCode))
+  for (const [command, stdout, exitCode, notes] of cases) {
+    it(command, () => check(command, stdout, exitCode, '', FILES, notes))
   }
 
   it('does not depend on where an all-empty binary input first contains NUL', () => {
@@ -78,8 +78,9 @@ describe('grep binary inputs containing only empty records', () => {
     check('grep --text . zeros', '\0\0\0\n', 0)
     check('grep -ao . zeros', '\0\n\0\n\0\n', 0)
     check('grep -Ia . zero', '\0\n', 0)
-    check('grep -aI . zero')
-    check('grep -Iv . zero')
+    const notes = ['grep: skipped 1 binary file: "/zero". Binary input is treated as text with -a.']
+    check('grep -aI . zero', '', 1, '', FILES, notes)
+    check('grep -Iv . zero', '', 1, '', FILES, notes)
   })
 
   for (const command of [

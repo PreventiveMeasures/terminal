@@ -14,8 +14,8 @@ const FILES = {
 const READ_ERROR = 'cat: missing: no such file or directory\n'
 const NUL_WARNING = 'warning: command substitution: ignored null byte in input\n'
 
-function check(command, stdout, exitCode = 0, stderr = '') {
-  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] }, command)
+function check(command, stdout, exitCode = 0, stderr = '', notes = []) {
+  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd: '/', notes, unsupported: [] }, command)
 }
 
 describe('command substitution — Bash file shorthand', () => {
@@ -43,7 +43,7 @@ describe('command substitution — shared input', () => {
     [String.raw`printf 'first\nsecond\n' | { x=$(cat); echo "[$x]"; cat; }`, '[first\nsecond]\n'],
     [String.raw`printf 'first\nsecond\n' | { a=$(cat) b=$(cat); echo "[$a] [$b]"; }`, '[first\nsecond] []\n'],
     ['{ x=$(cat); echo "[$x]"; cat; } < input', '[first\nsecond\nthird]\n'],
-    ['{ a=$(head -n1) b=$(cat); printf "[%s] [%s]\\n" "$a" "$b"; cat; } < input', '[first] [second\nthird]\n'],
+    ['{ a=$(head -n1) b=$(cat); printf "[%s] [%s]\\n" "$a" "$b"; cat; } < input', '[first] [second\nthird]\n', ['head: selected 1 of 3 lines from standard input.']],
     ['{ echo "$(cat)" <other; cat; } <input', 'first\nsecond\nthird\n'],
     ['{ x=$(cat) <other; echo "$x"; cat; } <input', 'first\nsecond\nthird\n'],
     ['{ x=$(cat) echo visible <other; cat; } <input', 'visible\n'],
@@ -51,12 +51,12 @@ describe('command substitution — shared input', () => {
     ['{ echo "$(<other)"; cat; } <input', 'replacement\nfirst\nsecond\nthird\n'],
     [String.raw`printf 'first\nsecond\n' | { x=$(cat /dev/stdin); echo "[$x]"; cat; }`, '[first\nsecond]\n'],
     [String.raw`printf 'first\nsecond\n' | { x=$(</dev/stdin); echo "[$x]"; cat; }`, '[first\nsecond]\n'],
-    ['{ head -n1; x=$(cat /dev/stdin); echo "[$x]"; cat; } <input', 'first\n[first\nsecond\nthird]\nsecond\nthird\n'],
-    ['{ head -n1; x=$(</dev/stdin); echo "[$x]"; cat; } <input', 'first\n[first\nsecond\nthird]\nsecond\nthird\n'],
+    ['{ head -n1; x=$(cat /dev/stdin); echo "[$x]"; cat; } <input', 'first\n[first\nsecond\nthird]\nsecond\nthird\n', ['head: selected 1 of 3 lines from standard input.']],
+    ['{ head -n1; x=$(</dev/stdin); echo "[$x]"; cat; } <input', 'first\n[first\nsecond\nthird]\nsecond\nthird\n', ['head: selected 1 of 3 lines from standard input.']],
     ['f=missing; f=$(printf input) <"$f"; echo "$? $f"', '0 input\n'],
     ['f=other; f=$(printf input) cat <"$f"; echo "$f"', 'replacement\nother\n'],
   ]
-  for (const [command, stdout] of cases) it(command, () => check(command, stdout))
+  for (const [command, stdout, notes] of cases) it(command, () => check(command, stdout, 0, '', notes))
 })
 
 describe('command substitution — expansion order and stderr', () => {
@@ -86,17 +86,17 @@ describe('command substitution — expansion order and stderr', () => {
 
 describe('command substitution — NUL output', () => {
   const cases = [
-    ['printf "<%s>\\n" "$(cat nul)"', '<ab\nc>\n', NUL_WARNING],
-    ['printf "<%s>\\n" "$(<nul)"', '<ab\nc>\n', NUL_WARNING],
-    ['echo "$(cat nulOnly)"', '\n', NUL_WARNING],
-    ['echo "$(cat nulEnd)"', 'before\n', NUL_WARNING],
-    ['x=$(cat nul); echo "$? [$x]"', '0 [ab\nc]\n', NUL_WARNING],
-    ['echo "$(cat nulOnly)$(cat nulOnly)"', '\n', NUL_WARNING.repeat(2)],
-    ['echo "$(echo "$(cat nulOnly)")"', '\n', NUL_WARNING],
-    ['echo "$(cat nul)" 2>/dev/null', 'ab\nc\n', NUL_WARNING],
-    ['{ echo "$(cat nul)"; } 2>/dev/null', 'ab\nc\n', ''],
-    ['x=$(cat nul) 2>/dev/null; echo "$x"', 'ab\nc\n', NUL_WARNING],
-    ['echo "$(cat nul >&2)"', '\n', FILES.nul],
+    ['printf "<%s>\\n" "$(cat nul)"', '<ab\nc>\n', NUL_WARNING, 3],
+    ['printf "<%s>\\n" "$(<nul)"', '<ab\nc>\n', NUL_WARNING, 3],
+    ['echo "$(cat nulOnly)"', '\n', NUL_WARNING, 2],
+    ['echo "$(cat nulEnd)"', 'before\n', NUL_WARNING, 1],
+    ['x=$(cat nul); echo "$? [$x]"', '0 [ab\nc]\n', NUL_WARNING, 3],
+    ['echo "$(cat nulOnly)$(cat nulOnly)"', '\n', NUL_WARNING.repeat(2), 2],
+    ['echo "$(echo "$(cat nulOnly)")"', '\n', NUL_WARNING, 2],
+    ['echo "$(cat nul)" 2>/dev/null', 'ab\nc\n', NUL_WARNING, 3],
+    ['{ echo "$(cat nul)"; } 2>/dev/null', 'ab\nc\n', '', 3],
+    ['x=$(cat nul) 2>/dev/null; echo "$x"', 'ab\nc\n', NUL_WARNING, 3],
+    ['echo "$(cat nul >&2)"', '\n', FILES.nul, 0],
   ]
-  for (const [command, stdout, stderr] of cases) it(command, () => check(command, stdout, 0, stderr))
+  for (const [command, stdout, stderr, count] of cases) it(command, () => check(command, stdout, 0, stderr, count ? [`command substitution: discarded ${count} NUL ${count === 1 ? 'byte' : 'bytes'}.`] : []))
 })

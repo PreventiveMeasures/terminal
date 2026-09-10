@@ -61,7 +61,7 @@ export function writableFs(base) {
       if (!absolute.startsWith('/tmp/') || backup !== null && !backup.startsWith('/tmp/')) return false
       checkTarget(fs, cwd, path)
       const inode = files.get(absolute)
-      if (!inode) throw new Error(`${path}: No such file or directory`)
+      if (!inode) throw pathError(path, 'No such file or directory')
       if (backup !== null) checkTarget(fs, cwd, backupPath)
       const replacement = { bytes: encodeUtf8(content) }
       if (backup !== null) put(backup, inode)
@@ -73,7 +73,7 @@ export function writableFs(base) {
       const absolute = resolve(cwd, path)
       if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
       const found = lookup(cwd, path, fs)
-      if (found.error) throw new Error(`${path}: ${found.error}`)
+      if (found.error) throw pathError(path, found.error)
       if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
       // Open handles retain the unlinked inode until their last writer ends.
       files.delete(found.path)
@@ -90,14 +90,18 @@ function checkTarget(fs, cwd, path) {
     if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
     return
   }
-  if (found.error !== 'No such file or directory' || path.includes('\0') || path.endsWith('/')) throw new Error(`${path}: ${found.error}`)
+  if (found.error !== 'No such file or directory' || path.includes('\0') || path.endsWith('/')) throw pathError(path, found.error)
   // Preserve components until lookup has checked them: file/../new and
   // missing/../new cannot create a sibling by lexical normalization alone.
   const slash = path.lastIndexOf('/')
   const parent = slash < 0 ? '.' : path.slice(0, slash) || '/'
   const directory = lookup(cwd, parent, fs)
-  if (directory.error) throw new Error(`${path}: ${directory.error}`)
+  if (directory.error) throw pathError(path, directory.error)
   if (!fs.isDir(directory.path)) throw new Error(`${path}: Not a directory`)
+}
+
+function pathError(path, fsError) {
+  return Object.assign(new Error(`${path}: ${fsError}`), { path, fsError })
 }
 
 function writeHandle(path, inode, append, check) {

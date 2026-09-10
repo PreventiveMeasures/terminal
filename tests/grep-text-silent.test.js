@@ -13,9 +13,15 @@ const FILES = {
   unicode: 'é\0\n',
 }
 
-function check(command, stdout, exitCode = 0, stderr = '', files = FILES) {
+const BINARY_NOTES = ['grep: skipped 1 binary file: "/binary". Binary input is treated as text with -a.']
+const FILTER_NOTES = [
+  'glob: no paths matched "--include=*.txt"; the pattern was left literal.',
+  'grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/dir/two.js".',
+]
+
+function check(command, stdout, exitCode = 0, stderr = '', files = FILES, notes = []) {
   assert.deepEqual(createTerminal(files).run(command), {
-    stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [],
+    stdout, stderr, exitCode, cwd: '/', notes, unsupported: [],
   }, command)
 }
 
@@ -35,9 +41,9 @@ describe('grep — force binary input to text', () => {
     ['grep -am1 hit binary', 'hit\0tail\n'],
     ['grep -acm1 hit binary', '1\n'],
     ['cat binary | grep --text hit', 'hit\0tail\nhit\0last\n'],
-    ['grep -arhn hit dir --include=*.txt', '1:hit\0three\n1:hit\0one\n'],
+    ['grep -arhn hit dir --include=*.txt', '1:hit\0three\n1:hit\0one\n', FILTER_NOTES],
   ]
-  for (const [command, stdout] of cases) it(command, () => check(command, stdout))
+  for (const [command, stdout, notes] of cases) it(command, () => check(command, stdout, 0, '', FILES, notes))
 
   it('retains ordinary no-match status when binary input is treated as text', () => {
     check('grep -a absent binary', '', 1)
@@ -59,10 +65,10 @@ describe('grep — force binary input to text', () => {
 
   for (const options of ['-aI', '-a -I', '--text -I', '-IaI']) {
     it(`the last binary exclusion wins: ${options}`, () => {
-      check(`grep ${options} hit binary`, '', 1)
-      check(`grep ${options} -q hit binary`, '', 1)
-      check(`grep ${options} -c hit binary`, '0\n', 1)
-      check(`grep ${options} -L hit binary`, 'binary\n', 1)
+      check(`grep ${options} hit binary`, '', 1, '', FILES, BINARY_NOTES)
+      check(`grep ${options} -q hit binary`, '', 1, '', FILES, BINARY_NOTES)
+      check(`grep ${options} -c hit binary`, '0\n', 1, '', FILES, BINARY_NOTES)
+      check(`grep ${options} -L hit binary`, 'binary\n', 1, '', FILES, BINARY_NOTES)
     })
   }
 })
@@ -84,10 +90,10 @@ describe('grep — suppress input read errors', () => {
     ['grep -sq hit missing empty', '', 2],
     ['grep -sq absent good', '', 1],
     ['grep -sm0 hit missing', '', 1],
-    ['grep -srn hit missing dir --include=*.txt -a', 'dir/nested/three.txt:1:hit\0three\ndir/one.txt:1:hit\0one\n', 2],
+    ['grep -srn hit missing dir --include=*.txt -a', 'dir/nested/three.txt:1:hit\0three\ndir/one.txt:1:hit\0one\n', 2, FILTER_NOTES],
     ['grep --no-messages -a hit missing binary', 'binary:hit\0tail\nbinary:hit\0last\n', 2],
   ]
-  for (const [command, stdout, exitCode] of cases) it(command, () => check(command, stdout, exitCode))
+  for (const [command, stdout, exitCode, notes] of cases) it(command, () => check(command, stdout, exitCode, '', FILES, notes))
 
   it('leaves read errors visible unless suppression was requested', () => {
     check('grep -a hit missing binary', 'binary:hit\0tail\nbinary:hit\0last\n', 2,

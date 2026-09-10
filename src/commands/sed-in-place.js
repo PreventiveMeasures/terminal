@@ -1,4 +1,4 @@
-import { lookup } from '../fs.js'
+import { lookupWithNote, missingPathNote } from '../notes.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { err } from '../util.js'
@@ -62,6 +62,7 @@ export function runInPlace(program, flags, ctx, suffix, run) {
     const backup = backupName(name, suffix)
     let replaced
     try { replaced = ctx.fs.replaceWritable(ctx.cwd, name, content, backup) } catch (e) {
+      missingPathNote(ctx, 'sed', e?.path, e?.fsError)
       const failed = unsupportedFrom(e, 'sed', `sed: ${e.message}`, 4)
       appendOutput(result, failed)
       return copyNote(result, failed)
@@ -83,7 +84,7 @@ function inPlaceInput(name, ctx) {
     return { error: err(`sed: couldn't edit ${name}: not a regular file`, 4) }
   }
   if (name === '/dev/stdin' || name === '/dev/stdout' || name === '/dev/stderr') return { error: refused(name) }
-  const found = lookup(ctx.cwd, name, ctx.fs)
+  const found = lookupWithNote(ctx, 'sed', name)
   if (found.error) return { error: err(`sed: ${name}: ${found.error.toLowerCase()}`, 2) }
   if (ctx.fs.isDir(found.path)) return { error: err(`sed: couldn't edit ${name}: not a regular file`, 4) }
   if (!ctx.writable || !found.path.startsWith('/tmp/')) return { error: refused(name) }

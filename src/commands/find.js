@@ -3,10 +3,11 @@
 // runs after traversal, is true as a predicate, and maps failures to find status 1.
 // Double-dash predicate spellings are local extensions, not GNU find syntax.
 
-import { lookup, relativeTo, walkTree } from '../fs.js'
+import { relativeTo, walkTree } from '../fs.js'
 import { parseFindArgs } from './find-parse.js'
 import { unsupported } from '../unsupported.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
+import { lookupWithNote, omissionNote } from '../notes.js'
 
 export function find(stdin, tokens, ctx) {
   const parsed = parseFindArgs(tokens)
@@ -14,27 +15,36 @@ export function find(stdin, tokens, ctx) {
   if (stdin !== '' && tokens.some((t) => t === '-exec' || t === '--exec')) return unsupported('feature', 'find', '-exec stdin', 'find: passing shared standard input to -exec is not supported')
   const { starts, minDepth, maxDepth, groups, batches } = parsed
   const result = emptyOutput()
-  for (const start of starts) {
-    const { path: startAbs, error } = lookup(ctx.cwd, start, ctx.fs)
-    if (error) {
-      // A bad root does not prevent traversal of the remaining roots.
-      collectOutput(result, ctx.flushOutput(emptyOutput(`find: ${start}: ${error.toLowerCase()}\n`)))
-      result.exitCode = 1
-      continue
+  const omitted = new Set()
+  try {
+    for (const start of starts) {
+      const { path: startAbs, error } = lookupWithNote(ctx, 'find', start)
+      if (error) {
+        // A bad root does not prevent traversal of the remaining roots.
+        collectOutput(result, ctx.flushOutput(emptyOutput(`find: ${start}: ${error.toLowerCase()}\n`)))
+        result.exitCode = 1
+        continue
+      }
+      // walkTree consults pruning after evaluating the current entry.
+      const pruned = new Set()
+      for (const entry of walkTree(ctx.fs, startAbs, maxDepth, (path) => !pruned.has(path))) {
+        if (entry.depth >= minDepth) {
+          const display = toDisplayPath(start, startAbs, entry.path)
+          runPredicates(groups, { kind: entry.kind, path: display, abs: entry.path, prune: pruned }, ctx, result)
+        }
+        if (entry.kind !== 'dir' || entry.depth !== maxDepth || pruned.has(entry.path)) continue
+        const { dirs, files } = ctx.fs.listDir(entry.path)
+        if (dirs.length || files.length) omitted.add(entry.path)
+      }
     }
-    // walkTree consults pruning after evaluating the current entry.
-    const pruned = new Set()
-    for (const entry of walkTree(ctx.fs, startAbs, maxDepth, (path) => !pruned.has(path))) {
-      if (entry.depth < minDepth) continue
-      const display = toDisplayPath(start, startAbs, entry.path)
-      runPredicates(groups, { kind: entry.kind, path: display, abs: entry.path, prune: pruned }, ctx, result)
+    // Do not dispatch empty batches. Any failed batch makes find exit 1.
+    for (const pred of batches) {
+      if (pred.collected.length === 0) continue
+      const finalArgs = pred.args.slice(0, -1).concat(pred.collected)
+      if (!runExec(pred.cmd, finalArgs, ctx, result)) result.exitCode = 1
     }
-  }
-  // Do not dispatch empty batches. Any failed batch makes find exit 1.
-  for (const pred of batches) {
-    if (pred.collected.length === 0) continue
-    const finalArgs = pred.args.slice(0, -1).concat(pred.collected)
-    if (!runExec(pred.cmd, finalArgs, ctx, result)) result.exitCode = 1
+  } finally {
+    omissionNote(ctx.notes, { command: 'find', action: 'depth limit omitted contents of', noun: ['directory', 'directories'], paths: omitted })
   }
   return result
 }

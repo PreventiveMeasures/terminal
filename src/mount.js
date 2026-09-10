@@ -13,7 +13,7 @@ export function mountSources(sources, opts) {
     throw new Error("createTerminal: mount must not be /, /tmp, or inside /tmp when writable is '/tmp/'")
   }
   const base = createFs(sources, mount)
-  return { fs: writable ? writableFs(base) : base, cwd, home, writable }
+  return { fs: writable ? writableFs(base) : base, cwd, home, mount, writable }
 }
 
 function optionPath(opts, name) {

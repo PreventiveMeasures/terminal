@@ -10,31 +10,36 @@ const FILES = {
 }
 const FIRST = "2:p: one\n3:  'two': 2\n4:route('/three')\n5:p: four\n6:p: five\n7:p: six\n"
 const SECOND = "3:  'eight': 8\n"
+const FILTER_NOTES = [
+  'glob: no paths matched "--include=*.ts"; the pattern was left literal.',
+  'grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/src/ignored.js".',
+]
+const HEAD_NOTE = 'head: selected 6 of 7 lines from standard input.'
 
-function check(command, stdout) {
+function check(command, stdout, notes = []) {
   assert.deepEqual(createTerminal(FILES).run(command), {
-    stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
+    stdout, stderr: '', exitCode: 0, cwd: '/', notes, unsupported: [],
   })
 }
 
 describe('source discovery loop from agent logs', () => {
   it('finds only matching TypeScript paths', () => {
-    check('grep -rl "q:" src --include=*.ts', 'src/a.ts\nsrc/b.ts\n')
+    check('grep -rl "q:" src --include=*.ts', 'src/a.ts\nsrc/b.ts\n', FILTER_NOTES)
   })
 
   it('preserves BRE alternation, anchors, literal parentheses, and single quotes', () => {
-    check(String.raw`grep -n "p:\|^  '\|('/" src/a.ts | head -6`, FIRST)
+    check(String.raw`grep -n "p:\|^  '\|('/" src/a.ts | head -6`, FIRST, [HEAD_NOTE])
     check(String.raw`grep -n "p:\|^  '\|('/" src/b.ts | head -6`, SECOND)
   })
 
   it('runs the same loop body with an explicit file list', () => {
     check(String.raw`for f in src/a.ts src/b.ts; do echo "== $f"; grep -n "p:\|^  '\|('/" $f | head -6; done 2>/dev/null | head -120`,
-      '== src/a.ts\n' + FIRST + '== src/b.ts\n' + SECOND)
+      '== src/a.ts\n' + FIRST + '== src/b.ts\n' + SECOND, [HEAD_NOTE])
   })
 
   it('runs the complete discovery and preview command', () => {
     check(String.raw`for f in $(grep -rl "q:" src --include=*.ts); do echo "== $f"; grep -n "p:\|^  '\|('/" $f | head -6; done 2>/dev/null | head -120`,
-      '== src/a.ts\n' + FIRST + '== src/b.ts\n' + SECOND)
+      '== src/a.ts\n' + FIRST + '== src/b.ts\n' + SECOND, [...FILTER_NOTES, HEAD_NOTE])
   })
 
   it('assigns grep counts and prints only matching files inside a conditional', () => {
