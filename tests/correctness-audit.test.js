@@ -76,7 +76,7 @@ describe('correctness audit — shell expansion and diagnostics', () => {
     gap('echo {1..100001}', 'brace expansion limit')
   })
   it('an expansion failure preserves previous output and later stages', () => {
-    const r = createTerminal(FILES).run('echo before; IFS=:; x=a:b; echo $x 2>/dev/null | cat; echo after')
+    const r = createTerminal(FILES).run('echo before; IFS=:; x=a:b; { echo $x; } 2>/dev/null | cat; echo after')
     assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['before\nafter\n', '', 0])
     assert.equal(r.unsupported[0].detail, 'IFS')
   })

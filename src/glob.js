@@ -4,7 +4,7 @@
 
 import { compareNames, lookup } from './fs.js'
 import { UnsupportedError } from './unsupported.js'
-import { readPosixClass } from './charclass.js'
+import { POSIX_CLASSES, readPosixClass } from './charclass.js'
 
 const META = /[*?[]/u
 const NON_ASCII = /\P{ASCII}/u
@@ -13,7 +13,15 @@ const REGEX_META = /[.+*?^${}()|[\]\\/]/u
 // Escape regex syntax while translating shell wildcards. Keep options in an
 // object: callers also pass this function to map(), whose index is not a flag.
 export function compileGlob(pattern, opts = {}) {
+  try { return compilePattern(pattern, opts) } catch (error) {
+    if (error instanceof UnsupportedError) throw error
+    throw new UnsupportedError('feature', 'glob pattern', `unsupported glob pattern: ${error.message}`)
+  }
+}
+
+function compilePattern(pattern, opts) {
   let re = '^'
+  let nonAsciiRange = false
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i]
     if (c === '\\' && i + 1 < pattern.length) {
@@ -23,16 +31,15 @@ export function compileGlob(pattern, opts = {}) {
     } else if (c === '*') re += '.*'
     else if (c === '?') re += '.'
     else if (c === '[') {
-      const bracket = readBracket(pattern, i, opts.ignoreCase)
+      const bracket = readBracket(pattern, i, opts)
       if (bracket?.voided) return /^(?!)$/u
-      if (bracket) { re += bracket.source; i = bracket.end } else re += '\\['
+      if (bracket) {
+        re += bracket.source; i = bracket.end
+        nonAsciiRange ||= bracket.nonAsciiRange
+      } else re += '\\['
     } else re += literal(c, opts.ignoreCase)
   }
-  try {
-    return checkedGlob(new RegExp(re + '$', 'us'), pattern, opts)
-  } catch {
-    return /^(?!)$/u
-  }
+  return checkedGlob(new RegExp(re + '(?![\\s\\S])', 'us'), pattern, opts, nonAsciiRange)
 }
 
 function literal(c, ignoreCase) {
@@ -58,24 +65,22 @@ function foldedBracket(body, classes, negated) {
 
 // Bracket ranges, question marks and case folding depend on the locale for
 // multibyte names. Literal UTF-8 names and ordinary star patterns are exact.
-function checkedGlob(re, pattern, opts) {
+function checkedGlob(re, pattern, opts, nonAsciiRange) {
   const localeSensitive = /[?[]/u.test(pattern)
   const nonAsciiPattern = NON_ASCII.test(pattern)
   return { test(name) {
-    if (localeSensitive || opts.ignoreCase) {
-      const ignoreCase = opts.ignoreCase
-      if (NON_ASCII.test(name) || (ignoreCase && nonAsciiPattern)) {
-        throw new UnsupportedError('feature', 'non-ASCII glob matching', 'locale-dependent glob matching of non-ASCII names is not supported')
-      }
+    if (nonAsciiRange || (opts.ignoreCase && nonAsciiPattern) || ((localeSensitive || opts.ignoreCase) && NON_ASCII.test(name))) {
+      throw new UnsupportedError('feature', 'non-ASCII glob matching', 'locale-dependent glob matching of non-ASCII names is not supported')
     }
     return re.test(name)
   } }
 }
 
-// An unmatched '[' is literal. Unknown POSIX classes contribute no members;
+// An unmatched '[' is literal. Bash unknown classes contribute no members;
 // reversed ranges are empty, but a POSIX class ending a range voids the pattern.
 // Track range endpoints separately so adjacent classes cannot create a range.
-function readBracket(pattern, start, ignoreCase = false) {
+function readBracket(pattern, start, opts) {
+  const { ignoreCase } = opts
   let i = start + 1
   let negated = false
   if (pattern[i] === '!' || pattern[i] === '^') { negated = true; i++ }
@@ -83,6 +88,7 @@ function readBracket(pattern, start, ignoreCase = false) {
   let classes = ''
   let rangeAt = false
   let openRange = false
+  let nonAsciiRange = false
   let voided = false
   let atom = '', atomStart = 0, rangeChar = '', rangeStart = 0
   if (pattern[i] === ']') { body += '\\]'; i++; rangeAt = true; atom = ']' }
@@ -90,8 +96,11 @@ function readBracket(pattern, start, ignoreCase = false) {
     const c = pattern[i]
     if (c === '[' && (pattern[i + 1] === '.' || pattern[i + 1] === '=')) throw new UnsupportedError('feature', 'glob collating or equivalence class', 'glob collating symbols and equivalence classes are not supported')
     if (c === '[' && pattern[i + 1] === ':') {
-      const cls = readPosixClass(pattern, i, { unknown: 'empty' })
+      const cls = opts.bash ? readGlobClass(pattern, i) : readPosixClass(pattern, i, { unknown: 'empty' })
       if (cls) {
+        if (!opts.bash && cls.body === '') {
+          throw new UnsupportedError('feature', 'glob character class', 'unknown POSIX classes in command filename patterns are not supported')
+        }
         if (openRange) voided = true
         if (ignoreCase) classes += cls.body
         else body += cls.body
@@ -100,6 +109,8 @@ function readBracket(pattern, start, ignoreCase = false) {
         openRange = false
         continue
       }
+      // Bash resumes at ':' when a class name has no closing ':]'.
+      if (opts.bash) continue
     }
     if (c === '-' && rangeAt) {
       rangeStart = atomStart; rangeChar = atom
@@ -109,6 +120,7 @@ function readBracket(pattern, start, ignoreCase = false) {
     } else {
       const next = c === '\\' && i + 1 < pattern.length ? pattern[++i] : c
       atomStart = body.length; atom = next
+      if (openRange && NON_ASCII.test(rangeChar + next)) nonAsciiRange = true
       if (openRange && next.codePointAt(0) < rangeChar.codePointAt(0)) body = body.slice(0, rangeStart)
       else body += /[\]\\^[-]/u.test(next) ? `\\${next}` : next
       // A character that closed a range cannot begin the next one, so
@@ -119,7 +131,16 @@ function readBracket(pattern, start, ignoreCase = false) {
   }
   if (i >= pattern.length) return null
   if (voided) return { voided: true, end: i }
-  return { source: ignoreCase ? foldedBracket(body, classes, negated) : `[${negated ? '^' : ''}${body}]`, end: i }
+  return { source: ignoreCase ? foldedBracket(body, classes, negated) : `[${negated ? '^' : ''}${body}]`, end: i, nonAsciiRange }
+}
+
+function readGlobClass(pattern, start) {
+  const end = pattern.indexOf(':]', start + 2)
+  if (end === -1) return null
+  // Bash finds the raw terminator before dequoting the name, including a
+  // backslash immediately before that terminator.
+  const name = pattern.slice(start + 2, end).replace(/\\([\s\S]|$)/gu, '$1')
+  return { body: name === 'ascii' ? '\\x00-\\x7F' : POSIX_CLASSES[name] ?? '', end: end + 2 }
 }
 
 export function globMatch(name, pattern) {
@@ -135,13 +156,42 @@ export function hasGlobMeta(word) {
   return false
 }
 
+export function hasExtglob(word) {
+  const bare = (i) => !word.mask || word.mask[i] === '0'
+  for (let i = 0; i < word.value.length; i++) {
+    const c = word.value[i]
+    if (!bare(i)) continue
+    if (c === '\\') i++
+    else if (c === '[') i = bracketEnd(word, i, bare)
+    else if (/[?*+@!]/u.test(c) && word.value[i + 1] === '(' && bare(i + 1)) return true
+  }
+  return false
+}
+
+function bracketEnd(word, start, bare) {
+  const { value } = word
+  let i = start + 1
+  if (/[!^]/u.test(value[i]) && bare(i)) i++
+  if (value[i] === ']' && bare(i)) i++
+  for (; i < value.length; i++) {
+    if (!bare(i)) continue
+    if (value[i] === '\\') i++
+    else if (value[i] === ']') return i
+    else if (value[i] === '[' && /[.:=]/u.test(value[i + 1]) && bare(i + 1)) {
+      const end = value.indexOf(value[i + 1] + ']', i + 2)
+      if (end !== -1) i = end + 1
+    }
+  }
+  return start
+}
+
 // The word as a pattern for compileGlob: bare characters as typed,
 // quoted ones backslash-escaped where they would otherwise be read as
 // glob syntax — including the characters that are only special inside
 // a bracket expression, so `[a"-"c]` is a set of three, not a range.
-const QUOTABLE = /[*?[\]^!\\-]/u
+const QUOTABLE = /[*?[\]^!\\:.=-]/u
 
-function toPattern(word) {
+export function globPattern(word) {
   const { value, mask } = word
   if (mask === null) return value
   let out = ''
@@ -154,7 +204,7 @@ function toPattern(word) {
 
 // Expand one path segment at a time while preserving the operand's spelling.
 export function globPaths(word, ctx) {
-  const pattern = toPattern(word)
+  const pattern = globPattern(word)
   const segments = pattern.match(/[^/]+|\/+/gu) ?? []
   let candidates = ['']
   for (let s = 0; s < segments.length; s++) {
@@ -169,14 +219,14 @@ export function globPaths(word, ctx) {
   return candidates.filter((c) => lookup(ctx.cwd, c, ctx.fs).path !== null).sort(compareNames)
 }
 
-// A literal segment may still carry escapes from toPattern (a quoted
+// A literal segment may still carry escapes from globPattern (a quoted
 // `*` in a path component that has no live metacharacter).
 const unescape = (seg) => seg.replace(/\\(.)/gu, '$1')
 
 // Only the last segment may match files. Shell globbing excludes dotfiles
 // unless the segment starts with '.', and never yields '.' or '..'.
 function expandSegment(candidates, seg, isLast, ctx) {
-  const re = compileGlob(seg)
+  const re = compileGlob(seg, { bash: true })
   const segStartsWithDot = seg.startsWith('.') || seg.startsWith('\\.')
   const matches = (name) => {
     if (!segStartsWithDot && name.startsWith('.')) return false

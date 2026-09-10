@@ -5,6 +5,8 @@ import { decodeUtf8, encodeUtf8Loose } from '../util.js'
 import { UnsupportedError } from '../unsupported.js'
 import { readCommandSubstitution } from './substitution.js'
 import { isUnicodeScalar } from '../unicode.js'
+import { readArithmeticExpansion, readBracedExpansion } from './expansion-scan.js'
+import { readConditional } from './conditional-lex.js'
 
 export const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/u
 const NAME_CHAR = /[A-Za-z0-9_]/u
@@ -12,26 +14,17 @@ const NAME_CHAR = /[A-Za-z0-9_]/u
 // Process parameters are lexed here; expand.js reports their missing state.
 const SPECIAL = /[?#@*$!0-9-]/u
 
-// Keep references as source text for expansion. Unsupported braced operators
-// must be diagnosed instead of surviving as plausible literal arguments.
-export function readRef(line, i) {
-  const ref = scanRef(line, i)
-  if (ref || line[i + 1] !== '{') return ref
-  const shown = line.slice(i, line.indexOf('}', i) + 1 || undefined).slice(0, 20)
-  throw new UnsupportedError('feature', '${', `parameter expansion operators are not supported (\`${shown}\`); only \`$NAME\` and \`\${NAME}\` expand`)
+// Lookahead follows shell_getc(1): continuations disappear before token
+// recognition, while offsets still refer to the original source.
+export function skipContinuations(line, at) {
+  while (line[at] === '\\' && line[at + 1] === '\n') at += 2
+  return at
 }
 
 // Tokenization scans raw source; expansion additionally supplies its quote
 // mask. A reference cannot cross a mask boundary ("$x"y names x, not xy).
 export function scanRef(line, i, mask = null) {
   const same = (j) => j < line.length && (mask === null || mask[j] === mask[i])
-  if (line[i + 1] === '{') {
-    let j = i + 2
-    while (same(j) && line[j] !== '}') j++
-    if (!same(j)) return null
-    const name = line.slice(i + 2, j)
-    return NAME_RE.test(name) || (name.length === 1 && SPECIAL.test(name)) ? { name, raw: line.slice(i, j + 1) } : null
-  }
   if (!same(i + 1)) return null
   const c = line[i + 1]
   if (SPECIAL.test(c)) return { name: c, raw: line.slice(i, i + 2) }
@@ -42,18 +35,17 @@ export function scanRef(line, i, mask = null) {
 }
 
 // Called wherever substitution is active, including unquoted here-documents.
-export function readExpansion(line, i, depth = 0) {
-  let next = i + 1
-  while (line[next] === '\\' && line[next + 1] === '\n') next += 2
+export function readExpansion(line, i, depth = 0, quoted = false) {
+  const next = skipContinuations(line, i + 1)
   const n = line[next]
   if (n === '(') {
-    let second = next + 1
-    while (line[second] === '\\' && line[second + 1] === '\n') second += 2
-    if (line[second] === '(') throw new UnsupportedError('feature', '$((', 'arithmetic expansion (`$((…))`) is not supported')
-    return readCommandSubstitution(line, i, next, depth, { readExpansion, decodeAnsiC, readHeredocBodies, readOperator })
+    const second = skipContinuations(line, next + 1)
+    if (line[second] === '(') return readArithmeticExpansion(line, i, second, depth, { readExpansion })
+    return readCommandSubstitution(line, i, next, depth, { readExpansion, decodeAnsiC, readHeredocBodies, readOperator, readConditional, skipContinuations })
   }
+  if (n === '{') return readBracedExpansion(line, i, next, depth, quoted, { readExpansion, decodeAnsiC })
   if (n === '[') throw new UnsupportedError('feature', '$[', 'arithmetic expansion (`$[…]`) is not supported')
-  return readRef(line, i)
+  return scanRef(line, i)
 }
 
 // A backtick outside single quotes opens the other command substitution.
@@ -116,22 +108,27 @@ export function decodeAnsiC(line, start) {
 export function readOperator(line, i, atWordStart) {
   const c = line[i]
   if (atWordStart && /[0-9]/u.test(c)) {
-    let j = i
-    while (/[0-9]/u.test(line[j] ?? '')) j++
+    let digits = '', j = i
+    while (/[0-9]/u.test(line[j] ?? '')) {
+      digits += line[j]
+      j = skipContinuations(line, j + 1)
+    }
     if (line[j] !== '>' && line[j] !== '<') return null
-    return readRedirect(line, j, Number(line.slice(i, j)))
+    return readRedirect(line, j, Number(digits))
   }
-  const two = line.slice(i, i + 2)
+  const next = skipContinuations(line, i + 1)
+  const n = line[next]
   switch (c) {
-    case '|': return two === '||' ? tok('or', i + 2) : two === '|&' ? tok('pipe_err', i + 2) : tok('pipe', i + 1)
+    case '|': return n === '|' ? tok('or', next + 1) : n === '&' ? tok('pipe_err', next + 1) : tok('pipe', i + 1)
     case '&':
-      if (two === '&&') return tok('and', i + 2)
-      if (two === '&>') {
-        const append = line[i + 2] === '>'
-        return redir(1, append ? 'bothAppend' : 'both', i + (append ? 3 : 2))
+      if (n === '&') return tok('and', next + 1)
+      if (n === '>') {
+        const third = skipContinuations(line, next + 1)
+        const append = line[third] === '>'
+        return redir(1, append ? 'bothAppend' : 'both', (append ? third : next) + 1)
       }
       return tok('amp', i + 1)
-    case ';': return two === ';;' ? tok('dsemi', i + 2) : tok('semi', i + 1)
+    case ';': return n === ';' ? tok('dsemi', next + 1) : tok('semi', i + 1)
     case '(': return tok('paren_open', i + 1)
     case ')': return tok('paren_close', i + 1)
     case '<': case '>': return readRedirect(line, i, c === '<' ? 0 : 1)
@@ -144,20 +141,22 @@ const redir = (fd, op, end, fields) => ({ token: { kind: 'redir', fd, op, ...fie
 
 function readRedirect(line, i, fd) {
   const c = line[i]
-  const n = line[i + 1]
+  const next = skipContinuations(line, i + 1)
+  const n = line[next]
   if (n === '(') throw new UnsupportedError('feature', `${c}(`, `process substitution (\`${c}(…)\`) is not supported`)
-  if (n === '&') return readDup(line, i + 1, fd, c === '<' ? '<&' : `${fd === 1 && c === '>' ? '' : fd}>&`)
+  if (n === '&') return readDup(line, next, fd, c === '<' ? '<&' : `${fd === 1 && c === '>' ? '' : fd}>&`)
   if (c === '<') {
     if (n === '>') throw new UnsupportedError('feature', '<>', 'read/write file redirects are not supported')
-    if (line.slice(i, i + 3) === '<<<') return redir(fd, 'herestring', i + 3)
     if (n === '<') {
-      const strip = line[i + 2] === '-'
-      return redir(fd, 'heredoc', i + (strip ? 3 : 2), { strip, delim: null, body: null })
+      const third = skipContinuations(line, next + 1)
+      if (line[third] === '<') return redir(fd, 'herestring', third + 1)
+      const strip = line[third] === '-'
+      return redir(fd, 'heredoc', (strip ? third : next) + 1, { strip, delim: null, body: null })
     }
     return redir(fd, 'read', i + 1)
   }
-  if (n === '>') return redir(fd, 'append', i + 2)
-  return redir(fd, 'write', i + (n === '|' ? 2 : 1))
+  if (n === '>') return redir(fd, 'append', next + 1)
+  return redir(fd, 'write', (n === '|' ? next : i) + 1)
 }
 
 // `N>&M` / `N<&M` fd duplication and the `N>&-` close form. The target
@@ -165,11 +164,12 @@ function readRedirect(line, i, fd) {
 // the user wrote as one token) doesn't silently split into a fd-dup
 // plus a stray word.
 function readDup(line, ampAt, fd, label) {
-  const target = line[ampAt + 1]
-  const after = line[ampAt + 2]
-  const boundary = after === undefined || /[\s|&>;()<]/u.test(after)
-  if (/[0-9]/u.test(target ?? '') && boundary) return redir(fd, 'dup', ampAt + 2, { toFd: Number(target) })
-  if (target === '-' && boundary) return redir(fd, 'close', ampAt + 2)
+  const targetAt = skipContinuations(line, ampAt + 1)
+  const target = line[targetAt]
+  const after = line[skipContinuations(line, targetAt + 1)]
+  const boundary = after === undefined || /[ \t\n|&>;()<]/u.test(after)
+  if (/[0-9]/u.test(target ?? '') && boundary) return redir(fd, 'dup', targetAt + 1, { toFd: Number(target) })
+  if (target === '-' && boundary) return redir(fd, 'close', targetAt + 1)
   throw new UnsupportedError('feature', 'redirect target', `redirect \`${label}\` requires a file descriptor number (or \`-\`) followed by a token boundary`)
 }
 

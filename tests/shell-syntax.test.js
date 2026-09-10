@@ -181,16 +181,16 @@ describe('shell syntax — parameters', () => {
   it('the substitutions this shell lacks are refused, not passed through', () => {
     for (const [line, detail] of [
       ['echo `pwd`', '`'],
-      ['echo $((1+2))', '$(('],
-      ['echo ${x%.js}', '${'],
-      ['echo ${#x}', '${'],
-      ['echo ${x:-d}', '${'],
+      ['echo $[1+2]', '$['],
+      ['echo ${x@Q}', '${'],
+      ['echo ${x[0]}', '${'],
+      ['echo ${!x}', '${'],
       ['cat <(ls)', '<('],
     ]) {
       const r = term().run(line)
       assert.equal(r.exitCode, 1, line)
       assert.equal(r.stdout, '', line)
-      assert.match(r.stderr, /not supported/u, line)
+      assert.match(r.stderr, /not supported|unsupported/u, line)
       assert.deepEqual(r.unsupported.map((u) => `${u.kind}:${u.detail}`), [`feature:${detail}`], line)
     }
   })
@@ -417,8 +417,10 @@ describe('shell syntax — redirects', () => {
 
   it('the substitutions this shell lacks are refused inside an unquoted here-document too', () => {
     assert.deepEqual(gaps('cat <<EOF\n`echo owned`\nEOF'), ['feature:`'])
-    assert.deepEqual(gaps('cat <<EOF\n$((1+2))\nEOF'), ['feature:$(('])
-    assert.deepEqual(gaps('x=5; cat <<EOF\n${x:-y}\nEOF'), ['feature:${'])
+    assert.equal(out('cat <<EOF\n$((1+2))\nEOF'), '3\n')
+    assert.deepEqual(gaps('cat <<EOF\n$[1+2]\nEOF'), ['feature:$['])
+    assert.equal(out('x=5; cat <<EOF\n${x:-y}\nEOF'), '5\n')
+    assert.deepEqual(gaps('cat <<EOF\n${x@Q}\nEOF'), ['feature:${'])
     assert.equal(out('cat <<EOF\n$(echo expanded)\nEOF'), 'expanded\n')
     // Escaped, under a quoted delimiter, or a plain dollar: text.
     assert.equal(out('cat <<EOF\n\\$(echo kept) \\`x\\` \\${x:-y}\nEOF'), '$(echo kept) `x` ${x:-y}\n')
@@ -553,7 +555,7 @@ describe('shell syntax — compound commands', () => {
     assert.deepEqual(gaps('((1+2))'), ['feature:(('])
     assert.deepEqual(gaps('for ((i=0;i<3;i++)); do echo $i; done'), ['feature:for (('])
     assert.deepEqual(gaps('for f; do echo $f; done'), ['feature:for NAME; do'])
-    assert.deepEqual(gaps('[[ -f a.txt ]] && echo yes'), ['feature:[['])
+    assert.deepEqual(gaps('[[ x =~ x ]]'), ['feature:[[ =~'])
     assert.deepEqual(gaps('time ls'), ['feature:time'])
     // Builtins are shell features, not missing commands: no "Available:" hint.
     for (const line of ['source x', 'type ls', 'set -e']) {

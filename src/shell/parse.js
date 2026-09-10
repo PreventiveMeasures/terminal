@@ -41,7 +41,7 @@ function appendStage(p, step, stage) {
 // Assignments and redirects alone are valid commands. Check emptiness before
 // adding |&'s implicit redirect, which must not legitimize an empty stage.
 const isCommand = (s) => s.words.length > 0 || s.assigns.length > 0 || s.redirs.length > 0
-const isBlock = (s) => s.group || s.loop || s.conditional
+const isBlock = (s) => s.group || s.loop || s.conditional || s.test
 
 const newStage = () => ({ words: [], assigns: [], redirs: [] })
 const newStep = (gate) => ({ gate, stages: [], negate: false, bang: false })
@@ -69,7 +69,6 @@ const UNIMPLEMENTED_BLOCKS = new Map([
   ['case', '`case` statements are not supported; gate on exit status with `&&` / `||` instead'],
   ['select', '`select` loops are not supported'],
   ['function', 'shell functions are not supported'],
-  ['[[', '`[[ … ]]` conditional expressions are not supported'],
   ['time', '`time` is not supported'],
   ['coproc', '`coproc` is not supported'],
 ])
@@ -85,6 +84,12 @@ function buildSteps(p, end) {
   let stage = newStage()
   while (p.i < raw.length) {
     const t = raw[p.i]
+    if (t.kind === 'condition') {
+      if (!commandPosition(stage)) throw new UnsupportedError('feature', '[[ syntax', 'unexpected `[[`')
+      stage.test = t.expression
+      p.i++
+      continue
+    }
     if (t.kind === 'paren_close') {
       if (end !== ')') throw new Error('unexpected `)`')
       p.i++
@@ -122,6 +127,7 @@ function buildSteps(p, end) {
     if (stage.group) throw new Error(`unexpected token after \`${stage.isolate ? ')' : '}'}\``)
     if (stage.loop) throw new Error('unexpected token after `done`')
     if (stage.conditional) throw new Error('unexpected token after `fi`')
+    if (stage.test) throw new UnsupportedError('feature', '[[ syntax', 'unexpected token after `]]`')
     if (!t.quoted && stage.words.length === 0 && p.aliases.has(t.value)) p.aliasUsed = true
     if (!t.quoted && commandPosition(stage)) {
       if (Array.isArray(end) ? end.includes(t.value) : t.value === end) { p.i++; return finishBlock(p, steps, stage, end) }

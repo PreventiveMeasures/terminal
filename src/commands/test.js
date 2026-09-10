@@ -5,7 +5,7 @@ import { INT64_MAX, INT64_MIN } from '../numeric.js'
 
 const UNARY_GAPS = new Set(['-b', '-c', '-g', '-h', '-k', '-p', '-r', '-s', '-t', '-u', '-v', '-w', '-x', '-G', '-L', '-N', '-O', '-R', '-S', '-o'])
 const BINARY_GAPS = new Set(['-nt', '-ot', '-ef', '<', '>'])
-const INTEGER_TESTS = {
+export const INTEGER_TESTS = {
   __proto__: null,
   '-eq': (left, right) => left === right,
   '-ne': (left, right) => left !== right,
@@ -77,7 +77,7 @@ function integerOperand(operand) {
   throw new Error(`${operand}: integer expression expected`)
 }
 
-function fileTest(operator, operand, ctx) {
+export function fileTest(operator, operand, ctx) {
   // Stream paths and /dev/null are reserved by the shell even without source
   // map entries. Their parent must exist for component-by-component lookup.
   const fs = {

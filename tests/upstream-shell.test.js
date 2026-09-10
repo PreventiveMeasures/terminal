@@ -198,17 +198,22 @@ describe('upstream shell audit — heredocs and redirection', () => {
   ])
 })
 
+describe('upstream shell audit — arithmetic, parameter operators and conditionals', () => {
+  cases([
+    ['arithmetic substitution', 'echo "$((2 + 3))"', '5\n'],
+    ['default parameter expansion', 'echo "${missing:-fallback}"', 'fallback\n'],
+    ['parameter length', 'x=value; echo "${#x}"', '5\n'],
+    ['extended conditional', 'if [[ x = x ]]; then echo chosen; fi', 'chosen\n'],
+  ])
+})
+
 describe('upstream shell audit — explicit unsupported constructs', () => {
   const rows = [
     ['legacy substitution', 'echo `printf value`', '`'],
     ['case pattern syntax in substitution', 'echo "$(case word in word) echo yes;; esac)"', 'case'],
-    ['arithmetic substitution', 'echo "$((2 + 3))"', '$(('],
-    ['default parameter expansion', 'echo "${missing:-fallback}"', '${'],
-    ['parameter length', 'x=value; echo "${#x}"', '${'],
     ['custom IFS', 'IFS=:; x=red:blue; echo $x', 'IFS'],
     ['shell function declaration', 'show() { echo value; }; show', 'function'],
     ['arithmetic conditional', 'if (( 0 )); then echo lost; fi', '(('],
-    ['extended conditional', 'if [[ x = x ]]; then echo chosen; fi', '[['],
     ['while loop', 'while false; do echo lost; done', 'while'],
     ['heredoc on another descriptor', 'cat 3<<HERE\nvalue\nHERE', '3<<'],
     ['read-write redirection', 'cat <>input', '<>'],

@@ -2162,21 +2162,15 @@ describe('createTerminal — pathological inputs', () => {
   })
 
   it('a long run of `${` tokenizes in linear time', () => {
-    // The `${…}` scan once searched to end-of-line for a closing brace
-    // at every `${`, so this 1 MB word took seconds; it now costs one
-    // failed sticky match per `${`. Double-quoted, so the word still
-    // goes through the reference scan but skips brace expansion, whose
-    // own end-of-line rescan per unmatched `{` predates this and is
-    // not what is being pinned here.
-    // `${` with no name is a parameter-expansion form this shell refuses,
-    // so the run fails — but it must fail fast.
+    // Deeply nested, unfinished expansions must fail before a repeated scan
+    // of their remaining source can become quadratic.
     const t = createTerminal(SOURCES)
     const word = '${'.repeat(500000)
     const started = Date.now()
     const r = t.run(`echo "${word}"`)
     assert.ok(Date.now() - started < 2000, 'tokenizer went quadratic')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /parameter expansion operators are not supported/u)
+    assert.match(r.stderr, /expansion nesting .* is not supported/u)
   })
 
   it('brace expansion is linear on a long run of unmatched braces', () => {

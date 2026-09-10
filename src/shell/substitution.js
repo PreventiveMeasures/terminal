@@ -33,7 +33,6 @@ function finishWord(st) {
     st.target = null
   } else if (st.command && !word.quoted) {
     if (word.value === 'case') throw new UnsupportedError('feature', 'case', '`case` patterns inside command substitutions are not supported')
-    if (word.value === '[[') throw new UnsupportedError('feature', '[[', '`[[ … ]]` expressions inside command substitutions are not supported')
     st.command = ['!', '{', 'do', 'then', 'else', 'elif', 'if', 'while', 'until'].includes(word.value) || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(word.value)
   } else st.command = false
   st.word = freshWord()
@@ -49,6 +48,12 @@ function scan(st) {
   if (c === '`') { backticks(st); return false }
   if (quote) { append(st, c, true); st.i++; return false }
   if (c === "'" || c === '"') { st.quote = c; st.word.started = true; st.i++; return false }
+  if (st.command && !st.target && !st.word.started && line.startsWith('[[', i) && /[ \t\n()<>;&|]|^$/u.test(line[i + 2] ?? '')) {
+    const r = st.helpers.readConditional(line, i, st.helpers, st.depth + st.parens + 1)
+    st.i += r.raw.length
+    st.command = false
+    return false
+  }
   if (c === '#' && !st.word.started) {
     const end = line.indexOf('\n', i)
     st.i = end === -1 ? line.length : end
@@ -80,14 +85,15 @@ function escape(st) {
 
 function dollar(st) {
   const { line, i } = st
-  if (!st.quote && line[i + 1] === "'") {
-    const r = st.helpers.decodeAnsiC(line, i + 2)
+  const next = st.helpers.skipContinuations(line, i + 1)
+  if (!st.quote && line[next] === "'") {
+    const r = st.helpers.decodeAnsiC(line, next + 1)
     append(st, r.text, true)
     st.i = r.end
     return
   }
-  if (!st.quote && line[i + 1] === '"') { st.quote = '"'; st.word.started = true; st.i += 2; return }
-  const ref = st.helpers.readExpansion(line, i, st.depth + st.parens + 1)
+  if (!st.quote && line[next] === '"') { st.quote = '"'; st.word.started = true; st.i = next + 1; return }
+  const ref = st.helpers.readExpansion(line, i, st.depth + st.parens + 1, st.quote === '"')
   const text = ref?.raw ?? '$'
   append(st, text, Boolean(st.quote))
   st.i += text.length
@@ -119,6 +125,7 @@ function operator(st, op) {
     if (st.depth + ++st.parens >= MAX_SUBSTITUTION_DEPTH) throw depthGap()
     st.command = true
   } else if (token.kind === 'redir') {
+    st.command = false
     if (token.op === 'heredoc') st.heredocs.push(token)
     if (!['dup', 'close'].includes(token.op)) st.target = token
   } else st.command = true
