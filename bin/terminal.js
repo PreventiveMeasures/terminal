@@ -123,7 +123,10 @@ function start(session) {
 function evaluate(session, server, input, callback) {
   // Lines already buffered from a pipe still arrive after a close.
   if (session.closing) return callback(null)
-  const line = input.replace(/\n$/u, '')
+  // In a terminal, readline returns a multiline entry with its lines joined by
+  // a carriage return. The shell reads `\\` before one as an escaped CR rather
+  // than as the continuation that was typed, so put the newlines back.
+  const line = input.replace(/\n$/u, '').replaceAll('\r', '\n')
   // A trailing backslash is the shell's own continuation: collect the next
   // line and hand the tokenizer the whole thing, newline included.
   if (trailingBackslashes(line) % 2 === 1) return callback(new repl.Recoverable(new Error('line continuation')))
