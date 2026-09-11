@@ -34,7 +34,12 @@ export function duOptions(tokens, ctx) {
   if (flags.has('inodes') && flags.has('A')) options.stderr += 'du: warning: options --apparent-size and -b are ineffective with --inodes\n'
   if (!options.scale) {
     const configured = ctx.vars.get('DU_BLOCK_SIZE') ?? ctx.vars.get('BLOCK_SIZE') ?? ctx.vars.get('BLOCKSIZE')
-    options.scale = configured === undefined ? { unit: ctx.vars.has('POSIXLY_CORRECT') ? 512n : 1024n } : blockSize(configured)
+    try {
+      options.scale = configured === undefined ? { unit: ctx.vars.has('POSIXLY_CORRECT') ? 512n : 1024n } : blockSize(configured)
+    } catch (e) {
+      if (e instanceof UnsupportedError) throw e
+      throw new UnsupportedError('feature', 'invalid block size environment', 'invalid block size environment settings are not supported')
+    }
   }
   if (flags.has('inodes')) options.scale = { ...options.scale, unit: 1n, suffix: options.scale.suffix?.endsWith('B') ? 'B' : '' }
   if (options.scale.base) {
@@ -60,14 +65,14 @@ function blockSize(value) {
   const automatic = value && ['human-readable', 'si'].find((mode) => mode.startsWith(value))
   if (automatic) return { base: automatic === 'si' ? 1000n : 1024n, unit: 1n }
   if (value.startsWith("'")) throw new UnsupportedError('feature', 'grouped block sizes', 'grouped block sizes are not supported')
-  const match = /^[ \t\n\r\v\f]*\+?(0[xX][\da-fA-F]+|0[0-7]*|[1-9]\d*)?([kKmMgGtTPEZYRQ](?:i?B)?)?$/u.exec(value)
+  const match = /^[ \t\n\r\v\f]*\+?(0[xX][\da-fA-F]+|0[0-7]*|[1-9]\d*)?([kKmMgGtTPEZYRQ](?:i?B|D)?)?$/u.exec(value)
   if (!match || !match[1] && value !== match[2]) throw new Error(`invalid block size: ${value}`)
   const suffix = match[2] ?? ''
   const power = suffix ? 'KMGTPEZYRQ'.indexOf(suffix[0].toUpperCase()) + 1 : 0
-  const base = suffix.endsWith('B') && !suffix.endsWith('iB') ? 1000n : 1024n
+  const base = /[BD]$/u.test(suffix) && !suffix.endsWith('iB') ? 1000n : 1024n
   const unit = (match[1] ? unsignedInteger(match[1]) : 1n) * base ** BigInt(power)
   if (unit === 0n || unit > UINT64_MAX) throw new Error(`invalid block size: ${value}`)
-  const label = match[1] || !suffix ? '' : (power === 1 && base === 1000n ? 'k' : suffix[0].toUpperCase()) + (suffix.endsWith('B') ? base === 1000n ? 'B' : 'iB' : '')
+  const label = match[1] || !suffix ? '' : (power === 1 && suffix.endsWith('B') && base === 1000n ? 'k' : suffix[0].toUpperCase()) + (suffix.endsWith('B') ? base === 1000n ? 'B' : 'iB' : '')
   return { unit, suffix: label }
 }
 

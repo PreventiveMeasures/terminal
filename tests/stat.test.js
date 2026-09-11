@@ -42,7 +42,9 @@ describe('stat renders known file properties', () => {
 describe('stat format fields and escapes', () => {
   for (const [format, stdout] of [
     ['%5s', '    3\n'], ['%-5s', '3    \n'], ['%05s', '00003\n'], ['%05.3s', '  003\n'], ['%+s', '3\n'],
+    ['%# +05s', '00003\n'], ['%-05s', '3    \n'], ['%.s', '3\n'],
     ['%.0s', '3\n'], ['%5n', '    a\n'], ['%-5n', 'a    \n'], ['%05n', '    a\n'], ['%.0n', '\n'],
+    ['%# +05n', '    a\n'], ['%-08.3F', 'reg     \n'],
     ['%.7F', 'regular\n'], ['%%:%s:%', '%:3:%\n'],
   ]) {
     it(format, () => assert.deepEqual(run(`stat -c '${format}' a`), result(stdout)))
@@ -67,6 +69,12 @@ describe('stat format fields and escapes', () => {
     })
   }
   it('formats adjacent byte fragments before UTF-8 validation', () => assert.deepEqual(run("stat --printf='%.1n\\xA9' 'é😀'"), result('é')))
+  it('limits octal escapes to three digits and hexadecimal escapes to two', () => {
+    assert.deepEqual(run("stat --printf='\\1011:\\x412:%%s' a"), result('A1:A2:%s'))
+  })
+  it('emits NUL separators and literal filename line breaks', () => {
+    assert.deepEqual(createTerminal({ 'a\nb': 'x', c: '' }).run("stat --printf='%n\\0%s\\0' 'a\nb' c"), result('a\nb\u00001\u0000c\u00000\u0000'))
+  })
   it('preserves backslashes literally without --printf', () => assert.deepEqual(run("stat -c '%s\\n\\t' a"), result('3\\n\\t\n')))
   it('returns a diagnosed error for a partial UTF-8 field', () => {
     const actual = run("stat -c '%.1n' 'é😀'")
@@ -162,6 +170,11 @@ describe('stat errors, mounts, and writable metadata', () => {
     const terminal = createTerminal({}, { mount: '/src', writable: '/tmp/' })
     assert.deepEqual(terminal.run("printf é >/tmp/file; stat -c%s /tmp/file; printf 😀 >>/tmp/file; stat -c%s /tmp/file; printf a >/tmp/file; stat -c%s /tmp/file"), result('2\n6\n1\n', 0, '', '/src'))
   })
+  it('reflects empty files, in-place replacement, and removal in the type field', () => {
+    const terminal = createTerminal({}, { mount: '/src', writable: '/tmp/' })
+    const actual = terminal.run(": >/tmp/file; stat -c%F /tmp/file; printf x >/tmp/file; sed -i.bak 's/x/xx/' /tmp/file; stat -c '%s %F' /tmp/file /tmp/file.bak; rm /tmp/file; stat -c%F /tmp/file")
+    assert.deepEqual(actual, result('regular empty file\n2 regular file\n1 regular file\n', 1, "stat: cannot stat '/tmp/file': No such file or directory\n", '/src'))
+  })
   it('measures invalid UTF-8 overlay bytes without decoding them', () => {
     const fs = writableFs(createFs({}, '/src'))
     const first = fs.openWritable('/', '/tmp/file'), second = fs.openWritable('/', '/tmp/file')
@@ -185,5 +198,12 @@ describe('stat errors, mounts, and writable metadata', () => {
   it('allows filename-only output to share the named file', () => {
     const terminal = createTerminal({}, { mount: '/src', writable: '/tmp/' })
     assert.deepEqual(terminal.run('stat -c%n /tmp/file >/tmp/file; cat /tmp/file'), result('/tmp/file\n', 0, '', '/src'))
+  })
+  it('detects metadata overlap through a renamed backup and nested dispatch', () => {
+    const terminal = createTerminal({}, { mount: '/src', writable: '/tmp/' })
+    const actual = terminal.run("printf abc >/tmp/file; { sed -i.bak 's/a/A/' /tmp/file; printf /tmp/file.bak | xargs stat -c%s; } >>/tmp/file")
+    assert.equal(actual.exitCode, 123)
+    assert.equal(actual.unsupported[0].detail, 'metadata output overlap')
+    assert.equal(terminal.run('cat /tmp/file /tmp/file.bak').stdout, 'Abcabc')
   })
 })

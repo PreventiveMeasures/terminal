@@ -24,7 +24,7 @@ export function du(_stdin, tokens, ctx) {
     try { measure(found.path, name, state) } catch (e) {
       const note = unsupportedNote(e)
       const message = 'du: ' + reason(e)
-      if (note) ctx.unsupported.add({ ...note, command: 'du', message })
+      if (note) ctx.unsupported.add({ ...note, command: note.command ?? 'du', message })
       appendOutput(state.result, ctx.flushOutput(err(message)))
       state.failed = true
       if (note) return state.result

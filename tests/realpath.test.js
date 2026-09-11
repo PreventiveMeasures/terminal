@@ -162,6 +162,24 @@ describe('realpath relative output', () => {
 })
 
 describe('realpath failures, input ownership and unsupported options', () => {
+  // GNU error() flushes preceding stdout before emitting each diagnostic.
+  // https://github.com/coreutils/gnulib/blob/master/lib/error.c
+  for (const [operands, stdout] of [
+    ['file missing dir', '/file\nrealpath: missing: No such file or directory\n/dir\n'],
+    ['missing file', 'realpath: missing: No such file or directory\n/file\n'],
+  ]) {
+    it(`preserves merged output order for ${operands}`, () => {
+      assert.deepEqual(terminal().run(`realpath -e ${operands} 2>&1`), { ...result(stdout), exitCode: 1 })
+    })
+  }
+
+  it('retains merged output in a writable file without an ordering diagnostic', () => {
+    const t = createTerminal({ file: 'data' }, { mount: '/repo', writable: '/tmp/' })
+    const actual = t.run('realpath -e file missing file >/tmp/out 2>&1')
+    assert.deepEqual(actual, { ...result('', '/repo'), exitCode: 1 })
+    success('cat /tmp/out', '/repo/file\nrealpath: missing: No such file or directory\n/repo/file\n', t, '/repo')
+  })
+
   it('keeps successful operand output around ordinary failures', () => {
     const r = terminal().run('realpath -e dir missing file missing/child')
     assert.equal(r.stdout, '/dir\n/file\n')
@@ -218,6 +236,19 @@ describe('realpath failures, input ownership and unsupported options', () => {
     assert.equal(r.stdout, 'unconsumed\n')
     assert.equal(r.exitCode, 0)
     assert.match(r.stderr, /no such file or directory/iu)
+  })
+
+  it('preserves the enclosing xargs read guard when output would modify its arguments', () => {
+    const t = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
+    t.run("printf '/tmp/args\\n' >/tmp/args")
+    const actual = t.run('xargs realpath </tmp/args >>/tmp/args 2>/dev/null | cat')
+    assert.equal(actual.stdout, '')
+    assert.equal(actual.stderr, '')
+    assert.equal(actual.exitCode, 0)
+    assert.equal(actual.unsupported.length, 1)
+    assert.equal(actual.unsupported[0].command, 'xargs')
+    assert.equal(actual.unsupported[0].detail, 'streaming self-output')
+    success('cat /tmp/args', '/tmp/args\n', t, '/repo')
   })
 })
 

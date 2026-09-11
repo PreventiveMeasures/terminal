@@ -63,6 +63,7 @@ describe('du scales exact byte counts', () => {
     ['-kb', '1025\ta\n1024\tb\n0\tempty\n'], ['-bm', '1\ta\n1\tb\n0\tempty\n'],
     ['-bB1000', '2\ta\n2\tb\n0\tempty\n'], ['-bBK', '2K\ta\n1K\tb\n0K\tempty\n'],
     ['-bB1K', '2\ta\n1\tb\n0\tempty\n'], ['-bBKB', '2kB\ta\n2kB\tb\n0kB\tempty\n'],
+    ['-bB1KD', '2\ta\n2\tb\n0\tempty\n'], ['-bBKD', '2K\ta\n2K\tb\n0K\tempty\n'],
     ['-bh', '1.1K\ta\n1.0K\tb\n0\tempty\n'], ['-b --si', '1.1k\ta\n1.1k\tb\n0\tempty\n'],
     ['-bB0x400', '2\ta\n1\tb\n0\tempty\n'], ['-bB02000', '2\ta\n1\tb\n0\tempty\n'],
   ]) {
@@ -77,6 +78,20 @@ describe('du scales exact byte counts', () => {
     assert.equal(terminal.run('POSIXLY_CORRECT=1 du --apparent-size a').unsupported[0].detail, 'POSIXLY_CORRECT')
     assert.deepEqual(terminal.run('DU_BLOCK_SIZE=2 du -b a'), result('1025\ta\n'))
   })
+  it('uses the first configured block-size variable, including explicit overrides', () => {
+    assert.deepEqual(terminal.run('DU_BLOCK_SIZE=2 BLOCK_SIZE=1 BLOCKSIZE=512 du -A a'), result('513\ta\n'))
+    assert.deepEqual(terminal.run('BLOCK_SIZE=2 BLOCKSIZE=1 du -A a'), result('513\ta\n'))
+    assert.deepEqual(terminal.run('BLOCKSIZE=2 du -A a'), result('513\ta\n'))
+    assert.deepEqual(terminal.run('DU_BLOCK_SIZE=invalid du -b a'), result('1025\ta\n'))
+  })
+  for (const setting of ['DU_BLOCK_SIZE=', 'DU_BLOCK_SIZE=invalid', 'BLOCK_SIZE=2junk', 'BLOCKSIZE=0']) {
+    it(`diagnoses GNU fallback semantics for ${setting}`, () => {
+      const actual = terminal.run(`${setting} du -A a 2>/dev/null | cat`)
+      assert.equal(actual.stdout, '')
+      assert.equal(actual.stderr, '')
+      assert.equal(actual.unsupported[0].detail, 'invalid block size environment')
+    })
+  }
   for (const mode of ['h', 'hu', 'human', 's', 'si']) {
     it(`unique automatic-unit abbreviation ${mode}`, () => {
       assert.deepEqual(terminal.run(`du --apparent-size -B${mode} a`), result(`1.1${mode.startsWith('s') ? 'k' : 'K'}\ta\n`))
@@ -188,5 +203,22 @@ describe('du reports failures without inventing metadata', () => {
   it('permits inode counts when only a descendant file content changes', () => {
     const terminal = createTerminal({}, { mount: '/src', writable: '/tmp/' })
     assert.deepEqual(terminal.run('du --inodes /tmp >/tmp/out; cat /tmp/out'), result('2\t/tmp\n', 0, '', '/src'))
+  })
+  it('retains the parent reader in nested self-output diagnostics', () => {
+    const terminal = createTerminal({ a: 'abc' }, { mount: '/src', writable: '/tmp/' })
+    terminal.run('echo a >/tmp/args')
+    const actual = terminal.run('xargs -n1 du -b </tmp/args >>/tmp/args 2>/dev/null')
+    assert.equal(actual.exitCode, 123)
+    assert.deepEqual(actual.unsupported.map(({ command, detail }) => [command, detail]), [['xargs', 'streaming self-output']])
+    assert.deepEqual(terminal.run('cat /tmp/args'), result('a\n', 0, '', '/src'))
+  })
+  it('reports a closed stdout as a failed write', () => {
+    assert.deepEqual(run('du -b a 1>&-'), result('', 1, 'du: write error: Bad file descriptor\n'))
+  })
+  it('flushes warnings before inspecting a writable operand', () => {
+    const terminal = createTerminal({}, { mount: '/src', writable: '/tmp/' })
+    const warning = 'du: warning: summarizing is the same as using --max-depth=0\n'
+    assert.deepEqual(terminal.run('du -bsd0 /tmp/out 2>/tmp/out'), result(`${warning.length}\t/tmp/out\n`, 0, '', '/src'))
+    assert.deepEqual(terminal.run('cat /tmp/out'), result(warning, 0, '', '/src'))
   })
 })

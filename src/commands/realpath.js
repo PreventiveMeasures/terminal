@@ -1,7 +1,8 @@
 import { parseArgs } from '../args.js'
 import { dirname, joinPath, lookup, resolve } from '../fs.js'
 import { missingPathNote } from '../notes.js'
-import { err } from '../util.js'
+import { appendOutput, emptyOutput } from '../shell/output.js'
+import { err, ok } from '../util.js'
 
 function canonicalize(ctx, path, mode, strip) {
   const missing = { error: 'No such file or directory' }
@@ -92,18 +93,20 @@ export function realpath(_stdin, tokens, ctx) {
   if (relative.error) return relative.error
   const quiet = flags.has('q') || flags.has('quiet')
   const separator = flags.has('z') || flags.has('zero') ? '\0' : '\n'
-  let exitCode = 0, stderr = '', stdout = ''
+  const result = emptyOutput()
+  let failed = false
   for (const operand of positional) {
     const found = canonicalize(ctx, operand, mode, strip)
     if (found.error) {
       missingPathNote(ctx, 'realpath', operand, found.error)
-      if (!quiet) stderr += `realpath: ${operand}: ${found.error}\n`
-      exitCode = 1
+      if (!quiet) appendOutput(result, err(`realpath: ${operand}: ${found.error}`))
+      failed = true
     } else {
       const path = relative.target && (!relative.base || within(relative.base, found.path))
         ? relativePath(relative.target, found.path) : found.path
-      stdout += path + separator
+      appendOutput(result, ok(path + separator))
     }
   }
-  return { stdout, stderr, exitCode }
+  result.exitCode = failed ? 1 : 0
+  return result
 }
