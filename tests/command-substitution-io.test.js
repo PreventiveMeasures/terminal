@@ -60,7 +60,7 @@ describe('command substitution — shared input', () => {
 })
 
 // A read error routed to /dev/null reaches nobody, so it is reported here.
-const HIDDEN = `stderr: a redirect discarded ${JSON.stringify(READ_ERROR.trimEnd())}. Nothing else in this run reports that path.`
+const HIDDEN = 'cat: no such file or directory: "missing".'
 
 describe('command substitution — expansion order and stderr', () => {
   const cases = [

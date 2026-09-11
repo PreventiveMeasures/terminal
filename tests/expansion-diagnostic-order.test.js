@@ -10,7 +10,11 @@ const nope = 'cat: nope: no such file or directory\n'
 const gone = 'cat: gone: no such file or directory\n'
 const tildeError = 'error: named-user and directory-stack tilde prefixes are not supported\n'
 // A read error the redirect threw away reaches nobody else, so it is noted.
-const hidden = (line) => [`stderr: a redirect discarded ${JSON.stringify(line.trimEnd())}. Nothing else in this run reports that path.`]
+// The note names the command, the reason, and the paths it applied to.
+const hidden = (line) => {
+  const [, command, operand, reason] = /^([^:]+): (.+): (.+)$/u.exec(line.trimEnd())
+  return [`${command}: ${reason}: ${JSON.stringify(/'([^']*)'$/u.exec(operand)?.[1] ?? operand)}.`]
+}
 
 function examples(rows) {
   for (const [name, command, stdout, stderr, names = ['MISSING'], exitCode = 0, notes = []] of rows) {

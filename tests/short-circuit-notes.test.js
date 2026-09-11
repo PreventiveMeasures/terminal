@@ -119,7 +119,7 @@ describe('the note follows the run, not the output', () => {
 
   // Hiding the diagnostic hides neither consequence: the chain still says what
   // it cancelled, and the discarded read error is reported in its own right.
-  const discarded = "stderr: a redirect discarded \"cat: missing: no such file or directory\". Nothing else in this run reports that path."
+  const discarded = "cat: no such file or directory: \"missing\"."
   for (const command of ['cat missing 2>/dev/null && cat b.txt', '{ cat missing && cat b.txt; } 2>/dev/null']) {
     it(command, () => assert.deepEqual(notesOf(command), [note('cat', 1, 1), discarded]))
   }

@@ -232,9 +232,9 @@ export interface RunResult {
    * of the gate.
    *
    * A file or directory access failure whose diagnostic went to `/dev/null`
-   * or a closed descriptor is noted too, since a status alone cannot separate
-   * a missing path from an empty result. Not when the message reached stderr
-   * anyway, and not when another note already accounts for that path.
+   * or a closed descriptor is noted too, naming the command, the reason and
+   * the paths it applied to. Not when the message reached stderr anyway, and
+   * not when another note already accounts for that path.
    *
    * Failed relative file lookups also note verified alternatives at `/` or
    * the mount point when the current directory caused the missing path.

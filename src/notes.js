@@ -48,7 +48,7 @@ export function hiddenEntryNotes() {
 // whether the pattern was absent or `d2` never existed, and nothing in what
 // the caller can see tells the two apart. Notes survive redirects, so this is
 // the one channel that can still say it.
-const ACCESS_FAILURE = /(?:no such file or directory|not a directory|is a directory)$/iu
+const ACCESS_FAILURE = /^(?<command>[^:]+): (?<operand>.+): (?<reason>no such file or directory|not a directory|is a directory)$/iu
 
 export function discardedStderr(ctx, text) {
   for (const line of text.split('\n')) {
@@ -58,18 +58,21 @@ export function discardedStderr(ctx, text) {
 
 // Emitted at the end of a run, once everything else the caller will see is
 // known: a diagnostic that reached stderr anyway, or a path another note
-// already accounts for, needs no second telling.
+// already accounts for, needs no second telling. What survives is grouped, so
+// one command failing the same way on three paths says so once.
 export function discardedNotes(discarded, stderr, notes) {
-  return [...discarded].filter((line) => !stderr.includes(line) && !mentioned(notes, line))
-    .map((line) => `stderr: a redirect discarded ${JSON.stringify(line)}. Nothing else in this run reports that path.`)
-}
-
-// The operand sits between the command and the reason: `cat: a:b: is a
-// directory` names `a:b`, and `cp: cannot stat 'x': …` names `x`.
-function mentioned(notes, line) {
-  const middle = line.slice(line.indexOf(': ') + 2, line.lastIndexOf(': '))
-  const path = /'([^']*)'$/u.exec(middle)?.[1] ?? middle
-  return [...notes].some((note) => note.includes(JSON.stringify(path)))
+  const groups = new Map()
+  for (const line of discarded) {
+    if (stderr.includes(line)) continue
+    const { command, operand, reason } = ACCESS_FAILURE.exec(line).groups
+    // `cp: cannot stat 'x': …` wraps its operand; everything else is the path.
+    const path = /'([^']*)'$/u.exec(operand)?.[1] ?? operand
+    if ([...notes].some((note) => note.includes(JSON.stringify(path)))) continue
+    const key = `${command}: ${reason}`
+    if (!groups.has(key)) groups.set(key, new Set())
+    groups.get(key).add(path)
+  }
+  return [...groups].map(([key, paths]) => `${key}: ${[...paths].map((path) => JSON.stringify(path)).join(', ')}.`)
 }
 
 // A failing command in an `&&` chain cancels what follows it. That is the shell

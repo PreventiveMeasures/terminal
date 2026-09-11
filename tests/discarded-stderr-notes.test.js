@@ -4,7 +4,11 @@ import { createTerminal } from '@preventive/terminal'
 
 const FILES = { 'a.txt': 'oak\n', 'd1/x.js': 'a\n', 'sub/d.txt': 'ash\n' }
 
-const hidden = (line) => `stderr: a redirect discarded ${JSON.stringify(line)}. Nothing else in this run reports that path.`
+// The note names the command, the reason, and the paths it applied to.
+const hidden = (line) => {
+  const [, command, operand, reason] = /^([^:]+): (.+): (.+)$/u.exec(line.trimEnd())
+  return `${command}: ${reason}: ${JSON.stringify(/'([^']*)'$/u.exec(operand)?.[1] ?? operand)}.`
+}
 const notesOf = (command, files = FILES, opts) => createTerminal(files, opts).run(command).notes
 
 describe('a path failure sent to /dev/null is reported anyway', () => {
@@ -12,12 +16,10 @@ describe('a path failure sent to /dev/null is reported anyway', () => {
   // path just as completely; the status alone cannot tell the two apart.
   it('reads as a sentence', () => {
     assert.deepEqual(notesOf('cat f 2>/dev/null | head -30'),
-      ['stderr: a redirect discarded "cat: f: no such file or directory". ' +
-       'Nothing else in this run reports that path.'])
+      ['cat: no such file or directory: "f".'])
   })
 
   for (const [command, lines] of [
-    ['grep -rn a d1 d2 d3 2>/dev/null', ['grep: d2: no such file or directory', 'grep: d3: no such file or directory']],
     ['cat f 2>/dev/null | head -30', ['cat: f: no such file or directory']],
     ['ls dir/ 2>/dev/null | head -50', ['ls: dir/: no such file or directory']],
     ['cat sub 2>/dev/null', ['cat: sub: is a directory']],
@@ -34,6 +36,11 @@ describe('a path failure sent to /dev/null is reported anyway', () => {
   ]) {
     it(command, () => assert.deepEqual(notesOf(command), lines.map(hidden)))
   }
+
+  it('names every path one command failed the same way on, once', () => {
+    assert.deepEqual(notesOf('grep -rn a d1 d2 d3 2>/dev/null'),
+      ['grep: no such file or directory: "d2", "d3".'])
+  })
 
   it('reports a repeated failure once', () => {
     assert.deepEqual(notesOf('cat nope 2>/dev/null; cat nope 2>/dev/null'),
