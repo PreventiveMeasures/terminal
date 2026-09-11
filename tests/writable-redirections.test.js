@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
 const FILES = { 'a.txt': 'alpha\nbeta\nalpha\n', 'b.txt': 'gamma\n' }
-const expected = (stdout = '', exitCode = 0, stderr = '', unsupported = [], cwd = '/') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported })
+const expected = (stdout = '', exitCode = 0, stderr = '', unsupported = [], cwd = '/src') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported })
 const terminal = () => createTerminal(FILES, { mount: '/src/', writable: '/tmp/' })
 
 describe('writable tmp output redirection', () => {
@@ -19,8 +19,8 @@ describe('writable tmp output redirection', () => {
     ['false >/tmp/out; echo $?; cat /tmp/out', '1\n'],
     ['false && echo skipped >/tmp/out; test -f /tmp/out; echo $?', '1\n'],
     ['true || echo skipped >/tmp/out; test -f /tmp/out; echo $?', '1\n'],
-    ['grep alpha src/a.txt >/tmp/out; cat /tmp/out', 'alpha\nalpha\n'],
-    ['grep alpha src/a.txt | sort | uniq >/tmp/out; cat /tmp/out', 'alpha\n'],
+    ['grep alpha /src/a.txt >/tmp/out; cat /tmp/out', 'alpha\nalpha\n'],
+    ['grep alpha /src/a.txt | sort | uniq >/tmp/out; cat /tmp/out', 'alpha\n'],
     ['printf data | cat >/tmp/out; cat /tmp/out', 'data'],
     ['printf data >/tmp/out | cat; cat /tmp/out', 'data'],
     ['echo data >/tmp/out; cat </tmp/out | sed s/data/read/', 'read\n'],
@@ -44,10 +44,10 @@ describe('writable tmp output redirection', () => {
   })
   it('output survives across run calls and stays separate from source files', () => {
     const t = terminal()
-    assert.deepEqual(t.run('cat src/a.txt >/tmp/out'), expected())
+    assert.deepEqual(t.run('cat /src/a.txt >/tmp/out'), expected())
     assert.deepEqual(t.run('echo tail >>/tmp/out'), expected())
     assert.deepEqual(t.run('cat /tmp/out'), expected(FILES['a.txt'] + 'tail\n'))
-    assert.deepEqual(t.run('cat src/a.txt'), expected(FILES['a.txt']))
+    assert.deepEqual(t.run('cat /src/a.txt'), expected(FILES['a.txt']))
     assert.deepEqual(FILES, { 'a.txt': 'alpha\nbeta\nalpha\n', 'b.txt': 'gamma\n' })
   })
 })
@@ -95,11 +95,11 @@ describe('writable redirect failures remain ordinary or unsupported as appropria
   })
   it('read-only source files still refuse writes with diagnostics', () => {
     const t = terminal()
-    const result = t.run('echo before; echo bad >src/a.txt')
+    const result = t.run('echo before; echo bad >/src/a.txt')
     assert.equal(result.stdout, 'before\n')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['>'])
-    assert.deepEqual(t.run('cat src/a.txt'), expected(FILES['a.txt']))
+    assert.deepEqual(t.run('cat /src/a.txt'), expected(FILES['a.txt']))
   })
   it('unsupported command diagnostics survive writing stderr to a file', () => {
     const t = terminal()
@@ -122,7 +122,7 @@ describe('streaming commands cannot silently consume their own new output', () =
   for (const reader of ['head -n 10', 'grep alpha', 'egrep alpha', 'fgrep alpha', "sed -n p", "awk '{print}'"]) {
     it(reader, () => {
       const t = terminal()
-      t.run('cat src/a.txt >/tmp/out')
+      t.run('cat /src/a.txt >/tmp/out')
       const result = t.run(`${reader} /tmp/out >>/tmp/out`)
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 1)
@@ -132,14 +132,14 @@ describe('streaming commands cannot silently consume their own new output', () =
   }
   it('a consumed redirected input receives the same explicit diagnostic', () => {
     const t = terminal()
-    t.run('cat src/a.txt >/tmp/out')
+    t.run('cat /src/a.txt >/tmp/out')
     const result = t.run('head </tmp/out >>/tmp/out')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['streaming self-output'])
   })
   it('no-output readers retain their normal status', () => {
     const t = terminal()
-    t.run('cat src/a.txt >/tmp/out')
+    t.run('cat /src/a.txt >/tmp/out')
     assert.deepEqual(t.run('grep -q alpha /tmp/out >>/tmp/out'), expected())
     assert.deepEqual(t.run('head -n 0 /tmp/out >>/tmp/out'), { ...expected(), notes: ['head: selected 0 of 3 lines from "/tmp/out".'] })
     assert.deepEqual(t.run('grep absent /tmp/out >>/tmp/out'), expected('', 1))

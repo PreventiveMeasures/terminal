@@ -19,10 +19,11 @@ describe('createTerminal source mount', () => {
   for (const [name, sources] of [['Object', SOURCES], ['Map', new Map(Object.entries(SOURCES))]]) {
     it(`mounts every ${name} source beneath the configured path`, () => {
       const t = createTerminal(sources, { mount: '/workspace' })
-      assert.equal(t.cwd(), '/')
+      assert.equal(t.cwd(), '/workspace')
       check(t, 'ls /', 'workspace\n')
       check(t, 'cat /workspace/README.md /workspace/src/a.js', 'readme\nalpha\n')
-      check(t, 'echo $HOME ~', '/ /\n')
+      check(t, 'cat README.md src/a.js', 'readme\nalpha\n')
+      check(t, 'echo $HOME ~', '/workspace /workspace\n')
       const missing = t.run('cat /README.md')
       assert.equal(missing.stdout, '')
       assert.notEqual(missing.exitCode, 0)
@@ -43,7 +44,7 @@ describe('createTerminal source mount', () => {
       const t = createTerminal({ f: 'content' }, { mount })
       const file = expected === '/' ? '/f' : expected + '/f'
       check(t, `cat ${file}`, 'content')
-      assert.equal(t.cwd(), '/')
+      assert.equal(t.cwd(), expected)
     })
   }
 
@@ -70,7 +71,15 @@ describe('createTerminal source mount', () => {
     })
   }
 
-  it('leaves cwd independent of mount and home defaults', () => {
+  it('starts cwd and home at the mount, and lets either be set on its own', () => {
+    const t = createTerminal(SOURCES, { mount: '/workspace' })
+    check(t, 'pwd; echo ~ $HOME; cat README.md', '/workspace\n/workspace /workspace\nreadme\n')
+    // Either option still overrides the mount it would otherwise follow.
+    check(createTerminal(SOURCES, { mount: '/workspace', cwd: '/' }), 'pwd; echo ~', '/\n/workspace\n', '/')
+    check(createTerminal(SOURCES, { mount: '/workspace', home: '/' }), 'pwd; echo ~', '/workspace\n/\n', '/workspace')
+  })
+
+  it('leaves an explicit cwd and home independent of each other', () => {
     const t = terminal({ cwd: '/workspace/src' })
     check(t, 'pwd; echo $HOME; cat a.js', '/workspace/src\n/workspace/home\nalpha\n')
     check(t, 'cd ..; pwd; cat README.md', '/workspace\nreadme\n', '/workspace')
@@ -81,7 +90,7 @@ describe('createTerminal source mount', () => {
   it('retains existing root file and directory collision behavior at the mount', () => {
     const t = createTerminal({ '/': 'mounted root', child: 'child' }, { mount: '/workspace' })
     assert.deepEqual(t.run('cat /workspace /workspace/child'), {
-      stdout: 'child', stderr: 'cat: /workspace: is a directory\n', exitCode: 1, cwd: '/', notes: [], unsupported: [],
+      stdout: 'child', stderr: 'cat: /workspace: is a directory\n', exitCode: 1, cwd: '/workspace', notes: [], unsupported: [],
     })
     check(t, 'cd /workspace; pwd', '/workspace\n', '/workspace')
   })
@@ -285,5 +294,18 @@ describe('mount and home option validation', () => {
   it('undefined options keep their defaults', () => {
     const t = createTerminal(SOURCES, { mount: undefined, home: undefined })
     check(t, 'pwd; echo ~ $HOME; cat README.md', '/\n/ /\nreadme\n')
+    check(createTerminal(SOURCES, { mount: '/workspace', cwd: undefined, home: undefined }),
+      'pwd; echo ~ $HOME; cat README.md', '/workspace\n/workspace /workspace\nreadme\n')
+  })
+
+  // Starting outside the mount leaves every relative path and `~` pointing at a
+  // directory holding nothing but the mount, which is why neither defaults to it.
+  it('reaches the sources by their plain names wherever the mount is', () => {
+    for (const mount of ['/', '/repo', '/deep/nested/tree', '/work [x]']) {
+      const t = createTerminal(SOURCES, { mount })
+      check(t, 'cat README.md; cat src/a.js; ls src', 'readme\nalpha\na.js\nb.js\n')
+      check(t, 'cd; pwd', (mount === '/' ? '/' : mount) + '\n', mount === '/' ? '/' : mount)
+      assert.deepEqual(t.run('cat README.md').notes, [])
+    }
   })
 })

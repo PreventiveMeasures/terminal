@@ -142,7 +142,7 @@ describe('head and tail notes preserve streams, errors and nested invocations', 
 
   it('uses a known writable input handle path for redirected stdin', () => {
     const terminal = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
-    assert.deepEqual(terminal.run("printf 'one\\ntwo\\n' >/tmp/file; head -n1 </tmp/file"), expected('one\n', [note('head', 1, 2, '/tmp/file')]))
+    assert.deepEqual(terminal.run("printf 'one\\ntwo\\n' >/tmp/file; head -n1 </tmp/file"), expected('one\n', [note('head', 1, 2, '/tmp/file')], { cwd: '/repo' }))
   })
 
   it('keeps notes for successful operands beside ordinary input failures', () => {

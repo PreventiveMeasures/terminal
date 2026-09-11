@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 // later w opens. execute.c reports input errors before opening later files.
 // https://github.com/mirror/sed/blob/v4.9/sed/compile.c
 // https://github.com/mirror/sed/blob/v4.9/sed/execute.c
-const result = (stdout = '', exitCode = 0, stderr = '', cwd = '/') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported: [] })
+const result = (stdout = '', exitCode = 0, stderr = '', cwd = '/src') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported: [] })
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const terminal = () => createTerminal({ input: 'a\nb\n', single: 'a\n' }, { mount: '/src/', writable: '/tmp/' })
 const diagnostic = 'sed: /tmp/missing: no such file or directory\n'

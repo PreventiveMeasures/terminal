@@ -9,6 +9,8 @@ import { createTerminal } from '@preventive/terminal'
 // https://github.com/coreutils/coreutils/blob/v9.11/src/remove.c
 // https://github.com/coreutils/gnulib/blob/master/lib/quotearg.c
 const result = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
+// A writable overlay needs a mount away from `/`, and cwd follows the mount.
+const mounted = (...args) => ({ ...result(...args), cwd: '/src' })
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const writable = (files = {}) => createTerminal(files, { mount: '/src/', writable: '/tmp/' })
 
@@ -94,8 +96,8 @@ describe('base64 descriptor and option boundaries', () => {
   })
   it('preserves partial output and ordinary errors in separate files', () => {
     const t = writable({ input: 'Zm9v!' })
-    assert.deepEqual(t.run('base64 -d /src/input >/tmp/out 2>/tmp/error'), result('', 1))
-    assert.deepEqual(t.run('cat /tmp/out /tmp/error'), result('foobase64: invalid input\n'))
+    assert.deepEqual(t.run('base64 -d /src/input >/tmp/out 2>/tmp/error'), mounted('', 1))
+    assert.deepEqual(t.run('cat /tmp/out /tmp/error'), mounted('foobase64: invalid input\n'))
   })
   it('retains a recoverable invalid-input prefix through a successful pipeline', () => {
     assert.deepEqual(createTerminal({ input: 'Zm9v!' }).run('base64 -d input 2>/dev/null | cat'), result('foo'))
@@ -107,7 +109,7 @@ describe('base64 descriptor and option boundaries', () => {
     assert.equal(actual.stdout, '')
     assert.equal(actual.exitCode, 1)
     assert.deepEqual(actual.unsupported.map(({ detail }) => detail), ['streaming self-output'])
-    assert.deepEqual(t.run('cat /tmp/input'), result('foo'))
+    assert.deepEqual(t.run('cat /tmp/input'), mounted('foo'))
   })
 })
 
@@ -128,13 +130,13 @@ describe('rm quotes complete filenames in success and error output', () => {
     it(JSON.stringify(name), () => {
       const t = writable()
       const path = quote('/tmp/' + name)
-      assert.deepEqual(t.run(`>${path}; rm -v ${path}`), result(`removed ${shown}\n`))
-      assert.deepEqual(t.run(`rm ${path}`), result('', 1, `rm: cannot remove ${shown}: No such file or directory\n`))
+      assert.deepEqual(t.run(`>${path}; rm -v ${path}`), mounted(`removed ${shown}\n`))
+      assert.deepEqual(t.run(`rm ${path}`), mounted('', 1, `rm: cannot remove ${shown}: No such file or directory\n`))
     })
   }
   it('uses byte escapes for Unicode under the C locale', () => {
     const t = writable()
-    assert.deepEqual(t.run("echo data >/tmp/é; LC_ALL=C rm -v /tmp/é"), result("removed '/tmp/'$'\\303\\251'\n"))
+    assert.deepEqual(t.run("echo data >/tmp/é; LC_ALL=C rm -v /tmp/é"), mounted("removed '/tmp/'$'\\303\\251'\n"))
   })
   it('diagnoses nonprinting Unicode quoting before deleting a verbose operand', () => {
     const t = writable()
@@ -144,33 +146,33 @@ describe('rm quotes complete filenames in success and error output', () => {
     assert.equal(actual.stdout, '')
     assert.equal(actual.exitCode, 0)
     assert.deepEqual(actual.unsupported.map(({ detail }) => detail), ['filename quoting'])
-    assert.deepEqual(t.run(`test -f ${path}`), result())
-    assert.deepEqual(t.run(`rm ${path}`), result())
+    assert.deepEqual(t.run(`test -f ${path}`), mounted())
+    assert.deepEqual(t.run(`rm ${path}`), mounted())
   })
 })
 
 describe('rm effects respect descriptor and input lifetime', () => {
   it('does not consume inherited stdin', () => {
     const t = writable({ input: 'foo' })
-    assert.deepEqual(t.run('>/tmp/file; cat /src/input | { rm /tmp/file; cat; }'), result('foo'))
+    assert.deepEqual(t.run('>/tmp/file; cat /src/input | { rm /tmp/file; cat; }'), mounted('foo'))
   })
   it('does not resurrect a removed diagnostic target', () => {
     const t = writable()
-    assert.deepEqual(t.run('rm /tmp/log /tmp/missing 2>/tmp/log; test -f /tmp/log'), result('', 1))
+    assert.deepEqual(t.run('rm /tmp/log /tmp/missing 2>/tmp/log; test -f /tmp/log'), mounted('', 1))
   })
   it('supports recreated filenames while the previous output inode remains open', () => {
     const t = writable()
-    assert.deepEqual(t.run('{ rm /tmp/log; printf new >/tmp/log; echo old; } >/tmp/log; cat /tmp/log'), result('new'))
+    assert.deepEqual(t.run('{ rm /tmp/log; printf new >/tmp/log; echo old; } >/tmp/log; cat /tmp/log'), mounted('new'))
   })
   it('honors the option terminator for filenames named after flags', () => {
     const t = writable()
-    assert.deepEqual(t.run('>/tmp/-f; >/tmp/--verbose; rm -- /tmp/-f /tmp/--verbose; ls /tmp'), result())
+    assert.deepEqual(t.run('>/tmp/-f; >/tmp/--verbose; rm -- /tmp/-f /tmp/--verbose; ls /tmp'), mounted())
   })
   it('unknown option modes cannot partially delete earlier operands', () => {
     const t = writable()
     t.run('>/tmp/file')
     const actual = t.run('rm /tmp/file -iv 2>/dev/null | cat')
     assert.deepEqual(actual.unsupported.map(({ detail }) => detail), ['-i'])
-    assert.deepEqual(t.run('test -f /tmp/file'), result())
+    assert.deepEqual(t.run('test -f /tmp/file'), mounted())
   })
 })

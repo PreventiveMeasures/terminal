@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 // strings and heredoc bodies retain their own continuation rules.
 const continuation = '\\\n'
 const terminal = () => createTerminal({ input: 'source\n' }, { mount: '/repo', writable: '/tmp/' })
-const expected = (stdout, stderr = '', exitCode = 0) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
+const expected = (stdout, stderr = '', exitCode = 0) => ({ stdout, stderr, exitCode, cwd: '/repo', notes: [], unsupported: [] })
 
 function insertContinuations(operator) {
   return [...operator].join(continuation)

@@ -5,7 +5,7 @@ import { createTerminal } from '@preventive/terminal'
 // GNU closedown renames the original to its backup, then installs the
 // temporary output. Existing descriptors keep their original inode.
 // https://github.com/mirror/sed/blob/v4.9/sed/execute.c
-const result = (stdout = '', exitCode = 0, stderr = '', cwd = '/') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported: [] })
+const result = (stdout = '', exitCode = 0, stderr = '', cwd = '/src') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported: [] })
 const setup = () => {
   const terminal = createTerminal({}, { mount: '/src/', writable: '/tmp/' })
   assert.deepEqual(terminal.run('printf aa >/tmp/a; printf stale >/tmp/a.bak'), result())

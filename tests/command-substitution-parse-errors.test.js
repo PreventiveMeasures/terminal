@@ -6,6 +6,8 @@ import { createTerminal } from '@preventive/terminal'
 // unit. report_syntax_error sets EX_BADUSAGE (2), and parse_comsub aborts it.
 // eval.c's reader_loop executes earlier complete input units independently.
 const expected = (stdout, exitCode = 0) => ({ stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
+// A writable overlay needs a mount away from `/`, and cwd follows the mount.
+const mounted = (...args) => ({ ...expected(...args), cwd: '/repo' })
 
 function syntaxError(result, stdout = '') {
   assert.equal(result.stdout, stdout)
@@ -73,7 +75,7 @@ describe('literal command-substitution syntax errors abort outer parsing', () =>
     const terminal = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
     terminal.run('printf original >/tmp/output')
     syntaxError(terminal.run('echo "$(printf changed >/tmp/output)" "$(if true)" >/tmp/output'))
-    assert.deepEqual(terminal.run('cat /tmp/output'), expected('original'))
+    assert.deepEqual(terminal.run('cat /tmp/output'), mounted('original'))
   })
 })
 
@@ -93,7 +95,7 @@ describe('substitution parse errors preserve earlier complete input units', () =
     const command = 'printf kept >/tmp/output; probe before\nprintf lost >/tmp/output; probe "$(if true)"\nprobe after'
     syntaxError(terminal.run(command), 'before\n')
     assert.deepEqual(calls, [['before']])
-    assert.deepEqual(terminal.run('cat /tmp/output'), expected('kept'))
+    assert.deepEqual(terminal.run('cat /tmp/output'), mounted('kept'))
   })
 
   it('resumes normally on a new run after the rejected input', () => {

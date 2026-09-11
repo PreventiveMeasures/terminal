@@ -6,7 +6,7 @@ import { writableFs } from '../src/writable.js'
 
 // GNU remove.c defines -f's ignorable missing errors and -v's per-file output.
 // https://github.com/coreutils/coreutils/blob/master/src/remove.c
-const result = (stdout = '', exitCode = 0, stderr = '', cwd = '/') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported: [] })
+const result = (stdout = '', exitCode = 0, stderr = '', cwd = '/src') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported: [] })
 const makeTerminal = () => createTerminal({ source: 'original\n' }, { mount: '/src/', writable: '/tmp/' })
 const setup = () => {
   const terminal = makeTerminal()
@@ -119,10 +119,11 @@ describe('rm failures preserve filesystem state', () => {
     })
   }
   it('reports ordinary read-only failures when writable storage is absent', () => {
+    // No mount, so this terminal starts at the root rather than at /src.
     const terminal = createTerminal({ 'tmp/file': 'original' })
-    assert.deepEqual(terminal.run('rm /tmp/file'), result('', 1, "rm: cannot remove '/tmp/file': Read-only file system\n"))
-    assert.deepEqual(terminal.run('rm /tmp/file 2>/dev/null | cat'), result())
-    assert.deepEqual(terminal.run('cat /tmp/file'), result('original'))
+    assert.deepEqual(terminal.run('rm /tmp/file'), result('', 1, "rm: cannot remove '/tmp/file': Read-only file system\n", '/'))
+    assert.deepEqual(terminal.run('rm /tmp/file 2>/dev/null | cat'), result('', 0, '', '/'))
+    assert.deepEqual(terminal.run('cat /tmp/file'), result('original', 0, '', '/'))
   })
   it('writes ordinary errors through stderr redirection', () => {
     const terminal = setup()

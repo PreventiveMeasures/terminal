@@ -3,6 +3,8 @@ import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
 const result = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
+// A writable overlay needs a mount away from `/`, and cwd follows the mount.
+const mounted = (...args) => ({ ...result(...args), cwd: '/src' })
 const writeError = (name) => `${name}: write error: Bad file descriptor\n`
 const setup = () => createTerminal({ input: 'a\nb\n' })
 
@@ -52,8 +54,8 @@ describe('nested commands report their own closed-output failures', () => {
   })
   it('routes each child error into the enclosing stderr file', () => {
     const t = createTerminal({ input: 'a\n' }, { mount: '/src/', writable: '/tmp/' })
-    assert.deepEqual(t.run('find /src/input -exec echo {} \\; 1>&- 2>/tmp/errors'), result())
-    assert.deepEqual(t.run('cat /tmp/errors'), result(writeError('echo')))
+    assert.deepEqual(t.run('find /src/input -exec echo {} \\; 1>&- 2>/tmp/errors'), mounted())
+    assert.deepEqual(t.run('cat /tmp/errors'), mounted(writeError('echo')))
   })
 })
 

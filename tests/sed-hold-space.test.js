@@ -7,6 +7,8 @@ import { createTerminal } from '@preventive/terminal'
 // https://github.com/mirror/sed/blob/v4.9/sed/execute.c
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const result = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+// A writable overlay needs a mount away from `/`, and cwd follows the mount.
+const mounted = (...args) => ({ ...result(...args), cwd: '/src' })
 const run = (script, input, flags = '') => createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
 
 describe('sed hold commands copy, append, and exchange complete records', () => {
@@ -103,14 +105,14 @@ describe('sed hold state is local to one invocation and respects separate files'
   it('resets hold contents when files are edited in place', () => {
     const t = createTerminal({}, { mount: '/src/', writable: '/tmp/' })
     t.run("printf 'a\\n' >/tmp/first; printf 'b\\n' >/tmp/second")
-    assert.deepEqual(t.run("sed -i '1x' /tmp/first /tmp/second"), result())
-    assert.deepEqual(t.run('cat /tmp/first /tmp/second'), result('\n\n'))
+    assert.deepEqual(t.run("sed -i '1x' /tmp/first /tmp/second"), mounted())
+    assert.deepEqual(t.run('cat /tmp/first /tmp/second'), mounted('\n\n'))
   })
   it('preserves the hold terminator across separate in-place executions', () => {
     const t = createTerminal({}, { mount: '/src/', writable: '/tmp/' })
     t.run("printf one >/tmp/first; printf 'two\\n' >/tmp/second")
-    assert.deepEqual(t.run("sed -i '/one/h;/two/{g;s/^/X/}' /tmp/first /tmp/second"), result())
-    assert.deepEqual(t.run('cat /tmp/first /tmp/second'), result('oneX'))
+    assert.deepEqual(t.run("sed -i '/one/h;/two/{g;s/^/X/}' /tmp/first /tmp/second"), mounted())
+    assert.deepEqual(t.run('cat /tmp/first /tmp/second'), mounted('oneX'))
   })
   it('starts with fresh hold contents and terminator in the next invocation', () => {
     const t = createTerminal({ input: 'a' })

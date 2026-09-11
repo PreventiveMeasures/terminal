@@ -7,6 +7,8 @@ import { createTerminal } from '@preventive/terminal'
 // https://github.com/mirror/sed/blob/v4.9/sed/execute.c
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const result = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+// A writable overlay needs a mount away from `/`, and cwd follows the mount.
+const mounted = (...args) => ({ ...result(...args), cwd: '/src' })
 const run = (script, input, flags = '') => createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
 
 describe('sed D deletes through the first pattern-space delimiter', () => {
@@ -64,8 +66,8 @@ describe('sed D restarts preserve pending text and substitution state', () => {
   })
   it('can write the remaining pattern space with standalone w', () => {
     const t = createTerminal({ input: 'a\nb' }, { mount: '/src/', writable: '/tmp/' })
-    assert.deepEqual(t.run("sed -n '/^a/{N;D};w /tmp/out' /src/input"), result())
-    assert.deepEqual(t.run('cat /tmp/out'), result('b'))
+    assert.deepEqual(t.run("sed -n '/^a/{N;D};w /tmp/out' /src/input"), mounted())
+    assert.deepEqual(t.run('cat /tmp/out'), mounted('b'))
   })
 })
 
@@ -81,8 +83,8 @@ describe('sed D participates in separate and in-place input cycles', () => {
   it('writes only surviving output when editing files in place', () => {
     const t = createTerminal({}, { mount: '/src/', writable: '/tmp/' })
     t.run("printf 'a\\nb\\n' >/tmp/input")
-    assert.deepEqual(t.run("sed -i '/^a/{N;D}' /tmp/input"), result())
-    assert.deepEqual(t.run('cat /tmp/input'), result('b\n'))
+    assert.deepEqual(t.run("sed -i '/^a/{N;D}' /tmp/input"), mounted())
+    assert.deepEqual(t.run('cat /tmp/input'), mounted('b\n'))
   })
   it('reports bounded execution when restart continually restores the deleted text', () => {
     const actual = run('h;G;D', 'a\n', '-n')

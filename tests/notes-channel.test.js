@@ -154,7 +154,7 @@ describe('notes use absolute filesystem paths and isolated run storage', () => {
   it('includes hidden files from the writable overlay', () => {
     const terminal = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
     const result = terminal.run('printf hidden >/tmp/.hidden; printf visible >/tmp/visible; ls /tmp')
-    assert.deepEqual(result, expected('visible\n', [noteFor(['/tmp/.hidden'])]))
+    assert.deepEqual(result, expected('visible\n', [noteFor(['/tmp/.hidden'])], { cwd: '/repo' }))
   })
 
   it('freezes note arrays and resets them for each run and terminal', () => {

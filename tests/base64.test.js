@@ -8,6 +8,8 @@ import { createTerminal } from '@preventive/terminal'
 // https://github.com/coreutils/coreutils/blob/v9.11/src/basenc.c
 // https://github.com/coreutils/gnulib/blob/master/lib/base64.c
 const expected = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
+// A writable overlay needs a mount away from `/`, and cwd follows the mount.
+const mounted = (...args) => ({ ...expected(...args), cwd: '/src' })
 const vectors = [
   ['', ''], ['f', 'Zg=='], ['fo', 'Zm8='], ['foo', 'Zm9v'],
   ['foob', 'Zm9vYg=='], ['fooba', 'Zm9vYmE='], ['foobar', 'Zm9vYmFy'],
@@ -39,7 +41,7 @@ describe('base64 standard text and byte encoding', () => {
   })
   it('stores encoded and decoded files entirely in the virtual filesystem', () => {
     const t = createTerminal({ input: '{"ok":true}\n' }, { mount: '/src/', writable: '/tmp/' })
-    assert.deepEqual(t.run('base64 /src/input >/tmp/data; base64 -d /tmp/data >/tmp/plain; cat /tmp/plain'), expected('{"ok":true}\n'))
+    assert.deepEqual(t.run('base64 /src/input >/tmp/data; base64 -d /tmp/data >/tmp/plain; cat /tmp/plain'), mounted('{"ok":true}\n'))
   })
 })
 

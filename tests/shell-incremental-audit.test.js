@@ -14,7 +14,7 @@ function terminal() {
   return { calls, shell }
 }
 
-const expected = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+const expected = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/repo', notes: [], unsupported: [] })
 
 function syntaxFailure(result, stdout) {
   assert.equal(result.stdout, stdout)

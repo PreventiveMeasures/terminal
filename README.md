@@ -48,11 +48,11 @@ terminal.run('shopt -s nullglob').unsupported
 ## Writing
 
 Sources are read-only. Pass `writable: '/tmp/'` for a scratch overlay; the mount
-must live outside it.
+must live outside it. Sources mount at `/` unless `mount` says otherwise, and
+`cwd` and `home` start there too unless set on their own.
 
 ```js
-const terminal = createTerminal({ input: 'b\na\n' },
-  { mount: '/repo', cwd: '/repo', writable: '/tmp/' })
+const terminal = createTerminal({ input: 'b\na\n' }, { mount: '/repo', writable: '/tmp/' })
 
 terminal.run('sort input > /tmp/out; cat /tmp/out').stdout  // 'a\nb\n'
 terminal.run('echo x > out').exitCode                       // 1, and `>` refuses on the feed

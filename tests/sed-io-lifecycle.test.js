@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
-const result = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+const result = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/src', notes: [], unsupported: [] })
 const terminal = () => createTerminal({ single: 'a\n' }, { mount: '/src/', writable: '/tmp/' })
 
 describe('sed releases fully buffered scripts and completed input descriptors', () => {

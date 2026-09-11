@@ -9,6 +9,8 @@ import { createTerminal } from '@preventive/terminal'
 // https://github.com/mirror/sed/blob/v4.9/sed/regexp.c
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const expected = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
+// A writable overlay needs a mount away from `/`, and cwd follows the mount.
+const mounted = (...args) => ({ ...expected(...args), cwd: '/src' })
 const run = (script, input, flags = '') => createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
 
 describe('sed case-insensitive substitution flags', () => {
@@ -52,8 +54,8 @@ describe('sed case-insensitive substitution flags', () => {
 
   it('writes once per successful case-insensitive substitution', () => {
     const t = createTerminal({ input: 'AaA\nb\n' }, { mount: '/src/', writable: '/tmp/' })
-    assert.deepEqual(t.run("sed -n 's/a/X/Igpw /tmp/out' /src/input"), expected('XXX\n'))
-    assert.deepEqual(t.run('cat /tmp/out'), expected('XXX\n'))
+    assert.deepEqual(t.run("sed -n 's/a/X/Igpw /tmp/out' /src/input"), mounted('XXX\n'))
+    assert.deepEqual(t.run('cat /tmp/out'), mounted('XXX\n'))
   })
 })
 
@@ -85,9 +87,9 @@ describe('sed regex flag errors and engine limitations', () => {
 
   it('opens w targets before rejecting modifiers on an empty regex', () => {
     const t = createTerminal({ input: 'a\n' }, { mount: '/src/', writable: '/tmp/' })
-    assert.deepEqual(t.run('printf old >/tmp/out'), expected())
-    assert.deepEqual(t.run("sed 's//X/Iw /tmp/out' /src/input"), expected('', 1, 'sed: cannot specify modifiers on empty regexp\n'))
-    assert.deepEqual(t.run('cat /tmp/out'), expected())
+    assert.deepEqual(t.run('printf old >/tmp/out'), mounted())
+    assert.deepEqual(t.run("sed 's//X/Iw /tmp/out' /src/input"), mounted('', 1, 'sed: cannot specify modifiers on empty regexp\n'))
+    assert.deepEqual(t.run('cat /tmp/out'), mounted())
   })
 
   it('reports invalid flags before checking whether the regex is empty', () => {
