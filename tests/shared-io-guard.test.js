@@ -7,7 +7,7 @@ import { routeOutput } from '../src/shell/output.js'
 import { unsupportedNote } from '../src/unsupported.js'
 
 const options = { mount: '/repo', writable: '/tmp/' }
-const expected = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+const expected = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/repo', notes: [], unsupported: [] })
 
 function setup() {
   const { fs } = mountSources({}, options)

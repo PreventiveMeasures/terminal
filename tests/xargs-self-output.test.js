@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
-const result = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
+const result = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/src', notes: [], unsupported: [] })
 const setup = (input = 'hello\nworld\n') => {
   const terminal = createTerminal({ input }, { mount: '/src/', writable: '/tmp/' })
   assert.deepEqual(terminal.run('cat /src/input >/tmp/args'), result())

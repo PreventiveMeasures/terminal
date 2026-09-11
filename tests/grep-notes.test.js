@@ -68,7 +68,7 @@ describe('grep notes identify actual binary input skips', () => {
   it('attributes redirected writable input to its known absolute path', () => {
     const terminal = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
     const result = terminal.run("printf 'hit\\0tail\\n' >/tmp/binary; grep -I hit </tmp/binary")
-    assert.deepEqual(result, expected('', [binaryNote(['/tmp/binary'])], { exitCode: 1 }))
+    assert.deepEqual(result, expected('', [binaryNote(['/tmp/binary'])], { exitCode: 1, cwd: '/repo' }))
   })
 
   it('deduplicates actual file aliases and retains normal count output', () => {
@@ -103,7 +103,7 @@ describe('grep notes identify entries omitted by filename and directory filters'
 
   it('reports empty directories actually excluded during recursion', () => {
     const result = createTerminal({}, { mount: '/empty' }).run('grep -r hit / --exclude-dir=empty')
-    assert.deepEqual(result, expected('', [excludedNote(['/empty'])], { exitCode: 1 }))
+    assert.deepEqual(result, expected('', [excludedNote(['/empty'])], { exitCode: 1, cwd: '/empty' }))
   })
 
   it('preserves named start-directory trailing-slash matching rules', () => {

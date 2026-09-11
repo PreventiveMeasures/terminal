@@ -147,7 +147,7 @@ describe('find depth omission notes', () => {
   })
 
   it('ignores empty frontier directories and an empty root', () => {
-    assert.deepEqual(createTerminal({}, { mount: '/empty' }).run('find empty -maxdepth 0').notes, [])
+    assert.deepEqual(createTerminal({}, { mount: '/empty' }).run('find /empty -maxdepth 0').notes, [])
     check('find . -maxdepth 0', [], {})
   })
 

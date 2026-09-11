@@ -104,8 +104,9 @@ describe('cwd alternatives use real filesystem lookups', () => {
     assert.deepEqual(result.notes, [note('cat', 'src/file', ['/src/file'], '/sub')])
   })
 
-  it('finds mount-relative paths from the initial root cwd', () => {
-    const result = createTerminal(SOURCES, { mount: '/repo' }).run('cat file')
+  it('finds mount-relative paths from a cwd set outside the mount', () => {
+    // cwd follows the mount by default, so reaching this needs it set apart.
+    const result = createTerminal(SOURCES, { mount: '/repo', cwd: '/' }).run('cat file')
     assert.deepEqual(result.notes, [note('cat', 'file', ['/repo/file'], '/')])
   })
 

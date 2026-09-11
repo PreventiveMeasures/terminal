@@ -205,7 +205,7 @@ describe('pathname notes survive shell execution and remain scoped per run', () 
   it('sees omissions in the writable overlay', () => {
     const terminal = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
     const result = terminal.run('printf hidden >/tmp/.hidden; printf visible >/tmp/visible; printf "%s\\n" /tmp/*')
-    assert.deepEqual(result, expected('/tmp/visible\n', [omission('/tmp/*', ['/tmp/.hidden'])]))
+    assert.deepEqual(result, expected('/tmp/visible\n', [omission('/tmp/*', ['/tmp/.hidden'])], { cwd: '/repo' }))
   })
 
   it('freezes returned notes and resets them on later runs', () => {

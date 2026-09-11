@@ -7,6 +7,8 @@ import { createTerminal } from '@preventive/terminal'
 // https://github.com/mirror/sed/blob/v4.9/sed/execute.c
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const result = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+// A writable overlay needs a mount away from `/`, and cwd follows the mount.
+const mounted = (...args) => ({ ...result(...args), cwd: '/src' })
 const run = (script, input, flags = '-n') => createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
 
 describe('sed restart state survives addressed blocks and held pattern spaces', () => {
@@ -55,13 +57,13 @@ describe('sed writes do not change restart or substitution state', () => {
   it('writing a substituted pattern does not clear t after restoring held text', () => {
     const t = writable()
     const script = 'h;s/a/A/;w /tmp/out\ng;t yes;s/.*/BAD/;b;:yes;p;q'
-    assert.deepEqual(t.run(`sed -n ${quote(script)} /src/input`), result('a\n'))
-    assert.deepEqual(t.run('cat /tmp/out'), result('A\n'))
+    assert.deepEqual(t.run(`sed -n ${quote(script)} /src/input`), mounted('a\n'))
+    assert.deepEqual(t.run('cat /tmp/out'), mounted('A\n'))
   })
   it('writes a range only once when D revisits its numeric start line', () => {
     const t = writable()
     const script = '1N;2,2{w /tmp/out\nD};p'
-    assert.deepEqual(t.run(`sed -n ${quote(script)} /src/input`), result('b'))
-    assert.deepEqual(t.run('cat /tmp/out'), result('a\nb'))
+    assert.deepEqual(t.run(`sed -n ${quote(script)} /src/input`), mounted('b'))
+    assert.deepEqual(t.run('cat /tmp/out'), mounted('a\nb'))
   })
 })

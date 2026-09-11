@@ -116,9 +116,9 @@ export interface CreateTerminalOptions {
    */
   mount?: string
   /**
-   * Home path used by `~`, `$HOME`, and argumentless `cd`. Defaults to `/`;
-   * relative paths are resolved from `/`. Does not create a directory or
-   * change cwd. A shell assignment to `HOME` overrides this value.
+   * Home path used by `~`, `$HOME`, and argumentless `cd`. Defaults to the
+   * mount; relative paths are resolved from `/`. Does not create a directory
+   * or change cwd. A shell assignment to `HOME` overrides this value.
    */
   home?: string
   /**
@@ -130,7 +130,7 @@ export interface CreateTerminalOptions {
    * and changes to inherited input files reach the diagnostic channel.
    */
   writable?: '/tmp/' | false | undefined
-  /** Initial working directory. Normalized to an absolute path; defaults to `/`. */
+  /** Initial working directory. Normalized to an absolute path; defaults to the mount. */
   cwd?: string
   /** User name reported by `whoami`. Defaults to `'user'`. */
   user?: string

@@ -51,10 +51,10 @@ function main(argv) {
   // The overlay refuses a mount that would collide with it; the tree is the
   // point of the session, so keep it and report the overlay as unavailable.
   const writable = mount === '/' || mount === '/tmp' || mount.startsWith('/tmp/') ? false : '/tmp/'
-  // Home is the mounted directory: it is the only tree that exists here, so `~`
+  // cwd and home follow the mount, which is the only tree that exists here: `~`
   // always resolves, a bare `cd` returns to the root of it, and the prompt stays
   // short however deep the host path is.
-  const options = { mount, cwd: mount, home: mount, writable, user: safely(() => userInfo().username, 'user') }
+  const options = { mount, writable, user: safely(() => userInfo().username, 'user') }
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY)
   start({ terminal: createTerminal(tree.sources, options), tree, mount, home: mount, writable, interactive, exitCode: 0, closing: false })
 }

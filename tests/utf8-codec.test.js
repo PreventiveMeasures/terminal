@@ -10,6 +10,8 @@ import { unsupportedNote } from '../src/unsupported.js'
 const partialMessage = 'byte output that is not valid UTF-8 cannot be represented by this string-based terminal'
 const surrogateMessage = 'unpaired UTF-16 surrogates cannot be encoded as UTF-8'
 const result = (stdout = '', exitCode = 0, stderr = '', unsupported = [], notes = []) => ({ stdout, stderr, exitCode, cwd: '/', notes, unsupported })
+// A writable overlay needs a mount away from `/`, and cwd follows the mount.
+const mounted = (...args) => ({ ...result(...args), cwd: '/repo' })
 const vectors = [
   ['', []], ['\0', [0]], ['\u007F', [0x7F]], ['\u0080', [0xC2, 0x80]],
   ['\u07FF', [0xDF, 0xBF]], ['\u0800', [0xE0, 0xA0, 0x80]],
@@ -109,13 +111,13 @@ describe('loose encoding and strict file bytes retain their distinct contracts',
 
   it('does not corrupt a writable file when strict encoding rejects an append', () => {
     const t = createTerminal({ valid: '\uFEFFé😀', bad: '\uD800' }, { mount: '/repo', writable: '/tmp/' })
-    assert.deepEqual(t.run('cat /repo/valid >/tmp/file'), result())
+    assert.deepEqual(t.run('cat /repo/valid >/tmp/file'), mounted())
     const failed = t.run('cat /repo/bad >>/tmp/file 2>/dev/null | cat')
     assert.equal(failed.stdout, '')
     assert.equal(failed.stderr, '')
     assert.equal(failed.exitCode, 0)
     assert.deepEqual(failed.unsupported.map(({ detail }) => detail), ['unpaired surrogate'])
-    assert.deepEqual(t.run('cat /tmp/file'), result('\uFEFFé😀'))
+    assert.deepEqual(t.run('cat /tmp/file'), mounted('\uFEFFé😀'))
   })
 })
 
