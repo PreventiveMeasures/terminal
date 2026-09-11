@@ -43,50 +43,69 @@ export function hiddenEntryNotes() {
   }
 }
 
-// Chaining `&&` behind a command whose only product is a status is the idiom
-// rather than an oversight, so a gate those close goes unremarked. A search
-// asked for with -q is the same intent said with a flag.
-const STATUS_ONLY = new Set(['test', '[', 'true', 'false'])
-const SEARCHES = new Set(['grep', 'egrep', 'fgrep'])
-const QUIET = /^-[A-Za-z]*q/u
+// `2>/dev/null` is written to quiet expected noise, and it silences a missing
+// path just as completely: `grep -rn a d1 d2 d3 2>/dev/null` exits non-zero
+// whether the pattern was absent or `d2` never existed, and nothing in what
+// the caller can see tells the two apart. Notes survive redirects, so this is
+// the one channel that can still say it.
+const ACCESS_FAILURE = /(?:no such file or directory|not a directory|is a directory)$/iu
 
-export function gateBlame(argv) {
-  const [name, ...args] = argv
-  if (STATUS_ONLY.has(name)) return null
-  const search = SEARCHES.has(name)
-  return search && args.some((arg) => QUIET.test(arg)) ? null : { name, search }
+export function discardedStderr(ctx, text) {
+  for (const line of text.split('\n')) {
+    if (ACCESS_FAILURE.test(line)) ctx.discarded?.add(line)
+  }
 }
 
-// A failing command in an `&&` chain cancels what follows it. That is the
-// shell working as designed, and it is worth saying only where it actually
-// stopped work from happening: a search that found nothing, or a read of a
-// file that was not there, silently swallowing the commands the caller
-// chained behind it.
-// Tracks a run of steps an `&&` gate skipped, so one note can name both the
-// command that closed the gate and how much of the chain it cancelled.
-export function shortCircuitTracker(ctx) {
+// Emitted at the end of a run, once everything else the caller will see is
+// known: a diagnostic that reached stderr anyway, or a path another note
+// already accounts for, needs no second telling.
+export function discardedNotes(discarded, stderr, notes) {
+  return [...discarded].filter((line) => !stderr.includes(line) && !mentioned(notes, line))
+    .map((line) => `stderr: a redirect discarded ${JSON.stringify(line)}. Nothing else in this run reports that path.`)
+}
+
+// The operand sits between the command and the reason: `cat: a:b: is a
+// directory` names `a:b`, and `cp: cannot stat 'x': …` names `x`.
+function mentioned(notes, line) {
+  const middle = line.slice(line.indexOf(': ') + 2, line.lastIndexOf(': '))
+  const path = /'([^']*)'$/u.exec(middle)?.[1] ?? middle
+  return [...notes].some((note) => note.includes(JSON.stringify(path)))
+}
+
+// A failing command in an `&&` chain cancels what follows it. That is the shell
+// working as designed, and it is worth saying only where it actually stopped
+// work from happening: a search that found nothing, or a read of a file that
+// was not there, silently swallowing the commands chained behind it.
+// A command refused as unsupported is blamed like any other: the diagnostic
+// feed says the feature is missing, and only this says the rest of the chain
+// went with it.
+export function gateBlame(role, name) {
+  return role === 'status' ? null : { name, search: role === 'search' }
+}
+
+// Steps an `&&` gate skipped, reported once the run of them ends. Built only
+// once a gate has actually closed, so a chain that ran to the end costs
+// nothing.
+export function gateTracker() {
   let blame = null, skipped = 0
   return {
-    skip(exitCode) {
-      if (skipped === 0 && ctx.ranCommand) blame = { ...ctx.ranCommand, exitCode }
+    skip(candidate, exitCode) {
+      if (!skipped && candidate) blame = { ...candidate, exitCode }
       skipped++
     },
-    flush() {
-      if (skipped) shortCircuitNote(ctx.notes, blame, skipped)
+    flush(notes) {
+      if (skipped && blame) {
+        const commands = skipped === 1 ? 'the command' : `the ${skipped} commands`
+        // grep separates "found nothing" (1) from "went wrong" (2), and the
+        // first is the one callers chain behind without meaning to.
+        const search = blame.search && blame.exitCode === 1
+          ? ' A search that selects no lines exits 1, which is not a failure.' : ''
+        notes.add(`${blame.name}: exited ${blame.exitCode}, so ${commands} after && did not run.${search}`)
+      }
       blame = null
       skipped = 0
     },
   }
-}
-
-function shortCircuitNote(notes, blame, skipped) {
-  if (!blame) return
-  const commands = skipped === 1 ? 'the command' : `the ${skipped} commands`
-  // grep separates "found nothing" (1) from "went wrong" (2), and the first
-  // is the one callers chain behind without meaning to.
-  const search = blame.search && blame.exitCode === 1
-    ? ' A search that selects no lines exits 1, which is not a failure.' : ''
-  notes.add(`${blame.name}: exited ${blame.exitCode}, so ${commands} after && did not run.${search}`)
 }
 
 export function omissionNote(notes, options) {

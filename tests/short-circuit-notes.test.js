@@ -8,9 +8,18 @@ const note = (name, exitCode, skipped, search = false) =>
   `${name}: exited ${exitCode}, so ${skipped === 1 ? 'the command' : `the ${skipped} commands`} after && did not run.` +
   (search && exitCode === 1 ? ' A search that selects no lines exits 1, which is not a failure.' : '')
 
-const notesOf = (command, files = FILES) => createTerminal(files).run(command).notes
+const notesOf = (command) => createTerminal(FILES).run(command).notes
 
 describe('a failing command that cancels the rest of an && chain says so', () => {
+  // Spelled out once, so a change to the message has to be made here too.
+  it('reads as a sentence', () => {
+    assert.deepEqual(notesOf("grep -n -A 75 -B 15 'nope' a.txt && cat b.txt && cat c.txt"),
+      ['grep: exited 1, so the 2 commands after && did not run. ' +
+       'A search that selects no lines exits 1, which is not a failure.'])
+    assert.deepEqual(notesOf('cat missing.txt && cat b.txt'),
+      ['cat: exited 1, so the command after && did not run.'])
+  })
+
   for (const [command, expected] of [
     // The three shapes this was reported for: a search that found nothing, a
     // read of a file that was not there, and a probe in front of real work.
@@ -96,9 +105,8 @@ describe('the note follows the run, not the output', () => {
   for (const command of [
     'cat missing && cat b.txt >/dev/null',
     'cat missing && cat b.txt | cat',
-    'cat missing 2>/dev/null && cat b.txt',
     '( cat missing && cat b.txt )',
-    '{ cat missing && cat b.txt; } 2>/dev/null',
+    '{ cat missing && cat b.txt; }',
     'value=$(cat missing && cat b.txt); true',
     'for f in a.txt; do cat missing && cat $f; done',
   ]) {
@@ -108,6 +116,68 @@ describe('the note follows the run, not the output', () => {
       assert.deepEqual(result.unsupported, [])
     })
   }
+
+  // Hiding the diagnostic hides neither consequence: the chain still says what
+  // it cancelled, and the discarded read error is reported in its own right.
+  const discarded = "stderr: a redirect discarded \"cat: missing: no such file or directory\". Nothing else in this run reports that path."
+  for (const command of ['cat missing 2>/dev/null && cat b.txt', '{ cat missing && cat b.txt; } 2>/dev/null']) {
+    it(command, () => assert.deepEqual(notesOf(command), [note('cat', 1, 1), discarded]))
+  }
+
+  it('blames the stage whose status the gate read, not an earlier one', () => {
+    // The pipeline failed because `cat` could not open its input; `grep`
+    // succeeded, and naming it would also have called its status benign.
+    assert.deepEqual(notesOf('grep oak a.txt | cat < missingfile && cat b.txt'), [])
+    assert.deepEqual(notesOf('cat a.txt | cat < missingfile && cat b.txt'), [])
+  })
+
+  it('does not blame a command that only ran inside an expansion', () => {
+    // `echo` ran during substitution and exited 0; the step failed on its
+    // redirect, before reaching a command of its own.
+    assert.deepEqual(notesOf('cat $(echo a.txt) < missingfile && cat b.txt'), [])
+    assert.deepEqual(notesOf('cat a.txt > $(echo out) && cat b.txt'), [])
+  })
+
+  it('resolves a bin prefix before exempting a command', () => {
+    for (const command of ['/bin/false && echo yes', '/usr/bin/test -f nope && echo yes',
+      '/bin/[ -f nope ] && echo yes', '/bin/grep -q nope a.txt && cat b.txt']) {
+      assert.deepEqual(notesOf(command), [], command)
+    }
+    assert.deepEqual(notesOf('/bin/cat missing && cat b.txt'),
+      ['/bin/cat: exited 1, so the command after && did not run.'])
+  })
+
+  it('reads -q the way grep reads it', () => {
+    // `-query` is the pattern here, not a quiet flag, so the gate really did
+    // cancel something.
+    const search = note('grep', 1, 1, true)
+    assert.deepEqual(notesOf('grep -e -query a.txt && cat b.txt'), [search])
+    assert.deepEqual(notesOf('grep -- -query a.txt && cat b.txt'), [search])
+    assert.deepEqual(notesOf('grep -A 3 nope a.txt && cat b.txt'), [search])
+    assert.deepEqual(notesOf('grep -q nope a.txt && cat b.txt'), [])
+  })
+
+  it('leaves an && chain read for its status alone', () => {
+    // An `if` condition is a gate by construction, like `test` is.
+    assert.deepEqual(notesOf('if cat missing && cat b.txt; then echo yes; else echo no; fi'), [])
+    assert.deepEqual(notesOf('if cat a.txt && cat missing; then echo yes; else echo no; fi'), [])
+    // Its body is ordinary work again.
+    assert.deepEqual(notesOf('if true; then cat missing && cat b.txt; fi'), [note('cat', 1, 1)])
+  })
+
+  it('counts the operands of &&, compound commands included', () => {
+    assert.deepEqual(notesOf('cat missing && { cat b.txt; cat c.txt; } && cat a.txt'), [note('cat', 1, 2)])
+  })
+
+  it('does not carry blame into or out of a reentrant run', () => {
+    let inner
+    const terminal = createTerminal(FILES, {
+      commands: { probe: () => { inner = terminal.run('cat a.txt'); return { exitCode: 3 } } },
+    })
+    const result = terminal.run('probe && cat b.txt')
+    assert.deepEqual(inner.notes, [])
+    assert.deepEqual(result.notes, ['probe: exited 3, so the command after && did not run.'])
+  })
 
   it('says nothing when the step failed before dispatching a command', () => {
     // A refused redirect never reaches a command, so there is none to blame;

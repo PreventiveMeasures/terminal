@@ -2,7 +2,7 @@ import { expandRedirect, expandScalar, expandWords } from './expand.js'
 import { readBacktickSubstitution, readExpansion } from './lex.js'
 import { refusedWrite } from './parse.js'
 import { BindingMap } from './bindings.js'
-import { gateBlame, lookupWithNote, missingPathNote, shortCircuitTracker } from '../notes.js'
+import { gateBlame, gateTracker, lookupWithNote, missingPathNote } from '../notes.js'
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { err, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
@@ -24,29 +24,27 @@ export function routeExternalOutput(result, ctx) {
 
 // A list shares stdin across its steps: { cat; cat; } consumes it once.
 // `exit` bypasses pipeline negation; break/continue still carry its status.
-export function runSteps(steps, ctx, stream) {
+export function runSteps(steps, ctx, stream, condition = false) {
   const result = emptyOutput()
-  // What an `&&` gate skipped, reported once the run of skipped steps ends.
-  // The blame is the last command dispatched, whose status the gate read; a
-  // step that failed before dispatching one says nothing here.
-  const gate = shortCircuitTracker(ctx)
+  // An `if` reads the whole chain for its status, which is what `&&` is for
+  // there; only a chain run for its effects has anything to report.
+  let blame = null, gate = null
   for (const step of steps) {
     if (step.warnings) appendOutput(result, routeOutput({ ...emptyOutput(step.warnings), exitCode: result.exitCode }, { fds: ctx.outputFds }, ctx))
-    if (step.gate === 'and' && result.exitCode !== 0) { gate.skip(result.exitCode); continue }
+    if (step.gate === 'and' && result.exitCode !== 0) { (gate ??= gateTracker()).skip(condition ? null : blame, result.exitCode); continue }
     if (step.gate === 'or' && result.exitCode === 0) continue
-    gate.flush()
-    ctx.ranCommand = null
+    gate?.flush(ctx.notes)
     const r = runPipeline(step.stages, ctx, stream)
     appendOutput(result, r)
     if (step.negate && !r.halt) result.exitCode = r.exitCode === 0 ? 1 : 0
     // `!` inverts the status, so the command no longer explains a gate reading it.
-    if (step.negate) ctx.ranCommand = null
+    blame = step.negate ? null : r.blame
     ctx.lastExit = result.exitCode
     if (r.halt || r.control) { Object.assign(result, { halt: r.halt, control: r.control }); break }
   }
-  gate.flush()
+  gate?.flush(ctx.notes)
   ctx.stdinLeft = stream.text
-  return result
+  return Object.assign(result, { blame })
 }
 
 // Multi-stage pipelines isolate shell state and take the last stage's status.
@@ -66,6 +64,8 @@ function runPipeline(stages, ctx, stream) {
     if (first) stream.text = routed.inputLeft
     appendOutput(output, routed)
     input = piped
+    // A pipeline's status is its last stage's, so its blame is too.
+    output.blame = routed.blame
     if (stages.length === 1) { output.halt = routed.halt; output.control = routed.control }
   }
   return output
@@ -94,18 +94,25 @@ function pipelineStage(stage, ctx, stdin, stdinFile, fds) {
     const io = resolveRedirs(stage, ctx, ctx.stdinLeft, stdinFile, fds)
     ctx.expansionFds = io.fds
     let routed = false
+    // Blame for an `&&` gate reading this stage's status. A stage that failed
+    // before reaching a command — a bad redirect, an expansion error — leaves
+    // it unset, and the gate then has nothing to name.
+    let blame = null
     const result = withStreams(io, ctx, () => shellResult(ctx, () => {
       if (io.error) return io.error
       if (!simple) {
         const r = stage.test ? evaluateConditional(stage.test, ctx) : stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx) : runConditional(stage.conditional, ctx, io.stdin)
         routed = true
+        blame = r.blame ?? null
         return r
       }
-      return runStage(ctx, expanded)
+      const r = runStage(ctx, expanded)
+      if (expanded.argv.length) blame = gateBlame(ctx.registry.chainRole(expanded.argv), expanded.argv[0])
+      return r
     }))
     const inputLeft = io.inherited ? ctx.stdinLeft : io.parentLeft
     appendOutput(ctx.expansionOutput, routed ? result : routeStageOutput(result, io, ctx))
-    return { ...ctx.expansionOutput, inputLeft, halt: result.halt, control: result.control }
+    return { ...ctx.expansionOutput, inputLeft, halt: result.halt, control: result.control, blame }
   }))
 }
 
@@ -247,7 +254,6 @@ function runStage(ctx, expanded) {
   if (argv.length === 0) {
     return { stdout: '', stderr: '', exitCode: ctx.substitutionExit ?? 0 }
   }
-  ctx.ranCommand = gateBlame(argv)
   return withTemporaries(expanded.temps, ctx, () => ctx.invoke(argv[0], argv.slice(1), ctx.stdinLeft))
 }
 
@@ -308,6 +314,7 @@ function runLoop(loop, ctx) {
       ctx.vars.set(loop.name, value)
       const r = runSteps(loop.body, ctx, stream)
       appendOutput(result, r)
+      result.blame = r.blame
       if (r.halt) return { ...result, halt: true }
       if (r.control?.levels > 1) return { ...result, control: { ...r.control, levels: r.control.levels - 1 } }
       if (r.control?.type === 'break') break
@@ -322,18 +329,18 @@ function runConditional(conditional, ctx, stdin) {
   const result = emptyOutput()
   const stream = { text: stdin }
   for (const branch of conditional.branches) {
-    const test = runSteps(branch.condition, ctx, stream)
+    const test = runSteps(branch.condition, ctx, stream, true)
     appendOutput(result, test)
-    if (test.halt || test.control) return { ...result, halt: test.halt, control: test.control }
+    if (test.halt || test.control) return { ...result, halt: test.halt, control: test.control, blame: test.blame }
     if (test.exitCode !== 0) continue
     const body = runSteps(branch.body, ctx, stream)
     appendOutput(result, body)
-    return { ...result, halt: body.halt, control: body.control }
+    return { ...result, halt: body.halt, control: body.control, blame: body.blame }
   }
   if (conditional.otherwise) {
     const body = runSteps(conditional.otherwise, ctx, stream)
     appendOutput(result, body)
-    return { ...result, halt: body.halt, control: body.control }
+    return { ...result, halt: body.halt, control: body.control, blame: body.blame }
   }
   result.exitCode = 0
   return result

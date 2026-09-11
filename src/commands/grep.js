@@ -18,10 +18,19 @@ const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} [-e PATTERN
 const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'x', 'h', 'H', 'o', 'E', 'F', 'G', 'P', 'q', 'I', 'a', 's']
 const VALUE_SHORTS = ['A', 'B', 'C', 'm']
 
+const ARGS = { short: SHORT_FLAGS, long: ['text', 'no-messages'], valueShort: VALUE_SHORTS, repeatable: ['e', 'f', 'file', 'include', 'exclude', 'exclude-dir'] }
+
+// Whether this search was asked for its status alone. Answered by the same
+// parse the run uses, so a pattern that merely looks like a flag — `-e -q`,
+// or anything after `--` — is read as the operand it is.
+export function quietSearch(tokens) {
+  try { return parseArgs(tokens, ARGS).flags.has('q') } catch { return false }
+}
+
 export function grep(stdin, tokens, ctx) {
   // Repeatable patterns and filename filters retain their own argument values.
   let parsed
-  try { parsed = parseArgs(tokens, { short: SHORT_FLAGS, long: ['text', 'no-messages'], valueShort: VALUE_SHORTS, repeatable: ['e', 'f', 'file', 'include', 'exclude', 'exclude-dir'] }) }
+  try { parsed = parseArgs(tokens, ARGS) }
   // Preserve diagnostic metadata when converting argument errors to grep status 2.
   catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
   const { flags, values } = parsed
