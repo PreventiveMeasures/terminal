@@ -148,7 +148,7 @@ function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
         if (t.error) return done(err(`error: ${t.error}`))
         const dest = t.value === '/dev/null' ? 'null' : t.value === '/dev/stdout' ? fds[1] : t.value === '/dev/stderr' ? fds[2] : ctx.writable ? ctx.fs.openWritable(ctx.cwd, t.value, r.append) : null
         if (dest === null) {
-          const e = refusedWrite(r.label, t.value)
+          const e = refusedWrite(r.label, t.value, ctx.writable)
           ctx.unsupported.add(unsupportedNote(e))
           return done(err(`error: ${e.message}`))
         }

@@ -2191,12 +2191,11 @@ describe('createTerminal — pathological inputs', () => {
 })
 
 describe('createTerminal — read-only filesystem', () => {
-  it('rejects `>` to a real path with a friendly message that suggests `|`', () => {
+  it('rejects `>` to a real path, naming the operator and the target', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('cat src/foo.js > out.txt')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /read-only/u)
-    assert.match(r.stderr, /`\|`/u)
+    assert.equal(r.stderr, 'error: `>` cannot write to `out.txt`: the filesystem is read-only\n')
   })
 
   it('rejects `>>` (append) the same way', () => {
@@ -2256,8 +2255,9 @@ describe('createTerminal — /dev/null redirects', () => {
     const r = t.run('cat src/foo.js 2> err.log')
     assert.notEqual(r.exitCode, 0)
     assert.match(r.stderr, /read-only/u)
-    // Suggestion mentions both the pipe alternative and /dev/null.
-    assert.match(r.stderr, /\/dev\/null/u)
+    // The claim itself, rather than a suggestion in the message: /dev/null
+    // is the target a redirect may still name.
+    assert.equal(t.run('cat src/foo.js 2> /dev/null').exitCode, 0)
   })
 
   it('a missing redirect target errors clearly', () => {
@@ -3766,7 +3766,7 @@ describe('createTerminal — head/tail -N shorthand', () => {
     const t = createTerminal(SOURCES)
     // bare `>` to a real path mentions `>` (not `1>`):
     const stdoutErr = t.run('cat src/foo.js > out').stderr
-    assert.match(stdoutErr, /`>\/dev\/null`/u)
+    assert.match(stdoutErr, /`>` cannot write/u)
     assert.doesNotMatch(stdoutErr, /`1>/u)
     // `>>` append rejection also uses bare form:
     const appendErr = t.run('echo hi >> log').stderr
