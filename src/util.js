@@ -7,7 +7,7 @@ import { utf8fromString, utf8toString } from '@exodus/bytes/utf8.js'
 import { lookupWithNote } from './notes.js'
 
 export { utf8fromStringLoose as encodeUtf8Loose } from '@exodus/bytes/utf8.js'
-export { missingPathNote } from './notes.js'
+export { discardedNotes, missingPathNote } from './notes.js'
 
 // Byte operations encode JS strings as UTF-8. Preserve the BOM and refuse
 // slices that cannot be represented losslessly as string output.

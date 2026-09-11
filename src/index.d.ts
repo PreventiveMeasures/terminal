@@ -226,6 +226,16 @@ export interface RunResult {
    * would otherwise have taken, so `*.bar` reports `.bar` and says nothing
    * about `.foo.txt`.
    *
+   * A command that fails inside an `&&` chain cancels the rest of it, and
+   * that is noted where it actually stopped something from running — never
+   * for `test`, `[`, `true`, `false` or `grep -q`, whose status is the point
+   * of the gate.
+   *
+   * A file or directory access failure whose diagnostic went to `/dev/null`
+   * or a closed descriptor is noted too, naming the command, the reason and
+   * the paths it applied to. Not when the message reached stderr anyway, and
+   * not when another note already accounts for that path.
+   *
    * Failed relative file lookups also note verified alternatives at `/` or
    * the mount point when the current directory caused the missing path.
    * A single alternative is identified as a file or dir. Two alternatives

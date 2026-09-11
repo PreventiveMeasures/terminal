@@ -338,5 +338,5 @@ function parsePrint(p, kind) {
 }
 
 export function redirectMessage(name) {
-  return `cannot redirect output to \`${name}\`: the filesystem is read-only (only /dev/stdout, /dev/stderr and /dev/null are supported; to print a comparison, parenthesize it: print (a > b))`
+  return `cannot redirect output to \`${name}\`: the filesystem is read-only (only /dev/stdout, /dev/stderr and /dev/null). To print a comparison, parenthesize it: print (a > b)`
 }

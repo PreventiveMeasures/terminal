@@ -351,7 +351,7 @@ function parseRedirect(p) {
   const append = op.op === 'append' || op.op === 'bothAppend'
   const word = sliceWord(target)
   if (needsExpansion(word)) return { fd: op.fd, op: 'to', word, both, append, label }
-  if (!p.writable && !DEVICES.has(word.value)) throw refusedWrite(label, word.value)
+  if (!p.writable && !DEVICES.has(word.value)) throw refusedWrite(label, word.value, p.writable)
   return { fd: op.fd, op: 'to', target: word.value, both, append, label }
 }
 
@@ -365,7 +365,7 @@ function needsExpansion(word) {
   })
 }
 
-export function refusedWrite(label, target) {
-  const discard = label.replace('>>', '>') + '/dev/null'
-  return new UnsupportedError('feature', label, `filesystem is read-only — \`${label}\` cannot write to \`${target}\`; use \`|\` to pipe between commands, or \`${discard}\` to discard`)
+export function refusedWrite(label, target, writable) {
+  const why = writable ? 'only `/tmp/` is writable' : 'the filesystem is read-only'
+  return new UnsupportedError('feature', label, `\`${label}\` cannot write to \`${target}\`: ${why}`)
 }

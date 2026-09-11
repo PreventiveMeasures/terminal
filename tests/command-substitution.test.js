@@ -110,7 +110,9 @@ describe('command substitution — redirects and diagnostics', () => {
   it('retains stderr separately from captured stdout', () => {
     check('echo "$(cat missing; echo kept)"', 'kept\n', 0, 'cat: missing: no such file or directory\n')
     check('x=$(cat missing)', '', 1, 'cat: missing: no such file or directory\n')
-    check('echo "$(cat missing 2>/dev/null; echo kept)"', 'kept\n')
+    // The read error went to /dev/null, so only the note carries it.
+    check('echo "$(cat missing 2>/dev/null; echo kept)"', 'kept\n', 0, '',
+      ['cat: no such file or directory: "missing".'])
   })
 
   it('captures stderr only when the inner command redirects it to stdout', () => {

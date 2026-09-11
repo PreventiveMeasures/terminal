@@ -13,7 +13,7 @@ const OPERATORS = ['-eq', '-ne', '-lt', '-le', '-gt', '-ge']
 const COMMANDS = ['test', '[']
 const FILES = { lines: 'hit\nmiss\nhit\n' }
 const invocation = (name, expression) => `${name} ${expression}${name === '[' ? ' ]' : ''}`
-const result = (exitCode, stdout = '', stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
+const result = (exitCode, stdout = '', stderr = '', unsupported = [], notes = []) => ({ stdout, stderr, exitCode, cwd: '/', notes, unsupported })
 
 function check(expression, exitCode) {
   for (const name of COMMANDS) {
@@ -132,15 +132,16 @@ describe('integer comparisons in shell control flow and status checks', () => {
     ['[ 1 -gt 2 ]; echo $?', '1\n'],
     ['[ 2 -ge 2 ]; echo $?', '0\n'],
     ['grep missing lines; if [ $? -eq 1 ]; then echo absent; fi', 'absent\n'],
-    ['grep hit missing 2>/dev/null; if [ $? -eq 2 ]; then echo unreadable; fi', 'unreadable\n'],
+    ['grep hit missing 2>/dev/null; if [ $? -eq 2 ]; then echo unreadable; fi', 'unreadable\n',
+      ["grep: no such file or directory: \"missing\"."]],
     ['c=$(grep -c hit lines); if [ "$c" -ge 2 ]; then echo repeated; fi', 'repeated\n'],
     ['for n in 0 1 2; do if [ "$n" -lt 2 ]; then echo "$n"; fi; done', '0\n1\n'],
     ['[ nope -eq 0 ] 2>/dev/null; if [ $? -eq 2 ]; then echo invalid; fi', 'invalid\n'],
     ['{ [ 1 -eq 1 ]; cat; } < lines', FILES.lines],
     ['/usr/bin/test 1 -eq 1 && /bin/[ 2 -gt 1 ] && echo aliases', 'aliases\n'],
   ]
-  for (const [command, stdout] of cases) {
-    it(command, () => assert.deepEqual(createTerminal(FILES).run(command), result(0, stdout)))
+  for (const [command, stdout, notes = []] of cases) {
+    it(command, () => assert.deepEqual(createTerminal(FILES).run(command), result(0, stdout, '', [], notes)))
   }
 })
 

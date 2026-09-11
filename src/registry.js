@@ -9,6 +9,7 @@ import { bracket, test } from './commands/test.js'
 import { markUnsupported, unsupported, unsupportedNote } from './unsupported.js'
 import { SHELL_BUILTINS, SHELL_GAPS } from './shell/builtins.js'
 import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './commands/text.js'
+import { quietSearch } from './commands/grep.js'
 
 const VISIBLE_COMMANDS = { test, cat, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_COMMANDS }
 const grepAlias = (name, flag) => (stdin, tokens, ctx) => {
@@ -62,6 +63,19 @@ function resolveCommand(name, has) {
   return name
 }
 
+// Chaining `&&` behind a command whose only product is a status is the idiom
+// rather than an oversight, so a gate those close goes unremarked; a search
+// asked for with -q says the same thing with a flag. Bin-prefixed spellings
+// resolve first, so `/bin/false` is exempt for the reason `false` is.
+const STATUS_ONLY = new Set(['test', '[', 'true', 'false'])
+const SEARCHES = new Set(['grep', 'egrep', 'fgrep'])
+function chainRole(argv, has) {
+  const resolved = resolveCommand(argv[0], has)
+  if (STATUS_ONLY.has(resolved)) return 'status'
+  if (!SEARCHES.has(resolved)) return 'work'
+  return quietSearch(argv.slice(1)) ? 'status' : 'search'
+}
+
 // Custom names follow builtins in registration order. Freeze shared lookup
 // tables so one terminal or handler cannot alter another terminal's registry.
 export function createRegistry(commands) {
@@ -77,6 +91,7 @@ export function createRegistry(commands) {
     has,
     shellOnly: (name) => SHELL_ONLY.has(name),
     resolveCommand: (name) => resolveCommand(name, has),
+    chainRole: (argv) => chainRole(argv, has),
     known: names.join(', '),
   })
 }

@@ -9,7 +9,7 @@ import { parseUnits } from './shell/parse.js'
 import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
 import { BindingMap } from './shell/bindings.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
-import { err, missingPathNote, reason } from './util.js'
+import { discardedNotes, err, missingPathNote, reason } from './util.js'
 import { complete } from './complete.js'
 import { commandSubstitution } from './shell/capture.js'
 import { isolated, withState } from './shell/state.js'
@@ -73,7 +73,7 @@ function record(ctx, result, resolved) {
 // Syntax errors exit 2; unsupported constructs exit 1.
 function safeRun(line, ctx) {
   const feed = createUnsupportedFeed()
-  return withState(ctx, { unsupported: feed, notes: new Set(), stdinFile: false, stdinOrigin: null, stdinHandle: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, () => {
+  return withState(ctx, { unsupported: feed, notes: new Set(), discarded: new Set(), stdinFile: false, stdinOrigin: null, stdinHandle: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, () => {
     const result = { stdout: '', stderr: '', exitCode: 0 }
     const stream = { text: '' }
     try {
@@ -96,4 +96,8 @@ function safeRun(line, ctx) {
 }
 
 // Do not expose internal halt/control fields or mutable diagnostic entries.
-const finish = (r, ctx, feed) => ({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, cwd: ctx.cwd, unsupported: Object.freeze(feed.entries), notes: Object.freeze([...ctx.notes]) })
+const finish = (r, ctx, feed) => ({
+  stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, cwd: ctx.cwd,
+  unsupported: Object.freeze(feed.entries),
+  notes: Object.freeze([...ctx.notes, ...discardedNotes(ctx.discarded, r.stderr, ctx.notes)]),
+})

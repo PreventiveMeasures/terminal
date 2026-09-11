@@ -90,7 +90,8 @@ describe('shell if — source analysis and nested execution', () => {
 
   it('applies redirection to the whole conditional', () => {
     check('if echo condition; then echo body; fi >/dev/null', '')
-    check('if cat missing; then echo lost; else echo fallback; fi 2>/dev/null', 'fallback\n')
+    check('if cat missing; then echo lost; else echo fallback; fi 2>/dev/null', 'fallback\n', 0, '', '/',
+      ["cat: no such file or directory: \"missing\"."])
   })
 })
 

@@ -59,21 +59,24 @@ describe('command substitution — shared input', () => {
   for (const [command, stdout, notes] of cases) it(command, () => check(command, stdout, 0, '', notes))
 })
 
+// A read error routed to /dev/null reaches nobody, so it is reported here.
+const HIDDEN = 'cat: no such file or directory: "missing".'
+
 describe('command substitution — expansion order and stderr', () => {
   const cases = [
     ['echo "$(cat missing)" 2>/dev/null', '\n', 0, READ_ERROR],
     ['echo 2>/dev/null "$(cat missing)"', '\n', 0, READ_ERROR],
     ['echo "$(cat missing)" 2>&1', '\n', 0, READ_ERROR],
-    ['{ echo "$(cat missing)"; } 2>/dev/null', '\n', 0, ''],
+    ['{ echo "$(cat missing)"; } 2>/dev/null', '\n', 0, '', [HIDDEN]],
     ['{ echo "$(cat missing)"; } 2>&1', READ_ERROR + '\n', 0, ''],
     ['x=$(cat missing) 2>/dev/null', '', 1, READ_ERROR],
     ['x=$(cat missing) 2>&1', '', 1, READ_ERROR],
     ['x=$(cat missing) echo visible 2>/dev/null', 'visible\n', 0, READ_ERROR],
-    ['echo lost 2>/dev/null >"$(cat missing; printf /dev/null)"', '', 0, ''],
+    ['echo lost 2>/dev/null >"$(cat missing; printf /dev/null)"', '', 0, '', [HIDDEN]],
     ['echo lost >"$(cat missing; printf /dev/null)" 2>/dev/null', '', 0, READ_ERROR],
-    ['echo "$(cat missing 2>/dev/null)"', '\n', 0, ''],
+    ['echo "$(cat missing 2>/dev/null)"', '\n', 0, '', [HIDDEN]],
   ]
-  for (const [command, stdout, exitCode, stderr] of cases) it(command, () => check(command, stdout, exitCode, stderr))
+  for (const [command, stdout, exitCode, stderr, notes] of cases) it(command, () => check(command, stdout, exitCode, stderr, notes))
 
   it('keeps unsupported metadata even when an enclosing group suppresses assignment stderr', () => {
     const r = createTerminal(FILES).run('{ x=$(grep --unknown x input); } 2>/dev/null')

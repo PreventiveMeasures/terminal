@@ -1,6 +1,7 @@
 // Preserve command order when a surrounding group merges its streams.
 // A handler returning both streams has not specified their relative order.
 import { markUnsupported, unsupported, unsupportedNote } from '../unsupported.js'
+import { discardedStderr } from '../notes.js'
 
 export const eventsOf = (r) => r.events ?? [
   ...(r.stdout ? [{ fd: 1, text: r.stdout }] : []),
@@ -46,7 +47,11 @@ function routeEvents(result, io, ctx, write) {
   for (const e of eventsOf(r)) {
     const dest = io.fds[e.fd]
     if (typeof dest === 'object') { write(e, dest); continue }
-    if (dest !== 'out' && dest !== 'err') continue
+    if (dest !== 'out' && dest !== 'err') {
+      // A diagnostic sent to /dev/null or a closed descriptor reaches nobody.
+      if (e.fd === 2) discardedStderr(ctx, e.text)
+      continue
+    }
     events.push({ fd: dest === 'out' ? 1 : 2, text: e.text })
     if (dest === 'out') stdout += e.text
     else stderr += e.text

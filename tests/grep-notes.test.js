@@ -208,7 +208,10 @@ describe('grep omission notes retain bounded paths and run scope', () => {
     assert.deepEqual(terminal.run('grep -I hit binary missing'), expected('', [binaryNote(['/binary'])], {
       stderr: 'grep: missing: no such file or directory\n', exitCode: 2,
     }))
-    assert.deepEqual(terminal.run('grep -I hit binary missing 2>/dev/null | true'), expected('', [binaryNote(['/binary'])]))
+    // The unreadable operand is only on the notes channel now that its own
+    // diagnostic went to /dev/null.
+    assert.deepEqual(terminal.run('grep -I hit binary missing 2>/dev/null | true'),
+      expected('', [binaryNote(['/binary']), "grep: no such file or directory: \"missing\"."]))
   })
 
   it('deduplicates messages per run and keeps later runs independent', () => {

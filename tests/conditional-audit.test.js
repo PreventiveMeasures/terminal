@@ -82,7 +82,8 @@ describe('conditional operands expand in order with lazy state and input consump
   })
 
   it('applies conditional redirects before expanding command substitutions', () => {
-    assert.deepEqual(terminal().run('[[ ! -n "$(cat absent)" ]] 2>/dev/null'), expected())
+    assert.deepEqual(terminal().run('[[ ! -n "$(cat absent)" ]] 2>/dev/null'),
+      expected(0, '', '', ['cat: no such file or directory: "absent".']))
     assert.deepEqual(terminal().run('[[ "$(cat)" == input ]] < data'), expected())
   })
 })
