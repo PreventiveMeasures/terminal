@@ -1,6 +1,8 @@
 // Read-only source map with a directory index derived from file paths.
 // All internal lookups use normalized absolute paths.
 
+import { encodeUtf8 } from './util.js'
+
 export function normalize(path) {
   const absolute = path.startsWith('/')
   const segs = path.split('/').filter(Boolean)
@@ -106,6 +108,7 @@ export function createFs(sources, mount = '/') {
     isFile: (p) => files.has(p),
     isDir: (p) => childMap.has(p),
     readFile: (p) => files.get(p),
+    fileSize: (p) => files.has(p) && !childMap.has(p) ? encodeUtf8(files.get(p)).length : undefined,
     sameFileContents: (a, b) => files.get(a) === files.get(b),
     listDir: (p) => {
       const entry = childMap.get(p)

@@ -8,6 +8,7 @@ import { homeOf } from '../shell/expand.js'
 import { parseArgs } from '../args.js'
 import { err, ok, usage } from '../util.js'
 import { hiddenEntryNotes, lookupWithNote } from '../notes.js'
+import { FS_TOOLS } from './fs-tools.js'
 
 function pwd(_stdin, tokens, ctx) {
   parseArgs(tokens)
@@ -103,5 +104,5 @@ function dirnameCmd(_stdin, tokens) {
 }
 
 export const NAV_COMMANDS = {
-  pwd, cd, ls, find, tree, basename: basenameCmd, dirname: dirnameCmd,
+  pwd, cd, ls, find, tree, basename: basenameCmd, dirname: dirnameCmd, ...FS_TOOLS,
 }
