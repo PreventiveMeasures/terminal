@@ -112,6 +112,7 @@ function start(session) {
   // no prompt, and none of the `| ` the REPL prints while collecting a
   // continued line.
   if (!session.interactive) server.displayPrompt = () => {}
+  for (const name of ['break', 'clear', 'load', 'save']) delete server.commands[name]
   server.defineCommand('info', {
     help: 'Show what is mounted and what was left out',
     action() { note(banner(session) + omissions(session.tree)); this.displayPrompt() },
