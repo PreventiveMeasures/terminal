@@ -8,10 +8,12 @@ import { assignmentOf, sliceWord } from './word.js'
 import { NAME_RE } from './tokenize.js'
 import { UnsupportedError } from '../unsupported.js'
 import { advanceAliases } from './aliases.js'
-import { IncompleteInput, incomplete, readLine, readUnits, tokenAt } from './parse-input.js'
+import { IncompleteInput, incomplete, readAll, readLine, readUnits, tokenAt } from './parse-input.js'
 
 export const parseLine = (line, writable = false, hasCommand = () => false, options = {}) => readLine(line, writable, hasCommand, options, parseTokens)
 export const parseUnits = (line, writable = false, hasCommand = () => false) => readUnits(line, writable, hasCommand, parseTokens)
+// Parse alone, for a caller describing a line instead of running it.
+export const parseAll = (line, writable = false, hasCommand = () => false) => readAll(line, writable, hasCommand, parseTokens)
 
 function parseTokens(tokens, writable, hasCommand, options) {
   const p = { raw: tokens, i: 0, done: !options.read, read: options.read, unitOnly: options.unit, emptyStage: false, writable, aliases: options.aliases ?? new Set(), aliasUsed: options.aliasUsed ?? false, hasCommand, syntaxOnly: options.syntaxOnly }

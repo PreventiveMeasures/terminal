@@ -92,6 +92,7 @@
     "src/glob.js",
     "src/index.d.ts",
     "src/index.js",
+    "src/inspect.js",
     "src/mount.js",
     "src/notes.js",
     "src/numeric.js",

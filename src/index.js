@@ -7,12 +7,12 @@
 import { mountSources } from './mount.js'
 import { parseUnits } from './shell/parse.js'
 import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
-import { BindingMap } from './shell/bindings.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
 import { discardedNotes, err, missingPathNote, reason } from './util.js'
 import { complete } from './complete.js'
+import { inspectLine } from './inspect.js'
 import { commandSubstitution } from './shell/capture.js'
-import { isolated, withState } from './shell/state.js'
+import { BindingMap, isolated, withState } from './shell/state.js'
 import { commandWriteError, createIoGuard, routeExternalOutput, runSteps } from './shell/run.js'
 
 export function createTerminal(sources, opts = {}) {
@@ -37,6 +37,7 @@ export function createTerminal(sources, opts = {}) {
     run: (line) => safeRun(line, ctx),
     cwd: () => ctx.cwd,
     complete: (line) => complete(line, ctx, registry),
+    parse: (line) => inspectLine(line, ctx, registry),
   }
 }
 

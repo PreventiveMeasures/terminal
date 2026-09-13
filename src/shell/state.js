@@ -1,5 +1,9 @@
 import { BindingMap } from './bindings.js'
 
+// Variables are shell state, so a terminal's first set of bindings comes from
+// here alongside the scoping that saves and restores them.
+export { BindingMap }
+
 // Shell state is private to subshells; stdin consumption and diagnostics
 // still belong to the enclosing execution.
 export function isolated(ctx, fn) {
