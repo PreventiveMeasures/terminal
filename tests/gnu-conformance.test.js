@@ -330,3 +330,95 @@ describe('GNU conformance — what a reader says it could not read', () => {
     assert.equal(t.run('probe f').stderr, 'probe: f: Not a directory\n')
   })
 })
+
+describe('GNU conformance — what a tool says it could not read on the command line', () => {
+  // `sort` reads a key as START[,END], each FIELD[.OFFSET][MODIFIERS], and
+  // names the first thing wrong with it — six ways, in two shapes, all of
+  // them exit 2. This said `invalid key specification: <spec>` for most of
+  // them and exited 1, and rejected two specs GNU accepts: a field count is
+  // read the way strtoul reads one, so a leading blank or `+` belongs to the
+  // number. Every line below is what coreutils 9.4 printed in the C locale.
+  const rows = { pairs: 'b 2\na 1\n' }
+  const key = (spec) => createTerminal(rows).run(`sort -k'${spec}' pairs`)
+
+  const SPECS = [
+    ['0', "sort: field number is zero: invalid field specification '0'\n"],
+    ['0,1', "sort: field number is zero: invalid field specification '0,1'\n"],
+    ['1,0', "sort: field number is zero: invalid field specification '1,0'\n"],
+    ['0,0', "sort: field number is zero: invalid field specification '0,0'\n"],
+    ['+0', "sort: field number is zero: invalid field specification '+0'\n"],
+    [' 0', "sort: field number is zero: invalid field specification ' 0'\n"],
+    // A zero is read before a letter that has no business being there.
+    ['0q', "sort: field number is zero: invalid field specification '0q'\n"],
+    ['0.1', "sort: field number is zero: invalid field specification '0.1'\n"],
+    ['1,0q', "sort: field number is zero: invalid field specification '1,0q'\n"],
+    ['1.0', "sort: character offset is zero: invalid field specification '1.0'\n"],
+    ['1.0q', "sort: character offset is zero: invalid field specification '1.0q'\n"],
+    ['1.0,2', "sort: character offset is zero: invalid field specification '1.0,2'\n"],
+    ['x', "sort: invalid number at field start: invalid count at start of 'x'\n"],
+    ['.1', "sort: invalid number at field start: invalid count at start of '.1'\n"],
+    [',1', "sort: invalid number at field start: invalid count at start of ',1'\n"],
+    ['-1', "sort: invalid number at field start: invalid count at start of '-1'\n"],
+    ['1,x', "sort: invalid number after ',': invalid count at start of 'x'\n"],
+    ['1,', "sort: invalid number after ',': invalid count at start of ''\n"],
+    ['1.x', "sort: invalid number after '.': invalid count at start of 'x'\n"],
+    ['1.-1', "sort: invalid number after '.': invalid count at start of '-1'\n"],
+    ['1.', "sort: invalid number after '.': invalid count at start of ''\n"],
+    ['1x', "sort: stray character in field spec: invalid field specification '1x'\n"],
+    ['1z', "sort: stray character in field spec: invalid field specification '1z'\n"],
+    ['1q', "sort: stray character in field spec: invalid field specification '1q'\n"],
+    ['1,2q', "sort: stray character in field spec: invalid field specification '1,2q'\n"],
+    ['1 ', "sort: stray character in field spec: invalid field specification '1 '\n"],
+    ['1,2,3', "sort: stray character in field spec: invalid field specification '1,2,3'\n"],
+    ['1.1.1', "sort: stray character in field spec: invalid field specification '1.1.1'\n"],
+  ]
+  for (const [spec, stderr] of SPECS) {
+    it(`sort -k${JSON.stringify(spec)}`, () => {
+      const r = key(spec)
+      assert.deepEqual({ stderr: r.stderr, exitCode: r.exitCode }, { stderr, exitCode: 2 })
+      assert.deepEqual(r.unsupported, [])
+    })
+  }
+
+  it('reads a field count the way strtoul reads one', () => {
+    // A leading blank and a `+` both belong to the number, and an end offset
+    // of zero ends the key where a key with no end offset ends.
+    const sorted = 'a 1\nb 2\n'
+    for (const spec of [' 1', '+1', '+1b', ' 1n', '1,2.0', '1n,2r', '2,1']) {
+      const r = key(spec)
+      assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout: sorted, stderr: '', exitCode: 0 }, spec)
+    }
+  })
+
+  it('separates a key GNU has from a key nobody has, and exits alike on both', () => {
+    // A modifier GNU knows and a character offset are both things this
+    // cannot sort by; a letter GNU does not know is the stray character it
+    // calls it. Only what the caller is told differs — sort exits 2 either way.
+    for (const [gap, detail] of [['1g', '-k1g'], ['1.2', '-k1.2'], ['1.2b', '-k1.2b']]) {
+      const r = key(gap)
+      assert.deepEqual(r.unsupported.map((u) => u.detail), [detail], gap)
+      assert.equal(r.exitCode, 2, gap)
+    }
+    assert.equal(key('1z').exitCode, 2)
+    assert.equal(createTerminal(rows).run("sort -t'ab' pairs").stderr, "sort: multi-character tab 'ab'\n")
+    assert.equal(createTerminal(rows).run("sort -t'ab' pairs").exitCode, 2)
+  })
+
+  // coreutils exits 1 when it cannot read the command line at all. `grep`
+  // exits 2, and so does awk. This exited 2 for every one of them.
+  it('exits the way the tool does when the command line will not read', () => {
+    const files = { f: 'hi\n', pairs: 'a 1\n' }
+    for (const [command, exitCode] of [
+      ['seq', 1], ['cut pairs', 1], ['cut -c1 -f1 pairs', 1], ['tr a', 1], ['which', 1],
+      ['basename', 1], ['dirname', 1], ['printf', 1], ['cp f', 1], ['rm', 1], ['realpath', 1],
+      ['grep', 2], ['awk', 2],
+    ]) {
+      const r = createTerminal(files).run(command)
+      assert.equal(r.exitCode, exitCode, command)
+      assert.notEqual(r.stderr, '', command)
+    }
+    // The synopsis stands in for GNU's `Try '<tool> --help'`, which this
+    // terminal has no --help to offer.
+    assert.match(createTerminal(files).run('seq').stderr, /^usage: seq /u)
+  })
+})

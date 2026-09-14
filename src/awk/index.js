@@ -99,7 +99,7 @@ function splitGluedValues(tokens) {
 // that, the first operand.
 function programSource(progFiles, positional, ctx) {
   if (progFiles.length === 0) {
-    if (positional.length === 0) return { error: usage(USAGE) }
+    if (positional.length === 0) return { error: usage(USAGE, 2) }
     return { text: positional[0], operands: positional.slice(1) }
   }
   const parts = []

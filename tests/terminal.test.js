@@ -4308,7 +4308,8 @@ describe('createTerminal — sort -k / -t', () => {
     assert.match(t.run('sort -k0 sp.txt').stderr, /field number is zero/u)
     assert.deepEqual(t.run('sort -k2,1 sp.txt'), t.run('sort sp.txt'))
     assert.match(t.run('sort -k1.2 f.txt').stderr, /character offsets are not supported/u)
-    assert.match(t.run('sort -k1z f.txt').stderr, /unknown key option `z`/u)
+    assert.match(t.run('sort -k1z f.txt').stderr, /stray character in field spec/u)
+    assert.match(t.run('sort -k1g f.txt').stderr, /unknown key option `g`/u)
   })
 
   it('a key past the end of the line is empty, not an error', () => {

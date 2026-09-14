@@ -12,7 +12,7 @@ export function sort(stdin, tokens, ctx) {
     repeatable: ['k'],
   })
   const sep = values.get('t')
-  if (sep !== undefined && encodeUtf8Loose(sep).length !== 1) return err(`sort: multi-character tab \`${sep}\``)
+  if (sep !== undefined && encodeUtf8Loose(sep).length !== 1) return err(`sort: multi-character tab '${sep}'`, 2)
   const globals = { n: flags.has('n'), f: flags.has('f'), b: flags.has('b'), r: flags.has('r') }
   const keys = parseKeySpecs(values.get('k') ?? [], globals)
   if (keys.error) return keys.error
@@ -32,45 +32,79 @@ export function sort(stdin, tokens, ctx) {
 const KEY_MODS = 'nrfb'
 // Distinguish valid unimplemented modifiers from malformed key specifications.
 const GNU_KEY_MODS = 'bdfghiMnRrV'
-const KEY_POS = /^(\d+)([a-zA-Z]*)$/u
-// Recognize character-offset syntax before diagnosing unsupported key positions.
-const GNU_KEY_POS = /^\d+(?:\.\d+)?([a-zA-Z]*)$/u
-const isGnuKeySpec = (spec) => {
-  const parts = spec.split(',')
-  if (parts.length > 2) return false
-  return parts.every((part) => {
-    const m = GNU_KEY_POS.exec(part)
-    return m !== null && [...m[1]].every((c) => GNU_KEY_MODS.includes(c))
-  })
+// A field or offset is read the way strtoul reads one, so a leading blank or
+// `+` belongs to the number: `-k' 1'` and `-k+1` are both field 1.
+const KEY_COUNT = /^[ \t]*\+?(\d+)/u
+
+// GNU names the first thing wrong with a key, and says it two ways: a number
+// it could not read where one belongs, and anything else about the spec as a
+// whole. Both exit 2, as every sort diagnostic does. Recorded from coreutils 9.4.
+const keyCount = (what, rest) => err(`sort: ${what}: invalid count at start of '${rest}'`, 2)
+const keyField = (what, spec) => err(`sort: ${what}: invalid field specification '${spec}'`, 2)
+
+// START[,END], each of them FIELD[.OFFSET][MODIFIERS]. The zero checks come
+// before the leftover one, so `0q` is a field number rather than a stray `q`.
+function readKeySpec(spec) {
+  let at = 0
+  let fault = null
+  const count = (what) => {
+    const m = KEY_COUNT.exec(spec.slice(at))
+    if (m === null) { fault = keyCount(what, spec.slice(at)); return null }
+    at += m[0].length
+    return Number(m[1])
+  }
+  const position = (what) => {
+    const field = count(what)
+    if (field === null) return null
+    let offset = null
+    if (spec[at] === '.') {
+      at++
+      offset = count("invalid number after '.'")
+      if (offset === null) return null
+    }
+    const mods = at
+    while (at < spec.length && /[a-zA-Z]/u.test(spec[at])) at++
+    return { field, offset, mods: spec.slice(mods, at) }
+  }
+  const from = position('invalid number at field start')
+  if (from === null) return { error: fault }
+  let to = null
+  if (spec[at] === ',') {
+    at++
+    to = position("invalid number after ','")
+    if (to === null) return { error: fault }
+  }
+  if (from.field === 0 || to?.field === 0) return { error: keyField('field number is zero', spec) }
+  if (from.offset === 0) return { error: keyField('character offset is zero', spec) }
+  if (at !== spec.length) return { error: keyField('stray character in field spec', spec) }
+  return { from, to }
 }
 
 function parseKeySpecs(raw, globals) {
   const specs = []
   for (const spec of raw) {
-    const parts = spec.split(',')
-    const bad = () => {
-      const message = `sort: invalid key specification: ${spec}`
-      if (!isGnuKeySpec(spec)) return { error: err(message) }
-      return { error: unsupported('option', 'sort', `-k${spec}`, `${message} (character offsets are not supported)`) }
-    }
-    if (parts.length > 2) return bad()
-    const [m1, m2] = parts.map((part) => KEY_POS.exec(part))
-    if (!m1 || (parts.length === 2 && !m2)) return bad()
-    const mods = m1[2] + (m2?.[2] ?? '')
+    const read = readKeySpec(spec)
+    if (read.error) return { error: read.error }
+    const { from, to } = read
+    const mods = from.mods + (to?.mods ?? '')
     for (const c of mods) {
       if (KEY_MODS.includes(c)) continue
-      const message = `sort: unknown key option \`${c}\` in ${spec}`
-      return { error: GNU_KEY_MODS.includes(c) ? unsupported('option', 'sort', `-k${spec}`, message) : err(message) }
+      // A letter GNU knows is a key this cannot sort by; any other is the
+      // stray character GNU calls it.
+      if (!GNU_KEY_MODS.includes(c)) return { error: keyField('stray character in field spec', spec) }
+      return { error: unsupported('option', 'sort', `-k${spec}`, `sort: unknown key option \`${c}\` in ${spec}`, 2) }
     }
-    const start = Number(m1[1])
-    const end = m2 === undefined ? undefined : Number(m2[1])
-    if (start === 0 || end === 0) return { error: err(`sort: field number is zero: ${spec}`) }
+    // An end offset of zero ends the key at the end of its field, which is
+    // where a key with no end offset ends; any other offset picks a character.
+    if (from.offset !== null || (to?.offset ?? 0) !== 0) {
+      return { error: unsupported('option', 'sort', `-k${spec}`, `sort: invalid key specification: ${spec} (character offsets are not supported)`, 2) }
+    }
     // Any option on EITHER position suppresses the globals for this key
     // — `b` included, so `sort -r -k2b` sorts ascending.
     const own = mods.length > 0
     specs.push({
-      start,
-      end,
+      start: from.field,
+      end: to?.field,
       n: own ? mods.includes('n') : globals.n,
       r: own ? mods.includes('r') : globals.r,
       f: own ? mods.includes('f') : globals.f,
@@ -78,7 +112,7 @@ function parseKeySpecs(raw, globals) {
       // the position it was written on. `-k2,3b` blanks the END, so the
       // key still STARTS with field 2's leading blanks, while `-k2b,3`
       // strips them. Only the start matters without character offsets.
-      b: own ? m1[2].includes('b') : globals.b,
+      b: own ? from.mods.includes('b') : globals.b,
     })
   }
   return { specs }

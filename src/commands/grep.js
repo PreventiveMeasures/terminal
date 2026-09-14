@@ -35,7 +35,7 @@ export function grep(stdin, tokens, ctx) {
   catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
   const { flags, values } = parsed
   const source = grepPatterns(parsed, stdin, ctx)
-  if (!source) return usage(USAGE)
+  if (!source) return usage(USAGE, 2)
   if (source.error) return source.error
   const { patterns, rest } = source
   stdin = source.stdin
