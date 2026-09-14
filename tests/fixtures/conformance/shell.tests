@@ -110,6 +110,25 @@ test -f input && echo yes || echo no => "yes\n"
 [[ abc =~ b ]] && echo yes || echo no => ! [[ =~ 1
 [[ abc == @(a|b)* ]] && echo yes || echo no => ! [[ extglob 1
 
+# `[[` opens a conditional wherever a command may start, and is an ordinary
+# word everywhere else
+if [[ -f input ]]; then echo yes; fi => "yes\n"
+while [[ -f input ]]; do echo hit; break; done => "hit\n"
+until [[ -f input ]]; do echo no; break; done; echo after => "after\n"
+while ! [[ -f nosuch ]]; do echo once; break; done => "once\n"
+while [[ -f input ]] && [[ -d nosuch ]]; do echo no; done; echo after => "after\n"
+until { [[ -f input ]]; }; do echo no; break; done; echo after => "after\n"
+{ [[ -f input ]]; } && echo yes || echo no => "yes\n"
+( [[ -f input ]] ) && echo yes || echo no => "yes\n"
+[[ -f input ]] && [[ -n x ]] && echo both => "both\n"
+f() { [[ -f input ]]; }; f && echo yes || echo no => "yes\n"
+f() { [[ -f nosuch ]]; }; f && echo yes || echo no => "no\n"
+f() { [[ -f input ]] && echo yes; }; f => "yes\n"
+f() { [[ -f input ]]; }; f | cat; echo $? => "0\n"
+echo until [[ x ]] => "until [[ x ]]\n"
+f() { [[ -f $x ]]; }; f => ! function 1
+f() { [[ a == `x` ]]; }; f => ! function 1
+
 # quoting and word splitting
 "echo \"a  b\"" => "a  b\n"
 echo 'a  b' => "a  b\n"
@@ -202,6 +221,12 @@ while false; do :; done | wc -l => "0\n"
 while test 1 -eq 1; do break; done; echo after=$? => "after=0\n"
 f() { echo a; }; while f; do break; done => "a\n"
 f() { false; }; until f; do echo body; break; done => "body\n"
+n=0; until [[ $n == 3 ]]; do n=$((n+1)); echo $n; done => "1\n2\n3\n"
+until false; do echo x; break; done => "x\n"
+f() { echo hi; }; f > /dev/null; echo after => "after\n"
+cat <(echo hi) => ! <( 1
+diff <(echo a) <(echo b) => ! <( 1
+echo x > >(cat) => ! >( 1
 set -e => ! set 127
 shopt -s nullglob => ! shopt 127
 "trap \"echo bye\" EXIT" => ! trap 127

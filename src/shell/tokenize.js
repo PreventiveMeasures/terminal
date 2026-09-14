@@ -106,13 +106,22 @@ export function tokenizeFragment(line, quoted = false) {
   return st.tokens[0] ?? { value: '', mask: quoted ? '' : null }
 }
 
+// Separators that open a command, and the reserved words that stand in front
+// of a list rather than ending one. `[[` is the conditional only where one of
+// those leaves a command to start; anywhere else it is the word bash reads.
+const OPENS_COMMAND = new Set(['semi', 'and', 'or', 'pipe', 'pipe_err', 'amp', 'paren_open'])
+const PRECEDES_LIST = new Set(['!', '{', 'if', 'then', 'else', 'elif', 'while', 'until', 'do'])
+
 function conditionalPosition(tokens) {
-  let command = true, target = false
+  let command = true, previous = null, target = false
   for (const t of tokens) {
-    if (['semi', 'and', 'or', 'pipe', 'pipe_err', 'paren_open'].includes(t.kind)) { command = true; target = false; continue }
+    // `name ()` opens a function body, the one place a `)` leads a command.
+    const opens = OPENS_COMMAND.has(t.kind) || (t.kind === 'paren_close' && previous?.kind === 'paren_open')
+    previous = t
+    if (opens) { command = true; target = false; continue }
     if (t.kind === 'redir') { command = false; target = !['dup', 'close'].includes(t.op); continue }
     if (target) { target = false; continue }
-    if (!command || t.kind !== 'word' || t.quoted || !['!', '{', 'if', 'then', 'else', 'elif', 'do'].includes(t.value)) command = false
+    if (!command || t.kind !== 'word' || t.quoted || !PRECEDES_LIST.has(t.value)) command = false
   }
   return command && !target
 }

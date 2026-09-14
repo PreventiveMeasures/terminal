@@ -110,11 +110,21 @@ export function parseFunction(p, name, buildSteps) {
 const macroSafe = (steps) => steps.every((step) => step.stages.every(stageSafe))
 
 function stageSafe(stage) {
-  if (stage.assigns.length > 0 || stage.test || stage.define) return false
+  if (stage.assigns.length > 0 || stage.define) return false
+  if (stage.test) return testSafe(stage.test) && stage.redirs.every(plainRedirect)
   if (stage.group) return macroSafe(stage.group)
   if (stage.conditional) return stage.conditional.branches.every((b) => macroSafe(b.condition) && macroSafe(b.body)) && macroSafe(stage.conditional.otherwise ?? [])
   if (stage.loop) return (stage.loop.words ?? []).every(plainWord) && macroSafe(stage.loop.condition ?? []) && macroSafe(stage.loop.body)
   return stage.words.every(plainWord) && stage.redirs.every(plainRedirect)
+}
+
+// A `[[ … ]]` holds its operands in an expression rather than a word list, so
+// reach them there to ask of each what a word list is asked of.
+function testSafe(node) {
+  if (node.kind === 'and' || node.kind === 'or') return testSafe(node.left) && testSafe(node.right)
+  if (node.kind === 'not') return testSafe(node.expression)
+  if (node.kind === 'unary') return plainWord(node.word)
+  return plainWord(node.left) && plainWord(node.right)
 }
 
 // A here-document whose delimiter leaves its body to expand reads whatever

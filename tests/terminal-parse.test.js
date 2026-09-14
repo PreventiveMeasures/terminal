@@ -286,6 +286,56 @@ describe('parse() spells a value out only when expansion still decides it', () =
     assert.deepEqual(verdict('while a'), { ok: false, incomplete: true, error: 'while: missing `do`' })
   })
 
+  // `[[` opens a conditional only where a command may start, and is the plain
+  // word it spells anywhere else — which is what a reading that finds one too
+  // late would run instead. Command position outlives `&`, the reserved words
+  // that lead a list rather than end one, and the `()` a definition opens with.
+  it('reads `[[` as the conditional it is wherever a command may start', () => {
+    const unary = { type: 'unary', op: '-f', word: 'x' }
+    const AT = [
+      ['while [[ -f x ]]; do b; done', (nodes) => nodes[0].condition[0]],
+      ['until [[ -f x ]]; do b; done', (nodes) => nodes[0].condition[0]],
+      ['while ! [[ -f x ]]; do b; done', (nodes) => nodes[0].condition[0]],
+      ['until { [[ -f x ]]; }; do b; done', (nodes) => nodes[0].condition[0].list[0]],
+      ['f() { [[ -f x ]]; }', (nodes) => nodes[0].list[0]],
+      ['a & [[ -f x ]]', (nodes) => nodes[1]],
+      ['{ [[ -f x ]]; }', (nodes) => nodes[0].list[0]],
+      ['( [[ -f x ]] )', (nodes) => nodes[0].list[0]],
+      ['for i in a; do [[ -f x ]]; done', (nodes) => nodes[0].list[0]],
+      ['if a; then [[ -f x ]]; fi', (nodes) => nodes[0].branches[0].list[0]],
+      ['a | [[ -f x ]]', (nodes) => nodes[0].stages[1]],
+    ]
+    for (const [line, at] of AT) {
+      const node = at(list(line))
+      assert.deepEqual([node.type, node.expression], ['test', unary], line)
+    }
+    // A word in any other place, as bash reads it: `echo until [[ x ]]` prints
+    // its arguments, and quoting settles it wherever a conditional could open.
+    assert.deepEqual(list('echo until [[ x ]]')[0].argv, ['echo', 'until', '[[', 'x', ']]'])
+    assert.deepEqual(list('echo "[[" -f x "]]"')[0].argv, ['echo', '[[', '-f', 'x', ']]'])
+    assert.deepEqual(verdict('{ a; } [[ -f x ]]'), { ok: false, incomplete: false, error: 'unexpected token after `}`' })
+  })
+
+  // A body holds its operands in an expression rather than a word list, and
+  // the rule that keeps a call the same list as the line it stands in is asked
+  // of them there: literal operands read nothing, and a reference is refused.
+  it('reads a conditional in a function body, and refuses one that reads', () => {
+    const body = (line) => list(line)[0].list[0]
+    assert.deepEqual(body('f() { [[ -f x && -d y ]]; }').expression, {
+      type: 'and',
+      left: { type: 'unary', op: '-f', word: 'x' },
+      right: { type: 'unary', op: '-d', word: 'y' },
+    })
+    assert.deepEqual(body('f() { [[ ! -f x ]]; }').expression, { type: 'not', expression: { type: 'unary', op: '-f', word: 'x' } })
+    assert.deepEqual(body('f() { [[ -f x ]] > /tmp/o; }').redirects, [{ fd: 1, op: '>', target: '/tmp/o' }])
+    const message = '`f()` is supported only while its body reads and writes no variable'
+    for (const line of ['f() { [[ -f $x ]]; }', 'f() { [[ a == $b ]]; }', 'f() { [[ a == `x` ]]; }', 'f() { [[ ! -f $x ]]; }', 'f() { [[ -f x ]] > /tmp/$y; }']) {
+      assert.deepEqual(verdict(line), { ok: false, incomplete: false, error: message }, line)
+    }
+    // The summary cannot say what a conditional answers, so it says so.
+    assert.throws(() => terminal().summarize('f() { [[ -f x ]]; }; f'), { message: 'summarize: `[[ … ]]` is not a simple chain' })
+  })
+
   // `<( … )` runs commands and the word is the path their output arrives on,
   // so what it holds is what it runs. Opening one needs a descriptor this
   // shell has none of, which is a gap running the line reports, not reading it.
@@ -549,6 +599,51 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   })
 
   // A `for` is a list of its own too, run once for each word after `in`.
+  // `&` ends the row it follows rather than joining the next, and what that
+  // row holds makes no difference to where it ends.
+  it('closes a row on `&`, whatever the row holds', () => {
+    const backgrounded = [
+      ['ls &', [['ls']]],
+      ['{ a; } &', [['a']]],
+      ['(a) &', [['a']]],
+      ['(cd dir) &', [{ type: 'parens', summary: [[['cd', 'dir']]] }]],
+      ['{ a; b; } &', [{ type: 'braces', summary: [[['a']], [['b']]] }]],
+      ['for i in a; do b; done &', [{ type: 'for', name: 'i', words: ['a'], summary: [[['b']]] }]],
+      ['while a; do b; done &', [{ type: 'while', condition: [[['a']]], summary: [[['b']]] }]],
+      ['until a; do b; done &', [{ type: 'until', condition: [[['a']]], summary: [[['b']]] }]],
+      ['a | b &', [['a'], ['b']]],
+    ]
+    for (const [line, chain] of backgrounded) {
+      assert.deepEqual(terminal().summarize(line), [chain, '&'], line)
+    }
+  })
+
+  // A process substitution is a path the shell fills from what it runs, so the
+  // word is the commands behind it wherever a word may stand.
+  it('says what a process substitution runs, whichever slot holds it', () => {
+    const process = (op, chains) => ({ type: 'process', op, summary: chains })
+    assert.deepEqual(terminal().summarize('diff <(a) <(b)'), [[['diff', process('<', [[['a']]]), process('<', [[['b']]])]]])
+    assert.deepEqual(terminal().summarize('ls > >(tee -a log)'), [[['ls'], ['>', process('>', [[['tee', '-a', 'log']]])]]])
+    assert.deepEqual(terminal().summarize('cat < <(ls)'), [[['cat', process('<', [[['ls']]])]]])
+    assert.deepEqual(terminal().summarize('tee >(wc -l) < a.txt'), [[['cat', 'a.txt'], ['tee', process('>', [[['wc', '-l']]])]]])
+    assert.deepEqual(terminal().summarize('x=<(ls) ls'), [[[
+      { type: 'assignments', assignments: [{ name: 'x', value: process('<', [[['ls']]]) }] },
+      'ls',
+    ]]])
+  })
+
+  // A row that holds a block holds whatever the block holds, however deep.
+  it('nests a loop in the brackets that hold it', () => {
+    const loop = { type: 'while', condition: [[['a']]], summary: [[['b']]] }
+    assert.deepEqual(terminal().summarize('(while a; do b; done)'), [[{ type: 'parens', summary: [[loop]] }]])
+    assert.deepEqual(terminal().summarize('f() { while a; do b; done; }; f'), [[{ type: 'braces', summary: [[loop]] }]])
+    assert.deepEqual(terminal().summarize('until a; do b; done > /tmp/out'), [[{ ...loop, type: 'until' }, ['>', '/tmp/out']]])
+    assert.deepEqual(terminal().summarize('{ for i in a b; do c; done; }'), [[{
+      type: 'braces',
+      summary: [[{ type: 'for', name: 'i', words: ['a', 'b'], summary: [[['c']]] }]],
+    }]])
+  })
+
   it('summarizes a for loop as the list it repeats', () => {
     assert.deepEqual(terminal().summarize('for d in a-*; do echo "$d"; done'), [[{
       type: 'for',
