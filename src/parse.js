@@ -8,7 +8,8 @@
 // may write is a property of a terminal, not of the line. A terminal reads the
 // same tree under its own write policy, through `createTerminal(…).parse()`.
 
-import { read, summarize as summarizeWith } from './parse-tree.js'
+import { read } from './parse-tree.js'
+import { summarize as summarizeWith } from './summarize.js'
 
 export const parse = (line) => read(line, true)
 

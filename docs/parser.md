@@ -196,12 +196,38 @@ summarize('ls *.js ~/bin $home a{b,c}')
 //      { type: 'variable', name: 'home', multi: true }, 'ab', 'ac'] ] ]
 ```
 
+A word whose text a command has to print is the commands that print it, since
+a summary of commands is what a summary already is. Quoting decides only
+whether that output stays one word:
+
+```js
+summarize('echo `a;b`')
+// [ [ ['echo', { type: 'shell', list: [[['a']], [['b']]], multi: true }] ] ]
+
+summarize('echo "`a|b`"')
+// [ [ ['echo', { type: 'shell', list: [[['a'], ['b']]], multi: false }] ] ]
+```
+
+A `( … )` is a list of its own, so it holds a summary too, in place of the row
+a command would have stood in:
+
+```js
+summarize('(cd dir; ls) | wc -l')
+// [ [ { type: 'braces', list: [[['cd', 'dir']], [['ls']]] }, ['wc', '-l'] ] ]
+
+summarize('(ls) > out')
+// [ [['ls'], ['>', 'out']] ]
+```
+
+Parentheses holding one command that changes nothing the shell around them
+keeps are the command they hold — `(ls)` is `ls` — while `(cd dir)` keeps
+them, since stopping the `cd` from reaching the shell is all they are for.
+
 Anything else throws rather than be summarized into a lie: a line that does not
-parse, `while`, `case` and the other constructs this terminal refuses, a
-subshell, group, `for`, `if` or `[[ … ]]`, a `!`, a
-here-document whose delimiter leaves its body to expand, and any word a command
-has to run before its text is known — `` `date` `` or `$(( … ))`, whether it is
-the whole argument or one piece of it. `parse()` reads those.
+parse, `while`, `case` and the other constructs this terminal refuses, a brace
+group, `for`, `if` or `[[ … ]]`, a `!`, a here-document whose delimiter leaves
+its body to expand, and any word no line settles the text of — `$(( … ))`, or
+the braces of an ambiguous redirect. `parse()` reads those.
 
 A terminal has the same method, under its own write policy: `summarize('ls >
 out')` throws there when nothing may be written.

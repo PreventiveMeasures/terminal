@@ -383,7 +383,6 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   }
 
   for (const [line, message] of [
-    ['(ls)', 'summarize: a subshell is not a simple chain'],
     ['{ ls; }', 'summarize: a brace group is not a simple chain'],
     ['for f in a; do ls; done', 'summarize: `for` is not a simple chain'],
     ['if ls; then cat a.txt; fi', 'summarize: `if` is not a simple chain'],
@@ -395,11 +394,8 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['wc < a.txt < b.txt', 'summarize: a command reading from two places is not a simple chain'],
     ['wc < a.txt <<<here', 'summarize: a command reading from two places is not a simple chain'],
     ['ls > {a,b}', 'summarize: {a,b} is not a literal word'],
-    ['ls a$(date)', 'summarize: $(…) is not a literal word'],
-    ['echo `date`', 'summarize: $(…) is not a literal word'],
-    ['echo $(date)', 'summarize: $(…) is not a literal word'],
     ['echo $((1 + 2))', 'summarize: $((…)) is not a literal word'],
-    ['ls; (cd dir)', 'summarize: a subshell is not a simple chain'],
+    ['ls; { cd dir; }', 'summarize: a brace group is not a simple chain'],
   ]) {
     it(`refuses ${JSON.stringify(line)}`, () => {
       assert.throws(() => terminal().summarize(line), { message })
@@ -425,17 +421,53 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     assert.deepEqual(terminal().summarize('echo "prefix $(cat <<\'EOF\'\nx\nEOF\n) suffix"'), [[['echo', 'prefix x suffix']]])
   })
 
-  for (const [label, line] of [
-    ['unquoted, so its text would split into fields', HERE('a b', "'EOF'", '')],
-    ['a delimiter that lets the body expand', HERE('$x', 'EOF')],
-    ['a cat that reads a file as well', 'echo "$(cat f <<\'EOF\'\nx\nEOF\n)"'],
-    ['another command reading it', 'echo "$(wc <<\'EOF\'\nx\nEOF\n)"'],
-    ['a second command after it', 'echo "$(cat <<\'EOF\'\nx\nEOF\nls)"'],
+  // Only a here-document nothing else touches is the text it holds. The rest
+  // is the shell it runs, which a summary says rather than refuses.
+  const shell = (chains, multi) => ({ type: 'shell', list: chains, multi })
+
+  for (const [label, line, token] of [
+    ['unquoted, so its text would split into fields', HERE('a b', "'EOF'", ''), shell([[['echo', 'a b']]], true)],
+    ['a cat that reads a file as well', 'echo "$(cat f <<\'EOF\'\nx\nEOF\n)"', shell([[['echo', 'x'], ['cat', 'f']]], false)],
+    ['another command reading it', 'echo "$(wc <<\'EOF\'\nx\nEOF\n)"', shell([[['echo', 'x'], ['wc']]], false)],
+    ['a second command after it', 'echo "$(cat <<\'EOF\'\nx\nEOF\nls)"', shell([[['echo', 'x']], [['ls']]], false)],
   ]) {
-    it(`refuses ${label}`, () => {
-      assert.throws(() => terminal().summarize(line), /is not a literal word/u)
+    it(`says the shell it runs for ${label}`, () => {
+      assert.deepEqual(terminal().summarize(line), [[['echo', token]]])
     })
   }
+
+  it('refuses a delimiter that lets the body expand, inside a substitution as out', () => {
+    assert.throws(() => terminal().summarize(HERE('$x', 'EOF')), { message: 'summarize: a here-document its delimiter leaves to expand is not a simple chain' })
+  })
+
+  // A substitution runs commands, and what a summary has to say about commands
+  // is a summary. Quoting decides only whether its output stays one word.
+  it('says the shell a word waits on, and how many words it may come back as', () => {
+    assert.deepEqual(terminal().summarize('echo "`a;b`"'), [[['echo', shell([[['a']], [['b']]], false)]]])
+    assert.deepEqual(terminal().summarize('echo `a;b`'), [[['echo', shell([[['a']], [['b']]], true)]]])
+    assert.deepEqual(terminal().summarize('echo "`a|b`"'), [[['echo', shell([[['a'], ['b']]], false)]]])
+    assert.deepEqual(terminal().summarize('echo `a|b`'), [[['echo', shell([[['a'], ['b']]], true)]]])
+    assert.deepEqual(terminal().summarize('echo "`a`"'), [[['echo', shell([[['a']]], false)]]])
+    assert.deepEqual(terminal().summarize('echo `a`'), [[['echo', shell([[['a']]], true)]]])
+    assert.deepEqual(terminal().summarize('x=$(date) ls'), [[[{ type: 'assignments', assignments: [{ name: 'x', value: shell([[['date']]], false) }] }, 'ls']]])
+    assert.deepEqual(terminal().summarize('ls $(cat f)/x'), [[['ls', parts(shell([[['cat', 'f']]], true), '/x')]]])
+    assert.throws(() => terminal().summarize('echo `echo )`'), { message: 'unexpected `)`' })
+  })
+
+  // `( … )` is a list of its own, and a summary of a list is a summary.
+  it('summarizes a subshell as the line it runs, and drops what it keeps from nothing', () => {
+    const braces = (chains) => ({ type: 'braces', list: chains })
+    assert.deepEqual(terminal().summarize('(ls)'), [[['ls']]])
+    assert.deepEqual(terminal().summarize('(ls -a) | wc'), [[['ls', '-a'], ['wc']]])
+    assert.deepEqual(terminal().summarize('(ls) > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
+    assert.deepEqual(terminal().summarize('echo x | (cat) > /tmp/f'), [[['echo', 'x'], ['>', '/tmp/f']]])
+    assert.deepEqual(terminal().summarize('(cd dir; ls)'), [[braces([[['cd', 'dir']], [['ls']]])]])
+    assert.deepEqual(terminal().summarize('(cd dir)'), [[braces([[['cd', 'dir']]])]])
+    assert.deepEqual(terminal().summarize('(a && b &)'), [[braces([[['a']], '&&', [['b']], '&'])]])
+    assert.deepEqual(terminal().summarize('(ls; cd x) | wc -l > /tmp/out'), [[braces([[['ls']], [['cd', 'x']]]), ['wc', '-l'], ['>', '/tmp/out']]])
+    assert.deepEqual(terminal().summarize('(ls > /tmp/a) > /tmp/b'), [[braces([[['ls'], ['>', '/tmp/a']]]), ['>', '/tmp/b']]])
+    assert.deepEqual(terminal().summarize('(x=1)'), [[braces([[[{ type: 'assignments', assignments: [{ name: 'x', value: '1' }] }]]])]])
+  })
 
   // Whatever feeds a command is the command that feeds it, and text is written
   // by the command that writes text.
@@ -476,7 +508,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     assert.deepEqual(terminal().summarize('x=1 > /tmp/out'), [[[assigned({ name: 'x', value: '1' })], ['>', '/tmp/out']]])
     assert.deepEqual(terminal().summarize('A=1 ls | B=2 wc'), [[[assigned({ name: 'A', value: '1' }), 'ls'], [assigned({ name: 'B', value: '2' }), 'wc']]])
     assert.deepEqual(terminal().summarize('x=*.js y=~/a ls'), [[[assigned({ name: 'x', value: '*.js' }, { name: 'y', value: parts(home(), '/a') }), 'ls']]])
-    assert.throws(() => terminal().summarize('x=$(date) ls'), { message: 'summarize: $(…) is not a literal word' })
+    assert.throws(() => terminal().summarize('x=$((1 + 2)) ls'), { message: 'summarize: $((…)) is not a literal word' })
   })
 
   // A here-string is its word and a newline, whoever settles the word.

@@ -30,7 +30,7 @@ function moduleGraph(entryPath) {
 describe('the parse entry point is published on its own', () => {
   it('is exported as @preventive/terminal/parse.js, with its own types', () => {
     assert.deepEqual(pkg.exports['./parse.js'], { types: './src/parse.d.ts', default: './src/parse.js' })
-    for (const file of ['src/parse.js', 'src/parse.d.ts', 'src/parse-tree.js']) assert.ok(pkg.files.includes(file), file)
+    for (const file of ['src/parse.js', 'src/parse.d.ts', 'src/parse-tree.js', 'src/summarize.js']) assert.ok(pkg.files.includes(file), file)
   })
 
   it('exports the functions its types declare, and no more', () => {
@@ -48,7 +48,7 @@ describe('the parse entry point is published on its own', () => {
     // A budget, not a target: the parser, its lexers, and the leaves they need
     // — brace syntax among them, since reading a word has to say which of its
     // text a `{a,b}` claims.
-    assert.ok(files.length <= 17, `${files.length} modules: ${files.join(', ')}`)
+    assert.ok(files.length <= 18, `${files.length} modules: ${files.join(', ')}`)
     assert.deepEqual(external, ['@exodus/bytes/utf8.js'])
     assert.ok(moduleGraph('src/index.js').files.length > 80, 'the whole terminal is much more than the parser')
   })

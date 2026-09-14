@@ -363,8 +363,9 @@ export interface ParseResult {
 
 /**
  * One token of a chain that stands for a word: the text it will be, the
- * pattern it will be matched by, the variable it reads, or the pieces those
- * are joined from. Each says what it reaches for as plainly as a name does —
+ * pattern it will be matched by, the variable it reads, the shell it waits
+ * on, or the pieces those are joined from. Each says what it reaches for as
+ * plainly as a name does —
  * `ls *.js` is `['ls', { type: 'pattern', pattern: '*.js', multi: true }]` and `ls ~/bin`
  * is `['ls', { type: 'parts', parts: [{ type: 'variable', name: 'HOME', multi: false }, '/bin'] }]`.
  *
@@ -372,7 +373,10 @@ export interface ParseResult {
  * command has to run first stands on the pattern side of `[[ x == y ]]`, and
  * a `[[ … ]]` is not a chain to summarize.
  */
-export type WordToken = string | StringPatternPart | VariablePart | TokenParts
+export type WordToken = TokenPiece | TokenParts
+
+/** One piece of a {@link WordToken}, or the whole of one where it is the only piece. */
+export type TokenPiece = string | StringPatternPart | VariablePart | ShellToken
 
 /** One token of a chain: a word, or the assignments a command carries. */
 export type Token = WordToken | AssignmentsToken
@@ -384,7 +388,24 @@ export type Token = WordToken | AssignmentsToken
  */
 export interface TokenParts {
   type: 'parts'
-  parts: Array<string | StringPatternPart | VariablePart>
+  parts: TokenPiece[]
+}
+
+/**
+ * `$( … )` or `` ` … ` ``: the commands it runs, summarized as a line of their
+ * own, and the word is whatever they print. A summary of commands is a
+ * summary, so `` echo `a;b` `` holds one — which is what keeps
+ * `` `a;b` ``, `` `a|b` `` and `` `a` `` three different words, quoted or not.
+ *
+ * `multi` is what quoting decides here as anywhere: bare, the output is split
+ * into fields and matched as a pattern, so it may come back as any number of
+ * words. A `"$(cat <<'EOF' … EOF)"` is not one of these at all — it is the
+ * text that here-document holds, which nothing has to run to know.
+ */
+export interface ShellToken {
+  type: 'shell'
+  list: Summary
+  multi: boolean
 }
 
 /**
@@ -409,9 +430,26 @@ export interface TokenAssignment {
 /**
  * One command of a chain: each pipeline stage's `argv`, with the assignments
  * it carries in front, and each redirect as the tokens it was written with —
- * `['>', 'out']`, `['2>&1']`.
+ * `['>', 'out']`, `['2>&1']`. Where a stage is a `( … )`, a
+ * {@link ChainBraces} stands in place of that row.
  */
-export type Chain = Token[][]
+export type Chain = Array<Token[] | ChainBraces>
+
+/**
+ * A `( … )` a chain runs: the commands inside, summarized as a line of their
+ * own, since a subshell holds a list like any other — `(cd dir; ls) > out` is
+ * `[{ type: 'braces', list: [[['cd', 'dir']], [['ls']]] }, ['>', 'out']]`.
+ *
+ * Parentheses holding one command that changes nothing the shell around them
+ * keeps are the command they hold: `(ls)` is `['ls']` and `(ls) | wc` is two
+ * plain rows, while `(cd dir)` keeps them, since they are what stops the `cd`
+ * reaching the shell. This is not the tree's `subshell`: a chain's rows are
+ * commands, and `list` is a {@link Summary} rather than a list of nodes.
+ */
+export interface ChainBraces {
+  type: 'braces'
+  list: Summary
+}
 
 /**
  * A summarized line: its chains in order, with `&&` or `||` standing between
@@ -472,16 +510,15 @@ export function parse(line: string): ParseResult
  * text, and the substitution has to be one word, since bare its text would be
  * split into fields and globbed.
  *
- * A token is text, or the pattern or variable an argument is written as, or
- * the word those are joined into, or the `A=1 B=2` a command carries — each
- * of which says what it reaches for as plainly as a name says what it runs.
- * Anything a summary
+ * A token is text, or the pattern or variable an argument is written as, the
+ * shell whose output it will be, the word those are joined into, or the
+ * `A=1 B=2` a command carries — each of which says what it reaches for as
+ * plainly as a name says what it runs. Anything a summary
  * would have to lie about throws instead: a line that does not parse, a
- * subshell, group, `for`, `if` or `[[ … ]]`, a `!`, a
+ * brace group, `for`, `if` or `[[ … ]]`, a `!`, a
  * here-document whose delimiter leaves its body to expand, a stage that reads
- * its own input from inside a pipeline, and any word a command has to run
- * before its text is known — `` `date` ``, `$(( … ))`, or the braces of an
- * ambiguous redirect. {@link parse}
+ * its own input from inside a pipeline, and any word no line settles the text
+ * of — `$(( … ))`, or the braces of an ambiguous redirect. {@link parse}
  * reads those; this is the short answer while a line stays simple, and an
  * error the moment it does not.
  *

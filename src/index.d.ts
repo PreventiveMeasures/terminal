@@ -258,6 +258,7 @@ export type {
   ArithmeticPart,
   Assignment,
   BracePart,
+  ChainBraces,
   Branch,
   Chain,
   CloseRedirect,
@@ -283,6 +284,7 @@ export type {
   ParseResult,
   Pipeline,
   Redirect,
+  ShellToken,
   Subshell,
   StringPatternPart,
   SubstitutionPart,
@@ -292,6 +294,7 @@ export type {
   Token,
   TokenAssignment,
   TokenParts,
+  TokenPiece,
   Value,
   VariablePart,
   WordToken,
@@ -359,11 +362,12 @@ export interface Terminal {
    * `[['echo', '…'], ['>', 'notes.md']]`, the pass-through `cat` left out.
    *
    * A token is text, a {@link PatternPart} or {@link VariablePart}, the
-   * {@link TokenParts} those join into — a `~` among them, which reads as the
-   * `$HOME` it names — or the {@link AssignmentsToken} a command carries. It
+   * {@link ShellToken} whose output a word will be, the {@link TokenParts}
+   * those join into — a `~` among them, which reads as the `$HOME` it names —
+   * or the {@link AssignmentsToken} a command carries. It
    * throws rather than summarize what it cannot: a line
    * that does not parse (including a redirect this filesystem would refuse),
-   * a subshell, group, `for`, `if` or `[[ … ]]`, a `!`, a
+   * a brace group, `for`, `if` or `[[ … ]]`, a `!`, a
    * here-document whose delimiter leaves its body to expand, a stage reading
    * its own input from inside a pipeline, or a word a command has to run before
    * its text is known.
