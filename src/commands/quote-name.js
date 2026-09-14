@@ -32,3 +32,13 @@ export function quoteName(name, ctx) {
   }
   return out + "'"
 }
+
+// GNU quotearg's shell-escape style, which realpath uses: the same quoting as
+// quoteaf, but omitted entirely when the name needs none. `#` and `~` are safe
+// only away from the front, where a shell would read them as comment and tilde.
+const SHELL_SAFE = /^[#%+,\-./0-9@A-Z\]_a-z{}~]+$/u
+
+export function quoteShell(name, ctx) {
+  if (SHELL_SAFE.test(name) && !'#~'.includes(name[0])) return name
+  return quoteName(name, ctx)
+}

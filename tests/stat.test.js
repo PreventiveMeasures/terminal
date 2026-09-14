@@ -141,10 +141,10 @@ describe('stat reports unavailable metadata and unsupported syntax', () => {
 
 describe('stat errors, mounts, and writable metadata', () => {
   it('continues after missing files', () => {
-    assert.deepEqual(run('stat -c%s missing a'), result('3\n', 1, "stat: cannot stat 'missing': No such file or directory\n"))
+    assert.deepEqual(run('stat -c%s missing a'), result('3\n', 1, "stat: cannot statx 'missing': No such file or directory\n"))
   })
   it('retains operand event order under merged descriptors', () => {
-    assert.deepEqual(run('stat -c%s a missing empty 2>&1'), result("3\nstat: cannot stat 'missing': No such file or directory\n0\n", 1))
+    assert.deepEqual(run('stat -c%s a missing empty 2>&1'), result("3\nstat: cannot statx 'missing': No such file or directory\n0\n", 1))
   })
   for (const name of ['a/../empty', 'missing/../a', 'a/']) {
     it(`validates intermediate components ${name}`, () => {
@@ -173,7 +173,7 @@ describe('stat errors, mounts, and writable metadata', () => {
   it('reflects empty files, in-place replacement, and removal in the type field', () => {
     const terminal = createTerminal({}, { mount: '/src', writable: '/tmp/' })
     const actual = terminal.run(": >/tmp/file; stat -c%F /tmp/file; printf x >/tmp/file; sed -i.bak 's/x/xx/' /tmp/file; stat -c '%s %F' /tmp/file /tmp/file.bak; rm /tmp/file; stat -c%F /tmp/file")
-    assert.deepEqual(actual, result('regular empty file\n2 regular file\n1 regular file\n', 1, "stat: cannot stat '/tmp/file': No such file or directory\n", '/src'))
+    assert.deepEqual(actual, result('regular empty file\n2 regular file\n1 regular file\n', 1, "stat: cannot statx '/tmp/file': No such file or directory\n", '/src'))
   })
   it('measures invalid UTF-8 overlay bytes without decoding them', () => {
     const fs = writableFs(createFs({}, '/src'))

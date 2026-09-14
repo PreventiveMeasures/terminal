@@ -10,6 +10,7 @@ const ALIASES = new Map(Object.entries({
 
 export function duOptions(tokens, ctx) {
   const parsed = parseArgs(tokens, {
+    // `-A` is the BSD/macOS spelling of GNU's long-only `--apparent-size`.
     short: ['0', 'a', 'A', 'b', 'c', 'h', 'H', 'k', 'l', 'm', 's', 'S', 'L', 'D', 'P'],
     long: [...ALIASES.keys()].filter((name) => !['d', 'B'].includes(ALIASES.get(name))).concat(['inodes', 'si']),
     valueShort: ['d', 'B'], valueLong: ['max-depth', 'block-size'],

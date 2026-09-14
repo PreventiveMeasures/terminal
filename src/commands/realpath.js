@@ -1,6 +1,7 @@
 import { parseArgs } from '../args.js'
 import { dirname, joinPath, lookup, resolve } from '../fs.js'
 import { missingPathNote } from '../notes.js'
+import { quoteShell } from './quote-name.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { err, ok } from '../util.js'
 
@@ -55,7 +56,8 @@ function relativePath(from, to) {
 }
 
 const within = (base, path) => base === '/' || path === base || path.startsWith(base + '/')
-const EXISTENCE_MODES = { E: 'E', canonicalize: 'E', e: 'e', 'canonicalize-existing': 'e', m: 'm', 'canonicalize-missing': 'm' }
+// GNU offers no flag for the default mode, so `E` names it internally only.
+const EXISTENCE_MODES = { e: 'e', 'canonicalize-existing': 'e', m: 'm', 'canonicalize-missing': 'm' }
 
 function relativeOptions(ctx, values, mode, strip) {
   const base = values.get('relative-base')
@@ -67,7 +69,7 @@ function relativeOptions(ctx, values, mode, strip) {
     const error = found.error ?? (mode === 'e' && !ctx.fs.isDir(found.path) ? 'Not a directory' : null)
     if (error) {
       missingPathNote(ctx, 'realpath', operand, error)
-      return { error: err(`realpath: ${operand}: ${error}`) }
+      return { error: err(`realpath: ${quoteShell(operand, ctx)}: ${error}`) }
     }
     result[key] = found.path
   }
@@ -78,8 +80,8 @@ function relativeOptions(ctx, values, mode, strip) {
 export function realpath(_stdin, tokens, ctx) {
   // There are no symlinks in this filesystem; -L and -P produce the same paths.
   const { flags, values, positional, order } = parseArgs(tokens, {
-    short: ['E', 'e', 'm', 'L', 'P', 's', 'q', 'z'],
-    long: ['canonicalize', 'canonicalize-existing', 'canonicalize-missing', 'logical', 'physical', 'strip', 'no-symlinks', 'quiet', 'zero'],
+    short: ['e', 'm', 'L', 'P', 's', 'q', 'z'],
+    long: ['canonicalize-existing', 'canonicalize-missing', 'logical', 'physical', 'strip', 'no-symlinks', 'quiet', 'zero'],
     valueLong: ['relative-to', 'relative-base'],
   })
   if (!positional.length) return err('realpath: missing operand')
@@ -99,7 +101,7 @@ export function realpath(_stdin, tokens, ctx) {
     const found = canonicalize(ctx, operand, mode, strip)
     if (found.error) {
       missingPathNote(ctx, 'realpath', operand, found.error)
-      if (!quiet) appendOutput(result, err(`realpath: ${operand}: ${found.error}`))
+      if (!quiet) appendOutput(result, err(`realpath: ${quoteShell(operand, ctx)}: ${found.error}`))
       failed = true
     } else {
       const path = relative.target && (!relative.base || within(relative.base, found.path))

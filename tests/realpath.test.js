@@ -33,7 +33,7 @@ describe('realpath canonical names', () => {
     ['missing///', '/missing\n'], ['dir/missing///', '/dir/missing\n'],
   ]) it(args, () => success('realpath ' + args, stdout))
 
-  for (const options of ['-E', '--canonicalize', '-e', '--canonicalize-existing', '-m', '--canonicalize-missing', '-L', '--logical', '-P', '--physical', '-s', '--strip', '--no-symlinks', '-q', '--quiet', '-eLPs', '-sPL']) {
+  for (const options of ['-e', '--canonicalize-existing', '-m', '--canonicalize-missing', '-L', '--logical', '-P', '--physical', '-s', '--strip', '--no-symlinks', '-q', '--quiet', '-eLPs', '-sPL']) {
     it(options + ' preserves existing canonical names', () => success(`realpath ${options} dir//./sub/../child`, '/dir/child\n'))
   }
 
@@ -57,7 +57,7 @@ describe('realpath canonical names', () => {
 })
 
 describe('realpath existence checks precede dot-dot collapse', () => {
-  for (const option of ['', '-E', '-L', '-s', '-e', '-eL', '-es', '-LP', '-sP', '--logical --physical']) {
+  for (const option of ['', '-L', '-s', '-e', '-eL', '-es', '-LP', '-sP', '--logical --physical']) {
     for (const [path, reason] of [
       ['file/child', /not a directory/iu], ['file/', /not a directory/iu],
       ['file/.', /not a directory/iu], ['file/..', /not a directory/iu], ['file/../dir', /not a directory/iu],
@@ -93,8 +93,10 @@ describe('realpath existence checks precede dot-dot collapse', () => {
   for (const options of ['-me', '-m -e', '--canonicalize-missing --canonicalize-existing']) {
     it(options + ' restores required existence', () => failure(`realpath ${options} missing`, /no such file or directory/iu))
   }
-  for (const options of ['-eE', '-mE', '--canonicalize-existing --canonicalize']) {
-    it(options + ' restores the default mode', () => {
+  // GNU has no flag for the default mode, so once -e or -m is given there is no
+  // way back to it; a run that never names one is the only way to ask for it.
+  for (const options of ['', '-L']) {
+    it(JSON.stringify(options) + ' is the only way to ask for the default mode', () => {
       success(`realpath ${options} missing`, '/missing\n')
       failure(`realpath ${options} missing/child`, /no such file or directory/iu)
     })
@@ -104,7 +106,7 @@ describe('realpath existence checks precede dot-dot collapse', () => {
 describe('realpath strip mode defers ordinary intermediate existence checks', () => {
   // CAN_NOLINKS skips ordinary intermediate names. Only a suffix requiring
   // directory traversal (notably /..) or the final lookup forces a check.
-  for (const option of ['-s', '--strip', '--no-symlinks', '-Ls', '-esE']) {
+  for (const option of ['-s', '--strip', '--no-symlinks', '-Ls']) {
     for (const path of ['missing/child', 'missing/./child', 'missing/child/']) {
       it(`${option} permits ${path} in the default existence mode`, () => success(`realpath ${option} ${path}`, '/missing/child\n'))
     }
@@ -212,7 +214,9 @@ describe('realpath failures, input ownership and unsupported options', () => {
     })
   }
 
-  for (const flag of ['-f', '-n', '-r', '--unknown', '--relative', '--relative-t=dir', '--canonicalize-exis', '--strip-slashes']) {
+  // -E and --canonicalize are not GNU realpath options: GNU rejects the first
+  // outright and calls the second an ambiguous prefix.
+  for (const flag of ['-f', '-n', '-r', '-E', '--canonicalize', '--unknown', '--relative', '--relative-t=dir', '--canonicalize-exis', '--strip-slashes']) {
     it(flag + ' remains diagnosed when stderr is hidden', () => {
       const r = terminal().run(`realpath ${flag} file 2>/dev/null | cat`)
       assert.equal(r.stdout, '')
@@ -304,5 +308,30 @@ describe('realpath mount paths and missing-path narration', () => {
     const r = mounted().run('realpath -e /file')
     assert.equal(r.exitCode, 1)
     assert.deepEqual(r.notes, [])
+  })
+})
+
+describe('realpath quotes an operand only where a shell would need it', () => {
+  // GNU realpath uses quotearg's shell-escape style, not the always-quoting
+  // quoteaf that `du`, `cp` and `rm` print. `#` and `~` are bare only away from
+  // the front, where a shell would read them as a comment and a tilde.
+  for (const [name, shown] of [
+    ['missing', 'missing'], ['dir/missing', 'dir/missing'], ['a#b', 'a#b'], ['a~b', 'a~b'],
+    ['a%b,c+d@e]f{g}h', 'a%b,c+d@e]f{g}h'],
+    ['#ab', "'#ab'"], ['~ab', "'~ab'"], ['', "''"], ['a b', "'a b'"], ['a:b', "'a:b'"],
+    ['a|b', "'a|b'"], ['a$b', "'a$b'"], ['a*b', "'a*b'"], ['a[b', "'a[b'"], ['a\\b', "'a\\b'"],
+    ["a'b", '"a\'b"'],
+  ]) {
+    it(JSON.stringify(name), () => {
+      const r = terminal().run(`LC_ALL=C realpath -e -- '${name.replaceAll("'", "'\\''")}'`)
+      assert.equal(r.stderr, `realpath: ${shown}: No such file or directory\n`)
+      assert.equal(r.exitCode, 1)
+      assert.deepEqual(r.unsupported, [])
+    })
+  }
+
+  it('escapes nonprinting bytes under the C locale', () => {
+    const r = terminal().run("LC_ALL=C realpath -e -- 'a\u00E9b'")
+    assert.equal(r.stderr, "realpath: 'a'$'\\303\\251''b': No such file or directory\n")
   })
 })

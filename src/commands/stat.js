@@ -41,7 +41,7 @@ function statOperand(parts, name, ctx) {
     return result
   }
   const found = lookupWithNote(ctx, 'stat', name)
-  if (found.error) return err(`stat: cannot stat ${quoteName(name, ctx)}: ${found.error}`)
+  if (found.error) return err(`stat: cannot statx ${quoteName(name, ctx)}: ${found.error}`)
   try { return ok(formatStat(parts, name, found.path, ctx.fs)) } catch (e) {
     const result = unsupportedFrom(e, 'stat', 'stat: ' + reason(e))
     // A later operand can succeed without erasing this operand's diagnostic.
