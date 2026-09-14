@@ -22,12 +22,14 @@ const terminal = createTerminal({
 
 terminal.run('grep -rn oak src').stdout  // 'src/app.js:1:export const name = "oak"\n'
 terminal.complete('cat src/a')           // ['cat src/app.js']
+terminal.parse('wc -l src/app.js')       // { ok: true, commands: [{ name: 'wc', … }], … }
 terminal.run('cd src; wc -l app.js')     // { stdout: '1 app.js\n', exitCode: 0, cwd: '/src', … }
 ```
 
 `run(line)` is synchronous and returns `{ stdout, stderr, exitCode, cwd,
 unsupported, notes }`. Variables and the working directory persist across calls.
-`complete(line)` returns full-line replacements, ready to drop in.
+`complete(line)` returns full-line replacements, ready to drop in. `parse(line)`
+reads a line and runs none of it.
 
 ## Three channels, because a wrong answer is the one failure that matters
 
@@ -44,6 +46,34 @@ unsupported, notes }`. Variables and the working directory persist across calls.
 terminal.run('shopt -s nullglob').unsupported
 // [{ kind: 'feature', command: 'shopt', detail: 'shopt', message: 'shopt: `shopt` is not supported' }]
 ```
+
+## Reading a line before running it
+
+`parse(line)` is the parser on its own: nothing runs, nothing changes — not the
+working directory, the variables, or the overlay — and you get the shell's
+verdict on the input.
+
+```js
+terminal.parse('sort input | uniq -c')
+// { ok: true, incomplete: false, error: null, unsupported: [],
+//   commands: [{ name: 'sort', resolved: 'sort' }, { name: 'uniq', resolved: 'uniq' }] }
+
+terminal.parse('for f in src/*.js; do').incomplete   // true — ask for another line
+terminal.parse('echo )').error                       // 'unexpected `)`'
+terminal.parse('while :; do echo x; done').unsupported[0].detail  // 'while'
+```
+
+`commands` is what the line *names*, in source order, through pipelines, gates,
+subshells, groups, loop bodies and `if` branches. A name only expansion can
+produce — `$tool`, `` `which ls` ``, `~/bin/x`, a glob — is `null`, `resolved`
+is `null` for a name this terminal has nothing under (`/bin/grep` resolves to
+`grep`), and a command inside `$( … )` stays part of the word it sits in. Which
+of them run is still up to the gates: this is a reading of the line, not a
+permission boundary.
+
+Only parsing happens, so only parsing's answers come back. An unregistered
+command, an option a command refuses, a gap an expansion hits — `run()` finds
+those.
 
 ## Writing
 
