@@ -373,7 +373,8 @@ export interface Terminal {
    * throws rather than summarize what it cannot: a line
    * that does not parse (including a redirect this filesystem would refuse),
    * an `if` or `[[ … ]]`, a `!`, a
-   * here-document whose delimiter leaves its body to expand, a stage reading
+   * here-document whose delimiter leaves its body to expand, an operand or a
+   * sum that would run a command behind a reader, a stage reading
    * its own input from inside a pipeline, or a word a command has to run before
    * its text is known.
    * {@link Terminal.parse} reads those.

@@ -161,6 +161,10 @@ export interface ProcessPart {
  * digit, since a custom `IFS` is refused, and no digit matches a file — so
  * unlike the other expansions this one says nothing about how many words come
  * back. It is always the one.
+ *
+ * A summary keeps it as it stands here, since an expression is not a list of
+ * commands to summarize — unless it holds one, `$(( $(id -u) + 1 ))` being a
+ * command behind text, which {@link summarize} refuses rather than hide.
  */
 export interface ArithmeticPart {
   type: 'arithmetic'
@@ -393,7 +397,7 @@ export interface ParseResult {
 export type WordToken = TokenPiece | TokenParts
 
 /** One piece of a {@link WordToken}, or the whole of one where it is the only piece. */
-export type TokenPiece = string | StringPatternPart | VariablePart | ShellToken | ProcessToken
+export type TokenPiece = string | StringPatternPart | VariablePart | ShellToken | ProcessToken | ArithmeticPart
 
 /** One token of a chain: a word, or the assignments a command carries. */
 export type Token = WordToken | AssignmentsToken
@@ -585,9 +589,9 @@ export function parse(line: string): ParseResult
  * would have to lie about throws instead: a line that does not parse, an
  * `if` or `[[ … ]]`, a `!`, a
  * here-document whose delimiter leaves its body to expand, a stage that reads
- * its own input from inside a pipeline, and any word no line settles the text
- * of — `$(( … ))`, an operand that runs a command like `${x:-$(id)}`, or the
- * braces of an ambiguous redirect. {@link parse}
+ * its own input from inside a pipeline, and any word that would hide a
+ * command inside text a summary keeps as written — `${x:-$(id)}`,
+ * `$(( $(id -u) ))` — or the braces of an ambiguous redirect. {@link parse}
  * reads those; this is the short answer while a line stays simple, and an
  * error the moment it does not.
  *

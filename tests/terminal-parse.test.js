@@ -416,7 +416,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['wc < a.txt < b.txt', 'summarize: a command reading from two places is not a simple chain'],
     ['wc < a.txt <<<here', 'summarize: a command reading from two places is not a simple chain'],
     ['ls > {a,b}', 'summarize: {a,b} is not a literal word'],
-    ['echo $((1 + 2))', 'summarize: $((…)) is not a literal word'],
+    ['echo $(( $(id) + 1 ))', 'summarize: $((…)) is not a literal word'],
     ['echo ${x:-$(id)}', 'summarize: ${x:-$(id)} is not a literal word'],
     ['ls > ${x:-$(id)}', 'summarize: ${x:-$(id)} is not a literal word'],
     ['ls; if a; then b; fi', 'summarize: `if` is not a simple chain'],
@@ -553,6 +553,9 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     // An operand is text, and text is all it may hold: `${x:-$y}` reads a
     // name in front of a reader, where `${x:-$(id)}` would run `id` behind one.
     assert.deepEqual(terminal().summarize('ls ${x:-$y}'), [[['ls', { type: 'variable', name: 'x', operator: ':-', operand: '$y', multi: true }]]])
+    // A sum is an expression, said as it was written, under the same rule.
+    assert.deepEqual(terminal().summarize('echo $((1 + 2)) $((i++))'), [[['echo', { type: 'arithmetic', source: '1 + 2' }, { type: 'arithmetic', source: 'i++' }]]])
+    assert.deepEqual(terminal().summarize('x=$((n * 2)) ls'), [[[{ type: 'assignments', assignments: [{ name: 'x', value: { type: 'arithmetic', source: 'n * 2' } }] }, 'ls']]])
     assert.deepEqual(terminal().summarize('echo a > $out'), [[['echo', 'a'], ['>', { type: 'variable', name: 'out', multi: true }]]])
     assert.deepEqual(terminal().summarize('ls a{b,c} {1..3}'), [[['ls', 'ab', 'ac', '1', '2', '3']]])
     assert.deepEqual(terminal().summarize('wc < *.txt'), [[['cat', pattern('*.txt')], ['wc']]])
@@ -569,7 +572,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     assert.deepEqual(terminal().summarize('x=1 > /tmp/out'), [[[assigned({ name: 'x', value: '1' })], ['>', '/tmp/out']]])
     assert.deepEqual(terminal().summarize('A=1 ls | B=2 wc'), [[[assigned({ name: 'A', value: '1' }), 'ls'], [assigned({ name: 'B', value: '2' }), 'wc']]])
     assert.deepEqual(terminal().summarize('x=*.js y=~/a ls'), [[[assigned({ name: 'x', value: '*.js' }, { name: 'y', value: parts(home(), '/a') }), 'ls']]])
-    assert.throws(() => terminal().summarize('x=$((1 + 2)) ls'), { message: 'summarize: $((…)) is not a literal word' })
+    assert.throws(() => terminal().summarize('x=${y:-$(id)} ls'), { message: 'summarize: ${y:-$(id)} is not a literal word' })
   })
 
   // A here-string is its word and a newline, whoever settles the word.

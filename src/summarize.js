@@ -174,6 +174,13 @@ function piece(part) {
     return part
   }
   if (part.type === 'process') return { type: 'process', op: part.op, summary: summaryOf(part.list) }
+  // A sum is an expression rather than a list of commands, so a summary says
+  // it as the line wrote it — and as with an operand, text is all it may
+  // hold: `$(( $(id -u) ))` would be running one behind a reader.
+  if (part.type === 'arithmetic') {
+    if (RUNS.test(part.source)) throw refuse(spell(part), 'a literal word')
+    return part
+  }
   if (part.type !== 'substitution') throw refuse(spell(part), 'a literal word')
   // Bash parses a backtick when it comes to run it, so a body that does not
   // parse is a line that does not parse, reported as any other one is.
