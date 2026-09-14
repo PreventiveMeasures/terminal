@@ -520,6 +520,18 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     assert.deepEqual(terminal().summarize('f() { a; b; }; f | wc'), [[{ type: 'braces', summary: [[['a']], [['b']]] }, ['wc']]])
     assert.deepEqual(terminal().summarize('f() { date; }; echo "$(f)"'), [[['echo', { type: 'shell', summary: [[['date']]], multi: false }]]])
     assert.throws(() => terminal().summarize('f() { f; }; f'), { message: 'summarize: a function that calls itself is not a simple chain' })
+    assert.throws(() => terminal().summarize('f() { ls; } | cat'), { message: 'summarize: a function defined in a pipeline is not a simple chain' })
+  })
+
+  // What a subshell defines belongs to it, so a summary must not stand a body
+  // where a call of it would not have reached one — and a call inside a
+  // subshell reaches the definitions the line around it made.
+  it('keeps a definition inside the brackets that keep it', () => {
+    assert.deepEqual(terminal().summarize('(f() { ls; }); f'), [[{ type: 'parens', summary: [] }], [['f']]])
+    assert.deepEqual(terminal().summarize('f() { ls; }; (f)'), [[{ type: 'parens', summary: [[['ls']]] }]])
+    // Parentheses a body would need keeping are kept: `f` is whatever it holds.
+    assert.deepEqual(terminal().summarize('f() { cd dir; }; (f)'), [[{ type: 'parens', summary: [[['cd', 'dir']]] }]])
+    assert.deepEqual(terminal().summarize('f() { cd dir; }; f'), [[['cd', 'dir']]])
   })
 
   // A `while` asks before every turn, and `until` reads the answer the other

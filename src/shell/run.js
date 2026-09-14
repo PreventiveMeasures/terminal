@@ -125,7 +125,9 @@ function pipelineStage(stage, ctx, stdin, stdinFile, fds) {
           return gap
         }
         ctx.calling.add(name)
-        try { return withTemporaries(expanded.temps, ctx, () => runSteps(body, ctx, { text: io.stdin })) } finally { ctx.calling.delete(name) }
+        // A `break` inside the body is no more in the caller's loop than the
+        // line the body was defined on was.
+        try { return withState(ctx, { loopDepth: 0 }, () => withTemporaries(expanded.temps, ctx, () => runSteps(body, ctx, { text: io.stdin }))) } finally { ctx.calling.delete(name) }
       }
       const r = runStage(ctx, expanded)
       if (expanded.argv.length) blame = gateBlame(ctx.registry.chainRole(expanded.argv), expanded.argv[0])

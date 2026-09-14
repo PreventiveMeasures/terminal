@@ -44,15 +44,15 @@ function summaryOf(nodes, macros) {
 // reaches its own name has no end to stand in for, so it is refused, as
 // running one is.
 function inlined(stage, macros, depth = 0) {
-  if (stage.type !== 'command' || typeof stage.argv[0] !== 'string') return opened(stage)
-  const list = macros.defined.get(stage.argv[0])
-  if (list === undefined) return opened(stage)
-  if (depth > 16 || macros.open.has(stage.argv[0])) throw refuse('a function that calls itself')
-  const call = { type: 'group', name: stage.argv[0], list, redirects: stage.redirects, assignments: stage.assignments }
-  return inlined(opened(call), macros, depth + 1)
+  const step = opened(stage, macros)
+  if (step.type !== 'command' || typeof step.argv[0] !== 'string') return step
+  const list = macros.defined.get(step.argv[0])
+  if (list === undefined) return step
+  if (depth > 16 || macros.open.has(step.argv[0])) throw refuse('a function that calls itself')
+  return inlined({ type: 'group', name: step.argv[0], list, redirects: step.redirects, assignments: step.assignments }, macros, depth + 1)
 }
 
-const BLOCKS = { if: '`if`', test: '`[[ … ]]`', pipeline: 'a pipeline of pipelines' }
+const BLOCKS = { if: '`if`', test: '`[[ … ]]`', pipeline: 'a pipeline of pipelines', function: 'a function defined in a pipeline' }
 
 // What a chain's rows can be: a command, and the two blocks that are a list of
 // commands and nothing a summary would have to leave out.
@@ -89,7 +89,9 @@ function chainOf(node, macros) {
 // brackets they were written with, which is the whole of the difference: one
 // keeps what it runs to itself, and the other does not.
 function rowOf(stage, macros) {
-  if (stage.type === 'subshell') return { type: 'parens', summary: summaryOf(stage.list, macros) }
+  // What a subshell defines belongs to the subshell, so a name defined in one
+  // is not a name the line around it can call.
+  if (stage.type === 'subshell') return { type: 'parens', summary: summaryOf(stage.list, { defined: new Map(macros.defined), open: macros.open }) }
   if (stage.type === 'group') return { type: 'braces', summary: body(stage, macros) }
   if (stage.type === 'for') return { type: 'for', name: stage.name, words: stage.words.map((word) => literal(word, macros)), summary: summaryOf(stage.list, macros) }
   if (stage.type === 'while' || stage.type === 'until') return { type: stage.type, condition: summaryOf(stage.condition, macros), summary: summaryOf(stage.list, macros) }
@@ -113,11 +115,13 @@ function body(stage, macros) {
 // around them, so those keep theirs. Redirects on both sides belong to
 // neither pair: `(ls > a) > b` writes to `a` and leaves `b` empty, where
 // `ls > a > b` would leave `a` empty instead.
-function opened(stage) {
+function opened(stage, macros) {
   if ((stage.type !== 'subshell' && stage.type !== 'group') || stage.list.length !== 1) return stage
   const [inner] = stage.list
   if (inner.type !== 'command' || inner.negate || inner.background) return stage
-  if (stage.type === 'subshell' && (inner.assignments || typeof inner.argv[0] !== 'string' || OUTLIVES.has(inner.argv[0]))) return stage
+  // A name a definition stands for is whatever that body keeps, which these
+  // parentheses may be there to keep in.
+  if (stage.type === 'subshell' && (inner.assignments || typeof inner.argv[0] !== 'string' || OUTLIVES.has(inner.argv[0]) || macros.defined.has(inner.argv[0]))) return stage
   if ((stage.redirects ?? []).length > 0 && (inner.redirects ?? []).length > 0) return stage
   if (stage.assignments && inner.assignments) return stage
   return {

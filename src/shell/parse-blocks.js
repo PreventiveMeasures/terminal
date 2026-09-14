@@ -114,8 +114,12 @@ function stageSafe(stage) {
   if (stage.group) return macroSafe(stage.group)
   if (stage.conditional) return stage.conditional.branches.every((b) => macroSafe(b.condition) && macroSafe(b.body)) && macroSafe(stage.conditional.otherwise ?? [])
   if (stage.loop) return (stage.loop.words ?? []).every(plainWord) && macroSafe(stage.loop.condition ?? []) && macroSafe(stage.loop.body)
-  return stage.words.every(plainWord) && stage.redirs.every((r) => r.word === undefined || plainWord(r.word))
+  return stage.words.every(plainWord) && stage.redirs.every(plainRedirect)
 }
+
+// A here-document whose delimiter leaves its body to expand reads whatever
+// that body names, as a word does.
+const plainRedirect = (r) => (r.op === 'text' ? !r.expand || !/[$`]/u.test(r.body) : r.word === undefined || plainWord(r.word))
 
 // Text no expansion reads a name out of. Masks count UTF-16 units, so index
 // the value the same way rather than by code point.

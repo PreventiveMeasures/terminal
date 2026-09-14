@@ -170,6 +170,38 @@ f() { cat input; }; f; f => "oak\nelm\nfir\noak\nelm\nfir\n"
 f() { echo hi; }; f arg1 arg2 => "hi\n"
 f() { echo one; }; f; echo $? => "one\n0\n"
 f() { echo $x; }; f => ! function 1
+f() { i=0; }; f => ! function 1
+f() { echo "$@"; }; f => ! function 1
+"f() { cat <<EOF\n$HOME\nEOF\n}; f" => ! function 1
+f() { echo hi; } > out => ! function 1
+f() { f; }; f => ! function recursion 1
+f() { echo x; }; if f; then echo then; fi => "x\nthen\n"
+f() { echo one; echo two; }; f | head -1 => "one\n"
+f() { cat; }; echo piped | f | tr a-z A-Z => "PIPED\n"
+f() { cat input; }; f | wc -l => "3\n"
+f() { echo x; }; for i in 1 2 3; do f; done | wc -l => "3\n"
+f() { echo a; }; g() { echo b; }; f; g; f => "a\nb\na\n"
+f() { echo in f; }; g() { f; f; }; g => "in f\nin f\n"
+f() { true; }; f; echo $? => "0\n"
+f() { false; }; f; echo $? => "1\n"
+f() { grep nosuch input; }; f; echo $? => "1\n"
+f() { printf a; printf b; }; f => "ab"
+f() { echo done; }; { f; } | cat => "done\n"
+f() { echo done; }; ( f ) => "done\n"
+cd /; f() { pwd; }; f => "/\n"
+f() { break; }; for i in a b; do f; echo $i; done => "a\nb\n" 0 %
+(g() { echo in; }); g => ! g 127
+f() { echo hi; } | cat; f => ! f 127
+i=0; while test $i -lt 3; do j=0; while test $j -lt 2; do echo $i$j; j=$((j+1)); done; i=$((i+1)); done => "00\n01\n10\n11\n20\n21\n"
+i=0; while test $i -lt 5; do i=$((i+1)); if test $i -eq 3; then break; fi; echo $i; done => "1\n2\n"
+i=0; while test $i -lt 5; do i=$((i+1)); if test $i -eq 3; then continue; fi; echo $i; done => "1\n2\n4\n5\n"
+for a in 1 2; do i=0; while test $i -lt 2; do i=$((i+1)); if test $i -eq 1; then continue 2; fi; echo miss; done; echo $a; done => ""
+while echo a; echo b; false; do echo body; done => "a\nb\n"
+while true; do echo x; break; done | wc -l => "1\n"
+while false; do :; done | wc -l => "0\n"
+while test 1 -eq 1; do break; done; echo after=$? => "after=0\n"
+f() { echo a; }; while f; do break; done => "a\n"
+f() { false; }; until f; do echo body; break; done => "body\n"
 set -e => ! set 127
 shopt -s nullglob => ! shopt 127
 "trap \"echo bye\" EXIT" => ! trap 127

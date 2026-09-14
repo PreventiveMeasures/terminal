@@ -129,6 +129,9 @@ export function readOperator(line, i, atWordStart) {
       j = skipContinuations(line, j + 1)
     }
     if (line[j] !== '>' && line[j] !== '<') return null
+    // `2>(cat)` is the word `2` in front of a process substitution: a
+    // descriptor prefix wants a target, and `(` opens commands instead.
+    if (line[skipContinuations(line, j + 1)] === '(') return null
     return readRedirect(line, j, Number(digits))
   }
   const next = skipContinuations(line, i + 1)
