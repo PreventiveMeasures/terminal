@@ -277,7 +277,6 @@ export type {
   Node,
   NodeBase,
   Operator,
-  ParameterPart,
   Part,
   Parts,
   PatternPart,
@@ -291,6 +290,7 @@ export type {
   TildePart,
   Token,
   Value,
+  VariablePart,
 } from './parse.js'
 
 /** A virtual terminal instance with a mutable cwd carried across {@link Terminal.run} calls. */
@@ -353,9 +353,9 @@ export interface Terminal {
    * `[['cat', '1.txt'], ['wc']]`, and `cat > notes.md <<EOF … EOF` as
    * `[['echo', '…'], ['>', 'notes.md']]`, the pass-through `cat` left out.
    *
-   * A token is text, or a {@link PatternPart} or {@link TildePart} when one is
-   * the whole of its argument, so it throws rather than summarize what it
-   * cannot: a line
+   * A token is text, or a {@link PatternPart}, {@link TildePart} or
+   * {@link VariablePart} when one is the whole of its argument, so it throws
+   * rather than summarize what it cannot: a line
    * that does not parse (including a redirect this filesystem would refuse),
    * a subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
    * here-document whose delimiter leaves its body to expand, a stage reading

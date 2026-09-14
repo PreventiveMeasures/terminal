@@ -199,7 +199,9 @@ function substitutionOf(source, mark) {
 // Re-read the construct from the source the tokenizer copied into the word.
 // It parsed once already, so the only question left is what it is.
 function expansionAt(value, at, quoted) {
-  const mark = quoted ? { quoted: true } : {}
+  // Whether a result is split into fields and matched as a pattern is half of
+  // what a reference does, so it is said either way rather than by omission.
+  const mark = { quoted }
   if (value[at] === '`') {
     const { raw, command } = readBacktickSubstitution(value, at)
     return { part: substitutionOf(command, mark), end: at + raw.length }
@@ -212,7 +214,7 @@ function expansionAt(value, at, quoted) {
   const { name, operator, word } = ref.parameter ?? { name: ref.name, operator: '' }
   return {
     part: {
-      type: 'parameter',
+      type: 'variable',
       name,
       ...(operator ? { operator } : {}),
       ...(word === undefined ? {} : { operand: word }),
@@ -356,15 +358,15 @@ function redirectTokens(redirect) {
   return [lead + op, literal(redirect.target)]
 }
 
-// A token is the text it will be, or the pattern it will be matched by — a
-// pattern says what it looks for as plainly as a name does, so long as it is
-// the whole of its argument. Pieces joined into a word are not that, and a
-// substitution is a command rather than a token.
+// A token is the text it will be, or what stands in for it: a pattern, a `~`,
+// a variable. Each says what it reaches for as plainly as a name says what it
+// runs, so long as it is the whole of its argument. Pieces joined into a word
+// are not that, and a substitution is a command rather than a token.
 const literal = (value) => {
   if (typeof value === 'string') return value
   const text = literalText(value)
   if (text !== null) return text
-  if (value.type === 'pattern' || value.type === 'tilde') return value
+  if (value.type === 'pattern' || value.type === 'tilde' || value.type === 'variable') return value
   if (value.type === 'parts') throw refuse('a word joined from pieces', 'a literal word')
   throw refuse(spell(value), 'a literal word')
 }
@@ -400,7 +402,7 @@ const spell = (part) => {
   if (typeof part === 'string') return part
   if (part.type === 'pattern') return part.pattern
   if (part.type === 'brace' || part.type === 'tilde') return part.source
-  if (part.type === 'parameter') return `\${${part.name}${part.operator ?? ''}${part.operand ?? ''}}`
+  if (part.type === 'variable') return `\${${part.name}${part.operator ?? ''}${part.operand ?? ''}}`
   return part.type === 'arithmetic' ? '$((…))' : '$(…)'
 }
 

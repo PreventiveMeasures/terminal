@@ -81,14 +81,14 @@ quoting:
 ```js
 terminal.parse('grep -rn "$pattern" src/*.js').list[0].argv
 // [ 'grep', '-rn',
-//   { type: 'parameter', name: 'pattern', quoted: true },
+//   { type: 'variable', name: 'pattern', quoted: true },
 //   { type: 'pattern', pattern: 'src/*.js' } ]
 ```
 
 `'*'` is the string `*`, because quoting settled it; `*.js` is a pattern,
 because the filesystem has yet to. A piece is a plain string once nothing can
 change it; otherwise it names what it waits for — `pattern`, `tilde`,
-`parameter`, `substitution`, `arithmetic`. A word of several pieces is a
+`variable`, `substitution`, `arithmetic`. A word of several pieces is a
 `parts` node holding them in order, and a word of one piece is that piece.
 
 Braces need nothing but the text, so they are already expanded: `ls a{b,c}`
@@ -147,19 +147,20 @@ is the `echo` that writes it, and a `cat` left with nothing to read but its own
 input is left out. A quoted `$(cat <<'EOF' … EOF)` comes back as the text that
 here-document holds.
 
-A token is text, or the pattern or `~` an argument is written as:
+A token is text, or the pattern, `~` or variable an argument is written as:
 
 ```js
-summarize('ls *.js ~/bin a{b,c}')
-// [ [ ['ls', { type: 'pattern', pattern: '*.js' }, { type: 'tilde', source: '~/bin' }, 'ab', 'ac'] ] ]
+summarize('ls *.js ~/bin $home a{b,c}')
+// [ [ ['ls', { type: 'pattern', pattern: '*.js' }, { type: 'tilde', source: '~/bin' },
+//      { type: 'variable', name: 'home', quoted: false }, 'ab', 'ac'] ] ]
 ```
 
 Anything else throws rather than be summarized into a lie: a line that does not
 parse, `while`, `case` and the other constructs this terminal refuses, a
 subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
-here-document or here-string, and any word whose text only running it settles —
-`$x`, `` `date` ``, or a word joined from pieces like `a*"b"`. `parse()` reads
-those.
+here-document whose delimiter leaves its body to expand, and any word whose
+text only running it settles — `` `date` ``, `$(( … ))`, or a word joined from
+pieces like `a*"b"`. `parse()` reads those.
 
 A terminal has the same method, under its own write policy: `summarize('ls >
 out')` throws there when nothing may be written.

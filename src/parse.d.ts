@@ -21,11 +21,12 @@ export interface Parts {
  *
  * A piece is a plain string once nothing can change it, quoted or not: `"a b"`
  * is `'a b'`, and so is `a" "b`, whose runs join. Every other piece names the
- * expansion it is waiting for, and carries `quoted` when it stands inside
- * quotes, where its result is neither split into fields nor matched as a
- * pattern.
+ * expansion it is waiting for; the ones whose result quoting still governs say
+ * so either way, since inside quotes a result is neither split into fields nor
+ * matched as a pattern. A pattern, a brace and a `~` are bare by definition —
+ * quoting any of them settles the text instead.
  */
-export type Part = string | PatternPart | BracePart | TildePart | ParameterPart | SubstitutionPart | ArithmeticPart
+export type Part = string | PatternPart | BracePart | TildePart | VariablePart | SubstitutionPart | ArithmeticPart
 
 /**
  * Bare text carrying glob syntax — `*`, `?`, or a `[` a bare `]` closes —
@@ -66,18 +67,20 @@ export interface TildePart {
 }
 
 /**
- * `$x`, `${x}`, `${x:-default}`, `$?`, `$1`. `quoted` marks a reference
- * inside double quotes, whose result is neither split nor globbed.
+ * `$x`, `${x}`, `${x:-default}`, and the ones a shell keeps for itself: `$?`,
+ * `$1`, `$@`. `quoted` marks a reference inside double quotes, whose result is
+ * neither split into fields nor matched as a pattern.
  */
-export interface ParameterPart {
-  type: 'parameter'
-  /** The name, or the character a special parameter is spelled with: `x`, `?`, `1`, `@`. */
+export interface VariablePart {
+  type: 'variable'
+  /** The name, or the character a special one is spelled with: `x`, `?`, `1`, `@`. */
   name: string
   /** What the reference does beyond reading the value — `:-`, `:=`, `:?`, `:+`, `#`, `##`, `%`, `%%`, `/`, `//`, `:` for a substring, and `length` for `${#x}`. Absent for a plain reference. */
   operator?: string
   /** The operator's operand, as written: the default in `${x:-a b}`, the pattern in `${x##prefix}`. Absent when the operator takes none. */
   operand?: string
-  quoted?: true
+  /** Whether it stands inside quotes, said either way: it decides whether the result is split into fields and matched as a pattern. */
+  quoted: boolean
 }
 
 /**
@@ -95,14 +98,16 @@ export interface SubstitutionPart {
   list: Node[]
   /** Why the body did not parse, when it did not. Absent otherwise. */
   error?: string
-  quoted?: true
+  /** Whether it stands inside quotes, said either way: it decides whether the output is split into fields and matched as a pattern. */
+  quoted: boolean
 }
 
 /** `$(( … ))`: the expression as written, which this parser does not read further. */
 export interface ArithmeticPart {
   type: 'arithmetic'
   source: string
-  quoted?: true
+  /** Whether it stands inside quotes, said either way. */
+  quoted: boolean
 }
 
 /** One piece, or the pieces a word joins. */
@@ -299,12 +304,13 @@ export interface ParseResult {
 
 /**
  * One token of a chain: the text it will be, or the pattern it will be
- * matched by, or the home directory it opens with. Each says what it looks
- * for as plainly as a name does, so long as it is the whole of its argument —
- * `ls *.js` is `['ls', { type: 'pattern', pattern: '*.js' }]`, while
- * `ls a*"b"`, whose word is pieces joined together, is not summarized at all.
+ * matched by, the home directory it opens with, or the variable it reads.
+ * Each says what it reaches for as plainly as a name does, so long as it is
+ * the whole of its argument — `ls *.js` is
+ * `['ls', { type: 'pattern', pattern: '*.js' }]`, while `ls a*"b"`, whose word
+ * is pieces joined together, is not summarized at all.
  */
-export type Token = string | PatternPart | TildePart
+export type Token = string | PatternPart | TildePart | VariablePart
 
 /**
  * One command of a chain: each pipeline stage's `argv`, and each redirect as
@@ -366,14 +372,15 @@ export function parse(line: string): ParseResult
  * text, and the substitution has to be quoted, since bare its text would be
  * split into fields and globbed.
  *
- * A token is text, or the pattern or `~` an argument is written as — each of
- * which says what it looks for as plainly as a name does. Anything a summary
+ * A token is text, or the pattern, `~` or variable an argument is written as —
+ * each of which says what it reaches for as plainly as a name says what it
+ * runs. Anything a summary
  * would have to lie about throws instead: a line that does not parse, a
  * subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
  * here-document whose delimiter leaves its body to expand, a stage that reads
  * its own input from inside a pipeline, and any word whose text only running
- * it settles — `$x`,
- * `` `date` ``, and a word joined from pieces such as `a*"b"`. {@link parse}
+ * it settles — `` `date` ``,
+ * `$(( … ))`, and a word joined from pieces such as `a*"b"`. {@link parse}
  * reads those; this is the short answer while a line stays simple, and an
  * error the moment it does not.
  *

@@ -109,7 +109,7 @@ describe('parse() hands back the line as the parser read it', () => {
       type: 'for',
       name: 'f',
       words: [pattern('*.js'), 'a'],
-      list: [{ type: 'command', argv: ['wc', '-l', parts({ type: 'parameter', name: 'f', quoted: true })] }],
+      list: [{ type: 'command', argv: ['wc', '-l', parts({ type: 'variable', name: 'f', quoted: true })] }],
     }])
     assert.deepEqual(list('for f in; do ls; done')[0].words, [])
   })
@@ -129,7 +129,7 @@ describe('parse() hands back the line as the parser read it', () => {
       expression: {
         type: 'and',
         left: { type: 'not', expression: { type: 'unary', op: '-f', word: 'a.txt' } },
-        right: { type: 'binary', op: '==', left: parts({ type: 'parameter', name: 'x', quoted: true }), right: 'y' },
+        right: { type: 'binary', op: '==', left: parts({ type: 'variable', name: 'x', quoted: true }), right: 'y' },
       },
     }])
   })
@@ -138,7 +138,7 @@ describe('parse() hands back the line as the parser read it', () => {
     assert.deepEqual(list('x=1 y=$z'), [{
       type: 'command',
       argv: [],
-      assignments: [{ name: 'x', value: '1' }, { name: 'y', value: parts({ type: 'parameter', name: 'z' }) }],
+      assignments: [{ name: 'x', value: '1' }, { name: 'y', value: parts({ type: 'variable', name: 'z', quoted: false }) }],
     }])
     assert.deepEqual(list('x=1 ls'), [{ type: 'command', argv: ['ls'], assignments: [{ name: 'x', value: '1' }] }])
   })
@@ -158,7 +158,7 @@ describe('parse() hands back the line as the parser read it', () => {
   })
 
   it('marks a redirect target expansion has yet to settle', () => {
-    assert.deepEqual(list('echo a > $out')[0].redirects, [{ fd: 1, op: '>', target: parts({ type: 'parameter', name: 'out' }) }])
+    assert.deepEqual(list('echo a > $out')[0].redirects, [{ fd: 1, op: '>', target: parts({ type: 'variable', name: 'out', quoted: false }) }])
     assert.deepEqual(list("cat <<'EOF'\n$x\nEOF")[0].redirects, [{ fd: 0, op: '<<', text: '$x\n', expand: false }])
   })
 
@@ -208,23 +208,23 @@ describe('parse() spells a value out only when expansion still decides it', () =
 
   const dated = [{ type: 'command', argv: ['date'] }]
   for (const [written, pieces] of [
-    ['$x', [{ type: 'parameter', name: 'x' }]],
-    ['"$x"', [{ type: 'parameter', name: 'x', quoted: true }]],
-    ['${x:-a b}', [{ type: 'parameter', name: 'x', operator: ':-', operand: 'a b' }]],
-    ['${#x}', [{ type: 'parameter', name: 'x', operator: 'length' }]],
-    ['$?', [{ type: 'parameter', name: '?' }]],
-    ['$(date)', [{ type: 'substitution', list: dated }]],
+    ['$x', [{ type: 'variable', name: 'x', quoted: false }]],
+    ['"$x"', [{ type: 'variable', name: 'x', quoted: true }]],
+    ['${x:-a b}', [{ type: 'variable', name: 'x', operator: ':-', operand: 'a b', quoted: false }]],
+    ['${#x}', [{ type: 'variable', name: 'x', operator: 'length', quoted: false }]],
+    ['$?', [{ type: 'variable', name: '?', quoted: false }]],
+    ['$(date)', [{ type: 'substitution', list: dated, quoted: false }]],
     ['"$(date)"', [{ type: 'substitution', list: dated, quoted: true }]],
-    ['`date`', [{ type: 'substitution', list: dated }]],
-    ['$((1 + 2))', [{ type: 'arithmetic', source: '1 + 2' }]],
+    ['`date`', [{ type: 'substitution', list: dated, quoted: false }]],
+    ['$((1 + 2))', [{ type: 'arithmetic', source: '1 + 2', quoted: false }]],
     ['*.js', [pattern('*.js')]],
     ['~/bin', [{ type: 'tilde', source: '~/bin' }]],
     ['a{b}', ['a{b}']],
     ['[ab]c', [pattern('[ab]c')]],
     ['a*"b"', [pattern('a*'), 'b']],
-    ['a"b"$c', ['ab', { type: 'parameter', name: 'c' }]],
-    ['"$x"""', [{ type: 'parameter', name: 'x', quoted: true }, '']],
-    ['"a $x"', ['a ', { type: 'parameter', name: 'x', quoted: true }]],
+    ['a"b"$c', ['ab', { type: 'variable', name: 'c', quoted: false }]],
+    ['"$x"""', [{ type: 'variable', name: 'x', quoted: true }, '']],
+    ['"a $x"', ['a ', { type: 'variable', name: 'x', quoted: true }]],
   ]) {
     it(`reads ${written} as the pieces expansion works on`, () => {
       assert.deepEqual(list(`echo ${written}`)[0].argv[1], parts(...pieces))
@@ -232,23 +232,24 @@ describe('parse() spells a value out only when expansion still decides it', () =
   }
 
   it('reads the commands a substitution runs, however deep', () => {
-    assert.deepEqual(list('foo `bar a b c`')[0].argv, ['foo', parts({ type: 'substitution', list: [{ type: 'command', argv: ['bar', 'a', 'b', 'c'] }] })])
+    assert.deepEqual(list('foo `bar a b c`')[0].argv, ['foo', parts({ type: 'substitution', quoted: false, list: [{ type: 'command', argv: ['bar', 'a', 'b', 'c'] }] })])
     assert.deepEqual(list('echo $(cat $(ls))')[0].argv[1], parts({
       type: 'substitution',
-      list: [{ type: 'command', argv: ['cat', parts({ type: 'substitution', list: [{ type: 'command', argv: ['ls'] }] })] }],
+      quoted: false,
+      list: [{ type: 'command', argv: ['cat', parts({ type: 'substitution', quoted: false, list: [{ type: 'command', argv: ['ls'] }] })] }],
     }))
   })
 
   // Bash reads a backtick when it expands it, so the line still parses.
   it('keeps the diagnostic of a backtick body that does not parse', () => {
-    assert.deepEqual(list('echo `echo )`')[0].argv[1], parts({ type: 'substitution', list: [], error: 'unexpected `)`' }))
+    assert.deepEqual(list('echo `echo )`')[0].argv[1], parts({ type: 'substitution', list: [], error: 'unexpected `)`', quoted: false }))
     assert.equal(parse('echo `echo )`').ok, true)
     assert.equal(parse('echo $(echo ))').ok, false)
   })
 
   it('applies the same rule to a command name', () => {
     assert.deepEqual(named('"ls"'), ['ls'])
-    assert.deepEqual(named('$tool a'), [parts({ type: 'parameter', name: 'tool' })])
+    assert.deepEqual(named('$tool a'), [parts({ type: 'variable', name: 'tool', quoted: false })])
   })
 })
 
@@ -306,16 +307,13 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['ls | wc < a.txt', 'summarize: a pipeline stage reading its own input is not a simple chain'],
     ['wc < a.txt < b.txt', 'summarize: a command reading from two places is not a simple chain'],
     ['wc < a.txt <<<here', 'summarize: a command reading from two places is not a simple chain'],
-    ['ls $x', 'summarize: ${x} is not a literal word'],
-    ['ls "$x"', 'summarize: ${x} is not a literal word'],
-    ['ls ${x:-a}', 'summarize: ${x:-a} is not a literal word'],
+    ['ls a$x', 'summarize: a word joined from pieces is not a literal word'],
     ['ls > {a,b}', 'summarize: {a,b} is not a literal word'],
     ['ls a*"b"', 'summarize: a word joined from pieces is not a literal word'],
     ['echo "$x"""', 'summarize: a word joined from pieces is not a literal word'],
     ['echo `date`', 'summarize: $(…) is not a literal word'],
     ['echo $(date)', 'summarize: $(…) is not a literal word'],
     ['echo $((1 + 2))', 'summarize: $((…)) is not a literal word'],
-    ['echo a > $out', 'summarize: ${out} is not a literal word'],
     ['ls; (cd dir)', 'summarize: a subshell is not a simple chain'],
   ]) {
     it(`refuses ${JSON.stringify(line)}`, () => {
@@ -370,9 +368,12 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
 
   // A pattern says what it looks for as plainly as a name does, so long as it
   // is the whole argument rather than one piece of a word.
-  it('keeps a whole-argument pattern or tilde as what it is', () => {
+  it('keeps a whole-argument pattern, tilde or variable as what it is', () => {
     assert.deepEqual(terminal().summarize('ls *.js | head'), [[['ls', pattern('*.js')], ['head']]])
     assert.deepEqual(terminal().summarize('ls ~/bin'), [[['ls', { type: 'tilde', source: '~/bin' }]]])
+    assert.deepEqual(terminal().summarize('ls $x "$y"'), [[['ls', { type: 'variable', name: 'x', quoted: false }, { type: 'variable', name: 'y', quoted: true }]]])
+    assert.deepEqual(terminal().summarize('ls ${x:-a}'), [[['ls', { type: 'variable', name: 'x', operator: ':-', operand: 'a', quoted: false }]]])
+    assert.deepEqual(terminal().summarize('echo a > $out'), [[['echo', 'a'], ['>', { type: 'variable', name: 'out', quoted: false }]]])
     assert.deepEqual(terminal().summarize('ls a{b,c} {1..3}'), [[['ls', 'ab', 'ac', '1', '2', '3']]])
     assert.deepEqual(terminal().summarize('wc < *.txt'), [[['cat', pattern('*.txt')], ['wc']]])
     assert.deepEqual(terminal().summarize('cat x > /tmp/out*'), [[['cat', 'x'], ['>', pattern('/tmp/out*')]]])
