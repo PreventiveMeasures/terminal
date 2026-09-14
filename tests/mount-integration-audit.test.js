@@ -98,7 +98,7 @@ describe('mounted sources and custom filesystem views remain isolated', () => {
     assert.deepEqual(sources, { file: 'source', 'dir/leaf': 'leaf' })
   })
 
-  for (const [path, error] of [['file/../dir', 'not a directory'], ['file/', 'not a directory'], ['missing/../dir', 'no such file or directory']]) {
+  for (const [path, error] of [['file/../dir', 'Not a directory'], ['file/', 'Not a directory'], ['missing/../dir', 'No such file or directory']]) {
     it(`custom fs.listDir retains the lookup error for ${path}`, () => {
       const t = createTerminal({ file: 'file', 'dir/leaf': 'leaf' }, {
         ...options, commands: { listing: ({ fs, args }) => { fs.listDir(args[0]) } },

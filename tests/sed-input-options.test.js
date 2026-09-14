@@ -173,7 +173,7 @@ describe('sed separates file addresses and active ranges', () => {
     const actual = createTerminal(FILES).run("sed -sn '$p' first missing second")
     assert.equal(actual.stdout, 'b\nd\n')
     assert.equal(actual.exitCode, 2)
-    assert.match(actual.stderr, /missing: no such file or directory/u)
+    assert.match(actual.stderr, /missing: No such file or directory/u)
     assert.deepEqual(actual.unsupported, [])
   })
 })

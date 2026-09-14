@@ -97,7 +97,7 @@ describe('grep — suppress input read errors', () => {
 
   it('leaves read errors visible unless suppression was requested', () => {
     check('grep -a hit missing binary', 'binary:hit\0tail\nbinary:hit\0last\n', 2,
-      'grep: missing: no such file or directory\n')
+      'grep: missing: No such file or directory\n')
   })
 
   it('does not suppress invalid-pattern or invalid-option-argument errors', () => {

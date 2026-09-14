@@ -147,7 +147,7 @@ describe('head and tail notes preserve streams, errors and nested invocations', 
 
   it('keeps notes for successful operands beside ordinary input failures', () => {
     assert.deepEqual(createTerminal(FILES).run('head -qn1 missing many dir'), expected(lines[0], [note('head', 1, 12)], {
-      stderr: 'head: missing: no such file or directory\nhead: dir: is a directory\n', exitCode: 1,
+      stderr: 'head: missing: No such file or directory\nhead: dir: Is a directory\n', exitCode: 1,
     }))
   })
 

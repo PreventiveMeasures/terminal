@@ -153,7 +153,7 @@ describe('grep extraction — combined modes and early exits', () => {
   it('quiet success preserves earlier errors and skips later operands', () => {
     const r = createTerminal(files).run('grep -q x missing f')
     assert.deepEqual([r.stdout, r.exitCode, r.unsupported], ['', 0, []])
-    assert.match(r.stderr, /missing: no such file/u)
+    assert.match(r.stderr, /missing: No such file/u)
     check('grep -q x f missing', '', files)
     check('grep -q x f binary', '', files)
   })

@@ -119,8 +119,8 @@ describe('ls -d lists operands themselves', () => {
     const result = createTerminal(TREE).run('ls -d a missing z/../b')
     assert.equal(result.stdout, 'a\n')
     assert.equal(result.exitCode, 2)
-    assert.match(result.stderr, /ls: missing: no such file or directory/u)
-    assert.match(result.stderr, /ls: z\/\.\.\/b: not a directory/u)
+    assert.match(result.stderr, /ls: missing: No such file or directory/u)
+    assert.match(result.stderr, /ls: z\/\.\.\/b: Not a directory/u)
     assert.deepEqual(result.unsupported, [])
   })
 

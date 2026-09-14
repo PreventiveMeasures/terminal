@@ -58,10 +58,10 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
       consumeStdin(ctx)
     } else if (name !== '/dev/null') {
       const found = lookupWithNote(ctx, cmd, name)
-      if (found.error) { entry.kind = 'missing'; error = found.error.toLowerCase() }
+      if (found.error) { entry.kind = 'missing'; error = found.error }
       else if (ctx.fs.isDir(found.path)) {
         entry.kind = 'dir'
-        if (!options.noRead) error = 'is a directory'
+        if (!options.noRead) error = 'Is a directory'
       } else entry.content = ctx.fs.readFile(found.path)
     }
     entries.push(entry)

@@ -8,7 +8,7 @@ import { missingPathNote } from '../src/notes.js'
 const options = { mount: '/repo', cwd: '/repo/sub', writable: '/tmp/' }
 const prefix = 'cat: relative path "tmp/file" was not found from cwd "/repo/sub". '
 const both = 'Both of "/repo/tmp/file" and "/tmp/file" exist'
-const expected = (ending) => ({ stdout: '', stderr: 'cat: tmp/file: no such file or directory\n', exitCode: 1, cwd: '/repo/sub', unsupported: [], notes: [prefix + ending] })
+const expected = (ending) => ({ stdout: '', stderr: 'cat: tmp/file: No such file or directory\n', exitCode: 1, cwd: '/repo/sub', unsupported: [], notes: [prefix + ending] })
 
 function terminalWithFiles(mounted, overlay) {
   const terminal = createTerminal({ 'tmp/file': mounted, 'sub/keep': '', overlay }, options)
@@ -82,8 +82,8 @@ describe('missing-path notes describe alternative file kinds and contents', () =
 
 describe('alternative comparisons are observational', () => {
   for (const [line, output, stderr, fileContent] of [
-    ['cat tmp/file 2>>/tmp/file', '', '', 'overlay\ncat: tmp/file: no such file or directory\n'],
-    ['cat tmp/file /repo/overlay >>/tmp/file', '', 'cat: tmp/file: no such file or directory\n', 'overlay\noverlay\n'],
+    ['cat tmp/file 2>>/tmp/file', '', '', 'overlay\ncat: tmp/file: No such file or directory\n'],
+    ['cat tmp/file /repo/overlay >>/tmp/file', '', 'cat: tmp/file: No such file or directory\n', 'overlay\noverlay\n'],
   ]) {
     it(`preserves output behavior for ${line}`, () => {
       const terminal = terminalWithFiles('mounted\n', 'overlay\n')

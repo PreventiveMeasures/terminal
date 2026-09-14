@@ -74,7 +74,7 @@ describe('createTerminal — opts.commands: a wired sha256sum', () => {
     const t = withSha()
     const r = t.run('sha256sum a.txt nope.txt src')
     assert.equal(r.stdout, `${HELLO_SHA}  a.txt\n`)
-    assert.equal(r.stderr, 'sha256sum: nope.txt: no such file or directory\nsha256sum: src: is a directory\n')
+    assert.equal(r.stderr, 'sha256sum: nope.txt: No such file or directory\nsha256sum: src: Is a directory\n')
     assert.equal(r.exitCode, 1)
   })
 
@@ -184,7 +184,7 @@ describe('createTerminal — opts.commands: the handler contract', () => {
     const spec = () => ({ stderr: 'oops', exitCode: 1 })
     const t = createTerminal(SOURCES, { commands: { probe: spec } })
     assert.equal(t.run('probe; probe').stderr, 'oops\noops\n')
-    assert.equal(t.run('probe; cat missing').stderr, 'oops\ncat: missing: no such file or directory\n')
+    assert.equal(t.run('probe; cat missing').stderr, 'oops\ncat: missing: No such file or directory\n')
     assert.equal(t.run('probe 2>&1 | wc -l').stdout, '1\n')
     // An already-terminated line is left alone, and empty stays empty.
     assert.equal(run(() => ({ stderr: 'done\n' }), 'probe').stderr, 'done\n')
@@ -246,7 +246,7 @@ describe('createTerminal — opts.commands: the handler contract', () => {
     assert.equal(seen.failed, false)
     // Errors are named after the registered command, not a generic label.
     t.run('probe missing.js')
-    assert.equal(seen.stderr, 'probe: missing.js: no such file or directory\n')
+    assert.equal(seen.stderr, 'probe: missing.js: No such file or directory\n')
     assert.equal(seen.failed, true)
   })
 
@@ -349,8 +349,8 @@ describe('createTerminal — opts.commands: the io.fs view', () => {
     // relatively-typed operand — neither is what a handler should
     // surface to the user.
     const t = createTerminal(SOURCES, { commands: { probe: (io) => io.fs.listDir(io.args[0]) && '' } })
-    assert.equal(t.run('probe nope').stderr, 'probe: nope: no such file or directory\n')
-    assert.equal(t.run('probe a.txt').stderr, 'probe: a.txt: not a directory\n')
+    assert.equal(t.run('probe nope').stderr, 'probe: nope: No such file or directory\n')
+    assert.equal(t.run('probe a.txt').stderr, 'probe: a.txt: Not a directory\n')
     assert.equal(t.run('probe src').exitCode, 0)
   })
 

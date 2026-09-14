@@ -6,8 +6,8 @@ const terminal = () => createTerminal({ input: 'present\n' })
 const warning = (name) => `warning: $${name} is unset (this shell has no environment variables; only \`for\` bindings and \`NAME=value\` assignments)\n`
 const missing = warning('MISSING')
 const other = warning('OTHER')
-const nope = 'cat: nope: no such file or directory\n'
-const gone = 'cat: gone: no such file or directory\n'
+const nope = 'cat: nope: No such file or directory\n'
+const gone = 'cat: gone: No such file or directory\n'
 const tildeError = 'error: named-user and directory-stack tilde prefixes are not supported\n'
 // A read error the redirect threw away reaches nobody else, so it is noted.
 // The note names the command, the reason, and the paths it applied to.

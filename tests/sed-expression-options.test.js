@@ -139,7 +139,7 @@ describe('sed reports expression argument and option errors precisely', () => {
     const actual = createTerminal(FILES).run("sed -e 's/a/A/' missing first")
     assert.equal(actual.stdout, 'A\n')
     assert.equal(actual.exitCode, 2)
-    assert.match(actual.stderr, /missing: no such file or directory/u)
+    assert.match(actual.stderr, /missing: No such file or directory/u)
     assert.deepEqual(actual.unsupported, [])
   })
 })

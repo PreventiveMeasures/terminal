@@ -84,7 +84,7 @@ describe('sed q reads files and shared stdin only when needed', () => {
       const result = createTerminal(FILES).run(command)
       assert.equal(result.stdout, stdout)
       assert.equal(result.exitCode, 2)
-      assert.match(result.stderr, /missing: no such file or directory/u)
+      assert.match(result.stderr, /missing: No such file or directory/u)
       assert.deepEqual(result.unsupported, [])
     })
   }

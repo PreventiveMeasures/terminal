@@ -47,7 +47,7 @@ describe('sed address and regex boundaries', () => {
   it('retains read errors while a regex range spans surviving input files', () => {
     const result = createTerminal({ first: 'start\n', last: 'body\nend' }).run("sed -n '/start/,/end/p' first missing last")
     assert.equal(result.stdout, 'start\nbody\nend')
-    assert.match(result.stderr, /missing: no such file/u)
+    assert.match(result.stderr, /missing: No such file/u)
     assert.equal(result.exitCode, 2)
     assert.deepEqual(result.unsupported, [])
   })

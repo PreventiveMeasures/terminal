@@ -125,7 +125,7 @@ function fsView(scope) {
       // Report the original operand, distinguishing missing files from files
       // passed where a directory is required.
       if (!scope.fs.isDir(abs)) {
-        throw new Error(`${path}: ${error?.toLowerCase() ?? 'not a directory'}`)
+        throw new Error(`${path}: ${error ?? 'Not a directory'}`)
       }
       const { dirs, files } = scope.fs.listDir(abs)
       return { dirs: [...dirs], files: [...files] }

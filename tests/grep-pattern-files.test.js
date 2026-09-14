@@ -113,29 +113,29 @@ describe('grep — pattern files and shared stdin', () => {
 
   it('retains stdin consumption when a later pattern file cannot be read', () => {
     check('{ grep -f missing; cat; } < patterns/alpha', 'alpha\n', 0,
-      'grep: missing: no such file or directory\n')
+      'grep: missing: No such file or directory\n')
     check('{ grep -f - -f missing data; cat; } < patterns/alpha', '', 0,
-      'grep: missing: no such file or directory\n')
+      'grep: missing: No such file or directory\n')
   })
 })
 
 describe('grep — pattern file errors and diagnostics', () => {
   for (const options of ['-f missing', '-sf missing', '-f missing -s', '--no-messages --file missing', '-qf missing', '-m0 -f missing']) {
     it(`fails before scanning input: ${options}`, () => {
-      check(`grep ${options} data`, '', 2, 'grep: missing: no such file or directory\n')
+      check(`grep ${options} data`, '', 2, 'grep: missing: No such file or directory\n')
     })
   }
 
   it('reports directories and invalid path components as ordinary read errors', () => {
-    check('grep -sf patterns data', '', 2, 'grep: patterns: is a directory\n')
-    check('grep -sf data/../patterns/alpha data', '', 2, 'grep: data/../patterns/alpha: not a directory\n')
+    check('grep -sf patterns data', '', 2, 'grep: patterns: Is a directory\n')
+    check('grep -sf data/../patterns/alpha data', '', 2, 'grep: data/../patterns/alpha: Not a directory\n')
   })
 
   it('keeps input error suppression separate from pattern file errors', () => {
     check('grep -sf patterns/pair missing data', 'data:alpha\ndata:beta\n', 2)
     check('grep -sqf patterns/pair missing data', '')
     check('grep -f patterns/pair missing data', 'data:alpha\ndata:beta\n', 2,
-      'grep: missing: no such file or directory\n')
+      'grep: missing: No such file or directory\n')
   })
 
   it('rejects missing option arguments and invalid patterns without unsupported notes', () => {

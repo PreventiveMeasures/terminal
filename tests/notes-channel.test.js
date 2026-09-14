@@ -84,7 +84,7 @@ describe('RunResult notes describe actual ls omissions', () => {
   it('keeps the normal mixed-success ls error and exit status', () => {
     const result = createTerminal(HIDDEN).run('ls / /missing')
     assert.deepEqual(result, expected('/:\nvisible\n', [ONE_NOTE], {
-      stderr: 'ls: /missing: no such file or directory\n', exitCode: 2,
+      stderr: 'ls: /missing: No such file or directory\n', exitCode: 2,
     }))
   })
 })

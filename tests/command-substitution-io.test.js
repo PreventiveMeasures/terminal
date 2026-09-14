@@ -11,7 +11,7 @@ const FILES = {
   nulOnly: '\0\0',
   nulEnd: 'before\n\0\n',
 }
-const READ_ERROR = 'cat: missing: no such file or directory\n'
+const READ_ERROR = 'cat: missing: No such file or directory\n'
 const NUL_WARNING = 'warning: command substitution: ignored null byte in input\n'
 
 function check(command, stdout, exitCode = 0, stderr = '', notes = []) {
@@ -60,7 +60,7 @@ describe('command substitution — shared input', () => {
 })
 
 // A read error routed to /dev/null reaches nobody, so it is reported here.
-const HIDDEN = 'cat: no such file or directory: "missing".'
+const HIDDEN = 'cat: No such file or directory: "missing".'
 
 describe('command substitution — expansion order and stderr', () => {
   const cases = [

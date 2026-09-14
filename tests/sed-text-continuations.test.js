@@ -96,7 +96,7 @@ describe('sed text continuation honors script file and option order', () => {
     const result = createTerminal(FILES).run(command(expressions('p', 'a\\') + ' -f missing'))
     assert.equal(result.stdout, '')
     assert.equal(result.exitCode, 4)
-    assert.match(result.stderr, /missing: no such file/u)
+    assert.match(result.stderr, /missing: No such file/u)
     assert.deepEqual(result.unsupported, [])
   })
 })

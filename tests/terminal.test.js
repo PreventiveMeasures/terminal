@@ -89,7 +89,7 @@ describe('createTerminal — basics', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('ls -- -1')
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /-1: no such file/u)
+    assert.match(r.stderr, /-1: No such file/u)
   })
 
   it('ls -10 / -123 (pure-digit shorts) stay positional, matching head -5 shorthand', () => {
@@ -97,7 +97,7 @@ describe('createTerminal — basics', () => {
     // intent is clearly "POSIX -1 + other flags". Pure-digit tokens
     // are NOT bundle-shaped — parseArgs's `^-\d` guard already
     // classifies them as positional. ls then tries to read them as
-    // filenames and reports "no such file" rather than mangling
+    // filenames and reports "No such file" rather than mangling
     // them into a malformed flag set.
     const t = createTerminal(SOURCES)
     assert.match(t.run('ls -10').stderr, /unknown option/u)
@@ -109,14 +109,14 @@ describe('createTerminal — basics', () => {
     assert.equal(t.run('ls -1 -1').stdout, t.run('ls').stdout)
   })
 
-  it('ls routes per-target "no such file" to stderr (not stdout) on partial failure', () => {
+  it('ls routes per-target "No such file" to stderr (not stdout) on partial failure', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('ls src nope')
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /nope: no such file/u)
+    assert.match(r.stderr, /nope: No such file/u)
     // The successful target's listing must stay clean — no error
     // text leaks into stdout, so downstream pipes get clean data.
-    assert.doesNotMatch(r.stdout, /no such file/u)
+    assert.doesNotMatch(r.stdout, /No such file/u)
     assert.match(r.stdout, /foo\.js/u)
   })
 
@@ -179,18 +179,18 @@ describe('createTerminal — text commands', () => {
     assert.equal(t.run('cat nope').exitCode, 1)
   })
 
-  it('reading a directory reports "is a directory" rather than "no such file"', () => {
+  it('reading a directory reports "Is a directory" rather than "No such file"', () => {
     // Matches GNU cat / head / tail: the path exists, it's just
     // not a file. Affects every command that goes through
     // readFilesFor (cat, grep, head, tail, wc).
     const t = createTerminal(SOURCES)
     const r = t.run('cat src')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /is a directory/u)
-    assert.doesNotMatch(r.stderr, /no such file/u)
+    assert.match(r.stderr, /Is a directory/u)
+    assert.doesNotMatch(r.stderr, /No such file/u)
     // Same for head and wc — confirms the helper, not just cat.
-    assert.match(t.run('head src').stderr, /is a directory/u)
-    assert.match(t.run('wc src').stderr, /is a directory/u)
+    assert.match(t.run('head src').stderr, /Is a directory/u)
+    assert.match(t.run('wc src').stderr, /Is a directory/u)
   })
 
   it('multi-file: an unreadable operand does not discard the readable files', () => {
@@ -202,14 +202,14 @@ describe('createTerminal — text commands', () => {
     const t = createTerminal({ 'a.txt': 'AAA\n', 'b.txt': 'BBB\n', 'dir/inner.txt': 'x\n' })
     const r = t.run('cat a.txt missing.txt b.txt')
     assert.equal(r.stdout, 'AAA\nBBB\n')
-    assert.match(r.stderr, /missing\.txt: no such file or directory/u)
+    assert.match(r.stderr, /missing\.txt: No such file or directory/u)
     assert.equal(r.exitCode, 1)
     // The pipeline that used to come up empty now carries the data.
     assert.equal(t.run('cat a.txt missing.txt b.txt | sort').stdout, 'AAA\nBBB\n')
     // A directory operand is reported too, without dropping the files.
     const d = t.run('cat a.txt dir b.txt')
     assert.equal(d.stdout, 'AAA\nBBB\n')
-    assert.match(d.stderr, /dir: is a directory/u)
+    assert.match(d.stderr, /dir: Is a directory/u)
     assert.equal(d.exitCode, 1)
   })
 
@@ -273,7 +273,7 @@ describe('createTerminal — text commands', () => {
     // One operand means no banner, so a lone directory prints nothing.
     const solo = t.run('head -n 1 dir')
     assert.equal(solo.stdout, '')
-    assert.match(solo.stderr, /dir: is a directory/u)
+    assert.match(solo.stderr, /dir: Is a directory/u)
     assert.equal(solo.exitCode, 1)
   })
 
@@ -281,7 +281,7 @@ describe('createTerminal — text commands', () => {
     const t = createTerminal({ 'a.txt': 'AAA\n', 'b.txt': 'BBB\n' })
     const r = t.run('grep A a.txt missing.txt b.txt')
     assert.match(r.stdout, /a\.txt:AAA/u)
-    assert.match(r.stderr, /missing\.txt: no such file or directory/u)
+    assert.match(r.stderr, /missing\.txt: No such file or directory/u)
     // GNU grep exits 2 when an error occurs, outranking the 0/1 match status.
     assert.equal(r.exitCode, 2)
   })
@@ -340,7 +340,7 @@ describe('createTerminal — text commands', () => {
     // from 1 ("no match"). Pinning it explicitly catches a
     // regression that collapsed both into 1.
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /no such file or directory/u)
+    assert.match(r.stderr, /No such file or directory/u)
   })
 
   it('grep -r combines with -i and -n', () => {
@@ -1166,10 +1166,10 @@ describe('createTerminal — text commands', () => {
     // from the exit 1 the partial-failure commands use.
     const s = t.run('sort nope.txt')
     assert.equal(s.exitCode, 2)
-    assert.match(s.stderr, /sort: nope\.txt: no such file/u)
+    assert.match(s.stderr, /sort: nope\.txt: No such file/u)
     const u = t.run('uniq nope.txt')
     assert.equal(u.exitCode, 1)
-    assert.match(u.stderr, /uniq: nope\.txt: no such file/u)
+    assert.match(u.stderr, /uniq: nope\.txt: No such file/u)
   })
 
   it('echo -e interprets backslash escapes; default leaves them literal', () => {
@@ -1203,7 +1203,7 @@ describe('createTerminal — text commands', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('ls src nope')
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /nope:.*no such file/u)
+    assert.match(r.stderr, /nope:.*No such file/u)
     assert.match(r.stdout, /foo\.js/u)
     assert.doesNotMatch(r.stdout, /nope/u)
   })
@@ -1617,7 +1617,7 @@ describe('createTerminal — find / tree / path', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('find src nope')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /nope: no such file or directory/u)
+    assert.match(r.stderr, /nope: No such file or directory/u)
     // src's entries must still appear despite nope's failure.
     const lines = r.stdout.split('\n').filter(Boolean).sort()
     assert.ok(lines.includes('src/foo.js'), `expected src/foo.js in stdout, got ${JSON.stringify(lines)}`)
@@ -1943,7 +1943,7 @@ describe('createTerminal — strict option parsing', () => {
     // After `--`, `-z` is treated as a filename — cat tries to read it.
     const r = t.run('cat -- -z')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /no such file/u)
+    assert.match(r.stderr, /No such file/u)
   })
 
   it('numeric-prefixed args (e.g. negative numbers) stay positional', () => {
@@ -2121,7 +2121,7 @@ describe('createTerminal — xargs', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('echo /src/missing.js | xargs cat')
     assert.equal(r.exitCode, 123)
-    assert.match(r.stderr, /no such file/u)
+    assert.match(r.stderr, /No such file/u)
   })
 
   it('reports unknown inner commands the same way as bare dispatch', () => {
@@ -2247,7 +2247,7 @@ describe('createTerminal — /dev/null redirects', () => {
     // Exit code and stderr unaffected.
     const r = t.run('cat /nope 1>/dev/null')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /no such file/u)
+    assert.match(r.stderr, /No such file/u)
   })
 
   it('redirects only allow `/dev/null` as the target', () => {
@@ -2287,16 +2287,16 @@ describe('createTerminal — `2>&1` fd-to-fd redirects', () => {
     // is now on stdout. Exit code is preserved.
     assert.equal(r.exitCode, 1)
     assert.equal(r.stderr, '')
-    assert.match(r.stdout, /no such file/u)
+    assert.match(r.stdout, /No such file/u)
   })
 
   it('`2>&1 | …` lets the next stage see both streams', () => {
     const t = createTerminal(SOURCES)
     // Without 2>&1, grep would see only cat's empty stdout. With it,
     // cat's stderr is folded into the pipe so grep can match on it.
-    const r = t.run('cat /nope 2>&1 | grep "no such"')
+    const r = t.run('cat /nope 2>&1 | grep "No such"')
     assert.equal(r.exitCode, 0)
-    assert.match(r.stdout, /no such file/u)
+    assert.match(r.stdout, /No such file/u)
     assert.equal(r.stderr, '')
   })
 
@@ -2330,7 +2330,7 @@ describe('createTerminal — `2>&1` fd-to-fd redirects', () => {
     // unaffected. Confirms the flag is per-stage, not per-pipeline.
     const r = t.run('cat /nope 2>&1 | head -n 1')
     assert.equal(r.exitCode, 0)
-    assert.match(r.stdout, /no such file/u)
+    assert.match(r.stdout, /No such file/u)
     assert.equal(r.stderr, '')
   })
 
@@ -2432,7 +2432,7 @@ describe('createTerminal — `;` sequential separator', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('cat /nope 2>&1; echo hi 2>&1')
     assert.equal(r.exitCode, 0)
-    assert.match(r.stdout, /no such file/u)
+    assert.match(r.stdout, /No such file/u)
     assert.match(r.stdout, /^hi$/mu)
   })
 
@@ -2695,7 +2695,7 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     // at the current stdout, THEN `>/dev/null` discards stdout only —
     // the error line arrives on stdout, nothing on stderr.
     const silenced = t.run('(cat /nope; echo ok) 2>&1 >/dev/null')
-    assert.equal(silenced.stdout, 'cat: /nope: no such file or directory\n')
+    assert.equal(silenced.stdout, 'cat: /nope: No such file or directory\n')
     assert.equal(silenced.stderr, '')
     // The other order silences both.
     const both = t.run('(cat /nope; echo ok) >/dev/null 2>&1')
@@ -2714,12 +2714,12 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     // Same for 2>&1: merge sets a flag, then the group runs, then the
     // merge applies to the group's combined output.
     const merged = t.run('2>&1 (cat /nope)')
-    assert.match(merged.stdout, /no such file/u)
+    assert.match(merged.stdout, /No such file/u)
     assert.equal(merged.stderr, '')
     // Leading + trailing redirects on the same group must both apply,
     // in that order: stderr joins stdout, then stdout goes to /dev/null.
     const both = t.run('2>&1 (cat /nope; echo ok) >/dev/null')
-    assert.equal(both.stdout, 'cat: /nope: no such file or directory\n')
+    assert.equal(both.stdout, 'cat: /nope: No such file or directory\n')
     assert.equal(both.stderr, '')
     // Leading redirect on a nested group attaches to the OUTER group,
     // not the inner — the inner is parsed by a separate buildSteps
@@ -2737,7 +2737,7 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('(cat /nope 2>&1)')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stdout, /no such file/u)
+    assert.match(r.stdout, /No such file/u)
     assert.equal(r.stderr, '')
     // Symmetric `1>&2)` form.
     const sym = t.run('(echo hi 1>&2)')
@@ -2954,7 +2954,7 @@ describe('createTerminal — `for` loops', () => {
     assert.equal(t.run('for f in "a b"; do echo [$f]; done').stdout, '[a b]\n')
     const split = t.run('for f in "README.md src"; do cat $f; done')
     assert.equal(split.stdout, '# Hello\n\nA project.\n')
-    assert.equal(split.stderr, 'cat: src: is a directory\n')
+    assert.equal(split.stderr, 'cat: src: Is a directory\n')
     assert.equal(t.run('for f in " a  b "; do echo $f | wc -w; done').stdout.trim(), '2')
   })
 
@@ -2983,7 +2983,7 @@ describe('createTerminal — `for` loops', () => {
     // Last iteration wins: a failure earlier in the list is forgotten.
     const recovered = t.run('for f in /nope README.md; do cat $f >/dev/null; done')
     assert.equal(recovered.exitCode, 0)
-    assert.equal(recovered.stderr, 'cat: /nope: no such file or directory\n')
+    assert.equal(recovered.stderr, 'cat: /nope: No such file or directory\n')
     assert.equal(t.run('for f in README.md /nope; do cat $f >/dev/null; done').exitCode, 1)
     // Empty list: the body never runs and the status is 0.
     const empty = t.run('for f in; do echo never; done && echo empty-ok')
@@ -3397,7 +3397,7 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     })
     const r = t.run("sed -n '1,5p' a.txt nope.txt c.txt")
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /nope\.txt: no such file/u)
+    assert.match(r.stderr, /nope\.txt: No such file/u)
     // Surviving files\' lines are still in cumulative-numbering order:
     // a.txt = lines 1-3, c.txt = lines 4-6 (skipped file contributes
     // nothing). `1,5p` therefore prints lines 1-5 = A1, A2, A3, C1, C2.
@@ -3478,21 +3478,21 @@ describe('createTerminal — shell-style glob expansion', () => {
     // Quoted: wc tries to read a file literally named `dir/*.js`.
     const r = t.run("wc -l 'dir/*.js'")
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /no such file/u)
+    assert.match(r.stderr, /No such file/u)
   })
 
   it('double-quoted pattern is also literal', () => {
     const t = createTerminal(SRC)
     const r = t.run('wc -l "dir/*.js"')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /no such file/u)
+    assert.match(r.stderr, /No such file/u)
   })
 
   it('pattern with no matches passes through verbatim (bash default)', () => {
     const t = createTerminal(SRC)
     const r = t.run('wc -l dir/*.txt')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /dir\/\*\.txt: no such file/u)
+    assert.match(r.stderr, /dir\/\*\.txt: No such file/u)
   })
 
   it('absolute glob — `/dir/*.js`', () => {
@@ -3515,7 +3515,7 @@ describe('createTerminal — shell-style glob expansion', () => {
     // `cat` will report the unexpanded pattern as a missing file.
     const r = t.run('cat *.js')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /\*\.js: no such file/u)
+    assert.match(r.stderr, /\*\.js: No such file/u)
     // Explicit `.` matches the dotfile.
     const dot = t.run('cat .*.js')
     assert.equal(dot.stdout, 'h\n')
@@ -3847,7 +3847,7 @@ describe('createTerminal — head -c (byte counts)', () => {
     const r = t.run('head -c 2 a.txt missing.txt b.txt')
     assert.match(r.stdout, /==> a\.txt <==\nab/u)
     assert.match(r.stdout, /==> b\.txt <==\nde/u)
-    assert.match(r.stderr, /missing\.txt: no such file/u)
+    assert.match(r.stderr, /missing\.txt: No such file/u)
     assert.equal(r.exitCode, 1)
   })
 
@@ -3901,7 +3901,7 @@ describe('createTerminal — head/tail operand-count banners', () => {
     const t = createTerminal(SRC)
     const r = t.run('head -n 1 h.txt missing')
     assert.equal(r.stdout, '==> h.txt <==\nhello\n')
-    assert.match(r.stderr, /missing: no such file/u)
+    assert.match(r.stderr, /missing: No such file/u)
     assert.equal(r.exitCode, 1)
     assert.equal(t.run('tail -n 1 h.txt missing').stdout, '==> h.txt <==\nworld\n')
     // Byte mode shares the same block writer, banners included.
@@ -3917,7 +3917,7 @@ describe('createTerminal — head/tail operand-count banners', () => {
     assert.equal(t.run('head -n 1 missing h.txt').stdout, '==> h.txt <==\nhello\n')
     const r = t.run('head -n 1 missing h.txt o.txt')
     assert.equal(r.stdout, '==> h.txt <==\nhello\n\n==> o.txt <==\nother\n')
-    assert.match(r.stderr, /missing: no such file/u)
+    assert.match(r.stderr, /missing: No such file/u)
     assert.equal(r.exitCode, 1)
     assert.equal(t.run('head -n 1 h.txt missing o.txt').stdout,
       '==> h.txt <==\nhello\n\n==> o.txt <==\nother\n')
@@ -3943,7 +3943,7 @@ describe('createTerminal — head/tail operand-count banners', () => {
     assert.equal(t.run('cat h.txt | tail -n 0').stdout, '')
     const h = t.run('head -n 0 h.txt missing')
     assert.equal(h.stdout, '==> h.txt <==\n')
-    assert.match(h.stderr, /missing: no such file/u)
+    assert.match(h.stderr, /missing: No such file/u)
     assert.equal(h.exitCode, 1)
     assert.equal(t.run('head -n 0 h.txt o.txt').stdout, '==> h.txt <==\n\n==> o.txt <==\n')
   })
@@ -4406,7 +4406,7 @@ describe('createTerminal — ls -d/-r/-A/-F, find -iname/-print0/-empty', () => 
     assert.equal(t.run('ls -d ..').stdout, '..\n')
     const missing = t.run('ls -d nope')
     assert.equal(missing.exitCode, 2)
-    assert.match(missing.stderr, /no such file/u)
+    assert.match(missing.stderr, /No such file/u)
   })
 
   it('ls -r reverses the listing, grouping included', () => {
@@ -4528,7 +4528,7 @@ describe('createTerminal — xargs -0/-I, sort aborts on unreadable input', () =
     const r = t.run('sort ok.txt missing.txt')
     assert.equal(r.stdout, '')
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /missing\.txt: no such file/u)
+    assert.match(r.stderr, /missing\.txt: No such file/u)
     // A directory operand aborts it the same way.
     const d = t.run('sort ok.txt ft')
     assert.equal(d.stdout, '')
@@ -4709,7 +4709,7 @@ describe('createTerminal — hexdump', () => {
     const t = createTerminal({ 'a.txt': 'x' })
     const r = t.run('hexdump a.txt missing.txt')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /missing\.txt: no such file or directory/u)
+    assert.match(r.stderr, /missing\.txt: No such file or directory/u)
     assert.equal(r.stdout, '0000000 0078'.padEnd(47) + '\n0000001\n')
   })
 
@@ -6539,7 +6539,7 @@ describe('createTerminal — awk', () => {
 
   it('input errors: a missing file is fatal after the output so far (exit 2); a directory is skipped with a warning', () => {
     let r = run("awk '{ print $1 }' a.txt nope b.txt")
-    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['x\ny\n', 'awk: nope: no such file or directory\n', 2])
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['x\ny\n', 'awk: nope: No such file or directory\n', 2])
     r = run("awk '{ print }' src a.txt")
     assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['x\ny\n', "awk: warning: command line argument `src' is a directory: skipped\n", 0])
   })
@@ -6625,7 +6625,7 @@ describe('createTerminal — awk', () => {
     assert.equal(out("awk 'BEGINFILE { if (ERRNO) { print \"skip\", FILENAME, ERRNO; nextfile } print \"open\", FILENAME } { print } ENDFILE { print \"end\", FILENAME, FNR }' a.txt nope b.txt", files), 'open a.txt\nx\ny\nend a.txt 2\nskip nope No such file or directory\nopen b.txt\ny\nz\nend b.txt 2\n')
     // Without the idiom a missing file is still fatal, after BEGINFILE ran.
     let r = run("awk 'BEGINFILE { print \"bf\" } { print }' nope", files)
-    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['bf\n', 'awk: nope: no such file or directory\n', 2])
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['bf\n', 'awk: nope: No such file or directory\n', 2])
     assert.equal(out("awk 'BEGINFILE { nextfile } ENDFILE { print \"ef\", FILENAME } END { print NR }' a.txt b.txt", files), 'ef a.txt\nef b.txt\n0\n')
     assert.equal(out("awk 'FNR == 1 { nextfile } ENDFILE { print \"ef\", FILENAME, FNR, NR }' a.txt b.txt", files), 'ef a.txt 1 1\nef b.txt 1 2\n')
     r = run("awk 'ENDFILE { exit 4 } END { print \"end\" }' a.txt b.txt", files)

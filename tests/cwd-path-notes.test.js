@@ -17,27 +17,27 @@ function note(command, path, alternatives, cwd = '/repo/sub', kind = 'file', dif
 }
 
 const cases = [
-  ['cat file', 'cat', 'file', 1, 'cat: file: no such file or directory\n'],
-  ['head file', 'head', 'file', 1, 'head: file: no such file or directory\n'],
-  ['tail file', 'tail', 'file', 1, 'tail: file: no such file or directory\n'],
-  ['wc file', 'wc', 'file', 1, 'wc: file: no such file or directory\n'],
-  ['tac file', 'tac', 'file', 1, 'tac: file: no such file or directory\n'],
-  ['nl file', 'nl', 'file', 1, 'nl: file: no such file or directory\n'],
-  ['cut -c1 file', 'cut', 'file', 1, 'cut: file: no such file or directory\n'],
-  ['base64 file', 'base64', 'file', 1, 'base64: file: no such file or directory\n'],
-  ['sort file', 'sort', 'file', 2, 'sort: file: no such file or directory\n'],
-  ['ls dir', 'ls', 'dir', 2, 'ls: dir: no such file or directory\n'],
-  ['find dir', 'find', 'dir', 1, 'find: dir: no such file or directory\n'],
+  ['cat file', 'cat', 'file', 1, 'cat: file: No such file or directory\n'],
+  ['head file', 'head', 'file', 1, 'head: file: No such file or directory\n'],
+  ['tail file', 'tail', 'file', 1, 'tail: file: No such file or directory\n'],
+  ['wc file', 'wc', 'file', 1, 'wc: file: No such file or directory\n'],
+  ['tac file', 'tac', 'file', 1, 'tac: file: No such file or directory\n'],
+  ['nl file', 'nl', 'file', 1, 'nl: file: No such file or directory\n'],
+  ['cut -c1 file', 'cut', 'file', 1, 'cut: file: No such file or directory\n'],
+  ['base64 file', 'base64', 'file', 1, 'base64: file: No such file or directory\n'],
+  ['sort file', 'sort', 'file', 2, 'sort: file: No such file or directory\n'],
+  ['ls dir', 'ls', 'dir', 2, 'ls: dir: No such file or directory\n'],
+  ['find dir', 'find', 'dir', 1, 'find: dir: No such file or directory\n'],
   ['cd dir', 'cd', 'dir', 1, 'cd: dir: No such file or directory\n'],
-  ['grep x file', 'grep', 'file', 2, 'grep: file: no such file or directory\n'],
-  ['grep -r x dir', 'grep', 'dir', 2, 'grep: dir: no such file or directory\n'],
+  ['grep x file', 'grep', 'file', 2, 'grep: file: No such file or directory\n'],
+  ['grep -r x dir', 'grep', 'dir', 2, 'grep: dir: No such file or directory\n'],
   ['grep -s x file', 'grep', 'file', 2, ''],
   ['grep -rs x dir', 'grep', 'dir', 2, ''],
-  ['grep -f file keep', 'grep', 'file', 2, 'grep: file: no such file or directory\n'],
-  ["sed 's/x/y/' file", 'sed', 'file', 2, 'sed: file: no such file or directory\n'],
-  ["sed -i 's/x/y/' file", 'sed', 'file', 2, 'sed: file: no such file or directory\n'],
-  ['sed -f file keep', 'sed', 'file', 4, 'sed: file: no such file or directory\n'],
-  ["awk '{print}' file", 'awk', 'file', 2, 'awk: file: no such file or directory\n'],
+  ['grep -f file keep', 'grep', 'file', 2, 'grep: file: No such file or directory\n'],
+  ["sed 's/x/y/' file", 'sed', 'file', 2, 'sed: file: No such file or directory\n'],
+  ["sed -i 's/x/y/' file", 'sed', 'file', 2, 'sed: file: No such file or directory\n'],
+  ['sed -f file keep', 'sed', 'file', 4, 'sed: file: No such file or directory\n'],
+  ["awk '{print}' file", 'awk', 'file', 2, 'awk: file: No such file or directory\n'],
   ['awk -f file', 'awk', 'file', 2, 'awk: cannot open program file `file`: No such file or directory\n'],
   ['cp file /tmp/file', 'cp', 'file', 1, "cp: cannot stat 'file': No such file or directory\n"],
   ['cp keep src/file', 'cp', 'src/file', 1, "cp: cannot create regular file 'src/file': No such file or directory\n"],
@@ -70,7 +70,7 @@ describe('cwd notes accompany actual relative-path lookup failures', () => {
   it('retains successful file output alongside a missing operand', () => {
     const result = createTerminal(SOURCES, OPTIONS).run('cat keep file keep')
     assert.equal(result.stdout, 'local\nlocal\n')
-    assert.equal(result.stderr, 'cat: file: no such file or directory\n')
+    assert.equal(result.stderr, 'cat: file: No such file or directory\n')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.notes, [note('cat', 'file', ['/repo/file'])])
   })
@@ -222,7 +222,7 @@ describe('custom commands and writable failures use the shared cwd note path', (
       },
     } })
     const result = terminal.run('read file')
-    assert.equal(result.stderr, 'read: file: no such file or directory\n')
+    assert.equal(result.stderr, 'read: file: No such file or directory\n')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.notes, [note('read', 'file', ['/repo/file'])])
   })
@@ -233,7 +233,7 @@ describe('custom commands and writable failures use the shared cwd note path', (
       probe: ({ fs }) => String(fs.isFile('file') || fs.isDir('dir') || fs.readFile('file') !== undefined),
     } })
     const listed = terminal.run('list dir')
-    assert.equal(listed.stderr, 'list: dir: no such file or directory\n')
+    assert.equal(listed.stderr, 'list: dir: No such file or directory\n')
     assert.equal(listed.exitCode, 1)
     assert.deepEqual(listed.notes, [note('list', 'dir', ['/repo/dir'], undefined, 'dir')])
     const probed = terminal.run('probe')

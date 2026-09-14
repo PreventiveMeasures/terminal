@@ -21,7 +21,7 @@ export function find(stdin, tokens, ctx) {
       const { path: startAbs, error } = lookupWithNote(ctx, 'find', start)
       if (error) {
         // A bad root does not prevent traversal of the remaining roots.
-        collectOutput(result, ctx.flushOutput(emptyOutput(`find: ${start}: ${error.toLowerCase()}\n`)))
+        collectOutput(result, ctx.flushOutput(emptyOutput(`find: ${start}: ${error}\n`)))
         result.exitCode = 1
         continue
       }

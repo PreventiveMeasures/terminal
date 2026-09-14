@@ -156,7 +156,7 @@ describe('run().unsupported — what counts as a gap', () => {
 
   it('reports a gap and an ordinary error in the same line on their own channels', () => {
     const r = term().run('cat missing.txt; ls -t')
-    assert.match(r.stderr, /no such file or directory/u)
+    assert.match(r.stderr, /No such file or directory/u)
     assert.match(r.stderr, /unknown option: -t/u)
     assert.deepEqual(r.unsupported.map((u) => u.detail), ['-t'])
   })

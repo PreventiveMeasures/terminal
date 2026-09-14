@@ -135,7 +135,7 @@ describe('transforms evaluate selected operands in order', () => {
   it('retains ordinary and unsupported diagnostics from operand commands', () => {
     const ordinary = createTerminal({}).run('x=abc; printf "%s" "${x/b/$(cat missing)}"')
     assert.equal(ordinary.stdout, 'ac')
-    assert.match(ordinary.stderr, /missing: no such file/u)
+    assert.match(ordinary.stderr, /missing: No such file/u)
     assert.deepEqual(ordinary.unsupported, [])
     const unsupported = createTerminal({}).run('{ x=abc; printf "%s" "${x/b/$(unknown-command)}"; } 2>/dev/null | cat')
     assert.equal(unsupported.stdout, 'ac')

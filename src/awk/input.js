@@ -178,7 +178,7 @@ export class Input {
         const sig = this.failFile(m, op, error)
         if (sig !== undefined && sig.type === 'nextfile') continue
         if (this.exitSignal !== undefined) return false
-        throw new AwkError(`${op}: ${error.toLowerCase()}`)
+        throw new AwkError(`${op}: ${error}`)
       }
       if (this.use(m, op, text)) return true
     }

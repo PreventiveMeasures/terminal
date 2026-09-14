@@ -60,7 +60,7 @@ describe('grep count and attached match limits', () => {
   }
 
   it('keeps successful counts and capped matches when another operand cannot be read', () => {
-    const stderr = 'grep: missing: no such file or directory\n'
+    const stderr = 'grep: missing: No such file or directory\n'
     check('grep -c hit missing src/a.js', 'src/a.js:2\n', 2, stderr)
     check('grep -m1 hit missing src/a.js', 'src/a.js:hit hit\n', 2, stderr)
   })

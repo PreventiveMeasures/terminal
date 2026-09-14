@@ -114,7 +114,7 @@ describe('the writable overlay is separate, persistent and private', () => {
     assert.equal(failed.stderr, '')
     assert.equal(failed.exitCode, 1)
     assert.deepEqual(failed.unsupported, [])
-    check(t, 'cat /tmp/errors', 'cat: missing: no such file or directory\n')
+    check(t, 'cat /tmp/errors', 'cat: missing: No such file or directory\n')
   })
 
   it('still reports unsupported commands when stderr is redirected to a file', () => {

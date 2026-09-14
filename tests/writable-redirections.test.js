@@ -53,7 +53,7 @@ describe('writable tmp output redirection', () => {
 })
 
 describe('writable stderr and combined redirects', () => {
-  const message = 'cat: missing: no such file or directory\n'
+  const message = 'cat: missing: No such file or directory\n'
   for (const redirect of ['2>', '&>', '2>>', '&>>']) {
     it(redirect, () => {
       const t = terminal()

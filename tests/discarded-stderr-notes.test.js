@@ -16,35 +16,35 @@ describe('a path failure sent to /dev/null is reported anyway', () => {
   // path just as completely; the status alone cannot tell the two apart.
   it('reads as a sentence', () => {
     assert.deepEqual(notesOf('cat f 2>/dev/null | head -30'),
-      ['cat: no such file or directory: "f".'])
+      ['cat: No such file or directory: "f".'])
   })
 
   for (const [command, lines] of [
-    ['cat f 2>/dev/null | head -30', ['cat: f: no such file or directory']],
-    ['ls dir/ 2>/dev/null | head -50', ['ls: dir/: no such file or directory']],
-    ['cat sub 2>/dev/null', ['cat: sub: is a directory']],
-    ['ls a.txt/x 2>/dev/null', ['ls: a.txt/x: not a directory']],
+    ['cat f 2>/dev/null | head -30', ['cat: f: No such file or directory']],
+    ['ls dir/ 2>/dev/null | head -50', ['ls: dir/: No such file or directory']],
+    ['cat sub 2>/dev/null', ['cat: sub: Is a directory']],
+    ['ls a.txt/x 2>/dev/null', ['ls: a.txt/x: Not a directory']],
     ['cd nope 2>/dev/null', ['cd: nope: No such file or directory']],
     ['cd a.txt 2>/dev/null', ['cd: a.txt: Not a directory']],
     ['cat 2>/dev/null < nope', ['error: nope: No such file or directory']],
     // A closed descriptor discards just as thoroughly as /dev/null.
-    ['cat nope 2>&-', ['cat: nope: no such file or directory']],
+    ['cat nope 2>&-', ['cat: nope: No such file or directory']],
     // Hidden inside a group, a substitution, or a loop, it is still hidden.
-    ['{ cat nope; } 2>/dev/null', ['cat: nope: no such file or directory']],
-    ['value=$(cat nope 2>/dev/null); true', ['cat: nope: no such file or directory']],
-    ['for f in nope; do cat $f; done 2>/dev/null', ['cat: nope: no such file or directory']],
+    ['{ cat nope; } 2>/dev/null', ['cat: nope: No such file or directory']],
+    ['value=$(cat nope 2>/dev/null); true', ['cat: nope: No such file or directory']],
+    ['for f in nope; do cat $f; done 2>/dev/null', ['cat: nope: No such file or directory']],
   ]) {
     it(command, () => assert.deepEqual(notesOf(command), lines.map(hidden)))
   }
 
   it('names every path one command failed the same way on, once', () => {
     assert.deepEqual(notesOf('grep -rn a d1 d2 d3 2>/dev/null'),
-      ['grep: no such file or directory: "d2", "d3".'])
+      ['grep: No such file or directory: "d2", "d3".'])
   })
 
   it('reports a repeated failure once', () => {
     assert.deepEqual(notesOf('cat nope 2>/dev/null; cat nope 2>/dev/null'),
-      [hidden('cat: nope: no such file or directory')])
+      [hidden('cat: nope: No such file or directory')])
   })
 
   it('does not carry one run into the next', () => {
@@ -89,7 +89,7 @@ describe('nothing is said where the caller can already see it', () => {
     const terminal = createTerminal({ 'a.txt': 'oak\n' }, { mount: '/repo', cwd: '/repo', writable: '/tmp/' })
     const result = terminal.run('cat nope 2>/tmp/err')
     assert.deepEqual(result.notes, [])
-    assert.equal(terminal.run('cat /tmp/err').stdout, 'cat: nope: no such file or directory\n')
+    assert.equal(terminal.run('cat /tmp/err').stdout, 'cat: nope: No such file or directory\n')
   })
 })
 
@@ -105,7 +105,7 @@ describe('the note leaves the run itself alone', () => {
   it('sits alongside whatever else the run had to say', () => {
     assert.deepEqual(createTerminal(FILES).run('cat nope 2>/dev/null && cat a.txt').notes, [
       'cat: exited 1, so the command after && did not run.',
-      hidden('cat: nope: no such file or directory'),
+      hidden('cat: nope: No such file or directory'),
     ])
   })
 })

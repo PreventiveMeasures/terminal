@@ -232,3 +232,76 @@ describe('GNU conformance — line continuation inside a reference', () => {
     assert.equal(run("echo 'a\\\nb'").stdout, 'a\\\nb\n')
   })
 })
+
+describe('GNU conformance — strerror capitalization', () => {
+  // Every reader lowercased the reason it got back from the filesystem, so
+  // a missing operand read `cat: missing: no such file or directory` where
+  // coreutils 9.4, grep 3.11 and sed 4.9 all print strerror() as it comes:
+  // capitalized. `cp` and `rm` alone had it right, which is what the rest
+  // now match. The lines below are what those tools printed here.
+  const files = { f: 'hi\n', 'd/x': 'x\n' }
+  const diagnose = (command) => createTerminal(files).run(command).stderr
+
+  const EXACT = [
+    ['cat missing', 'cat: missing: No such file or directory\n'],
+    ['cat d', 'cat: d: Is a directory\n'],
+    ['cat f/x', 'cat: f/x: Not a directory\n'],
+    ['wc missing', 'wc: missing: No such file or directory\n'],
+    ['wc d', 'wc: d: Is a directory\n'],
+    ['wc f/x', 'wc: f/x: Not a directory\n'],
+    ['cut -c1 missing', 'cut: missing: No such file or directory\n'],
+    ['cut -c1 d', 'cut: d: Is a directory\n'],
+    ['grep hi missing', 'grep: missing: No such file or directory\n'],
+    ['grep hi d', 'grep: d: Is a directory\n'],
+    ['grep hi f/x', 'grep: f/x: Not a directory\n'],
+    ['base64 missing', 'base64: missing: No such file or directory\n'],
+    ['od missing', 'od: missing: No such file or directory\n'],
+    ['nl missing', 'nl: missing: No such file or directory\n'],
+    ['uniq missing', 'uniq: missing: No such file or directory\n'],
+    ['realpath -e missing', 'realpath: missing: No such file or directory\n'],
+    ['realpath f/x', 'realpath: f/x: Not a directory\n'],
+    ['cp missing x', "cp: cannot stat 'missing': No such file or directory\n"],
+    ['rm missing', "rm: cannot remove 'missing': No such file or directory\n"],
+  ]
+  for (const [command, stderr] of EXACT) {
+    it(JSON.stringify(command), () => assert.equal(diagnose(command), stderr))
+  }
+
+  // These readers name the operand differently from GNU — `ls: cannot
+  // access 'missing': …`, `head: cannot open 'missing' for reading: …`,
+  // `sort: cannot read: missing: …`, `find: 'missing': …`, `sed: can't
+  // read missing: …` — which is a separate divergence. The reason they
+  // end on is still strerror's, so it is still capitalized.
+  const REASONED = [
+    ['ls missing', 'No such file or directory'],
+    ['ls f/x', 'Not a directory'],
+    ['head missing', 'No such file or directory'],
+    ['head d', 'Is a directory'],
+    ['tail d', 'Is a directory'],
+    ['sort missing', 'No such file or directory'],
+    ['sort d', 'Is a directory'],
+    ['find missing', 'No such file or directory'],
+    ['sed -n p missing', 'No such file or directory'],
+    ['sed -n p d', 'Is a directory'],
+    ['sed -i s/a/b/ missing', 'No such file or directory'],
+    ['awk 1 missing', 'No such file or directory'],
+  ]
+  for (const [command, reason] of REASONED) {
+    it(`${JSON.stringify(command)} ends on ${JSON.stringify(reason)}`, () => {
+      assert.equal(diagnose(command).trimEnd().split('\n').at(-1).endsWith(`: ${reason}`), true, diagnose(command))
+    })
+  }
+
+  // gawk's own warning is a sentence, not strerror, and stays lowercase.
+  it('a directory operand keeps awk’s lowercase warning', () => {
+    assert.equal(diagnose('awk 1 d'), "awk: warning: command line argument `d' is a directory: skipped\n")
+  })
+
+  // A custom command reaching a non-directory through the exposed fs fails
+  // in the shape a built-in would, so it capitalizes the same way.
+  it('a custom command reads the same reason back', () => {
+    const t = createTerminal(files, { commands: { probe: (io) => io.fs.listDir(io.args[0]) && '' } })
+    assert.equal(t.run('probe missing').stderr, 'probe: missing: No such file or directory\n')
+    assert.equal(t.run('probe f').stderr, 'probe: f: Not a directory\n')
+  })
+})

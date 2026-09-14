@@ -48,7 +48,7 @@ describe('unmatched pathname glob notes', () => {
 
   it('preserves the ordinary missing-file error after the literal fallback', () => {
     const result = createTerminal({}).run('cat *.js')
-    assert.deepEqual(result, { ...success('', [unmatched('*.js')]), stderr: 'cat: *.js: no such file or directory\n', exitCode: 1 })
+    assert.deepEqual(result, { ...success('', [unmatched('*.js')]), stderr: 'cat: *.js: No such file or directory\n', exitCode: 1 })
   })
 
   it('does not expand a glob in a skipped command', () => {

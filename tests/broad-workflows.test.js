@@ -100,7 +100,7 @@ describe('broad audit — readers preserve shared input', () => {
   it('stops tail from-start mode at an unreadable directory', () => {
     const r = createTerminal(FILES).run('tail -n+1 f dir g')
     assert.equal(r.stdout, '==> f <==\n0123456789\n\n==> dir <==\n')
-    assert.match(r.stderr, /is a directory/u)
+    assert.match(r.stderr, /Is a directory/u)
     assert.equal(r.exitCode, 1)
   })
   it('a failed hexdump seek does not consume pipe input', () => {

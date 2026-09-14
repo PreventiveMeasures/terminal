@@ -179,16 +179,16 @@ describe('sed in-place quit and errors preserve the right files', () => {
     it(`requires explicit input files: ${run}`, () => assert.deepEqual(terminal().run(run), expected('', 4, 'sed: no input files\n')))
   }
   it('an absent explicit dash does not consume pipeline input', () => {
-    assert.deepEqual(terminal().run('printf a | sed -i p -'), expected('', 2, 'sed: -: no such file or directory\n'))
+    assert.deepEqual(terminal().run('printf a | sed -i p -'), expected('', 2, 'sed: -: No such file or directory\n'))
   })
   it('missing inputs do not prevent later existing inputs from being edited', () => {
     const t = terminal()
-    assert.deepEqual(t.run('sed -i s/a/A/ /tmp/missing /tmp/input'), expected('', 2, 'sed: /tmp/missing: no such file or directory\n'))
+    assert.deepEqual(t.run('sed -i s/a/A/ /tmp/missing /tmp/input'), expected('', 2, 'sed: /tmp/missing: No such file or directory\n'))
     contents(t, '/tmp/input', 'A\nb\nA\n')
   })
   it('missing-input status takes precedence over a later q exit code', () => {
     const t = terminal()
-    assert.deepEqual(t.run("sed -i 'q7' /tmp/missing /tmp/input"), expected('', 2, 'sed: /tmp/missing: no such file or directory\n'))
+    assert.deepEqual(t.run("sed -i 'q7' /tmp/missing /tmp/input"), expected('', 2, 'sed: /tmp/missing: No such file or directory\n'))
     contents(t, '/tmp/input', 'a\n')
   })
   for (const name of ['/tmp', '/dev/null', '/dev/stdin']) {

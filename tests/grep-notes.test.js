@@ -135,7 +135,7 @@ describe('grep notes identify entries omitted by filename and directory filters'
 
   it('does not count nonexistent operands or unnamed stdin as filename exclusions', () => {
     const result = createTerminal(FILES).run('cat good | grep hit - missing --include="*.ts"')
-    assert.deepEqual(result, expected('(standard input):hit\n', [], { stderr: 'grep: missing: no such file or directory\n', exitCode: 2 }))
+    assert.deepEqual(result, expected('(standard input):hit\n', [], { stderr: 'grep: missing: No such file or directory\n', exitCode: 2 }))
   })
 
   it('counts binary files excluded by name only in the rule category', () => {
@@ -206,12 +206,12 @@ describe('grep omission notes retain bounded paths and run scope', () => {
   it('preserves normal errors and notes despite hidden stderr', () => {
     const terminal = createTerminal(FILES)
     assert.deepEqual(terminal.run('grep -I hit binary missing'), expected('', [binaryNote(['/binary'])], {
-      stderr: 'grep: missing: no such file or directory\n', exitCode: 2,
+      stderr: 'grep: missing: No such file or directory\n', exitCode: 2,
     }))
     // The unreadable operand is only on the notes channel now that its own
     // diagnostic went to /dev/null.
     assert.deepEqual(terminal.run('grep -I hit binary missing 2>/dev/null | true'),
-      expected('', [binaryNote(['/binary']), "grep: no such file or directory: \"missing\"."]))
+      expected('', [binaryNote(['/binary']), "grep: No such file or directory: \"missing\"."]))
   })
 
   it('deduplicates messages per run and keeps later runs independent', () => {

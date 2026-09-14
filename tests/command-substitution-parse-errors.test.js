@@ -125,7 +125,7 @@ describe('runtime substitution status remains distinct from parse errors', () =>
 
   it('retains ordinary inner command failures while the outer echo succeeds', () => {
     assert.deepEqual(createTerminal({}).run('echo "$(cat missing)"; echo after'), {
-      ...expected('\nafter\n'), stderr: 'cat: missing: no such file or directory\n',
+      ...expected('\nafter\n'), stderr: 'cat: missing: No such file or directory\n',
     })
   })
 

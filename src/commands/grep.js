@@ -192,7 +192,7 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
     const { path: abs, error } = lookupWithNote(ctx, 'grep', p)
     // Filename filters apply after collecting both explicit and discovered files.
     if (ctx.fs.isFile(abs)) { inputs.push({ name: p, content: ctx.fs.readFile(abs) }); continue }
-    if (error) { stderr += `grep: ${p}: ${error.toLowerCase()}\n`; failed = true; continue }
+    if (error) { stderr += `grep: ${p}: ${error}\n`; failed = true; continue }
     if (excludedStartDir(p, filters.dir)) { filters.excluded.add(abs); continue }
     const descend = (path) => {
       if (path === abs || filters.dir.length === 0 || !someMatch(filters.dir, basename(path))) return true

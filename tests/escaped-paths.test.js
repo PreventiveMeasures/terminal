@@ -49,7 +49,7 @@ describe('escaped bracket paths — shell regression cases', () => {
 
   it('reports an absent literal path without retaining shell escape characters', () => {
     assert.deepEqual(virtual(String.raw`cat a/\[missing\]/c.ts`), {
-      stdout: '', stderr: 'cat: a/[missing]/c.ts: no such file or directory\n', exitCode: 1,
+      stdout: '', stderr: 'cat: a/[missing]/c.ts: No such file or directory\n', exitCode: 1,
     })
   })
 })

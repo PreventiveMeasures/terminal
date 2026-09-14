@@ -97,7 +97,7 @@ describe('egrep errors and unsupported diagnostics', () => {
   it('reports missing files as grep errors without unsupported notes', () => {
     const result = createTerminal(FILES).run('egrep a missing')
     assert.equal(result.stdout, '')
-    assert.match(result.stderr, /^grep: missing: no such file/u)
+    assert.match(result.stderr, /^grep: missing: No such file/u)
     assert.equal(result.exitCode, 2)
     assert.deepEqual(result.unsupported, [])
   })

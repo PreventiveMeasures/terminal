@@ -27,7 +27,7 @@ describe('createTerminal source mount', () => {
       const missing = t.run('cat /README.md')
       assert.equal(missing.stdout, '')
       assert.notEqual(missing.exitCode, 0)
-      assert.match(missing.stderr, /no such file or directory/u)
+      assert.match(missing.stderr, /No such file or directory/u)
       assert.deepEqual(missing.unsupported, [])
     })
   }
@@ -90,7 +90,7 @@ describe('createTerminal source mount', () => {
   it('retains existing root file and directory collision behavior at the mount', () => {
     const t = createTerminal({ '/': 'mounted root', child: 'child' }, { mount: '/workspace' })
     assert.deepEqual(t.run('cat /workspace /workspace/child'), {
-      stdout: 'child', stderr: 'cat: /workspace: is a directory\n', exitCode: 1, cwd: '/workspace', notes: [], unsupported: [],
+      stdout: 'child', stderr: 'cat: /workspace: Is a directory\n', exitCode: 1, cwd: '/workspace', notes: [], unsupported: [],
     })
     check(t, 'cd /workspace; pwd', '/workspace\n', '/workspace')
   })

@@ -83,7 +83,7 @@ describe('sed standalone w filename parsing and compilation effects', () => {
 
   it('creates the target before an input-open error', () => {
     const t = terminal()
-    check(t, command('w out', 'missing'), '', 2, 'sed: missing: no such file or directory\n')
+    check(t, command('w out', 'missing'), '', 2, 'sed: missing: No such file or directory\n')
     written(t, 'out', '')
   })
 

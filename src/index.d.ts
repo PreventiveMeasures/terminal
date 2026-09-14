@@ -13,7 +13,7 @@ export interface CommandFs {
   isDir(path: string): boolean
   /** Contents of `path`, or `undefined` if it is not a file. */
   readFile(path: string): string | undefined
-  /** Immediate children of directory `path`, each list sorted (copies — mutating them cannot affect the tree). Throws `<path>: not a directory` / `no such file or directory` otherwise. */
+  /** Immediate children of directory `path`, each list sorted (copies — mutating them cannot affect the tree). Throws `<path>: Not a directory` / `No such file or directory` otherwise. */
   listDir(path: string): { dirs: string[]; files: string[] }
   /** Every file path at or under `path`, absolute. Empty if `path` does not exist. */
   walkFiles(path: string): string[]

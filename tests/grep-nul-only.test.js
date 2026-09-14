@@ -67,8 +67,8 @@ describe('grep binary inputs containing only empty records', () => {
   })
 
   it('preserves ordinary read failures alongside binary non-matches', () => {
-    check('grep . missing zero', '', 2, 'grep: missing: no such file or directory\n')
-    check('grep -c . zero missing', 'zero:0\n', 2, 'grep: missing: no such file or directory\n')
+    check('grep . missing zero', '', 2, 'grep: missing: No such file or directory\n')
+    check('grep -c . zero missing', 'zero:0\n', 2, 'grep: missing: No such file or directory\n')
     check('grep -s . missing zero', '', 2)
     check('grep -sq . missing zero', '', 2)
   })

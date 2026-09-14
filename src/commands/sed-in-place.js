@@ -85,7 +85,7 @@ function inPlaceInput(name, ctx) {
   }
   if (name === '/dev/stdin' || name === '/dev/stdout' || name === '/dev/stderr') return { error: refused(name) }
   const found = lookupWithNote(ctx, 'sed', name)
-  if (found.error) return { error: err(`sed: ${name}: ${found.error.toLowerCase()}`, 2) }
+  if (found.error) return { error: err(`sed: ${name}: ${found.error}`, 2) }
   if (ctx.fs.isDir(found.path)) return { error: err(`sed: couldn't edit ${name}: not a regular file`, 4) }
   if (!ctx.writable || !found.path.startsWith('/tmp/')) return { error: refused(name) }
   return found
