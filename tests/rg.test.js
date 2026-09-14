@@ -208,3 +208,79 @@ describe('rg skips binary files while walking and refuses a named one', () => {
     assert.equal(run('rg -a oak b.dat', B).exitCode, 0)
   })
 })
+
+describe('rg decides between standard input and the tree the way ripgrep does', () => {
+  const B = { 'a.txt': 'oak\n', 'sub/b.js': 'oak\n' }
+  it('searches a pipe even when it carries nothing', () => {
+    // An empty pipe is still connected input, so the tree is not searched.
+    assert.equal(run("printf '' | rg oak", B).exitCode, 1)
+    assert.equal(run("printf '' | rg oak", B).stdout, '')
+    assert.equal(run('true | rg oak', B).exitCode, 1)
+  })
+
+  it('searches the tree with no pipe at all', () => {
+    assert.equal(run('rg oak', B).stdout, 'a.txt:oak\nsub/b.js:oak\n')
+  })
+
+  it('treats a redirected file as input and /dev/null as none', () => {
+    assert.equal(run('rg oak < a.txt', B).stdout, 'oak\n')
+    // ripgrep reads a file or a pipe, not a character device.
+    assert.equal(run('rg oak < /dev/null', B).stdout, 'a.txt:oak\nsub/b.js:oak\n')
+  })
+
+  it('still prefers a named path over the pipe', () => {
+    assert.equal(run("printf 'elm\\n' | rg oak a.txt", B).stdout, 'oak\n')
+  })
+})
+
+describe('rg resolves context flags before running', () => {
+  const B = { 'a.txt': 'oak tree\nelm\nOAK\noak\n' }
+  for (const [command, stdout] of [
+    ['rg -C1 oak a.txt', 'oak tree\nelm\nOAK\noak\n'],
+    // grep prints a `--` at zero context; ripgrep prints nothing.
+    ['rg -A0 oak a.txt', 'oak tree\noak\n'],
+    ['rg -B0 oak a.txt', 'oak tree\noak\n'],
+    // -A and -B override -C whichever order they come in.
+    ['rg -C1 -A0 oak a.txt', 'oak tree\n--\nOAK\noak\n'],
+    ['rg -A0 -C1 oak a.txt', 'oak tree\n--\nOAK\noak\n'],
+    ['rg -C1 -B0 oak a.txt', 'oak tree\nelm\n--\noak\n'],
+    // Repeats of one flag are last-one-wins.
+    ['rg -A2 -A1 oak a.txt', 'oak tree\nelm\n--\noak\n'],
+  ]) {
+    it(command, () => assert.equal(run(command, B).stdout, stdout))
+  }
+})
+
+describe('rg refuses a pattern its engine rejects for line-based search', () => {
+  const B = { 'a.txt': 'oak\n' }
+  for (const pattern of ['oak\\n', '\\n', '[\\n]', '\\x0A']) {
+    it(JSON.stringify(pattern), () => {
+      // ripgrep errors here rather than never matching, so returning "no match"
+      // would be an answer it never gives.
+      const result = run(`rg -- ${JSON.stringify(pattern)} a.txt`, B)
+      assert.equal(result.exitCode, 2)
+      assert.equal(result.unsupported[0].detail, 'newline in a pattern')
+    })
+  }
+
+  for (const pattern of ['\\r', '\\s', '\\t', 'oak']) {
+    it(`${JSON.stringify(pattern)} is allowed`, () => {
+      assert.deepEqual(run(`rg -- ${JSON.stringify(pattern)} a.txt`, B).unsupported, [])
+    })
+  }
+})
+
+describe('rg refuses a byte-order mark rather than matching through it', () => {
+  // ripgrep strips a leading BOM before matching, so `^oak` matches there and
+  // the mark never reaches the output; grep does neither.
+  const B = { 'bom.txt': '\uFEFFoak\n', 'plain.txt': 'oak\n' }
+  it('named outright', () => {
+    assert.equal(run('rg oak bom.txt', B).unsupported[0].detail, 'byte-order mark')
+  })
+  it('found while walking', () => {
+    assert.equal(run('rg oak', B).unsupported[0].detail, 'byte-order mark')
+  })
+  it('leaves an unmarked tree alone', () => {
+    assert.deepEqual(run('rg oak', { 'plain.txt': 'oak\n' }).unsupported, [])
+  })
+})

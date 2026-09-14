@@ -29,9 +29,9 @@ export function rg(stdin, tokens, ctx) {
   try { checkPatterns(options.patterns, options.literal) }
   catch (e) { return unsupportedFrom(e, 'rg', e.message, 2) }
   // With readable stdin and no path operand, ripgrep searches stdin rather than
-  // the tree. This runtime cannot tell an empty pipe from no pipe, so only
-  // content or a redirected file counts as connected.
-  const piped = !operands.length && (stdin !== '' || ctx.stdinFile)
+  // the tree. A pipe or a `<` redirect counts as connected even when it carries
+  // nothing, which is why this asks the shell rather than looking at content.
+  const piped = !operands.length && Boolean(ctx.stdinPiped)
   const targets = piped ? { roots: [], recursive: false, stdin: true } : resolveTargets(operands, ctx)
   if (targets.error) return targets.error
   if (!parsed.flags.has('no-ignore') && !options.unrestricted && targets.recursive) {
@@ -42,6 +42,8 @@ export function rg(stdin, tokens, ctx) {
   // ripgrep's "binary file matches" line, which this runtime cannot produce.
   const binary = options.text ? null : namedBinary(operands, ctx)
   if (binary) return gap('named binary file', `${JSON.stringify(binary)} is binary, and reporting a binary match is not supported`)
+  const marked = markedFile(operands, targets.roots, ctx)
+  if (marked) return gap('byte-order mark', `${JSON.stringify(marked)} begins with a byte-order mark, which ripgrep strips before matching`)
   return runGrep(stdin, options, operands, targets, ctx)
 }
 
@@ -82,6 +84,17 @@ function namedBinary(operands, ctx) {
   return null
 }
 
+// ripgrep drops a leading byte-order mark before matching, so `^` sits after it;
+// grep matches through it, which would answer differently on both counts.
+function markedFile(operands, roots, ctx) {
+  const named = operands.map((operand) => lookup(ctx.cwd, operand, ctx.fs).path).filter(Boolean)
+  const walked = roots.flatMap((root) => [...walkTree(ctx.fs, root)].filter((e) => e.kind === 'file').map((e) => e.path))
+  for (const path of [...named, ...walked]) {
+    if (!ctx.fs.isDir(path) && ctx.fs.readFile(path)?.startsWith('\uFEFF')) return relativeTo(ctx.cwd === '/' ? '/' : ctx.cwd, path) || path
+  }
+  return null
+}
+
 function runGrep(stdin, options, operands, targets, ctx) {
   const argv = options.literal ? ['-F'] : ['-P']
   if (options.ignoreCase) argv.push('-i')
@@ -92,7 +105,10 @@ function runGrep(stdin, options, operands, targets, ctx) {
   if (options.mode) argv.push('-' + options.mode)
   if (options.showName) argv.push('-' + options.showName)
   argv.push(options.text ? '-a' : '-I')
-  for (const [flag, value] of options.context) argv.push(flag, value)
+  // grep prints a `--` separator even at zero context; ripgrep prints none, so
+  // a zero side is left off rather than passed as zero.
+  if (options.after) argv.push('-A', String(options.after))
+  if (options.before) argv.push('-B', String(options.before))
   if (targets.recursive) argv.push('-r')
   // Dot-prefixed names are what rg leaves out of a walk; `.?*` spares the
   // starting directory, which `.` would otherwise match.

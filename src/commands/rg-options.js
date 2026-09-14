@@ -38,6 +38,11 @@ export function rgOptions(parsed) {
     if (INERT.has(name)) continue
     apply(state, CANONICAL.get(name) ?? name, value)
   }
+  // Repeats of one flag are last-one-wins, and -A and -B override -C whichever
+  // order they appear in, so the two sides are resolved rather than replayed.
+  const last = (flag) => state.context.findLast(([f]) => f === flag)?.[1]
+  state.after = Number(last('A') ?? last('C') ?? 0)
+  state.before = Number(last('B') ?? last('C') ?? 0)
   // -u reduces filtering one step at a time: ignore files, then hidden entries,
   // then binary files. The third step needs ripgrep's binary reporting.
   if (state.unrestricted >= 2) state.hidden = true
@@ -63,7 +68,7 @@ function apply(state, flag, value) {
     case 'e': state.patterns.push(value); return
     case 'hidden': state.hidden = true; return
     case 'u': state.unrestricted++; return
-    case 'A': case 'B': case 'C': state.context.push(['-' + flag, value]); return
+    case 'A': case 'B': case 'C': state.context.push([flag, value]); return
     default: throw gap(shown(flag), `${shown(flag)} is not supported`)
   }
 }
@@ -87,11 +92,28 @@ const REJECTED = [
   [/\\[QE]/u, String.raw`\Q…\E literal span`],
 ]
 
+// ripgrep searches a line at a time, so a pattern that spells out a newline is
+// rejected outright rather than simply never matching. `\s` and `\r` are fine;
+// only an explicit newline is not.
+function newlineLiteral(source) {
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]
+    if (c === '\n') return true
+    if (c !== '\\') continue
+    const next = source[i + 1]
+    if (next === 'n') return true
+    if (next === 'x' && /^x\{?0*a\}?/iu.test(source.slice(i + 1))) return true
+    i++
+  }
+  return false
+}
+
 export function checkPatterns(patterns, literal) {
   if (literal) return
   for (const source of patterns) {
     for (const [re, detail] of REJECTED) {
       if (re.test(source)) throw gap(detail, `${detail} is not supported; ripgrep's regex engine rejects it too`)
     }
+    if (newlineLiteral(source)) throw gap('newline in a pattern', 'a newline in a pattern is not supported; ripgrep rejects one outside multiline mode')
   }
 }
