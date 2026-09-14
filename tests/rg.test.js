@@ -400,3 +400,60 @@ describe('every rg refusal reaches the diagnostic feed', () => {
     assert.doesNotMatch(result.stderr, /PCRE/u)
   })
 })
+
+describe('rg reads ignore files from above the starting point as well as below', () => {
+  const B = { 'sub/a.js': 'oak\n', 'sub/b.txt': 'oak\n' }
+  it('refuses when a parent carries the rules', () => {
+    // Looking only downward would search a.js, which ripgrep leaves out.
+    const files = { ...B, '.gitignore': '*.js\n', '.git/HEAD': 'ref\n' }
+    for (const [cwd, command] of [['/sub', 'rg oak'], ['/sub', 'rg oak .'], ['/', 'rg oak sub']]) {
+      const result = createTerminal(files, { cwd }).run(command)
+      assert.equal(result.stdout, '', `${cwd} ${command}`)
+      assert.equal(result.unsupported[0].detail, 'ignore rules', `${cwd} ${command}`)
+    }
+  })
+
+  for (const name of ['.ignore', '.rgignore']) {
+    it(`${name} in a parent applies without any repository`, () => {
+      const result = createTerminal({ ...B, [name]: '*.js\n' }, { cwd: '/sub' }).run('rg oak')
+      assert.equal(result.unsupported[0].detail, 'ignore rules')
+    })
+  }
+
+  it('a .gitignore with no repository above it is inert', () => {
+    const result = createTerminal({ ...B, '.gitignore': '*.js\n' }, { cwd: '/sub' }).run('rg oak')
+    assert.equal(result.stdout, 'a.js:oak\nb.txt:oak\n')
+    assert.deepEqual(result.unsupported, [])
+  })
+
+  it('a repository with no rules in it changes nothing', () => {
+    // Refusing on a bare .git would turn away most checkouts for no reason.
+    const result = run('rg oak', { ...B, '.git/HEAD': 'ref\n' })
+    assert.equal(result.stdout, 'sub/a.js:oak\nsub/b.txt:oak\n')
+    assert.deepEqual(result.unsupported, [])
+  })
+
+  for (const [label, files] of [
+    ['a .gitignore deeper than the root', { '.git/HEAD': 'ref\n', 'sub/.gitignore': '*.js\n' }],
+    ['rules in .git/info/exclude', { '.git/info/exclude': '*.js\n' }],
+  ]) {
+    it(label, () => {
+      assert.equal(run('rg oak', { ...B, ...files }).unsupported[0].detail, 'ignore rules')
+    })
+  }
+
+  for (const [label, body] of [['empty', '\n'], ['comments only', '# nothing\n\n# more\n']]) {
+    it(`an ignore file that is ${label} is not worth refusing for`, () => {
+      const result = run('rg oak', { ...B, '.gitignore': body, '.git/HEAD': 'ref\n' })
+      assert.equal(result.stdout, 'sub/a.js:oak\nsub/b.txt:oak\n')
+      assert.deepEqual(result.unsupported, [])
+    })
+  }
+
+  it('searches everything with --no-ignore regardless of where the rules live', () => {
+    const files = { ...B, '.gitignore': '*.js\n', '.git/HEAD': 'ref\n' }
+    const result = createTerminal(files, { cwd: '/sub' }).run('rg --no-ignore oak')
+    assert.equal(result.stdout, 'a.js:oak\nb.txt:oak\n')
+    assert.deepEqual(result.unsupported, [])
+  })
+})

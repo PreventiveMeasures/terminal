@@ -94,7 +94,8 @@ report an unsupported diagnostic.
 last-one-wins and `-u` escalates, as in ripgrep. Its regex is checked against
 ripgrep's own engine, so backreferences and look-around are refused rather than
 answered. `.gitignore` in a repository, `.ignore` and `.rgignore` change which
-files are searched, so a tree carrying one is refused unless `--no-ignore`;
+files are searched -- from any directory above the starting point as well as
+below it -- so a tree carrying one is refused unless `--no-ignore`;
 binary files are left out of a walk but a named one is refused, and `-t`, `-g`,
 `--files` and the other output modes report an unsupported diagnostic. A
 pattern spelling out a newline, and a file starting with a byte-order mark, are

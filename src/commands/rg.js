@@ -3,15 +3,11 @@
 // defaults filter the tree before searching it, and a filter this runtime does
 // not model would silently shrink the answer.
 
-import { basename, lookup, relativeTo, walkTree } from '../fs.js'
+import { basename, dirname, lookup, relativeTo, walkTree } from '../fs.js'
 import { parseArgs } from '../args.js'
 import { unsupported, unsupportedNote } from '../unsupported.js'
 import { ARGS, checkPatterns, patternArgs, rgOptions } from './rg-options.js'
 import { grep } from './grep.js'
-
-// Ignore files this runtime does not implement. `.gitignore` only takes effect
-// inside a git repository, so it is `.git` that makes one matter.
-const IGNORE_FILES = new Set(['.git', '.ignore', '.rgignore'])
 
 const gap = (detail, message) => unsupported('feature', 'rg', detail, `rg: ${message}`, 2)
 
@@ -97,13 +93,39 @@ function resolveTargets(operands, ctx, hidden) {
   return { roots, recursive }
 }
 
+// ripgrep reads ignore files from every directory above the starting point as
+// well as below it, so looking only downward would miss the rules and answer
+// with files ripgrep leaves out. `.ignore` and `.rgignore` always apply; a
+// `.gitignore` needs a `.git` at or above it to mean anything, and that same
+// repository may carry rules in `.git/info/exclude`.
 function ignoreFileIn(roots, ctx) {
-  for (const root of roots) {
-    for (const entry of walkTree(ctx.fs, root)) {
-      if (IGNORE_FILES.has(basename(entry.path))) return relativeTo(ctx.cwd === '/' ? '/' : ctx.cwd, entry.path) || basename(entry.path)
+  const shown = (path) => relativeTo(ctx.cwd === '/' ? '/' : ctx.cwd, path) || path
+  const find = (name, mustBite = true) => {
+    for (const root of roots) {
+      for (const entry of walkTree(ctx.fs, root)) if (basename(entry.path) === name && bites(entry.path, mustBite, ctx)) return entry.path
+      for (let at = root; at !== '/'; at = dirname(at)) {
+        const found = lookup(dirname(at), name, ctx.fs)
+        if (found.path !== null && bites(found.path, mustBite, ctx)) return found.path
+      }
     }
+    return null
   }
-  return null
+  const always = find('.ignore') ?? find('.rgignore')
+  if (always) return shown(always)
+  const git = find('.git', false)
+  if (!git) return null
+  const exclude = lookup(git, 'info/exclude', ctx.fs).path
+  const excluding = exclude !== null && bites(exclude, true, ctx) ? exclude : null
+  const rules = find('.gitignore') ?? excluding
+  return rules ? shown(rules) : null
+}
+
+// An ignore file with nothing but blank lines and comments changes no answer,
+// so it is not worth turning a run away for. Whether a real rule matches
+// anything is a question this runtime does not try to answer.
+function bites(path, mustBite, ctx) {
+  if (!mustBite || ctx.fs.isDir(path)) return true
+  return (ctx.fs.readFile(path) ?? '').split('\n').some((line) => line.trim() !== '' && !line.trimStart().startsWith('#'))
 }
 
 function namedBinary(operands, ctx) {

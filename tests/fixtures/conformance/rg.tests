@@ -1,0 +1,73 @@
+# ripgrep, recorded from rg 14.1.0 with --sort path, its documented stable
+# order: the default walk is parallel and leaves order unspecified. Every
+# expectation here came from running the real tool over the `searched` tree,
+# never from what this implementation printed.
+
+@tree searched
+"rg oak" => "a.txt:oak tree\na.txt:oak\nblank.txt:oak\nblank.txt:oak\nd/x.txt:oak in d\nd.txt:oak sibling\nno-nl.txt:oak\nsub/b.js:const oak = 1\nsub/b.js:oak oak\nsub/deep/c.md:# oak\nwords.txt:oak\nwords.txt:oakland\nwords.txt:an-oak-tree\nwords.txt:oak_bar\n"
+"rg -n oak" => "a.txt:1:oak tree\na.txt:4:oak\nblank.txt:1:oak\nblank.txt:4:oak\nd/x.txt:1:oak in d\nd.txt:1:oak sibling\nno-nl.txt:1:oak\nsub/b.js:1:const oak = 1\nsub/b.js:2:oak oak\nsub/deep/c.md:1:# oak\nwords.txt:1:oak\nwords.txt:2:oakland\nwords.txt:3:an-oak-tree\nwords.txt:4:oak_bar\n"
+"rg -i oak" => "a.txt:oak tree\na.txt:OAK\na.txt:oak\nblank.txt:oak\nblank.txt:oak\nd/x.txt:oak in d\nd.txt:oak sibling\nno-nl.txt:oak\nsub/b.js:const oak = 1\nsub/b.js:oak oak\nsub/deep/c.md:# oak\nwords.txt:oak\nwords.txt:oakland\nwords.txt:an-oak-tree\nwords.txt:oak_bar\n"
+"rg -l oak" => "a.txt\nblank.txt\nd/x.txt\nd.txt\nno-nl.txt\nsub/b.js\nsub/deep/c.md\nwords.txt\n"
+"rg -c oak" => "a.txt:2\nblank.txt:2\nd/x.txt:1\nd.txt:1\nno-nl.txt:1\nsub/b.js:2\nsub/deep/c.md:1\nwords.txt:4\n"
+"rg -v oak a.txt" => "elm\nOAK\n"
+"rg -w oak words.txt" => "oak\nan-oak-tree\n"
+"rg -n -w oak words.txt" => "1:oak\n3:an-oak-tree\n"
+"rg -F oak a.txt" => "oak tree\noak\n"
+"rg oak a.txt" => "oak tree\noak\n"
+"rg oak sub" => "sub/b.js:const oak = 1\nsub/b.js:oak oak\nsub/deep/c.md:# oak\n"
+"rg oak ." => "./a.txt:oak tree\n./a.txt:oak\n./blank.txt:oak\n./blank.txt:oak\n./d/x.txt:oak in d\n./d.txt:oak sibling\n./no-nl.txt:oak\n./sub/b.js:const oak = 1\n./sub/b.js:oak oak\n./sub/deep/c.md:# oak\n./words.txt:oak\n./words.txt:oakland\n./words.txt:an-oak-tree\n./words.txt:oak_bar\n"
+"rg -n oak d" => "d/x.txt:1:oak in d\n"
+"rg oak d.txt" => "oak sibling\n"
+"rg -l oak sub" => "sub/b.js\nsub/deep/c.md\n"
+"rg --hidden oak" => "..odd/g.txt:oak odd\n.dot/e.txt:oak dotdir\n.hidden:oak hidden\na.txt:oak tree\na.txt:oak\nblank.txt:oak\nblank.txt:oak\nd/x.txt:oak in d\nd.txt:oak sibling\nno-nl.txt:oak\nsub/.h/f.txt:oak deep hidden\nsub/b.js:const oak = 1\nsub/b.js:oak oak\nsub/deep/c.md:# oak\nwords.txt:oak\nwords.txt:oakland\nwords.txt:an-oak-tree\nwords.txt:oak_bar\n"
+"rg --hidden -l oak" => "..odd/g.txt\n.dot/e.txt\n.hidden\na.txt\nblank.txt\nd/x.txt\nd.txt\nno-nl.txt\nsub/.h/f.txt\nsub/b.js\nsub/deep/c.md\nwords.txt\n"
+"rg -uu -l oak" => "..odd/g.txt\n.dot/e.txt\n.hidden\na.txt\nblank.txt\nd/x.txt\nd.txt\nno-nl.txt\nsub/.h/f.txt\nsub/b.js\nsub/deep/c.md\nwords.txt\n"
+"rg -u -l oak" => "a.txt\nblank.txt\nd/x.txt\nd.txt\nno-nl.txt\nsub/b.js\nsub/deep/c.md\nwords.txt\n"
+"rg -n oak no-nl.txt" => "1:oak\n"
+"rg -n oak blank.txt" => "1:oak\n4:oak\n"
+"rg oak empty.txt" => "" 1
+"rg -c oak README.md" => "" 1
+"rg -A1 oak blank.txt" => "oak\n\n--\noak\n"
+"rg -B1 oak blank.txt" => "oak\n--\n\noak\n"
+"rg -C1 oak blank.txt" => "oak\n\n\noak\n"
+"rg -A0 oak blank.txt" => "oak\noak\n"
+"rg -C1 -A0 oak blank.txt" => "oak\n--\n\noak\n"
+"rg -A0 -C1 oak blank.txt" => "oak\n--\n\noak\n"
+"rg -A2 -A1 oak blank.txt" => "oak\n\n--\noak\n"
+"rg -n -e oak -e elm a.txt" => "1:oak tree\n2:elm\n4:oak\n"
+"rg -F -e oak -e elm a.txt" => "oak tree\nelm\noak\n"
+"rg -i -s oak a.txt" => "oak tree\noak\n"
+"rg -s -i oak a.txt" => "oak tree\nOAK\noak\n"
+"rg -n -N oak a.txt" => "oak tree\noak\n"
+"rg -N -n oak a.txt" => "1:oak tree\n4:oak\n"
+"rg -c -l oak sub" => "sub/b.js\nsub/deep/c.md\n"
+"rg -l -c oak sub" => "sub/b.js:2\nsub/deep/c.md:1\n"
+"rg -H oak a.txt" => "a.txt:oak tree\na.txt:oak\n"
+"rg -I oak sub" => "const oak = 1\noak oak\n# oak\n"
+"rg -q oak; echo $?" => "0\n"
+"rg -q zzz; echo $?" => "1\n"
+"rg zzz; echo $?" => "1\n"
+"rg -n \"^oak\" a.txt" => "1:oak tree\n4:oak\n"
+"rg -n \"oak$\" a.txt" => "4:oak\n"
+"rg -n \"o.k\" a.txt" => "1:oak tree\n4:oak\n"
+"rg -n \"oak|elm\" a.txt" => "1:oak tree\n2:elm\n4:oak\n"
+"rg -n \"\\\\boak\\\\b\" words.txt" => "1:oak\n3:an-oak-tree\n"
+"rg -n \"[Oo]ak\" a.txt" => "1:oak tree\n4:oak\n"
+"rg -n \"\\\\w+\" no-nl.txt" => "1:oak\n"
+"rg oak nosuch" => % 2
+"rg oak a.txt nosuch" => "a.txt:oak tree\na.txt:oak\n" 2 %
+"rg -n oak sub sub/deep" => "sub/b.js:1:const oak = 1\nsub/b.js:2:oak oak\nsub/deep/c.md:1:# oak\nsub/deep/c.md:1:# oak\n"
+"rg -t js oak" => ! -t 2
+"rg -g *.js oak" => ! -g 2
+"rg --files oak" => ! --files 2
+"rg --json oak" => ! --json 2
+"rg -o oak" => ! -o 2
+"rg --sort path oak" => ! --sort 2
+"rg -uuu oak" => ! -uuu 2
+"rg -h oak" => ! -h 2
+"rg '(a)\\1' a.txt" => ! backreference 2
+"rg 'oak(?=x)' a.txt" => ! look-around 2
+"rg -- 'oak\\n' a.txt" => ! newline in a pattern 2
+"rg -A abc oak a.txt" => ! -A value 2
+"rg '[' a.txt" => ! regex parse error 2
+"rg oak .hidden sub" => ! named hidden path 2
