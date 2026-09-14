@@ -227,6 +227,96 @@ describe('parse() spells a value out only when expansion still decides it', () =
   })
 })
 
+describe('summarize() answers for a simple chain, and refuses the rest', () => {
+  const CHAINS = [[['foo', '-bar'], ['head', '-10']], [['ls'], ['>', 'file.txt']]]
+
+  for (const [line, summary] of [
+    ['foo -bar | head -10; ls > file.txt', CHAINS],
+    ['foo -bar | head -10\nls > file.txt', CHAINS],
+    ['foo -bar | head -10 && ls > file.txt', [CHAINS[0], '&&', CHAINS[1]]],
+    ['foo -bar | head -10 || ls > file.txt', [CHAINS[0], '||', CHAINS[1]]],
+    ['a && b || c; d', [[['a']], '&&', [['b']], '||', [['c']], [['d']]]],
+  ]) {
+    it(`summarizes ${JSON.stringify(line)}`, () => {
+      assert.deepEqual(terminal().summarize(line), summary)
+    })
+  }
+
+  for (const [line, chains] of [
+    ['ls', [[['ls']]]],
+    ['ls -l a.txt', [[['ls', '-l', 'a.txt']]]],
+    ['cat "a b" | wc -l', [[['cat', 'a b'], ['wc', '-l']]]],
+    ['cat a 2> /tmp/err | tr a-z A-Z >> /tmp/out', [[['cat', 'a'], ['2>', '/tmp/err'], ['tr', 'a-z', 'A-Z'], ['>>', '/tmp/out']]]],
+    ['wc < 1.txt || ls', [[['cat', '1.txt'], ['wc']], '||', [['ls']]]],
+    ['wc -l < a.txt > /tmp/out', [[['cat', 'a.txt'], ['wc', '-l'], ['>', '/tmp/out']]]],
+    ['cat 0< a.txt | tr a-z A-Z', [[['cat', 'a.txt'], ['cat'], ['tr', 'a-z', 'A-Z']]]],
+    ['ls 2>&1 | grep x', [[['ls'], ['2>&1'], ['grep', 'x']]]],
+    ['ls >&2', [[['ls'], ['>&2']]]],
+    ['ls 2>&-', [[['ls'], ['2>&-']]]],
+    ['ls &> /tmp/both', [[['ls'], ['&>', '/tmp/both']]]],
+    ['', []],
+    ['# comment', []],
+  ]) {
+    it(`summarizes ${JSON.stringify(line)}`, () => {
+      assert.deepEqual(terminal().summarize(line), chains)
+    })
+  }
+
+  for (const [line, message] of [
+    ['(ls)', 'summarize: a subshell is not a simple chain'],
+    ['{ ls; }', 'summarize: a brace group is not a simple chain'],
+    ['for f in a; do ls; done', 'summarize: `for` is not a simple chain'],
+    ['if ls; then cat a.txt; fi', 'summarize: `if` is not a simple chain'],
+    ['[[ -f a.txt ]]', 'summarize: `[[ … ]]` is not a simple chain'],
+    ['! ls', 'summarize: `!` is not a simple chain'],
+    ['x=1 ls', 'summarize: an assignment is not a simple chain'],
+    ['x=1', 'summarize: an assignment is not a simple chain'],
+    ['> /tmp/out', 'summarize: a command with no name is not a simple chain'],
+    ['cat <<EOF\nbody\nEOF', 'summarize: a here-document is not a simple chain'],
+    ['sort <<<here', 'summarize: a here-string is not a simple chain'],
+    ['ls | wc < a.txt', 'summarize: a pipeline stage reading its own input is not a simple chain'],
+    ['wc < a.txt < b.txt', 'summarize: a command reading from two places is not a simple chain'],
+    ['wc < a.txt <<<here', 'summarize: a command reading from two places is not a simple chain'],
+    ['ls $x', 'summarize: ${x} is not a literal word'],
+    ['ls "$x"', 'summarize: ${x} is not a literal word'],
+    ['ls ${x:-a}', 'summarize: ${x:-a} is not a literal word'],
+    ['ls *.js', 'summarize: *.js is not a literal word'],
+    ['ls ~/bin', 'summarize: ~/bin is not a literal word'],
+    ['echo `date`', 'summarize: $(…) is not a literal word'],
+    ['echo $(date)', 'summarize: $(…) is not a literal word'],
+    ['echo $((1 + 2))', 'summarize: $((…)) is not a literal word'],
+    ['echo a > $out', 'summarize: ${out} is not a literal word'],
+    ['ls; (cd dir)', 'summarize: a subshell is not a simple chain'],
+  ]) {
+    it(`refuses ${JSON.stringify(line)}`, () => {
+      assert.throws(() => terminal().summarize(line), { message })
+    })
+  }
+
+  for (const [line, message] of [
+    ['echo )', 'unexpected `)`'],
+    ['for f in a; do', 'for: missing `done`'],
+    ['while :; do :; done', '`while` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
+  ]) {
+    it(`throws the parse diagnostic for ${JSON.stringify(line)}`, () => {
+      assert.throws(() => terminal().summarize(line), { message })
+    })
+  }
+
+  it("refuses a write the terminal's filesystem would, as parse() does", () => {
+    const readOnly = createTerminal(SOURCES, { mount: '/src' })
+    assert.throws(() => readOnly.summarize('ls > out'), { message: '`>` cannot write to `out`: the filesystem is read-only' })
+    assert.deepEqual(terminal().summarize('ls > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
+  })
+
+  it('runs none of it', () => {
+    const t = terminal()
+    assert.deepEqual(t.summarize('cd dir; printf x > /tmp/file'), [[['cd', 'dir']], [['printf', 'x'], ['>', '/tmp/file']]])
+    assert.equal(t.cwd(), '/src')
+    assert.equal(t.run('test -e /tmp/file').exitCode, 1)
+  })
+})
+
 describe('parse() reports a syntax error as run() would, and runs nothing', () => {
   for (const [line, error] of [
     ['echo )', 'unexpected `)`'],

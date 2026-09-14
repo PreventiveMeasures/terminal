@@ -267,6 +267,19 @@ export interface ParseResult {
 }
 
 /**
+ * One command of a chain: each pipeline stage's `argv`, and each redirect as
+ * the tokens it was written with — `['>', 'out']`, `['2>&1']`.
+ */
+export type Chain = string[][]
+
+/**
+ * A summarized line: its chains in order, with `&&` or `||` standing between
+ * the two it gates. A `;` decides nothing about what follows, so nothing
+ * stands between those.
+ */
+export type Summary = Array<Chain | '&&' | '||'>
+
+/**
  * Parse one command line and run none of it.
  *
  * This entry point is the parser alone: it has no commands, no filesystem and
@@ -277,3 +290,34 @@ export interface ParseResult {
  * `run()` would report.
  */
 export function parse(line: string): ParseResult
+
+/**
+ * The same line at a glance, for a caller that only wants to know what it
+ * runs: one {@link Chain} per command, in order, with `&&` and `||` between
+ * the chains they gate.
+ *
+ * ```js
+ * summarize('foo -bar | head -10; ls > file.txt')
+ * // [ [['foo', '-bar'], ['head', '-10']], [['ls'], ['>', 'file.txt']] ]
+ * summarize('foo -bar | head -10 && ls > file.txt')
+ * // [ [['foo', '-bar'], ['head', '-10']], '&&', [['ls'], ['>', 'file.txt']] ]
+ * ```
+ *
+ * It says what the line does rather than how it was spelled, so a command
+ * reading a file is the `cat` that feeds it:
+ *
+ * ```js
+ * summarize('wc < 1.txt || ls')   // [ [['cat', '1.txt'], ['wc']], '||', [['ls']] ]
+ * ```
+ *
+ * Everything here is plain text, so anything a summary would have to lie
+ * about throws instead: a line that does not parse, a subshell, group, `for`,
+ * `if` or `[[ … ]]`, a `!`, an assignment, a here-document or here-string, a
+ * stage that reads its own input from inside a pipeline, and any word an
+ * expansion still decides — `$x`, `*.js`, `` `date` ``. {@link parse} reads
+ * those; this is the short answer while a line stays simple, and an error the
+ * moment it does not.
+ *
+ * @throws if the line does not parse, or holds anything but simple chains.
+ */
+export function summarize(line: string): Summary

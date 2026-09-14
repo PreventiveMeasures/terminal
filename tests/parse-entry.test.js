@@ -33,8 +33,8 @@ describe('the parse entry point is published on its own', () => {
     for (const file of ['src/parse.js', 'src/parse.d.ts', 'src/parse-tree.js']) assert.ok(pkg.files.includes(file), file)
   })
 
-  it('exports the one function its types declare', () => {
-    assert.deepEqual(Object.keys(entry), ['parse'])
+  it('exports the functions its types declare, and no more', () => {
+    assert.deepEqual(Object.keys(entry).sort(), ['parse', 'summarize'])
     assert.equal(typeof parse, 'function')
   })
 

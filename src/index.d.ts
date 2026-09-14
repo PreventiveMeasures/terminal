@@ -1,4 +1,4 @@
-import type { ParseResult } from './parse.js'
+import type { ParseResult, Summary } from './parse.js'
 
 /** Virtual source tree: file paths within the configured mount (leading `/` optional) to file contents, as either a plain object or a `Map`. */
 export type Sources = Record<string, string> | Map<string, string>
@@ -255,8 +255,10 @@ export interface RunResult {
  * made of.
  */
 export type {
+  ArithmeticPart,
   Assignment,
   Branch,
+  Chain,
   CloseRedirect,
   Command,
   Condition,
@@ -271,7 +273,6 @@ export type {
   HereDocument,
   HereString,
   If,
-  ArithmeticPart,
   Node,
   NodeBase,
   Operator,
@@ -282,6 +283,7 @@ export type {
   Redirect,
   Subshell,
   SubstitutionPart,
+  Summary,
   Test,
   TextPart,
   Value,
@@ -339,6 +341,23 @@ export interface Terminal {
    * this filesystem would refuse is reported here as the gap `run()` reports.
    */
   parse(line: string): ParseResult
+  /**
+   * What the line runs, at a glance: one {@link Chain} per command, each
+   * holding its pipeline stages' `argv` and its redirects as written, with
+   * `&&` and `||` standing between the chains they gate. It reports what the
+   * line does rather than how it was spelled, so `wc < 1.txt` summarizes as
+   * `[['cat', '1.txt'], ['wc']]`.
+   *
+   * Plain text throughout, so it throws rather than summarize what it cannot:
+   * a line that does not parse (including a redirect this filesystem would
+   * refuse), a subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an
+   * assignment, a here-document or here-string, a stage reading its own input
+   * from inside a pipeline, or a word an expansion still decides.
+   * {@link Terminal.parse} reads those.
+   *
+   * @throws if the line does not parse, or holds anything but simple chains.
+   */
+  summarize(line: string): Summary
 }
 
 /**

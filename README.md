@@ -116,6 +116,35 @@ Either way, only parsing happens, so only parsing's answers come back. Whether
 a command exists, what an option means, and what an expansion produces are
 `run()`'s to find.
 
+## The short answer
+
+`summarize(line)` is for a caller that only wants to know what a line runs:
+every command in plain text, with `&&` and `||` between the chains they gate.
+
+```js
+import { summarize } from '@preventive/terminal/parse.js'
+
+summarize('foo -bar | head -10; ls > file.txt')
+// [ [['foo', '-bar'], ['head', '-10']], [['ls'], ['>', 'file.txt']] ]
+
+summarize('foo -bar | head -10 && ls > file.txt')
+// [ [['foo', '-bar'], ['head', '-10']], '&&', [['ls'], ['>', 'file.txt']] ]
+
+summarize('wc < 1.txt || ls')
+// [ [['cat', '1.txt'], ['wc']], '||', [['ls']] ]
+```
+
+It reports what a line does rather than how it was written, which is why a
+command reading a file comes back as the `cat` that feeds it. Everything it
+returns is final text, so it throws rather than summarize what it cannot: a
+line that does not parse, `while`, `case` and the other constructs this
+terminal refuses, a subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an
+assignment, a here-document or here-string, and any word an expansion still
+decides — `$x`, `${x:-a}`, `*.js`, `` `date` ``. `parse()` reads those.
+
+A terminal has the same method, under its own write policy: `summarize('ls >
+out')` throws there when nothing may be written.
+
 ## Writing
 
 Sources are read-only. Pass `writable: '/tmp/'` for a scratch overlay; the mount

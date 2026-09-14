@@ -205,3 +205,82 @@ function conditionOf(e) {
   if (e.kind === 'unary') return { type: 'unary', op: e.op, word: valueOf(e.word) }
   return { type: 'binary', op: e.op, left: valueOf(e.left), right: valueOf(e.right) }
 }
+
+// A chain is what a line looks like when nothing in it needs explaining: the
+// commands it runs, each stage's argv, each redirect as the tokens it was
+// written with. Anything a summary would have to lie about — a block, a
+// negation, an assignment, a word an expansion still decides — stops it, so a
+// caller either gets the whole line in plain text or hears why it cannot.
+//
+// A gate stands between the chains it gates, since `&&` and `||` decide
+// whether the next one runs at all. A `;` decides nothing, so it is the plain
+// sequence the rows already are.
+export function summarize(line, writable) {
+  const result = read(line, writable)
+  if (!result.ok) throw new Error(result.error)
+  const summary = []
+  for (const node of result.list) {
+    if (node.op === '&&' || node.op === '||') summary.push(node.op)
+    summary.push(chainOf(node))
+  }
+  return summary
+}
+
+const BLOCKS = { subshell: 'a subshell', group: 'a brace group', for: '`for`', if: '`if`', test: '`[[ … ]]`', pipeline: 'a pipeline of pipelines' }
+
+function chainOf(node) {
+  if (node.negate) throw refuse('`!`')
+  const stages = node.type === 'pipeline' ? node.stages : [node]
+  const chain = []
+  for (const [index, stage] of stages.entries()) {
+    if (stage.type !== 'command') throw refuse(BLOCKS[stage.type])
+    if (stage.assignments) throw refuse('an assignment')
+    if (stage.argv.length === 0) throw refuse('a command with no name')
+    const redirects = stage.redirects ?? []
+    const input = inputOf(redirects, index)
+    if (input) chain.push(['cat', literal(input.target)])
+    chain.push(stage.argv.map(literal))
+    for (const redirect of redirects) {
+      if (redirect !== input) chain.push(redirectTokens(redirect))
+    }
+  }
+  return chain
+}
+
+// A summary says what a line does, not how it was spelled, so a command
+// reading a file is the `cat` that feeds it: `wc < 1.txt` is `cat 1.txt | wc`.
+// Only the first stage can be fed that way — a later one reading a file leaves
+// the stage before it writing into nothing, which no chain says — and one
+// stage reads from one place, so a second source has no equivalent either.
+function inputOf(redirects, index) {
+  const inputs = redirects.filter((r) => r.op === '<' || r.op === '<<<')
+  if (inputs.length === 0) return null
+  if (index > 0) throw refuse('a pipeline stage reading its own input')
+  if (inputs.length > 1) throw refuse('a command reading from two places')
+  if (inputs[0].op === '<<<') throw refuse('a here-string')
+  return inputs[0]
+}
+
+// The operator as it was typed, with the descriptor it defaults to left off.
+function redirectTokens(redirect) {
+  const { fd, op } = redirect
+  if (op === '<<') throw refuse('a here-document')
+  const lead = op.startsWith('&') || fd === 1 ? '' : String(fd)
+  if (op === '>&') return [`${lead}>&${redirect.toFd}`]
+  if (op === '>&-') return [`${lead}>&-`]
+  return [lead + op, literal(redirect.target)]
+}
+
+const literal = (value) => {
+  if (typeof value === 'string') return value
+  throw refuse(`${value.parts.map(spell).join('')}`, 'a literal word')
+}
+
+// Name the piece that needs expanding the way it was written.
+const spell = (part) => {
+  if (part.type === 'text') return part.value
+  if (part.type === 'parameter') return `\${${part.name}${part.operator ?? ''}${part.operand ?? ''}}`
+  return part.type === 'arithmetic' ? '$((…))' : '$(…)'
+}
+
+const refuse = (what, kind = 'a simple chain') => new Error(`summarize: ${what} is not ${kind}`)
