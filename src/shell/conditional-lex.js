@@ -16,7 +16,7 @@ export function readConditional(line, start, helpers, expansionDepth = 0) {
     if (p.token.kind !== 'end') syntax(`unexpected token \`${p.token.value ?? p.token.kind}\``)
     return { raw: line.slice(start, p.i + p.removed), expression }
   } catch (e) {
-    if (e instanceof UnsupportedError) throw e
+    if (e instanceof UnsupportedError || e.conditional) throw e
     syntax(e.message)
   }
 }
@@ -74,7 +74,9 @@ function parseTerm(p) {
 }
 
 const bare = (token, value) => token.kind === 'word' && !token.quoted && token.value === value
-const syntax = (message) => { throw new UnsupportedError('feature', '[[ syntax', `[[ ${message}`) }
+// Bash rejects these too, so they are the caller's own typo rather than
+// something this shell is missing: an ordinary syntax error, not a gap.
+const syntax = (message) => { throw Object.assign(new Error(`[[ ${message}`), { conditional: true }) }
 
 function operand(p) {
   if (p.token.kind !== 'word') syntax('expected an operand')

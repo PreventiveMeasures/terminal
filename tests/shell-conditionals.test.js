@@ -152,11 +152,29 @@ describe('[[ scanning retains compound words and real source boundaries', () => 
 })
 
 describe('[[ unsupported and malformed input always reaches diagnostics', () => {
+  // Bash rejects every one of these as a syntax error too, so each is the
+  // caller's own typo rather than something this shell is missing: an
+  // ordinary error on stderr, exit 2, and nothing on the feed. Reporting
+  // them as gaps taught a caller to read a typo as a missing feature.
   for (const command of [
     '[[ ]]', '[[ a b ]]', '[[ -f ]]', '[[ a == ]]', '[[ a == b extra ]]',
     '[[ a && ]]', '[[ (a ]]', '[[ a; b ]]', '[[ -Q value ]]', '[[ a -Q b ]]',
     `[[ a '==' a ]]`, '[[ -n"" value ]]', '[[ -f\nplain.txt ]]', '[[ a\n== b ]]',
-    '[[ a == b', '[[ a == b ]] extra', '[[ a < b ]]', '[[ b > a ]]', '[[ -r plain.txt ]]',
+    '[[ a == b', '[[ a == b ]] extra',
+  ]) {
+    it(`rejects ${JSON.stringify(command)} as bash does`, () => {
+      const r = terminal().run(command)
+      assert.equal(r.stdout, '', command)
+      assert.equal(r.exitCode, 2, command)
+      assert.notEqual(r.stderr, '', command)
+      assert.deepEqual(r.unsupported, [], command)
+    })
+  }
+
+  // These run in bash and cannot here, which is the other half of the same
+  // boundary: a gap on the feed, named.
+  for (const command of [
+    '[[ a < b ]]', '[[ b > a ]]', '[[ -r plain.txt ]]',
     '[[ -s plain.txt ]]', '[[ -L plain.txt ]]', '[[ plain.txt -nt empty.txt ]]',
     '[[ -v array[0] ]]', '[[ -v 0 ]]', '[[ -v BASH_REMATCH ]]',
     '[[ -e /dev/stdin ]]', '[[ a =~ a ]]', '[[ a == @(a|b) ]]',

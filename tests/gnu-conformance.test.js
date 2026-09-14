@@ -578,3 +578,51 @@ describe('GNU conformance — an unmatched quote in xargs input', () => {
     assert.equal(fed(`printf "a'b\\n" | xargs -0 echo`).stdout, "a'b\n\n")
   })
 })
+
+describe('GNU conformance — a conditional bash rejects too', () => {
+  // Every syntax error inside `[[ … ]]` was reported as a gap, exit 1, so a
+  // caller reading the feed was told the shell was missing something where
+  // bash rejects the same line. Bash exits 2 on all of these; nothing here
+  // is missing, and nothing reaches the feed. Recorded from bash 5.2.21.
+  const MALFORMED = [
+    ['[[ ]]', 'error: [[ expected an operand\n'],
+    ['[[ -f ]]', 'error: [[ expected an operand\n'],
+    ['[[ a == ]]', 'error: [[ expected an operand\n'],
+    ['[[ ! ]]', 'error: [[ expected an operand\n'],
+    // bash: `conditional binary operator expected`, word for word.
+    ['[[ a b ]]', 'error: [[ conditional binary operator expected\n'],
+    ['[[ -Q value ]]', 'error: [[ conditional binary operator expected\n'],
+    ['[[ a -Q b ]]', 'error: [[ conditional binary operator expected\n'],
+    ["[[ a '==' a ]]", 'error: [[ conditional binary operator expected\n'],
+    ['[[ x -a y ]]', 'error: [[ conditional binary operator expected\n'],
+    ['[[ a == a -o b == b ]]', 'error: [[ unexpected token `-o`\n'],
+    ['[[ a == b extra ]]', 'error: [[ unexpected token `extra`\n'],
+    ['[[ (a ]]', 'error: [[ expected `)`\n'],
+    ['[[ a == b', 'error: [[ missing `]]`\n'],
+    ['[[ a == "b ]]', 'error: [[ unterminated double quote\n'],
+    ['[[ a == b ]] extra', 'error: unexpected token after `]]`\n'],
+  ]
+  for (const [command, stderr] of MALFORMED) {
+    it(JSON.stringify(command), () => {
+      assert.deepEqual(createTerminal({}).run(command), {
+        stdout: '', stderr, exitCode: 2, cwd: '/', notes: [], unsupported: [],
+      })
+    })
+  }
+
+  // The other half of the boundary: these run in bash, so each is a gap.
+  it('still names what bash runs and this cannot', () => {
+    const files = { 'plain.txt': 'x\n', 'empty.txt': '' }
+    for (const [command, detail] of [
+      ['[[ a < b ]]', '[[ <'],
+      ['[[ a =~ a ]]', '[[ =~'],
+      ['[[ -r plain.txt ]]', '[[ -r'],
+      ['[[ plain.txt -nt empty.txt ]]', '[[ -nt'],
+      ['[[ a == @(a|b) ]]', '[[ extglob'],
+    ]) {
+      const r = createTerminal(files).run(command)
+      assert.deepEqual(r.unsupported.map((u) => u.detail), [detail], command)
+      assert.equal(r.exitCode, 1, command)
+    }
+  })
+})

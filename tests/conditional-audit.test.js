@@ -41,15 +41,20 @@ describe('conditional predicates retain the Bash expression grammar', () => {
     it(expression, () => { assert.deepEqual(terminal().run(`[[ ${expression} ]]`), expected(status)) })
   }
 
+  // A quoted operator is an operand, and an operator that arrives by
+  // expansion is one too, so each of these is the syntax error bash calls
+  // it — `conditional binary operator expected`, status 2 — rather than
+  // something this shell is missing.
   for (const source of [
     "[[ '-n' x ]]", "[[ x '==' x ]]", 'operator=-n; [[ $operator x ]]',
     'operator="=="; [[ x $operator x ]]', '[[ ! ]]', '[[ -n ]]', '[[ ! = ! ]]',
   ]) {
     it(`diagnoses ${source}`, () => {
       const result = terminal().run(source)
-      assert.notEqual(result.exitCode, 0)
+      assert.equal(result.exitCode, 2)
       assert.equal(result.stdout, '')
-      assert.ok(result.unsupported.length > 0)
+      assert.notEqual(result.stderr, '')
+      assert.deepEqual(result.unsupported, [])
     })
   }
 })

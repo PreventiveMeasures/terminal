@@ -92,7 +92,7 @@ function buildSteps(p, end) {
   let stage = newStage()
   for (let t; (t = tokenAt(p));) {
     if (t.kind === 'condition') {
-      if (!commandPosition(stage)) throw new UnsupportedError('feature', '[[ syntax', 'unexpected `[[`')
+      if (!commandPosition(stage)) throw new Error('unexpected `[[`')
       stage.test = t.expression
       p.i++
       continue
@@ -140,7 +140,7 @@ function buildSteps(p, end) {
     if (stage.group || stage.define) throw new Error(`unexpected token after \`${stage.isolate ? ')' : '}'}\``)
     if (stage.loop) throw new Error('unexpected token after `done`')
     if (stage.conditional) throw new Error('unexpected token after `fi`')
-    if (stage.test) throw new UnsupportedError('feature', '[[ syntax', 'unexpected token after `]]`')
+    if (stage.test) throw new Error('unexpected token after `]]`')
     if (!t.quoted && stage.words.length === 0 && p.aliases.has(t.value)) p.aliasUsed = true
     if (!t.quoted && commandPosition(stage)) {
       if (Array.isArray(end) ? end.includes(t.value) : t.value === end) { p.i++; return finishBlock(p, steps, stage, end) }
