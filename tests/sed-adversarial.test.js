@@ -9,7 +9,7 @@ import { createTerminal } from '@preventive/terminal'
 const result = (stdout = '', exitCode = 0, stderr = '', cwd = '/src') => ({ stdout, stderr, exitCode, cwd, notes: [], unsupported: [] })
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const terminal = () => createTerminal({ input: 'a\nb\n', single: 'a\n' }, { mount: '/src/', writable: '/tmp/' })
-const diagnostic = 'sed: /tmp/missing: No such file or directory\n'
+const diagnostic = 'sed: can\'t read /tmp/missing: No such file or directory\n'
 
 describe('sed in-place input failures happen before later file reads', () => {
   it('retains stderr when its file is a later edited operand', () => {

@@ -48,7 +48,7 @@ function ls(_stdin, tokens, ctx) {
   const display = (name, abs) => flags.has('F') && ctx.fs.isDir(abs) && !name.endsWith('/') ? name + '/' : name
   for (const target of targets) {
     const { path: abs, error } = lookupWithNote(ctx, 'ls', target)
-    if (error) errors.push(`ls: ${target}: ${error}`)
+    if (error) errors.push(`ls: cannot access '${target}': ${error}`)
     else if (flags.has('d') || ctx.fs.isFile(abs)) files.push(display(target, abs))
     else dirs.push(target)
   }

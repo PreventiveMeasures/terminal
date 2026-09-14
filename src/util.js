@@ -65,10 +65,31 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
       } else entry.content = ctx.fs.readFile(found.path)
     }
     entries.push(entry)
-    if (error) stderr += `${cmd}: ${name}: ${error}\n`
+    if (error) stderr += readFailure(cmd, name, error, entry.kind === 'dir')
     if (entry.kind !== 'file' && (options.stopOnError || (entry.kind === 'dir' && options.stopOnDir))) break
   }
   return { inputs: entries.filter((e) => e.kind === 'file'), entries, stderr, failed: stderr !== '' }
+}
+
+// GNU words a failed read per command, and several word a directory
+// differently from a path they could not open at all. `%s` is the operand as
+// typed and `%r` the reason the filesystem gave; a command not named here
+// says `<command>: <operand>: <reason>`, which is what most of them say.
+// Recorded from coreutils 9.4 and GNU sed 4.9.
+const READ_FAILURES = {
+  head: ["cannot open '%s' for reading: %r", "error reading '%s': Is a directory"],
+  tail: ["cannot open '%s' for reading: %r", "error reading '%s': Is a directory"],
+  sort: ['cannot read: %s: %r', 'read failed: %s: Is a directory'],
+  sed: ["can't read %s: %r", 'read error on %s: Is a directory'],
+  tac: ["failed to open '%s' for reading: %r", '%s: read error: Invalid argument'],
+  base64: [null, 'read error: Is a directory'],
+  uniq: [null, "error reading '%s': Is a directory"],
+}
+
+export function readFailure(cmd, name, why, directory = false) {
+  const shape = READ_FAILURES[cmd]?.[directory ? 1 : 0]
+  const text = shape ? shape.replace(/%[sr]/gu, (mark) => (mark === '%s' ? name : why)) : `${name}: ${why}`
+  return `${cmd}: ${text}\n`
 }
 
 export function readInputs(cmd, files, stdin, ctx, options) {

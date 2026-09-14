@@ -1,7 +1,7 @@
 import { lookupWithNote, missingPathNote } from '../notes.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
-import { err } from '../util.js'
+import { err, readFailure } from '../util.js'
 
 // GNU -i has an optional attached suffix; the next token is still a script
 // or operand. Required -e/-f values take precedence over option scanning.
@@ -85,7 +85,7 @@ function inPlaceInput(name, ctx) {
   }
   if (name === '/dev/stdin' || name === '/dev/stdout' || name === '/dev/stderr') return { error: refused(name) }
   const found = lookupWithNote(ctx, 'sed', name)
-  if (found.error) return { error: err(`sed: ${name}: ${found.error}`, 2) }
+  if (found.error) return { error: err(readFailure('sed', name, found.error).trimEnd(), 2) }
   if (ctx.fs.isDir(found.path)) return { error: err(`sed: couldn't edit ${name}: not a regular file`, 4) }
   if (!ctx.writable || !found.path.startsWith('/tmp/')) return { error: refused(name) }
   return found

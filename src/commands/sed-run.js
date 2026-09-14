@@ -18,7 +18,7 @@ export function runSed(program, flags, ctx, capture = false) {
   try {
     const code = runRecords(program.commands, state)
     result.quit = code !== null
-    result.exitCode = input.status.failed ? 2 : code ?? 0
+    result.exitCode = input.status.failed ? (input.status.directory ? 4 : 2) : code ?? 0
     result.failed = input.status.failed
   } catch (e) {
     const failed = sedFailure(e)

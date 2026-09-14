@@ -154,7 +154,7 @@ describe('find depth omission notes', () => {
   it('retains omissions across later root errors and visits remaining roots', () => {
     const result = createTerminal(FILES).run('find a missing c -maxdepth 0')
     assert.equal(result.stdout, 'a\nc\n')
-    assert.equal(result.stderr, 'find: missing: No such file or directory\n')
+    assert.equal(result.stderr, 'find: \'missing\': No such file or directory\n')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.unsupported, [])
     assert.deepEqual(result.notes, [note('find', ['/a', '/c'])])

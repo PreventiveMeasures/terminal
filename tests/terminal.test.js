@@ -89,7 +89,7 @@ describe('createTerminal — basics', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('ls -- -1')
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /-1: No such file/u)
+    assert.match(r.stderr, /ls: cannot access '-1': No such file/u)
   })
 
   it('ls -10 / -123 (pure-digit shorts) stay positional, matching head -5 shorthand', () => {
@@ -113,7 +113,7 @@ describe('createTerminal — basics', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('ls src nope')
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /nope: No such file/u)
+    assert.match(r.stderr, /ls: cannot access 'nope': No such file/u)
     // The successful target's listing must stay clean — no error
     // text leaks into stdout, so downstream pipes get clean data.
     assert.doesNotMatch(r.stdout, /No such file/u)
@@ -273,7 +273,7 @@ describe('createTerminal — text commands', () => {
     // One operand means no banner, so a lone directory prints nothing.
     const solo = t.run('head -n 1 dir')
     assert.equal(solo.stdout, '')
-    assert.match(solo.stderr, /dir: Is a directory/u)
+    assert.match(solo.stderr, /head: error reading 'dir': Is a directory/u)
     assert.equal(solo.exitCode, 1)
   })
 
@@ -1166,7 +1166,7 @@ describe('createTerminal — text commands', () => {
     // from the exit 1 the partial-failure commands use.
     const s = t.run('sort nope.txt')
     assert.equal(s.exitCode, 2)
-    assert.match(s.stderr, /sort: nope\.txt: No such file/u)
+    assert.match(s.stderr, /sort: cannot read: nope\.txt: No such file/u)
     const u = t.run('uniq nope.txt')
     assert.equal(u.exitCode, 1)
     assert.match(u.stderr, /uniq: nope\.txt: No such file/u)
@@ -1203,7 +1203,7 @@ describe('createTerminal — text commands', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('ls src nope')
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /nope:.*No such file/u)
+    assert.match(r.stderr, /cannot access 'nope':.*No such file/u)
     assert.match(r.stdout, /foo\.js/u)
     assert.doesNotMatch(r.stdout, /nope/u)
   })
@@ -1617,7 +1617,7 @@ describe('createTerminal — find / tree / path', () => {
     const t = createTerminal(SOURCES)
     const r = t.run('find src nope')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /nope: No such file or directory/u)
+    assert.match(r.stderr, /find: 'nope': No such file or directory/u)
     // src's entries must still appear despite nope's failure.
     const lines = r.stdout.split('\n').filter(Boolean).sort()
     assert.ok(lines.includes('src/foo.js'), `expected src/foo.js in stdout, got ${JSON.stringify(lines)}`)
@@ -3847,7 +3847,7 @@ describe('createTerminal — head -c (byte counts)', () => {
     const r = t.run('head -c 2 a.txt missing.txt b.txt')
     assert.match(r.stdout, /==> a\.txt <==\nab/u)
     assert.match(r.stdout, /==> b\.txt <==\nde/u)
-    assert.match(r.stderr, /missing\.txt: No such file/u)
+    assert.match(r.stderr, /cannot open 'missing\.txt' for reading: No such file/u)
     assert.equal(r.exitCode, 1)
   })
 
@@ -3901,7 +3901,7 @@ describe('createTerminal — head/tail operand-count banners', () => {
     const t = createTerminal(SRC)
     const r = t.run('head -n 1 h.txt missing')
     assert.equal(r.stdout, '==> h.txt <==\nhello\n')
-    assert.match(r.stderr, /missing: No such file/u)
+    assert.match(r.stderr, /cannot open 'missing' for reading: No such file/u)
     assert.equal(r.exitCode, 1)
     assert.equal(t.run('tail -n 1 h.txt missing').stdout, '==> h.txt <==\nworld\n')
     // Byte mode shares the same block writer, banners included.
@@ -3917,7 +3917,7 @@ describe('createTerminal — head/tail operand-count banners', () => {
     assert.equal(t.run('head -n 1 missing h.txt').stdout, '==> h.txt <==\nhello\n')
     const r = t.run('head -n 1 missing h.txt o.txt')
     assert.equal(r.stdout, '==> h.txt <==\nhello\n\n==> o.txt <==\nother\n')
-    assert.match(r.stderr, /missing: No such file/u)
+    assert.match(r.stderr, /cannot open 'missing' for reading: No such file/u)
     assert.equal(r.exitCode, 1)
     assert.equal(t.run('head -n 1 h.txt missing o.txt').stdout,
       '==> h.txt <==\nhello\n\n==> o.txt <==\nother\n')
@@ -3943,7 +3943,7 @@ describe('createTerminal — head/tail operand-count banners', () => {
     assert.equal(t.run('cat h.txt | tail -n 0').stdout, '')
     const h = t.run('head -n 0 h.txt missing')
     assert.equal(h.stdout, '==> h.txt <==\n')
-    assert.match(h.stderr, /missing: No such file/u)
+    assert.match(h.stderr, /cannot open 'missing' for reading: No such file/u)
     assert.equal(h.exitCode, 1)
     assert.equal(t.run('head -n 0 h.txt o.txt').stdout, '==> h.txt <==\n\n==> o.txt <==\n')
   })
@@ -4528,7 +4528,7 @@ describe('createTerminal — xargs -0/-I, sort aborts on unreadable input', () =
     const r = t.run('sort ok.txt missing.txt')
     assert.equal(r.stdout, '')
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /missing\.txt: No such file/u)
+    assert.match(r.stderr, /sort: cannot read: missing\.txt: No such file/u)
     // A directory operand aborts it the same way.
     const d = t.run('sort ok.txt ft')
     assert.equal(d.stdout, '')

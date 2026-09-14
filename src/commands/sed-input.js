@@ -21,6 +21,9 @@ export function sedInput(files, stdin, ctx, delimiter, separate, report) {
       status.failed ||= r.failed
       source = r.inputs.length ? { ...r.inputs[0], identity: inputIdentity(name, ctx), pos: 0, first: true } : null
       if (r.stderr && report) report(r.stderr)
+      // A directory is where GNU sed stops: it opens no later operand, and
+      // says so with a status of its own rather than the 2 a miss gets.
+      if (r.entries.some((read) => read.kind === 'dir')) { status.directory = true; index = names.length; return false }
       // readFilesFor consumes shared stdin eagerly; this reader consumes it
       // one record at a time, including when $ merely looks ahead.
       if (source?.shared) consumeStdin(ctx, pipe)

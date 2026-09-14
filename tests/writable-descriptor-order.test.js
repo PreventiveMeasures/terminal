@@ -71,15 +71,15 @@ describe('writable redirects are visible while enclosing commands execute', () =
     const t = terminal()
     const actual = t.run('find missing /repo/input -exec grep -q missing /tmp/log \\; -exec printf yes \\; 2>/tmp/log')
     assert.deepEqual(actual, result('yes', 1))
-    check(t, 'cat /tmp/log', 'find: missing: No such file or directory\n')
+    check(t, 'cat /tmp/log', 'find: \'missing\': No such file or directory\n')
   })
   it('find known stdout and stderr events can share a file in action order', () => {
     const t = terminal()
     const actual = t.run('find missing /repo/input -print 2>&1 >/tmp/out')
-    assert.deepEqual(actual, result('find: missing: No such file or directory\n', 1))
+    assert.deepEqual(actual, result('find: \'missing\': No such file or directory\n', 1))
     check(t, 'cat /tmp/out', '/repo/input\n')
     assert.deepEqual(t.run('find missing /repo/input -print >/tmp/log 2>&1'), result('', 1))
-    check(t, 'cat /tmp/log', 'find: missing: No such file or directory\n/repo/input\n')
+    check(t, 'cat /tmp/log', 'find: \'missing\': No such file or directory\n/repo/input\n')
   })
   it('delegated xargs commands see writes from earlier child commands', () => {
     const t = terminal({ commands: {

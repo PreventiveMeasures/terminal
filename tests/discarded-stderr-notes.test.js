@@ -21,9 +21,9 @@ describe('a path failure sent to /dev/null is reported anyway', () => {
 
   for (const [command, lines] of [
     ['cat f 2>/dev/null | head -30', ['cat: f: No such file or directory']],
-    ['ls dir/ 2>/dev/null | head -50', ['ls: dir/: No such file or directory']],
+    ['ls dir/ 2>/dev/null | head -50', ['ls: cannot access \'dir/\': No such file or directory']],
     ['cat sub 2>/dev/null', ['cat: sub: Is a directory']],
-    ['ls a.txt/x 2>/dev/null', ['ls: a.txt/x: Not a directory']],
+    ['ls a.txt/x 2>/dev/null', ['ls: cannot access \'a.txt/x\': Not a directory']],
     ['cd nope 2>/dev/null', ['cd: nope: No such file or directory']],
     ['cd a.txt 2>/dev/null', ['cd: a.txt: Not a directory']],
     ['cat 2>/dev/null < nope', ['error: nope: No such file or directory']],
