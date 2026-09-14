@@ -310,6 +310,13 @@ export function parse(line: string): ParseResult
  * summarize('wc < 1.txt || ls')   // [ [['cat', '1.txt'], ['wc']], '||', [['ls']] ]
  * ```
  *
+ * A quoted `$(cat <<'EOF' … EOF)` is the text it holds, so that is what it
+ * says: the here-document, minus the trailing newlines `$( )` strips.
+ * `echo "$(cat <<'EOF'` … `EOF` … `)"` summarizes as `[[['echo', '…']]]`.
+ * The delimiter has to be quoted, since an expanding body is not settled
+ * text, and the substitution has to be quoted, since bare its text would be
+ * split into fields and globbed.
+ *
  * Everything here is plain text, so anything a summary would have to lie
  * about throws instead: a line that does not parse, a subshell, group, `for`,
  * `if` or `[[ … ]]`, a `!`, an assignment, a here-document or here-string, a

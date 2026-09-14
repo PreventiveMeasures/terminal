@@ -135,7 +135,8 @@ summarize('wc < 1.txt || ls')
 ```
 
 It reports what a line does rather than how it was written, which is why a
-command reading a file comes back as the `cat` that feeds it. Everything it
+command reading a file comes back as the `cat` that feeds it, and why a quoted
+`$(cat <<'EOF' … EOF)` comes back as the text that here-document holds. Everything it
 returns is final text, so it throws rather than summarize what it cannot: a
 line that does not parse, `while`, `case` and the other constructs this
 terminal refuses, a subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an

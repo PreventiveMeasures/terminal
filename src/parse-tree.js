@@ -273,7 +273,35 @@ function redirectTokens(redirect) {
 
 const literal = (value) => {
   if (typeof value === 'string') return value
-  throw refuse(`${value.parts.map(spell).join('')}`, 'a literal word')
+  const text = literalText(value)
+  if (text === null) throw refuse(`${value.parts.map(spell).join('')}`, 'a literal word')
+  return text
+}
+
+// `"$(cat <<'EOF' … EOF)"` is the text it holds and nothing else: a literal
+// here-document, cat, and the trailing newlines `$( )` strips. Every part has
+// to be quoted for that to hold — bare, the text would be split into fields
+// and globbed, and no single token would stand for it.
+function literalText(word) {
+  let text = ''
+  for (const part of word.parts) {
+    if (!part.quoted) return null
+    if (part.type === 'text') { text += part.value; continue }
+    const here = heredocText(part)
+    if (here === null) return null
+    text += here
+  }
+  return text
+}
+
+function heredocText(part) {
+  if (part.type !== 'substitution' || part.list.length !== 1) return null
+  const [node] = part.list
+  if (node.type !== 'command' || node.negate || node.assignments) return null
+  if (node.argv.length !== 1 || node.argv[0] !== 'cat') return null
+  const [redirect, ...rest] = node.redirects ?? []
+  if (rest.length > 0 || redirect?.op !== '<<' || redirect.expand) return null
+  return redirect.text.replace(/\n+$/u, '')
 }
 
 // Name the piece that needs expanding the way it was written.

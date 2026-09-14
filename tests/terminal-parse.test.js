@@ -303,6 +303,26 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     })
   }
 
+  // `"$(cat <<'EOF' … EOF)"` is the text it holds, so that is what it says.
+  const HERE = (body, delimiter = "'EOF'", quote = '"') => `echo ${quote}$(cat <<${delimiter}\n${body}\nEOF\n)${quote}`
+
+  it('reads a quoted here-document substitution as the text it produces', () => {
+    assert.deepEqual(terminal().summarize(HERE('multiline text\nover two lines')), [[['echo', 'multiline text\nover two lines']]])
+    assert.deepEqual(terminal().summarize('echo "prefix $(cat <<\'EOF\'\nx\nEOF\n) suffix"'), [[['echo', 'prefix x suffix']]])
+  })
+
+  for (const [label, line] of [
+    ['unquoted, so its text would split into fields', HERE('a b', "'EOF'", '')],
+    ['a delimiter that lets the body expand', HERE('$x', 'EOF')],
+    ['a cat that reads a file as well', 'echo "$(cat f <<\'EOF\'\nx\nEOF\n)"'],
+    ['another command reading it', 'echo "$(wc <<\'EOF\'\nx\nEOF\n)"'],
+    ['a second command after it', 'echo "$(cat <<\'EOF\'\nx\nEOF\nls)"'],
+  ]) {
+    it(`refuses ${label}`, () => {
+      assert.throws(() => terminal().summarize(line), /is not a literal word/u)
+    })
+  }
+
   it("refuses a write the terminal's filesystem would, as parse() does", () => {
     const readOnly = createTerminal(SOURCES, { mount: '/src' })
     assert.throws(() => readOnly.summarize('ls > out'), { message: '`>` cannot write to `out`: the filesystem is read-only' })

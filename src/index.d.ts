@@ -346,7 +346,8 @@ export interface Terminal {
    * holding its pipeline stages' `argv` and its redirects as written, with
    * `&&` and `||` standing between the chains they gate. It reports what the
    * line does rather than how it was spelled, so `wc < 1.txt` summarizes as
-   * `[['cat', '1.txt'], ['wc']]`.
+   * `[['cat', '1.txt'], ['wc']]`, and a quoted `$(cat <<'EOF' … EOF)` as the
+   * text that here-document holds.
    *
    * Plain text throughout, so it throws rather than summarize what it cannot:
    * a line that does not parse (including a redirect this filesystem would
