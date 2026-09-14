@@ -1,0 +1,175 @@
+# patch, answered by GNU patch 2.7.6, run in the overlay because patch
+# writes. Each case builds its patch and target and then shows what
+# happened: offsets, fuzz, rejects, reversal detection, files created and
+# deleted, git headers, the malformed inputs and the usage errors. What GNU
+# printed after a tab in a header line was dropped when these were recorded,
+# as diff here prints none; a reject file echoes the header lines it was
+# given, so the same applies to it.
+@tree patchable
+@mode overlay
+diff -u ten ten2 > p; patch < p; cat ten => "patching file ten\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -u ten ten2 > p; patch ten < p; echo $?; cat ten => "patching file ten\n0\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -u ten ten2 > p; patch -i p; cat ten => "patching file ten\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -u ten ten2 > p; patch ten p; cat ten => "patching file ten\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -u ten ten2 > p; patch -p0 < p; cat ten => "patching file ten\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -c ten ten2 > p; patch < p; cat ten => "patching file ten\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff ten ten2 > p; patch ten < p; cat ten => "patching file ten\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff ten ten2 > p; patch < p; echo $? => "2\n" %
+diff -U0 ten ten2 > p; patch < p; cat ten => "patching file ten\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -C1 ten ten2 > p; patch < p; cat ten => "patching file ten\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -u ten ten2 > p; patch < p; patch < p; echo $?; cat ten.rej => "patching file ten\npatching file ten\nReversed (or previously applied) patch detected!  Assume -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored -- saving rejects to file ten.rej\n1\n--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n"
+diff -u ten ten2 > p; patch < p; patch -N < p; echo $?; cat ten => "patching file ten\npatching file ten\nReversed (or previously applied) patch detected!  Skipping patch.\n1 out of 1 hunk ignored -- saving rejects to file ten.rej\n1\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -u ten ten2 > p; patch < p; patch -t < p; echo $?; cat ten => "patching file ten\npatching file ten\nReversed (or previously applied) patch detected!  Assuming -R.\n0\na\nb\nc\nd\ne\nf\ng\nh\ni\nj\n"
+diff -u ten ten2 > p; patch < p; patch -f < p; echo $?; cat ten => "patching file ten\npatching file ten\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file ten.rej\n1\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -u ten ten2 > p; patch < p; patch -R < p; echo $?; cat ten => "patching file ten\npatching file ten\n0\na\nb\nc\nd\ne\nf\ng\nh\ni\nj\n"
+diff -u ten ten2 > p; patch -R < p; echo $? => "patching file ten\nUnreversed patch detected!  Ignore -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored -- saving rejects to file ten.rej\n1\n"
+diff -u ten ten2 > p; patch -R -t < p; echo $?; cat ten => "patching file ten\nUnreversed patch detected!  Ignoring -R.\n0\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -u ten ten2 > p; patch -R -N < p; echo $? => "patching file ten\nUnreversed patch detected!  Skipping patch.\n1 out of 1 hunk ignored -- saving rejects to file ten.rej\n1\n"
+diff -u ten ten2 > p; sed 's#^--- ten#--- a/ten#; s#^+++ ten2#+++ b/ten#' p > q; patch -p1 < q; cat ten => "patching file ten\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -u ten ten2 > p; sed 's#^--- ten#--- a/ten#; s#^+++ ten2#+++ b/ten#' p > q; patch -p0 < q; echo $? => "can't find file to patch at input line 3\nPerhaps you used the wrong -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|--- a/ten\n|+++ b/ten\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\n1\n"
+diff -u ten ten2 > p; sed 's#^--- ten#--- a/ten#; s#^+++ ten2#+++ b/ten#' p > q; patch < q; cat ten | head -3 => "patching file ten\na\nb\nX\n"
+diff -u ten ten2 > p; sed 's#^--- ten#--- a/ten#; s#^+++ ten2#+++ b/ten#' p > q; patch -p5 < q; echo $? => "can't find file to patch at input line 3\nPerhaps you used the wrong -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|--- a/ten\n|+++ b/ten\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\n1\n"
+diff -u ten ten2 > p; sed 's#^--- ten#--- a/ten#; s#^+++ ten2#+++ b/ten#' p > q; patch --strip=1 < q; echo $? => "patching file ten\n0\n"
+diff -u ten ten2 > p; printf 'p\nq\n' > t; cat ten >> t; patch t < p; cat t => "patching file t\nHunk #1 succeeded at 3 (offset 2 lines).\np\nq\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\n"
+diff -u ten ten2 > p; sed 1d ten > t; patch t < p; echo $?; cat t.rej => "patching file t\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file t.rej\n1\n--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n"
+diff -u ten ten2 > p; sed 's/^a$/A/' ten > t; patch t < p; echo $? => "patching file t\nHunk #1 succeeded at 1 with fuzz 1.\n0\n"
+diff -u ten ten2 > p; sed 's/^a$/A/; s/^j$/J/' ten > t; patch t < p => "patching file t\nHunk #1 succeeded at 1 with fuzz 2.\n"
+diff -u ten ten2 > p; sed 's/^b$/B/' ten > t; patch t < p => "patching file t\nHunk #1 succeeded at 1 with fuzz 2.\n"
+diff -u ten ten2 > p; printf 'p\n' > t; sed 's/^a$/A/' ten >> t; patch t < p => "patching file t\nHunk #1 succeeded at 2 with fuzz 1 (offset 1 line).\n"
+diff -u ten ten2 > p; printf 'z\nz\nz\n' > t; patch t < p; echo $?; cat t.rej; ls t.orig => "patching file t\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file t.rej\n1\n--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\nt.orig\n"
+diff -u ten ten2 > p; printf 'z\nz\nz\n' > t; patch --dry-run t < p; echo $?; ls => "checking file t\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED\n1\nbad1.patch\nbad2.patch\nbad3.patch\nbad4.patch\nbad5.patch\nbad6.patch\nbig\nbig2\nblank\nblank.patch\nblankctx.patch\ncreate.patch\nctx1.patch\nctx2.patch\nctxmiss1.patch\nctxmiss2.patch\ndelete.patch\nemp\nemp1.patch\nemp2.patch\nemp3.patch\nend1.patch\nend2.patch\nepoch.patch\nex\nex.patch\nextra.patch\ngit.patch\ngnew.patch\ngoner\ngren.patch\ngren2.patch\nindex.patch\nmf.patch\nmf1\nne1\nne2\nne3\nnewn\nnn\nnn.patch\nnoplus.patch\noldn\noldnew.patch\np\npartial\npd.patch\nrv\nrv.patch\nrv0\nrv2\nrv2.patch\nrv3\nrv4\nshort1.patch\nshort2.patch\nshort3.patch\nstart1.patch\nstart2.patch\nstart3.patch\nstart4.patch\nstart5.patch\nt\nten\nten2\nwf\nwf.patch\nwf3\nwfz\nws\nws.patch\n"
+diff -u ten ten2 > p; patch --dry-run t=ten < p; echo $? => "checking file 't=ten'\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED\n1\n"
+diff -u ten ten2 > p; patch --dry-run ten < p; echo $?; cat ten | head -3 => "checking file ten\n0\na\nb\nc\n"
+diff -u ten ten2 > p; patch --dry-run -s ten < p; echo $? => "0\n"
+diff -u ten ten2 > p; patch -o - ten < p; echo $? => "a\nb\nX\nd\ne\nf\ng\nh\nY\nj\n0\n" %
+diff -u ten ten2 > p; patch -o out ten < p; echo $?; cat out; cat ten | head -3 => "patching file out (read from ten)\n0\na\nb\nX\nd\ne\nf\ng\nh\nY\nj\na\nb\nc\n"
+diff -u ten ten2 > p; patch --dry-run -o - ten < p | head -3 => "a\nb\nX\n" %
+diff -u ten ten2 > p; patch -s ten < p; echo $?; head -3 ten => "0\na\nb\nX\n"
+diff -u ten ten2 > p; patch -b ten < p; ls ten*; cat ten.orig | head -3 => "patching file ten\nten\nten.orig\nten2\na\nb\nc\n"
+diff -u ten ten2 > p; patch -b -z .bk ten < p; ls ten* => "patching file ten\nten\nten.bk\nten2\n"
+diff -u ten ten2 > p; patch --backup --suffix=.old < p; ls ten* => "patching file ten\nten\nten.old\nten2\n"
+diff -u ten ten2 > p; patch nofile < p; echo $? => "patching file nofile\nHunk #1 FAILED at 1.\n2\n" %
+diff -u ten ten2 > p; sed 's#ten#nofile#' p | patch; echo $?; ls nofile* => "can't find file to patch at input line 3\nPerhaps you should have used the -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|--- nofile\n|+++ nofile2\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\n1\n" 2 %
+echo hello | patch; echo $? => "2\n" %
+printf '' | patch; echo $? => "0\n"
+printf 'Binary files a/x and b/x differ\n' | patch -p1; echo $? => "2\n" %
+diff -u ten ten2 > p; sed 4d p | patch ten; echo $? => "patching file ten\nHunk #1 succeeded at 2 with fuzz 1 (offset 1 line).\n0\n"
+# Without its @@ line a unified hunk reads as an ed script to GNU, which
+# runs ed on it and fails; the same happens when -c or -n forces a format
+# the patch is not in. Ed scripts are refused here rather than run.
+diff -u ten ten2 > p; sed '3d' p | patch; echo $? => ! ed script 0 "2\n"
+diff -u big big2 > p; printf 'top\n' > t; cat big >> t; patch t < p; sed -n '4,7p;20,22p' t => "patching file t\nHunk #1 succeeded at 3 (offset 1 line).\nHunk #2 succeeded at 19 (offset 1 line).\n3\n4\nNEW1\n5\n18\n19\ntwenty\n"
+diff -u big big2 > p; sed '1i\NEW0' big > t; patch t < p; echo $? => "patching file t\nHunk #1 succeeded at 3 (offset 1 line).\nHunk #2 succeeded at 19 (offset 1 line).\n0\n"
+diff -u big big2 > p; sed 's/^20$/xx/' big > t; patch t < p; echo $?; cat t.rej => "patching file t\nHunk #2 FAILED at 18.\n1 out of 2 hunks FAILED -- saving rejects to file t.rej\n1\n--- big\n+++ big2\n@@ -18,7 +19,7 @@\n 17\n 18\n 19\n-20\n+twenty\n 21\n 22\n 23\n"
+diff -u big big2 > p; sed 's/^3$/xx/' big > t; patch t < p; echo $? => "patching file t\nHunk #1 succeeded at 2 with fuzz 2.\n0\n"
+diff -u big big2 > p; sed '2,3d' big > t; patch t < p; echo $?; cat t.rej => "patching file t\nHunk #1 FAILED at 2.\nHunk #2 succeeded at 15 (offset -2 lines).\n1 out of 2 hunks FAILED -- saving rejects to file t.rej\n1\n--- big\n+++ big2\n@@ -2,6 +2,7 @@\n 2\n 3\n 4\n+NEW1\n 5\n 6\n 7\n"
+diff -c big big2 > p; printf 'top\n' > t; cat big >> t; patch t < p; echo $? => "patching file t\nHunk #1 succeeded at 3 (offset 1 line).\nHunk #2 succeeded at 19 (offset 1 line).\n0\n"
+diff -c big big2 > p; sed 's/^20$/xx/' big > t; patch t < p; echo $?; cat t.rej => "patching file t\nHunk #2 FAILED at 18.\n1 out of 2 hunks FAILED -- saving rejects to file t.rej\n1\n*** big\n--- big2\n***************\n*** 18,24 ****\n  17\n  18\n  19\n! 20\n  21\n  22\n  23\n--- 19,25 ----\n  17\n  18\n  19\n! twenty\n  21\n  22\n  23\n"
+diff big big2 > p; printf 'top\n' > t; cat big >> t; patch t < p; sed -n '4,7p;20,22p' t => "patching file t\nHunk #2 succeeded at 22 (offset 1 line).\n3\nNEW1\n4\n5\n18\n19\ntwenty\n"
+diff big big2 > p; sed 's/^20$/xx/' big > t; patch t < p; echo $?; cat t.rej => "patching file t\nHunk #2 FAILED at 21.\n1 out of 2 hunks FAILED -- saving rejects to file t.rej\n1\n*** /dev/null\n--- /dev/null\n***************\n*** 21\n- 20\n--- 22 -----\n+ twenty\n"
+diff big big2 > p; sed '1,2d' big > t; patch t < p; echo $? => "patching file t\nHunk #2 succeeded at 19 (offset -2 lines).\n0\n"
+diff -u big big2 > p; cp big2 t; patch -R t < p; echo $?; diff t big && echo same => "patching file t\n0\nsame\n"
+diff -u big big2 > p; printf 'top\n' > t; cat big2 >> t; patch -R t < p; echo $? => "patching file t\nHunk #1 succeeded at 3 (offset 1 line).\nHunk #2 succeeded at 18 (offset 1 line).\n0\n"
+diff -u ne1 ne2 > p; patch ne1 < p; cat -A ne1 => "patching file ne1\na$\nb$\nc$\n"
+diff -u ne1 ne3 > p; patch ne1 < p; cat -A ne1 => "patching file ne1\na$\nb$\nd"
+diff -u ne1 ne3 > p; patch ne2 < p; echo $?; cat -A ne2 => "patching file ne2\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file ne2.rej\n1\na$\nb$\nc$\n"
+diff -u ne2 ne1 > p; patch ne2 < p; cat -A ne2 => "patching file ne2\na$\nb$\nc"
+patch nn < nn.patch; echo $?; cat -A nn => "patching file nn\n0\na$\nB"
+diff ne1 ne3 > p; patch ne1 < p; cat -A ne1 => "patching file ne1\na$\nb$\nd"
+diff -c ne1 ne3 > p; patch ne1 < p; cat -A ne1 => "patching file ne1\na$\nb$\nd"
+patch -p1 < create.patch; echo $?; cat newf => "patching file newf\n0\none\ntwo\n"
+patch -p1 < create.patch; patch -p1 < create.patch; echo $? => "patching file newf\nThe next patch would create the file newf,\nwhich already exists!  Assume -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored\n1\n"
+patch -p1 < create.patch; patch -p1 -N < create.patch; echo $? => "patching file newf\nThe next patch would create the file newf,\nwhich already exists!  Skipping patch.\n1 out of 1 hunk ignored\n1\n"
+patch -p1 < create.patch; patch -p1 -f < create.patch; echo $?; cat newf => "patching file newf\nThe next patch would create the file newf,\nwhich already exists!  Applying it anyway.\npatching file newf\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file newf.rej\n1\none\ntwo\n"
+patch -p1 < create.patch; patch -p1 -t < create.patch; echo $?; ls newf => "patching file newf\nThe next patch would create the file newf,\nwhich already exists!  Assuming -R.\npatching file newf\n0\n" 2 %
+patch -p1 < delete.patch; echo $?; ls goner => "patching file goner\n0\n" 2 %
+patch -p1 < epoch.patch; echo $?; cat epochf => "patching file epochf\n0\nhello\n"
+patch -p1 < pd.patch; echo $?; cat partial => "patching file partial\nNot deleting file partial as content differs from patch\n1\nz\n"
+patch < emp3.patch; echo $?; cat emp => "patching file emp\n0\nx\n"
+patch < emp1.patch; echo $?; cat emp => "patching file emp\n0\nx\n"
+patch < emp2.patch; echo $? => "patching file emp\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file emp.rej\n1\n"
+patch < ex.patch; echo $? => "The next patch would create the file ex,\nwhich already exists!  Assume -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored\n1\n"
+patch -R < ex.patch; echo $?; ls ex => "patching file ex\n0\n" 2 %
+patch -E < delete.patch -p1; echo $?; ls goner => "patching file goner\n0\n" 2 %
+patch -p1 < git.patch; echo $?; head -3 ten => "patching file ten\n0\na\nB\nc\n"
+patch -p1 < gnew.patch; echo $?; cat gnew => "patching file gnew\n0\nhi\n"
+patch -p1 < gren.patch; echo $?; ls ten renamed => "patching file renamed (renamed from ten)\n0\nrenamed\n" 2 %
+patch -p1 < gren2.patch; echo $?; ls ten renamed2 => "patching file renamed2 (renamed from ten)\n0\nrenamed2\n" 2 %
+patch < gren.patch; echo $? => "patching file renamed (renamed from ten)\n0\n"
+patch -p1 -R < gren.patch; echo $? => "patching file ten (already renamed from renamed)\nUnreversed patch detected!  Ignore -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored -- saving rejects to file ten.rej\n1\n"
+patch < ws.patch; echo $?; cat ws => "patching file ws\nHunk #1 succeeded at 1 with fuzz 1.\n0\na  b\nC\n"
+patch -l < ws.patch; echo $?; cat ws => "patching file ws\n0\na  b\nC\n"
+patch < mf.patch; echo $?; cat mf1 => "patching file mf1\ncan't find file to patch at input line 8\nPerhaps you should have used the -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|--- mfnone\n|+++ mfnone\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\n1\nX\n"
+patch -f < mf.patch; echo $? => "patching file mf1\ncan't find file to patch at input line 8\nPerhaps you should have used the -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|--- mfnone\n|+++ mfnone\n--------------------------\nNo file to patch.  Skipping patch.\n1 out of 1 hunk ignored\n1\n"
+patch -t < mf.patch; echo $? => "patching file mf1\ncan't find file to patch at input line 8\nPerhaps you should have used the -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|--- mfnone\n|+++ mfnone\n--------------------------\nNo file to patch.  Skipping patch.\n1 out of 1 hunk ignored\n1\n"
+patch -s < mf.patch; echo $? => "The text leading up to this was:\n--------------------------\n|--- mfnone\n|+++ mfnone\n--------------------------\nFile to patch: \nSkip this patch? [y] \n1 out of 1 hunk ignored\n1\n"
+patch < oldnew.patch; echo $?; head -1 oldn newn => "patching file oldn\n0\n==> oldn <==\nONE\n\n==> newn <==\n1\n"
+rm newn; patch < oldnew.patch; echo $?; head -1 oldn => "patching file oldn\n0\nONE\n"
+rm oldn; patch < oldnew.patch; echo $?; head -1 newn => "patching file newn\n0\nONE\n"
+patch < index.patch; echo $?; head -1 ten => "patching file ten\n0\nA\n"
+patch --dry-run < short1.patch; echo $? => "checking file big\nHunk #1 succeeded at 1 with fuzz 1.\n0\n"
+patch --dry-run < short2.patch; echo $? => "checking file big\nHunk #1 succeeded at 1 with fuzz 1.\n0\n"
+patch --dry-run < short3.patch; echo $? => "checking file big\nHunk #1 succeeded at 1 with fuzz 2.\n0\n"
+patch --dry-run < bad1.patch; echo $? => "checking file big\n2\n" %
+patch --dry-run < bad2.patch; echo $? => "checking file big\n2\n" %
+patch --dry-run < bad3.patch; echo $? => "checking file big\n2\n" %
+patch --dry-run < bad4.patch; echo $? => "checking file big\n2\n" %
+patch --dry-run < bad5.patch; echo $? => "checking file big\n2\n" %
+patch --dry-run < bad6.patch; echo $? => "2\n" %
+patch --dry-run < extra.patch; echo $? => "checking file big\nHunk #1 succeeded at 1 with fuzz 1.\n0\n"
+patch --dry-run < noplus.patch; echo $? => "checking file big\n0\n"
+patch < blank.patch; echo $?; cat blank => "patching file blank\n0\na\n\nC\n"
+patch --dry-run < blankctx.patch; echo $? => "checking file ten\nHunk #1 succeeded at 1 with fuzz 1.\n0\n"
+patch --dry-run < ctx1.patch; echo $? => "checking file big\n0\n"
+patch --dry-run < ctx2.patch; echo $? => "checking file big\n0\n"
+patch --dry-run < ctxmiss1.patch; echo $? => "checking file big\nHunk #1 succeeded at 1 with fuzz 1.\n0\n"
+patch --dry-run < ctxmiss2.patch; echo $? => "checking file big\n0\n"
+patch < ctxmiss1.patch; head -5 big => "patching file big\nHunk #1 succeeded at 1 with fuzz 1.\n1\n2\nNEW\n3\n4\n"
+patch < ctxmiss2.patch; head -3 big => "patching file big\n1\n3\n4\n"
+patch --dry-run < end1.patch; echo $? => "checking file big\n0\n"
+patch --dry-run < end2.patch; echo $? => "checking file big\nHunk #1 succeeded at 28 with fuzz 1 (offset 1 line).\n0\n"
+patch --dry-run < start1.patch; echo $? => "checking file big\nHunk #1 succeeded at 1 with fuzz 1.\n0\n"
+patch --dry-run < start2.patch; echo $? => "checking file big\nHunk #1 succeeded at 2 with fuzz 1.\n0\n"
+patch --dry-run < start3.patch; echo $? => "checking file big\n0\n"
+patch --dry-run < start4.patch; echo $? => "checking file big\nHunk #1 succeeded at 1 (offset -2 lines).\n0\n"
+patch --dry-run < start5.patch; echo $? => "checking file big\nHunk #1 succeeded at 1 (offset -4 lines).\n0\n"
+patch --dry-run wf < wf.patch; echo $? => "checking file wf\n0\n"
+patch --dry-run wf3 < wf.patch; echo $? => "checking file wf3\n0\n"
+patch --dry-run wfz < wf.patch; echo $? => "checking file wfz\nHunk #1 succeeded at 2 (offset 1 line).\n0\n"
+patch --dry-run < rv.patch; echo $? => "checking file rv\nReversed (or previously applied) patch detected!  Assume -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored\n1\n"
+patch --dry-run < rv2.patch; echo $? => "checking file rv2\nReversed (or previously applied) patch detected!  Assume -R? [n] \nApply anyway? [n] \nSkipping patch.\n2 out of 2 hunks ignored\n1\n"
+sed 's/^--- rv$/--- rv3/; s/^+++ rv$/+++ rv3/' rv.patch | patch --dry-run; echo $? => "checking file rv3\nReversed (or previously applied) patch detected!  Assume -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored\n1\n"
+sed 's/^--- rv$/--- rv4/; s/^+++ rv$/+++ rv4/' rv.patch | patch --dry-run; echo $? => "checking file rv4\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED\n1\n"
+sed 's/^--- rv$/--- rv0/; s/^+++ rv$/+++ rv0/' rv.patch | patch -R --dry-run; echo $? => "checking file rv0\nUnreversed patch detected!  Ignore -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored\n1\n"
+sed 's/^--- rv$/--- rv0/; s/^+++ rv$/+++ rv0/' rv.patch | patch -R -t --dry-run; echo $? => "checking file rv0\nUnreversed patch detected!  Ignoring -R.\n0\n"
+printf '3,4c3\n< 3\n< 4\n---\n> THREE\n' | patch --dry-run big; echo $? => "checking file big\n0\n"
+printf '3a4,5\n> x\n> y\n' | patch --dry-run big; echo $? => "checking file big\n0\n"
+printf '3c3\n< WRONG\n---\n> THREE\n' | patch --dry-run big; echo $? => "checking file big\nHunk #1 FAILED at 3.\n1 out of 1 hunk FAILED\n1\n"
+printf '0a1\n> zero\n' | patch big; head -2 big => "patching file big\nzero\n1\n"
+printf '30d29\n< 30\n' | patch --dry-run big; echo $? => "checking file big\n0\n"
+printf '31d30\n< 31\n' | patch --dry-run big; echo $? => "checking file big\nReversed (or previously applied) patch detected!  Assume -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored\n1\n"
+printf '40a41\n> x\n' | patch --dry-run big; echo $? => "checking file big\n0\n"
+printf '3c3\n< 3\n' | patch --dry-run big; echo $? => "checking file big\n2\n" %
+printf '3c3\n< 3\n---\n' | patch --dry-run big; echo $? => "checking file big\n2\n" %
+patch -p; echo $? => "2\n" %
+patch -px ten < ws.patch; echo $? => "2\n" %
+patch a b c < ws.patch; echo $? => "2\n" %
+patch -F -1 < ws.patch; echo $? => "2\n" %
+patch -F0 < ws.patch; echo $? => "patching file ws\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file ws.rej\n1\n"
+patch -z '' < ws.patch; echo $? => "2\n" %
+patch -d nodir < ws.patch; echo $? => "2\n" %
+patch -i nopatch; echo $? => "2\n" %
+patch --reject-format=bogus < ws.patch; echo $? => "2\n" %
+diff -u ten ten2 > p; patch -r my.rej ten < p; diff -u ten ten2 > p; printf 'z\n' > t; patch -r my.rej t < p; echo $?; cat my.rej => "patching file ten\n0\n" 1 %
+diff -u ten ten2 > p; printf 'z\n' > t; patch -r - t < p; echo $?; ls t.rej => "patching file t\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED\n1\n" 2 %
+diff -u ten ten2 > p; printf 'z\n' > t; patch --reject-format=context t < p; echo $?; cat t.rej => "patching file t\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file t.rej\n1\n*** ten\n--- ten2\n***************\n*** 1,10 ****\n  a\n  b\n! c\n  d\n  e\n  f\n  g\n  h\n! i\n  j\n--- 1,10 ----\n  a\n  b\n! X\n  d\n  e\n  f\n  g\n  h\n! Y\n  j\n"
+diff -c ten ten2 > p; printf 'z\n' > t; patch --reject-format=unified t < p; echo $?; cat t.rej => "patching file t\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file t.rej\n1\n--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n"
+diff -u ten ten2 > p; patch -c ten < p; echo $? => ! ed script 0 "2\n"
+diff -u ten ten2 > p; patch -n ten < p; echo $? => ! ed script 0 "2\n"
+diff -u ten ten2 > p; patch -u ten < p; echo $? => "patching file ten\n0\n"
+diff ten ten2 > p; patch -u ten < p; echo $? => "2\n" %
+diff ten ten2 > p; patch -n ten < p; echo $? => "patching file ten\n0\n"
+diff -u ten ten2 > p; patch --no-backup-if-mismatch ten < p; ls ten* => "patching file ten\nten\nten2\n"
+diff -u ten ten2 > p; printf 'p\n' > t; cat ten >> t; patch --no-backup-if-mismatch t < p; ls t* => "patching file t\nHunk #1 succeeded at 2 (offset 1 line).\nt\nten\nten2\n"
+diff -u ten ten2 > p; printf 'p\n' > t; cat ten >> t; patch t < p; ls t* => "patching file t\nHunk #1 succeeded at 2 (offset 1 line).\nt\nt.orig\nten\nten2\n"
+diff -u ten ten2 > p; patch --binary ten < p; echo $? => "patching file ten\n0\n"
