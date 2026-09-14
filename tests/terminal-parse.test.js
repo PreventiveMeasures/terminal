@@ -417,6 +417,8 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['wc < a.txt <<<here', 'summarize: a command reading from two places is not a simple chain'],
     ['ls > {a,b}', 'summarize: {a,b} is not a literal word'],
     ['echo $((1 + 2))', 'summarize: $((…)) is not a literal word'],
+    ['echo ${x:-$(id)}', 'summarize: ${x:-$(id)} is not a literal word'],
+    ['ls > ${x:-$(id)}', 'summarize: ${x:-$(id)} is not a literal word'],
     ['ls; if a; then b; fi', 'summarize: `if` is not a simple chain'],
   ]) {
     it(`refuses ${JSON.stringify(line)}`, () => {
@@ -548,6 +550,9 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     assert.deepEqual(terminal().summarize('ls a*"b" a$x'), [[['ls', parts(pattern('a*'), 'b'), parts('a', { type: 'variable', name: 'x', multi: true })]]])
     assert.deepEqual(terminal().summarize('ls $x "$y"'), [[['ls', { type: 'variable', name: 'x', multi: true }, { type: 'variable', name: 'y', multi: false }]]])
     assert.deepEqual(terminal().summarize('ls ${x:-a}'), [[['ls', { type: 'variable', name: 'x', operator: ':-', operand: 'a', multi: true }]]])
+    // An operand is text, and text is all it may hold: `${x:-$y}` reads a
+    // name in front of a reader, where `${x:-$(id)}` would run `id` behind one.
+    assert.deepEqual(terminal().summarize('ls ${x:-$y}'), [[['ls', { type: 'variable', name: 'x', operator: ':-', operand: '$y', multi: true }]]])
     assert.deepEqual(terminal().summarize('echo a > $out'), [[['echo', 'a'], ['>', { type: 'variable', name: 'out', multi: true }]]])
     assert.deepEqual(terminal().summarize('ls a{b,c} {1..3}'), [[['ls', 'ab', 'ac', '1', '2', '3']]])
     assert.deepEqual(terminal().summarize('wc < *.txt'), [[['cat', pattern('*.txt')], ['wc']]])

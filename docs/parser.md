@@ -250,8 +250,9 @@ summarize('for d in a-*; do echo "$d"; done')
 Anything else throws rather than be summarized into a lie: a line that does not
 parse, `while`, `case` and the other constructs this terminal refuses, a brace
 group, `for`, `if` or `[[ … ]]`, a `!`, a here-document whose delimiter leaves
-its body to expand, and any word no line settles the text of — `$(( … ))`, or
-the braces of an ambiguous redirect. `parse()` reads those.
+its body to expand, and any word no line settles the text of — `$(( … ))`, an
+operand that runs a command like `${x:-$(id)}`, or the braces of an ambiguous
+redirect. `parse()` reads those.
 
 A terminal has the same method, under its own write policy: `summarize('ls >
 out')` throws there when nothing may be written.

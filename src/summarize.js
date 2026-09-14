@@ -165,7 +165,14 @@ const literal = (value) => {
 // nobody has added up, and a brace group left unexpanded is more words than
 // the one slot it sits in takes, so neither is a word to say outright.
 function piece(part) {
-  if (typeof part === 'string' || part.type === 'pattern' || part.type === 'variable') return part
+  if (typeof part === 'string' || part.type === 'pattern') return part
+  // `${x:-$(id)}` runs `id`, and the operand it runs it in is text here, as
+  // the line wrote it. A summary saying only `${x:-$(id)}` would have hidden
+  // a command inside a string, so text is all an operand may hold.
+  if (part.type === 'variable') {
+    if (RUNS.test(part.operand ?? '')) throw refuse(spell(part), 'a literal word')
+    return part
+  }
   if (part.type === 'process') return { type: 'process', op: part.op, summary: summaryOf(part.list) }
   if (part.type !== 'substitution') throw refuse(spell(part), 'a literal word')
   // Bash parses a backtick when it comes to run it, so a body that does not
@@ -208,5 +215,8 @@ const spell = (part) => {
   if (part.type === 'variable') return `\${${part.name}${part.operator ?? ''}${part.operand ?? ''}}`
   return part.type === 'arithmetic' ? '$((…))' : '$(…)'
 }
+
+// What no text says outright: a command whose output it will hold.
+const RUNS = /\$\(|`/u
 
 const refuse = (what, kind = 'a simple chain') => new Error(`summarize: ${what} is not ${kind}`)

@@ -106,7 +106,7 @@ export interface VariablePart {
   name: string
   /** What the reference does beyond reading the value — `:-`, `:=`, `:?`, `:+`, `#`, `##`, `%`, `%%`, `/`, `//`, `:` for a substring, and `length` for `${#x}`. Absent for a plain reference. */
   operator?: string
-  /** The operator's operand, as written: the default in `${x:-a b}`, the pattern in `${x##prefix}`. Absent when the operator takes none. */
+  /** The operator's operand, as written: the default in `${x:-a b}`, the pattern in `${x##prefix}`. Absent when the operator takes none. It is the source text rather than a {@link Value}, so an expansion inside it is text here too — `${x:-$(id)}` keeps `$(id)`, and {@link summarize} refuses it rather than say a line runs nothing it runs. */
   operand?: string
   /**
    * Whether what comes back may be more than one word, said either way: bare,
@@ -586,7 +586,8 @@ export function parse(line: string): ParseResult
  * `if` or `[[ … ]]`, a `!`, a
  * here-document whose delimiter leaves its body to expand, a stage that reads
  * its own input from inside a pipeline, and any word no line settles the text
- * of — `$(( … ))`, or the braces of an ambiguous redirect. {@link parse}
+ * of — `$(( … ))`, an operand that runs a command like `${x:-$(id)}`, or the
+ * braces of an ambiguous redirect. {@link parse}
  * reads those; this is the short answer while a line stays simple, and an
  * error the moment it does not.
  *
