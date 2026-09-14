@@ -109,7 +109,8 @@ export const TREES = {
   // Flat files for the patch corpus, which runs in the overlay: targets in
   // several states, and patches that were written by hand to be awkward.
   patchable: {
-    ten: 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n', ten2: 'a\nb\nX\nd\ne\nf\ng\nh\nY\nj\n',
+    ten: 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n', ten2: 'a\nb\nX\nd\ne\nf\ng\nh\nY\nj\n', ten3: 'a\nb\nX\nd\ne\nf\ng\nh\ni\nY\n',
+    ins: 'a\nb\nc\nNEW\nd\ne\nf\ng\nh\ni\nj\n', del: 'a\nb\nd\ne\nf\ng\nh\ni\nj\n',
     big: '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n',
     big2: '1\n2\n3\n4\nNEW1\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\ntwenty\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n',
     ne1: 'a\nb\nc', ne2: 'a\nb\nc\n', ne3: 'a\nb\nd', emp: '', wf: 'a\nb\n', wf3: 'a\nb\nc\n', wfz: 'z\na\nb\n', ws: 'a  b\nc\n',

@@ -3,19 +3,22 @@
 // otherwise, with the line numbers shifted by what the hunks before them
 // changed, so the rejects can be applied by hand where they were meant to go.
 
-const NO_NEWLINE = '\n\\ No newline at end of file\n'
-// GNU writes an incomplete line and nothing after it; the marker here says
-// what the reject means instead of running two lines together.
-const line = (prefix, text) => prefix + text + (text.endsWith('\n') ? '' : NO_NEWLINE)
+// A line without its newline is written as it is, and whatever comes next
+// follows on the same line: that is what GNU's pch_write_line does in a
+// reject, marker or no marker.
+const line = (prefix, text) => prefix + text
 
-export function createReject(header, format, reverse) {
+// `reverse` is read when a hunk is added, not when the file starts: the
+// first hunk can turn the patch around, and GNU labels the header by the
+// direction in force when the reject is written.
+export function createReject(header, format) {
   let text = ''
   const headerLine = (tag, side) => `${tag} ${header.names[side] ?? '/dev/null'}${header.timestrs[side] ?? ''}\n`
   const index = header.names.index === null ? '' : `Index: ${header.names.index}\n`
-  const sides = reverse ? ['new', 'old'] : ['old', 'new']
   return {
     get text() { return text },
-    add(hunk, first, outOffset) {
+    add(hunk, first, outOffset, reverse) {
+      const sides = reverse ? ['new', 'old'] : ['old', 'new']
       if (format === 'unified') {
         if (first) text += index + headerLine('---', sides[0]) + headerLine('+++', sides[1])
         text += unifiedReject(hunk, outOffset)

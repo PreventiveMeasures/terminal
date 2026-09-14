@@ -128,7 +128,7 @@ function applyOne(run, scanner, header, inname) {
     const note = renamed || skipRename ? ` (${skipRename ? 'already ' : ''}${how} from ${from})` : ''
     run.say(`${opts.dryRun ? 'checking' : 'patching'} file ${quoteShell(outname, run.ctx)}${note}\n`)
   }
-  const reject = createReject(header, opts.rejectFormat ?? header.type, run.reverse)
+  const reject = createReject(header, opts.rejectFormat ?? header.type)
   const hunks = () => header.empty ? null : nextHunk(scanner, header.type)
   const result = applyHunks(run, header, hunks, state, reject)
   if (!run.skipRest && !finishOutput(state)) {

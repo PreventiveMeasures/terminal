@@ -172,9 +172,11 @@ export function parseNormalHunk(scanner) {
   return { oldStart, oldLines, newStart, newLines, prefix: 0, suffix: 0, fn: null, marks: null, line }
 }
 
-// -R, or a hunk tried the other way round: old and new change places.
+// -R, or a hunk tried the other way round: old and new change places, and
+// so do the context-format marks that name a side (pch.c pch_swap).
 export function swapHunk(hunk) {
   const flip = (list, from, to) => list.map((l) => ({ tag: l.tag === from ? to : l.tag, text: l.text }))
+  const flipMarks = (marks, from, to) => marks.map((mark) => mark === from ? to : mark)
   return { ...hunk, oldStart: hunk.newStart, newStart: hunk.oldStart, oldLines: flip(hunk.newLines, '+', '-'), newLines: flip(hunk.oldLines, '-', '+'),
-    marks: hunk.marks && { old: hunk.marks.new, new: hunk.marks.old } }
+    marks: hunk.marks && { old: flipMarks(hunk.marks.new, '+', '-'), new: flipMarks(hunk.marks.old, '-', '+') } }
 }

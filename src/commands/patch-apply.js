@@ -125,7 +125,7 @@ export function applyHunks(run, header, hunks, state, reject) {
     const newWhere = (where || hunk.oldStart) + state.outOffset
     const creating = where === 1 && header.says[run.reverse ? 1 : 0] === 2 && state.input.length > 0
     if (run.skipRest || creating || !where || !applyHunk(state, hunk, where)) {
-      if (!run.skipRejectFile) reject.add(hunk, tally.failed === 0, state.outOffset)
+      if (!run.skipRejectFile) reject.add(hunk, tally.failed === 0, state.outOffset, run.reverse)
       tally.failed++
       if (!run.skipRest && !opts.silent) run.say(`Hunk #${tally.count} FAILED at ${newWhere}.\n`)
     } else if (!opts.silent && (fuzz || state.inOffset)) {
