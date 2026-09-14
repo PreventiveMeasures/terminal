@@ -44,6 +44,27 @@ export const TREES = {
     'dir/x.txt': 'x\n', 'dir/y': 'y\n', 'dir/sub/z.txt': 'z\n', '.dotdir/inside': 'i\n',
   },
 
+  // A source tree the way ripgrep meets one: nested directories, dot-named
+  // entries at two depths, a name that begins with two dots, and a sibling
+  // sharing a directory's name.
+  searched: {
+    'a.txt': 'oak tree\nelm\nOAK\noak\n', 'README.md': 'no match here\n',
+    'sub/b.js': 'const oak = 1\noak oak\n', 'sub/deep/c.md': '# oak\n',
+    'sub/other.txt': 'elm only\n', 'd/x.txt': 'oak in d\n', 'd.txt': 'oak sibling\n',
+    'words.txt': 'oak\noakland\nan-oak-tree\noak_bar\n', 'no-nl.txt': 'oak',
+    'blank.txt': 'oak\n\n\noak\n', 'empty.txt': '',
+    '.hidden': 'oak hidden\n', '.dot/e.txt': 'oak dotdir\n', 'sub/.h/f.txt': 'oak deep hidden\n',
+    '..odd/g.txt': 'oak odd\n',
+  },
+
+  // ASCII files beside one accented and one CJK file. Literal matching crosses
+  // scripts unchanged; case folding and the character classes do not, and the
+  // refusal covers the whole run rather than the file that provoked it.
+  scripts: {
+    'a.txt': 'oak\nOAK\n', 'sub/b.js': 'oak here\n',
+    'acc.txt': 'café\nCAFÉ\ncafe\n', 'cjk.txt': '日本語\n漢字\n',
+  },
+
   // The same shapes plus non-ASCII names, where matching needs a locale.
   wide: {
     a: '1\n', ab: '2\n', 'a b': '3\n', 'a*b': '4\n', 'b.txt': '5\n',

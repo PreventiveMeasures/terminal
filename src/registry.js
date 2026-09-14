@@ -25,7 +25,7 @@ const isBuiltin = (name) => Boolean(BUILTIN_COMMANDS[name])
 
 // Priority for completion/help; unlisted builtins follow in sorted order.
 const COMMAND_ORDER = [
-  'ls', 'cd', 'cat', 'grep', 'find',
+  'ls', 'cd', 'cat', 'grep', 'rg', 'find',
   'head', 'tail', 'wc', 'tree', 'du', 'stat', 'realpath',
   'sort', 'uniq', 'cut', 'tr', 'awk', 'nl', 'tac', 'hexdump', 'base64',
   'xargs', 'echo', 'printf', 'test', 'cp', 'rm',

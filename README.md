@@ -78,7 +78,7 @@ in, and `$1`, a `local` and the rest are nothing the body could have read. A
 body that needs any of them is refused rather than run as something it is
 not.
 
-`ls` `cd` `cat` `grep` `egrep` `fgrep` `sed` `awk` `find` `head` `tail` `wc`
+`ls` `cd` `cat` `grep` `rg` `egrep` `fgrep` `sed` `awk` `find` `head` `tail` `wc`
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
 `printf` `test` `cp` `rm` `du` `stat` `realpath` `pwd` `seq` `which` `basename`
 `dirname` — plus your own, via `opts.commands`.
@@ -88,6 +88,20 @@ not.
 BSD `-A`) supports block and human-readable units, and `--inodes` counts
 entries. Allocated disk sizes are unavailable, so plain `du` and `du -sh`
 report an unsupported diagnostic.
+
+`rg` covers the search itself: recursion, `-n -N -i -s -w -v -F -a -l -c -e -q
+-H -I -A -B -C -u`, and skipping hidden entries unless `--hidden`. Options are
+last-one-wins and `-u` escalates, as in ripgrep. Its regex is checked against
+ripgrep's own engine, so backreferences and look-around are refused rather than
+answered. `.gitignore` in a repository, `.ignore` and `.rgignore` change which
+files are searched -- from any directory above the starting point as well as
+below it -- so a tree carrying one is refused unless `--no-ignore`;
+binary files are left out of a walk but a named one is refused, and `-t`, `-g`,
+`--files` and the other output modes report an unsupported diagnostic. A
+pattern spelling out a newline, and a file starting with a byte-order mark, are
+refused rather than answered differently from ripgrep. Literal matching crosses
+scripts, but Unicode-aware matching does not: `-i`, `-w`, `.` and `\w` over a
+tree holding any non-ASCII file report an unsupported diagnostic.
 
 `stat -c '%s %n' file` reports byte size and name; `%F` reports file type.
 `--printf` adds escape processing and controls line endings. Default `stat`
@@ -99,7 +113,7 @@ relative output (`--relative-to`, `--relative-base`), quiet errors (`-q`) and
 NUL terminators (`-z`). It resolves paths within the virtual filesystem.
 
 Behaviour is checked against the real tools: bash 5.2, GNU grep 3.11, GNU sed
-4.9 and gawk 5.2 in the C locale, alongside the BusyBox, GNU/Spencer regex and
+4.9, gawk 5.2 and ripgrep 14.1 in the C locale, alongside the BusyBox, GNU/Spencer regex and
 Oils spec corpora.
 
 MIT

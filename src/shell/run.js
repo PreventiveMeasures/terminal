@@ -64,7 +64,7 @@ function runPipeline(stages, ctx, stream) {
     const fds = { ...ctx.outputFds }
     if (i < stages.length - 1) fds[1] = { write(text) { piped += text } }
     const stageInput = input
-    const run = () => pipelineStage(stage, ctx, stageInput, first && ctx.stdinFile, fds)
+    const run = () => pipelineStage(stage, ctx, stageInput, first && ctx.stdinFile, fds, first ? ctx.stdinPiped : true)
     const routed = stages.length > 1 ? isolated(ctx, run) : run()
     if (first) stream.text = routed.inputLeft
     appendOutput(output, routed)
@@ -78,8 +78,8 @@ function runPipeline(stages, ctx, stream) {
 
 // Simple-command arguments expand before redirects. All expansion diagnostics
 // follow the descriptors active at their expansion site.
-function pipelineStage(stage, ctx, stdin, stdinFile, fds) {
-  const initial = { fds, stdin, stdinFile, stdinOrigin: stdinFile ? ctx.stdinOrigin : null, stdinHandle: stdinFile ? ctx.stdinHandle : null }
+function pipelineStage(stage, ctx, stdin, stdinFile, fds, stdinPiped) {
+  const initial = { fds, stdin, stdinFile, stdinPiped, stdinOrigin: stdinFile ? ctx.stdinOrigin : null, stdinHandle: stdinFile ? ctx.stdinHandle : null }
   return withState(ctx, { substitutionExit: null, expansionOutput: emptyOutput(), expansionFds: fds }, () => withStreams(initial, ctx, () => {
     const simple = !stage.group && !stage.loop && !stage.conditional && !stage.test && !stage.define
     let expanded, expansionError
@@ -153,7 +153,8 @@ function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
   let handle = file ? ctx.stdinHandle : null
   let inherited = true
   let parentLeft = stdin
-  const done = (error) => ({ error, fds, stdin: input, stdinFile: file, stdinOrigin: file ? origin : null, stdinHandle: file ? handle : null, inherited, parentLeft })
+  let redirected = false
+  const done = (error) => ({ error, fds, stdin: input, stdinFile: file, stdinPiped: redirected || ctx.stdinPiped, stdinOrigin: file ? origin : null, stdinHandle: file ? handle : null, inherited, parentLeft })
   const expand = (fn) => {
     const value = withState(ctx, { expansionFds: fds }, () => withStreams({ fds, stdin: input, stdinFile: file, stdinOrigin: origin, stdinHandle: handle }, ctx, fn))
     input = ctx.stdinLeft
@@ -189,7 +190,7 @@ function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
         // A pipe's /dev/stdin shares the current stream. A regular file
         // is reopened from its original start with an independent offset.
         if (t.value !== '/dev/stdin' || file) inherited = false
-        if (t.value !== '/dev/stdin') { file = t.value !== '/dev/null'; origin = file ? input : null; handle = read.handle }
+        if (t.value !== '/dev/stdin') { file = t.value !== '/dev/null'; origin = file ? input : null; handle = read.handle; redirected = file }
       }
     }
     if (file && handle) {
@@ -221,7 +222,7 @@ function shellResult(ctx, fn) {
 // Closed descriptors propagate from enclosing groups. Leave stdinLeft
 // available to the enclosing list while restoring the other stream state.
 function withStreams(io, ctx, fn) {
-  const state = { outputFds: io.fds, closed: { out: io.fds[1] === 'closed', err: io.fds[2] === 'closed' }, stdinFile: Boolean(io.stdinFile), stdinOrigin: io.stdinOrigin, stdinHandle: io.stdinHandle }
+  const state = { outputFds: io.fds, closed: { out: io.fds[1] === 'closed', err: io.fds[2] === 'closed' }, stdinFile: Boolean(io.stdinFile), stdinPiped: io.stdinPiped ?? ctx.stdinPiped, stdinOrigin: io.stdinOrigin, stdinHandle: io.stdinHandle }
   ctx.stdinLeft = io.stdin
   return withState(ctx, state, fn)
 }

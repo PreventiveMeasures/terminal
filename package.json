@@ -80,6 +80,8 @@
     "src/commands/printf.js",
     "src/commands/quote-name.js",
     "src/commands/realpath.js",
+    "src/commands/rg-options.js",
+    "src/commands/rg.js",
     "src/commands/rm.js",
     "src/commands/sed-common.js",
     "src/commands/sed-in-place.js",
