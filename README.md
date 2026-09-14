@@ -89,13 +89,14 @@ BSD `-A`) supports block and human-readable units, and `--inodes` counts
 entries. Allocated disk sizes are unavailable, so plain `du` and `du -sh`
 report an unsupported diagnostic.
 
-`rg` covers the search itself: recursion, `-n -i -w -v -F -l -c -e -A -B -C`,
-and skipping hidden entries unless `--hidden`. Its regex is checked against
+`rg` covers the search itself: recursion, `-n -N -i -s -w -v -F -a -l -c -e -q
+-H -I -A -B -C -u`, and skipping hidden entries unless `--hidden`. Options are
+last-one-wins and `-u` escalates, as in ripgrep. Its regex is checked against
 ripgrep's own engine, so backreferences and look-around are refused rather than
 answered. `.gitignore` in a repository, `.ignore` and `.rgignore` change which
 files are searched, so a tree carrying one is refused unless `--no-ignore`;
-`-t`, `-g`, `--files` and the other output modes report an unsupported
-diagnostic.
+binary files are left out of a walk but a named one is refused, and `-t`, `-g`,
+`--files` and the other output modes report an unsupported diagnostic.
 
 `stat -c '%s %n' file` reports byte size and name; `%F` reports file type.
 `--printf` adds escape processing and controls line endings. Default `stat`

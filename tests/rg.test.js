@@ -148,3 +148,63 @@ describe('rg refuses the options it does not implement', () => {
     assert.equal(result.unsupported.length, 1)
   })
 })
+
+describe('rg reads repeated and cancelling options the way ripgrep does', () => {
+  const B = { 'a.txt': 'oak\nOAK\n', 'sub/b.js': 'oak\n', '.hidden': 'oak hidden\n' }
+  // Last one wins for every pair that cancels.
+  for (const [command, stdout] of [
+    ['rg -i -s oak', 'a.txt:oak\nsub/b.js:oak\n'],
+    ['rg -s -i oak', 'a.txt:oak\na.txt:OAK\nsub/b.js:oak\n'],
+    ['rg -n -N oak', 'a.txt:oak\nsub/b.js:oak\n'],
+    ['rg -N -n oak', 'a.txt:1:oak\nsub/b.js:1:oak\n'],
+    ['rg -c -l oak', 'a.txt\nsub/b.js\n'],
+    ['rg -l -c oak', 'a.txt:1\nsub/b.js:1\n'],
+    ['rg -i -s -i oak', 'a.txt:oak\na.txt:OAK\nsub/b.js:oak\n'],
+  ]) {
+    it(command, () => assert.equal(run(command, B).stdout, stdout))
+  }
+
+  // -u reduces filtering a step at a time, so it has to be counted.
+  it('escalates with each -u', () => {
+    assert.equal(run('rg -u oak', B).stdout, 'a.txt:oak\nsub/b.js:oak\n')
+    for (const command of ['rg -uu oak', 'rg -u -u oak', 'rg --unrestricted --unrestricted oak']) {
+      assert.equal(run(command, B).stdout, '.hidden:oak hidden\na.txt:oak\nsub/b.js:oak\n', command)
+    }
+    // A third -u asks for binary files to be reported, which needs ripgrep's
+    // own binary output.
+    assert.equal(run('rg -uuu oak', B).unsupported[0].detail, '-uuu')
+  })
+
+  it('matches the union of repeated patterns', () => {
+    assert.equal(run('rg -e oak -e elm', { 'a.txt': 'oak\nelm\nash\n' }).stdout, 'a.txt:oak\na.txt:elm\n')
+    assert.equal(run('rg -e "^oak" -e "elm$"', { 'a.txt': 'oak\nelm\nash\n' }).stdout, 'a.txt:oak\na.txt:elm\n')
+    // -F keeps each pattern literal rather than joining them into a regex.
+    assert.equal(run('rg -F -e oak -e elm', { 'a.txt': 'oak\nelm\nash\n' }).stdout, 'a.txt:oak\na.txt:elm\n')
+  })
+
+  it('spells the filename flags the way ripgrep does', () => {
+    // -H is --with-filename and -I is --no-filename; -h is --help, not a search.
+    assert.equal(run('rg -H oak a.txt', B).stdout, 'a.txt:oak\n')
+    assert.equal(run('rg -I oak', B).stdout, 'oak\noak\n')
+    assert.equal(run('rg -h oak', B).unsupported[0].detail, '-h')
+  })
+})
+
+describe('rg skips binary files while walking and refuses a named one', () => {
+  const B = { 't.txt': 'oak\n', 'b.dat': 'oak\u0000bin\n' }
+  it('leaves a binary file out of a walk, as ripgrep does', () => {
+    const result = run('rg oak .', B)
+    assert.equal(result.stdout, './t.txt:oak\n')
+    assert.equal(result.exitCode, 0)
+    assert.deepEqual(result.unsupported, [])
+  })
+
+  it('refuses a binary file named outright', () => {
+    // ripgrep answers "binary file matches" here, which this runtime cannot print.
+    assert.equal(run('rg oak b.dat', B).unsupported[0].detail, 'named binary file')
+  })
+
+  it('searches it as text with -a', () => {
+    assert.equal(run('rg -a oak b.dat', B).exitCode, 0)
+  })
+})
