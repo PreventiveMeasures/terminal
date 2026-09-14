@@ -5252,6 +5252,27 @@ describe('createTerminal — complete', () => {
     for (const name of c) assert.ok(name.startsWith('c'))
   })
 
+  // A function is a command this shell runs and shadows a builtin of its name,
+  // so completion offers it where it offers the rest — and only once a
+  // definition has run, since a name nothing defined is a name nothing runs.
+  it('completes a function once it has been defined', () => {
+    const t = createTerminal(SOURCES)
+    assert.deepEqual(t.complete('be'), [])
+    t.run('bench() { ls; }')
+    assert.deepEqual(t.complete('be'), ['bench'])
+    assert.deepEqual(t.complete('bench'), ['bench'])
+    assert.ok(t.complete('').includes('bench'))
+    assert.deepEqual(t.complete('ls | be'), ['ls | bench'])
+    assert.deepEqual(t.complete('cat README.md && be'), ['cat README.md && bench'])
+    // A bin prefix names a registered command, which a function never is.
+    assert.deepEqual(t.complete('/usr/bin/be'), [])
+    // A name already among the commands is offered once, not twice.
+    t.run('ls() { echo x; }')
+    assert.deepEqual(t.complete('ls'), ['ls'])
+    // A definition the line has yet to run does not complete.
+    assert.deepEqual(t.complete('later'), [])
+  })
+
   it('returns [] when no command matches the prefix', () => {
     const t = createTerminal(SOURCES)
     assert.deepEqual(t.complete('zzz'), [])
@@ -5400,6 +5421,41 @@ describe('createTerminal — complete: corner cases', () => {
       assert.ok(c.includes(input + 'cat'), `expected ${JSON.stringify(input + 'cat')}`)
       assert.ok(c.includes(input + 'grep'), `expected ${JSON.stringify(input + 'grep')}`)
     }
+  })
+
+  // A block opens a command position like any separator does, so what is being
+  // typed inside one completes as it would on a line of its own.
+  it('completes inside every block a line can open', () => {
+    const t = createTerminal(SOURCES)
+    for (const head of [
+      'for i in a; do ',
+      'while true; do ',
+      'until true; do ',
+      'if true; then ',
+      'if a; then b; else ',
+      'if a; then b; elif ',
+      'while ',
+      'until ',
+      'if ',
+      'f() { ',
+      '( ',
+      '{ ',
+      '! ',
+      'echo x; ',
+    ]) {
+      assert.deepEqual(t.complete(head + 'gre'), [head + 'grep'], head)
+      assert.deepEqual(t.complete(head + 'cat REA'), [head + 'cat README.md'], head)
+    }
+    // A word that closes a block is a word bash takes nothing after.
+    for (const head of ['for i in a; do ls; done ', 'while false; do ls; done ', 'if a; then b; fi ', '{ ls; } ']) {
+      assert.deepEqual(t.complete(head + 'gre'), [], head)
+      assert.deepEqual(t.complete(head + 'REA'), [], head)
+    }
+    // `for NAME in` names a variable and then says `in`: neither is a path,
+    // and this shell keeps no names to offer for the first.
+    assert.deepEqual(t.complete('for REA'), [])
+    assert.deepEqual(t.complete('for i REA'), [])
+    assert.deepEqual(t.complete('for i in REA'), ['for i in README.md'])
   })
 
   it('separator-only input resets to fresh command position', () => {

@@ -28,6 +28,9 @@ describe('diagnostic completeness — command dispatch', () => {
         '{ ' + command + '; } >/dev/null 2>&1 || true',
         '(' + command + ') 2>/dev/null | true',
         'for item in one two; do ' + command + '; done 2>/dev/null',
+        'while ' + command + '; do break; done 2>/dev/null',
+        'until ' + command + '; do break; done 2>/dev/null',
+        'f() { ' + command + '; }; f 2>/dev/null',
         "find src -type f -exec " + command + " {} ';' 2>/dev/null | true",
         'echo item | xargs ' + command + ' 2>/dev/null | true',
       ]) {
@@ -144,7 +147,17 @@ describe('diagnostic completeness — runtime and parser limitations', () => {
     ['cat <(cat f)', '<('],
     ['cat f > out', '>'],
     ['while true; do case x in a) :;; esac; done', 'case'],
+    ['until true; do case x in a) :;; esac; done', 'case'],
     ['fn() { cat $f; }; fn', 'function'],
+    ['fn() { [[ -f $f ]]; }; fn', 'function'],
+    ['fn() { ls; } > out', 'function'],
+    ['fn() { fn; }; fn', 'function recursion'],
+    ['ls > >(cat)', '>('],
+    ['echo x &', '&'],
+    ['while true; do :; done', 'loop limit'],
+    ['until false; do :; done', 'loop limit'],
+    ['exec 3>&1', '3>&1'],
+    ['read x', 'read'],
   ]) {
     it(command, () => {
       const r = run(command)

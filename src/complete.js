@@ -8,14 +8,17 @@ export function complete(line, ctx, reg) {
   const scanned = completionContext(line)
   if (!scanned) return []
   const { start, pipe, quote, words } = scanned
-  if (words[0] === 'do') words.shift()
-  if (words[0] === 'done') return []
+  while (OPENS_LIST.has(words[0])) words.shift()
+  if (CLOSES_LIST.has(words[0])) return []
+  // `for NAME in` takes a variable name and then the word `in`, neither of
+  // which is a path or a command, and this shell has no names to offer.
+  if (words[0] === 'for' && words.length <= 2) return []
   const raw = line.slice(start)
   const word = literalWord(raw, quote)
   if (!word) return []
   const commandPosition = words.length === 0
   const command = commandPosition ? '' : reg.resolveCommand(literalWord(words[0], null)?.value ?? '')
-  const candidates = commandPosition ? completeCommand(word.value, pipe, reg)
+  const candidates = commandPosition ? completeCommand(word.value, pipe, reg, ctx.functions)
     : pipe ? [] : completePath(word, ctx, command === 'cd')
   const head = line.slice(0, start)
   // A bare pipe benefits from a space; a typed command must keep its prefix.
@@ -23,14 +26,24 @@ export function complete(line, ctx, reg) {
   return candidates.map((candidate) => head + sep + raw + quoteSuffix(candidate.slice(word.value.length), quote))
 }
 
-// Bin prefixes complete registered commands, not arbitrary executable paths.
-function completeCommand(word, pipe, reg) {
+// The reserved words that stand in front of a list rather than end one: a word
+// typed after any of them opens a command, so it completes as a command name.
+// After a word that closes a block, bash takes no word at all.
+const OPENS_LIST = new Set(['!', '{', 'do', 'then', 'else', 'elif', 'if', 'while', 'until'])
+const CLOSES_LIST = new Set(['done', 'fi', '}', 'esac'])
+
+// Bin prefixes complete registered commands, not arbitrary executable paths —
+// and a function is not one of those, whatever it is named. Everywhere else a
+// defined function is a command this shell runs, so it completes as one, after
+// the registered names and only where it does not already stand among them.
+function completeCommand(word, pipe, reg, functions) {
   const names = pipe ? reg.pipeNames : reg.names
   for (const prefix of reg.binPrefixes) {
     if (word.startsWith(prefix)) return names.filter((n) => n.startsWith(word.slice(prefix.length))).map((n) => prefix + n)
   }
   if (word.startsWith('/') || word.startsWith('./')) return []
-  return names.filter((n) => n.startsWith(word))
+  const defined = [...functions.keys()].filter((name) => !names.includes(name))
+  return [...names, ...defined].filter((n) => n.startsWith(word))
 }
 
 // Read incomplete input while preserving original offsets. Quoted operators
@@ -40,6 +53,7 @@ function completionContext(line) {
   let pipe = false
   let quote = null
   let inWord = false
+  let opened = -1
   const words = []
   for (let i = 0; i < line.length; i++) {
     const c = line[i]
@@ -67,8 +81,10 @@ function completionContext(line) {
     }
     const or = c === '|' && line[i + 1] === '|'
     const and = c === '&' && line[i + 1] === '&'
-    if (c === '|' || and || c === ';' || c === '\n' || c === '(') {
+    // `name ()` opens a function body, the one place a `)` leads a command.
+    if (c === '|' || and || c === ';' || c === '\n' || c === '(' || (c === ')' && opened === i - 1)) {
       if (or || and) i++
+      if (c === '(') opened = i
       start = i + 1
       pipe = c === '|' && !or
       words.length = 0
