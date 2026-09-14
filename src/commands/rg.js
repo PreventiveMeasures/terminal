@@ -32,7 +32,7 @@ export function rg(stdin, tokens, ctx) {
   // the tree. A pipe or a `<` redirect counts as connected even when it carries
   // nothing, which is why this asks the shell rather than looking at content.
   const piped = !operands.length && Boolean(ctx.stdinPiped)
-  const targets = piped ? { roots: [], recursive: false, stdin: true } : resolveTargets(operands, ctx)
+  const targets = piped ? { roots: [], recursive: false, stdin: true } : resolveTargets(operands, ctx, options.hidden)
   if (targets.error) return targets.error
   if (!parsed.flags.has('no-ignore') && !options.unrestricted && targets.recursive) {
     const found = ignoreFileIn(targets.roots, ctx)
@@ -50,7 +50,7 @@ export function rg(stdin, tokens, ctx) {
 // rg filters only what it discovers by walking; an operand named on the command
 // line is always searched. Mixing the two would need two different filters in
 // one run, so a named hidden path alongside a directory is refused instead.
-function resolveTargets(operands, ctx) {
+function resolveTargets(operands, ctx, hidden) {
   const roots = []
   let hiddenNamed = false
   for (const operand of operands) {
@@ -60,7 +60,9 @@ function resolveTargets(operands, ctx) {
   }
   if (!operands.length) roots.push(ctx.cwd)
   const recursive = roots.length > 0
-  if (recursive && hiddenNamed && operands.length) {
+  // With --hidden nothing is filtered out of the walk, so naming a hidden path
+  // alongside a directory asks for nothing contradictory.
+  if (!hidden && recursive && hiddenNamed && operands.length) {
     return { error: gap('named hidden path', 'a hidden path named beside a directory is searched by ripgrep but skipped while walking, and both cannot apply at once') }
   }
   return { roots, recursive }
@@ -110,9 +112,10 @@ function runGrep(stdin, options, operands, targets, ctx) {
   if (options.after) argv.push('-A', String(options.after))
   if (options.before) argv.push('-B', String(options.before))
   if (targets.recursive) argv.push('-r')
-  // Dot-prefixed names are what rg leaves out of a walk; `.?*` spares the
-  // starting directory, which `.` would otherwise match.
-  if (targets.recursive && !options.hidden) argv.push('--exclude=.*', '--exclude-dir=.?*')
+  // Dot-prefixed names are what rg leaves out of a walk. The two directory
+  // globs spell that without catching `.` or `..`, either of which can be the
+  // starting point: the first takes `.hidden`, the second `..odd`.
+  if (targets.recursive && !options.hidden) argv.push('--exclude=.*', '--exclude-dir=.[!.]*', '--exclude-dir=..?*')
   argv.push(...patternArgs(options.patterns, options.literal))
   if (!targets.stdin) argv.push('--', ...(operands.length ? operands : ['.']))
   const before = new Set(ctx.notes)

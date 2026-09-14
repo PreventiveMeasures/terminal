@@ -284,3 +284,43 @@ describe('rg refuses a byte-order mark rather than matching through it', () => {
     assert.deepEqual(run('rg oak', { 'plain.txt': 'oak\n' }).unsupported, [])
   })
 })
+
+describe('rg walks from a starting point that is itself dot-named', () => {
+  const B = { 'a.txt': 'oak\n', 'sub/b.js': 'oak\n', '.hidden': 'oak hidden\n', 'sub/.h/g.txt': 'oak nested\n' }
+  it('searches the parent from a subdirectory', () => {
+    // `..` and `.` are dot-named, so a glob that removes hidden directories has
+    // to spare them or the walk starts nowhere.
+    const t = createTerminal(B, { cwd: '/sub' })
+    assert.equal(t.run('rg oak ..').stdout, '../a.txt:oak\n../sub/b.js:oak\n')
+    assert.equal(t.run('rg oak .').stdout, './b.js:oak\n')
+  })
+
+  it('still leaves hidden directories out of that walk', () => {
+    const t = createTerminal(B, { cwd: '/sub' })
+    assert.equal(t.run('rg --hidden oak ..').stdout,
+      '../.hidden:oak hidden\n../a.txt:oak\n../sub/.h/g.txt:oak nested\n../sub/b.js:oak\n')
+  })
+
+  it('keeps a directory whose name only begins with two dots out of a walk', () => {
+    const files = { 'a.txt': 'oak\n', '..odd/g.txt': 'oak odd\n' }
+    assert.equal(run('rg oak', files).stdout, 'a.txt:oak\n')
+    assert.equal(run('rg --hidden oak', files).stdout, '..odd/g.txt:oak odd\na.txt:oak\n')
+  })
+})
+
+describe('rg only refuses a named hidden path when it is also filtering', () => {
+  const B = { 'a.txt': 'oak\n', 'sub/b.js': 'oak\n', '.hidden': 'oak hidden\n' }
+  it('refuses while hidden entries are being skipped', () => {
+    assert.equal(run('rg oak .hidden sub', B).unsupported[0].detail, 'named hidden path')
+  })
+
+  it('accepts it with --hidden, where nothing is filtered', () => {
+    const result = run('rg --hidden oak .hidden sub', B)
+    assert.equal(result.stdout, '.hidden:oak hidden\nsub/b.js:oak\n')
+    assert.deepEqual(result.unsupported, [])
+  })
+
+  it('accepts it with -uu, which implies --hidden', () => {
+    assert.deepEqual(run('rg -uu oak .hidden sub', B).unsupported, [])
+  })
+})
