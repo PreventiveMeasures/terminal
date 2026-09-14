@@ -68,26 +68,37 @@ terminal.parse('while :; do echo x; done').unsupported[0].detail  // 'while'
 
 `list` is the whole line: each command carries the `op` that joins it to the
 one before (`;`, `&&`, `||`, and a newline reads as `;`), its `argv`, and
-whatever else it has — `assigns`, `redirs`, a `negate` for `!`. Pipelines,
-subshells, `{ …; }` groups, `for` loops, `if` branches and `[[ … ]]` tests are
-nodes of their own, each named by `type`. A field that would only say "nothing
+whatever else it has — `assignments`, `redirects`, a `negate` for `!`.
+Pipelines, subshells, `{ …; }` groups, `for` loops, `if` branches and
+`[[ … ]]` tests are nodes of their own, each named by `type`. A field that would only say "nothing
 here" is left out, and a line that fails partway still carries the commands
 ahead of the error.
 
-Values are plain text wherever the text is final, and a word node only where
-expansion still decides it — so reading arguments takes no knowledge of
+Values are plain text wherever the text is final, and a word in pieces only
+where expansion still decides it — so reading arguments takes no knowledge of
 quoting:
 
 ```js
 terminal.parse('grep -rn "$pattern" src/*.js').list[0].argv
 // [ 'grep', '-rn',
-//   { type: 'word', value: '${pattern}', mask: '2222222222' },
-//   { type: 'word', value: 'src/*.js' } ]
+//   { type: 'parameter', name: 'pattern', quoted: true },
+//   { type: 'pattern', pattern: 'src/*.js' } ]
 ```
 
-`'*'` is the string `*`, because quoting settled it; `*.js` is a word, because
-the filesystem has yet to. `mask` says which characters were quoted (`0` bare,
-`1` hard-quoted, `2` inside double quotes).
+`'*'` is the string `*`, because quoting settled it; `*.js` is a pattern,
+because the filesystem has yet to. A piece is a plain string once nothing can
+change it; otherwise it names what it waits for — `pattern`, `tilde`,
+`parameter`, `substitution`, `arithmetic`. A word of several pieces is a
+`parts` node holding them in order, and a word of one piece is that piece.
+
+Braces need nothing but the text, so they are already expanded: `ls a{b,c}`
+reads as `['ls', 'ab', 'ac']`, exactly as bash reads it before anything else
+happens. A substitution holds the commands it runs, parsed the same way:
+
+```js
+terminal.parse('foo `bar a b c`').list[0].argv[1]
+// { type: 'substitution', list: [ { type: 'command', argv: ['bar', 'a', 'b', 'c'] } ] }
+```
 
 ## The parser on its own
 
@@ -108,6 +119,45 @@ terminal whose filesystem is read-only.
 Either way, only parsing happens, so only parsing's answers come back. Whether
 a command exists, what an option means, and what an expansion produces are
 `run()`'s to find.
+
+## The short answer
+
+`summarize(line)` is for a caller that only wants to know what a line runs:
+every command in plain text, with `&&` and `||` between the chains they gate.
+
+```js
+import { summarize } from '@preventive/terminal/parse.js'
+
+summarize('foo -bar | head -10; ls > file.txt')
+// [ [['foo', '-bar'], ['head', '-10']], [['ls'], ['>', 'file.txt']] ]
+
+summarize('foo -bar | head -10 && ls > file.txt')
+// [ [['foo', '-bar'], ['head', '-10']], '&&', [['ls'], ['>', 'file.txt']] ]
+
+summarize('wc < 1.txt || ls')
+// [ [['cat', '1.txt'], ['wc']], '||', [['ls']] ]
+```
+
+It reports what a line does rather than how it was written, which is why a
+command reading a file comes back as the `cat` that feeds it, and why a quoted
+`$(cat <<'EOF' … EOF)` comes back as the text that here-document holds.
+
+A token is text, or the pattern or `~` an argument is written as:
+
+```js
+summarize('ls *.js ~/bin a{b,c}')
+// [ [ ['ls', { type: 'pattern', pattern: '*.js' }, { type: 'tilde', source: '~/bin' }, 'ab', 'ac'] ] ]
+```
+
+Anything else throws rather than be summarized into a lie: a line that does not
+parse, `while`, `case` and the other constructs this terminal refuses, a
+subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
+here-document or here-string, and any word whose text only running it settles —
+`$x`, `` `date` ``, or a word joined from pieces like `a*"b"`. `parse()` reads
+those.
+
+A terminal has the same method, under its own write policy: `summarize('ls >
+out')` throws there when nothing may be written.
 
 ## Writing
 

@@ -22,10 +22,10 @@ function commandNames(nodes) {
   for (const node of nodes) {
     if (node.type === 'command') { if (node.argv.length > 0) out.push(node.argv[0]) }
     else if (node.type === 'pipeline') out.push(...commandNames(node.stages))
-    else if (node.type === 'subshell' || node.type === 'group') out.push(...commandNames(node.body))
-    else if (node.type === 'for') out.push(...commandNames(node.body))
+    else if (node.type === 'subshell' || node.type === 'group') out.push(...commandNames(node.list))
+    else if (node.type === 'for') out.push(...commandNames(node.list))
     else if (node.type === 'if') {
-      for (const branch of node.branches) out.push(...commandNames(branch.condition), ...commandNames(branch.body))
+      for (const branch of node.branches) out.push(...commandNames(branch.condition), ...commandNames(branch.list))
       if (node.otherwise) out.push(...commandNames(node.otherwise))
     }
   }
@@ -33,6 +33,8 @@ function commandNames(nodes) {
 }
 
 const named = (line, opts) => commandNames(list(line, opts))
+const parts = (...pieces) => pieces.length === 1 ? pieces[0] : { type: 'parts', parts: pieces }
+const pattern = (source) => ({ type: 'pattern', pattern: source })
 
 describe('parse() hands back the line as the parser read it', () => {
   it('describes a simple command as its argv', () => {
@@ -73,24 +75,48 @@ describe('parse() hands back the line as the parser read it', () => {
 
   it('separates a subshell from a brace group', () => {
     assert.deepEqual(list('(cd dir) ; { cd dir; }'), [
-      { type: 'subshell', body: [{ type: 'command', argv: ['cd', 'dir'] }] },
-      { type: 'group', op: ';', body: [{ type: 'command', argv: ['cd', 'dir'] }] },
+      { type: 'subshell', list: [{ type: 'command', argv: ['cd', 'dir'] }] },
+      { type: 'group', op: ';', list: [{ type: 'command', argv: ['cd', 'dir'] }] },
     ])
   })
 
-  it("carries a loop's variable, its unexpanded list and its body", () => {
+  // Brace expansion needs nothing but the text, and bash runs it first, so a
+  // word list arrives with its braces already worked out.
+  it('expands braces in a word list, and leaves alone what they are not', () => {
+    assert.deepEqual(list('ls a{b,c} {1..3} a{b} "{a,b}"')[0].argv, ['ls', 'ab', 'ac', '1', '2', '3', 'a{b}', '{a,b}'])
+    assert.deepEqual(list('ls ~/x{x,2}*')[0].argv, ['ls', pattern('~/xx*'), pattern('~/x2*')])
+    assert.deepEqual(list('for f in {1..3}; do ls; done')[0].words, ['1', '2', '3'])
+  })
+
+  // Only a word list multiplies: an assignment, a here-string and a `[[ … ]]`
+  // operand take one word, and bash leaves their braces as text.
+  it('leaves braces alone where the shell does not expand them', () => {
+    assert.deepEqual(list('x={a,b} ls')[0].assignments, [{ name: 'x', value: '{a,b}' }])
+    assert.deepEqual(list('cat <<< {a,b}')[0].redirects, [{ fd: 0, op: '<<<', text: '{a,b}' }])
+    assert.deepEqual(list('[[ q == {a,b} ]]')[0].expression, { type: 'binary', op: '==', left: 'q', right: '{a,b}' })
+  })
+
+  // A redirect names one file, so a target that multiplies has nothing to say
+  // for itself but what it was written as.
+  it('keeps a redirect target that brace expansion would multiply', () => {
+    assert.deepEqual(list('ls > {a,b}')[0].redirects, [{ fd: 1, op: '>', target: { type: 'brace', source: '{a,b}' } }])
+    assert.deepEqual(list('ls > {1..1}')[0].redirects, [{ fd: 1, op: '>', target: '1' }])
+    assert.equal(terminal().run('ls > {a,b}').stderr.trim(), 'error: {a,b}: ambiguous redirect')
+  })
+
+  it("carries a loop's variable, the words after `in` and the list it runs", () => {
     assert.deepEqual(list('for f in *.js a; do wc -l "$f"; done'), [{
       type: 'for',
       name: 'f',
-      words: [{ type: 'word', value: '*.js' }, 'a'],
-      body: [{ type: 'command', argv: ['wc', '-l', { type: 'word', value: '${f}', mask: '2222' }] }],
+      words: [pattern('*.js'), 'a'],
+      list: [{ type: 'command', argv: ['wc', '-l', parts({ type: 'parameter', name: 'f', quoted: true })] }],
     }])
     assert.deepEqual(list('for f in; do ls; done')[0].words, [])
   })
 
-  it('orders if branches, each condition ahead of its body', () => {
+  it('orders if branches, each condition ahead of the list it guards', () => {
     const [node] = list('if ls; then cat a.txt; elif grep -q x a.txt; then head a.txt; else tail a.txt; fi')
-    assert.deepEqual(node.branches.map((b) => [commandNames(b.condition), commandNames(b.body)]), [
+    assert.deepEqual(node.branches.map((b) => [commandNames(b.condition), commandNames(b.list)]), [
       [['ls'], ['cat']], [['grep'], ['head']],
     ])
     assert.deepEqual(commandNames(node.otherwise), ['tail'])
@@ -103,7 +129,7 @@ describe('parse() hands back the line as the parser read it', () => {
       expression: {
         type: 'and',
         left: { type: 'not', expression: { type: 'unary', op: '-f', word: 'a.txt' } },
-        right: { type: 'binary', op: '==', left: { type: 'word', value: '${x}', mask: '2222' }, right: 'y' },
+        right: { type: 'binary', op: '==', left: parts({ type: 'parameter', name: 'x', quoted: true }), right: 'y' },
       },
     }])
   })
@@ -112,14 +138,14 @@ describe('parse() hands back the line as the parser read it', () => {
     assert.deepEqual(list('x=1 y=$z'), [{
       type: 'command',
       argv: [],
-      assigns: [{ name: 'x', value: '1' }, { name: 'y', value: { type: 'word', value: '$z' } }],
+      assignments: [{ name: 'x', value: '1' }, { name: 'y', value: parts({ type: 'parameter', name: 'z' }) }],
     }])
-    assert.deepEqual(list('x=1 ls'), [{ type: 'command', argv: ['ls'], assigns: [{ name: 'x', value: '1' }] }])
+    assert.deepEqual(list('x=1 ls'), [{ type: 'command', argv: ['ls'], assignments: [{ name: 'x', value: '1' }] }])
   })
 
   it('reads every redirect form, in source order', () => {
     const line = 'cat < a.txt > /tmp/out 2>> /tmp/log &> /tmp/both 2>&1 2>&- <<<here <<EOF\nbody\nEOF'
-    assert.deepEqual(list(line)[0].redirs, [
+    assert.deepEqual(list(line)[0].redirects, [
       { fd: 0, op: '<', target: 'a.txt' },
       { fd: 1, op: '>', target: '/tmp/out' },
       { fd: 2, op: '>>', target: '/tmp/log' },
@@ -127,20 +153,20 @@ describe('parse() hands back the line as the parser read it', () => {
       { fd: 2, op: '>&', toFd: 1 },
       { fd: 2, op: '>&-' },
       { fd: 0, op: '<<<', text: 'here' },
-      { fd: 0, op: '<<', body: 'body\n', expand: true },
+      { fd: 0, op: '<<', text: 'body\n', expand: true },
     ])
   })
 
   it('marks a redirect target expansion has yet to settle', () => {
-    assert.deepEqual(list('echo a > $out')[0].redirs, [{ fd: 1, op: '>', target: { type: 'word', value: '$out' } }])
-    assert.deepEqual(list("cat <<'EOF'\n$x\nEOF")[0].redirs, [{ fd: 0, op: '<<', body: '$x\n', expand: false }])
+    assert.deepEqual(list('echo a > $out')[0].redirects, [{ fd: 1, op: '>', target: parts({ type: 'parameter', name: 'out' }) }])
+    assert.deepEqual(list("cat <<'EOF'\n$x\nEOF")[0].redirects, [{ fd: 0, op: '<<', text: '$x\n', expand: false }])
   })
 
   it('carries a block its own redirects', () => {
     assert.deepEqual(list('{ ls; } > /tmp/out'), [{
       type: 'group',
-      body: [{ type: 'command', argv: ['ls'] }],
-      redirs: [{ fd: 1, op: '>', target: '/tmp/out' }],
+      list: [{ type: 'command', argv: ['ls'] }],
+      redirects: [{ fd: 1, op: '>', target: '/tmp/out' }],
     }])
   })
 
@@ -164,7 +190,7 @@ describe('parse() hands back the line as the parser read it', () => {
 })
 
 describe('parse() spells a value out only when expansion still decides it', () => {
-  for (const [word, value] of [
+  for (const [written, value] of [
     ['ls', 'ls'],
     ['"a b"', 'a b'],
     ["l''s", 'ls'],
@@ -175,31 +201,176 @@ describe('parse() spells a value out only when expansion still decides it', () =
     ['[', '['],
     ['a=b', 'a=b'],
   ]) {
-    it(`reads ${word} as the text ${JSON.stringify(value)}`, () => {
-      assert.deepEqual(list(`echo ${word}`)[0].argv, ['echo', value])
+    it(`reads ${written} as the text ${JSON.stringify(value)}`, () => {
+      assert.deepEqual(list(`echo ${written}`)[0].argv, ['echo', value])
     })
   }
 
-  for (const [word, node] of [
-    ['$x', { type: 'word', value: '$x' }],
-    ['"$x"', { type: 'word', value: '${x}', mask: '2222' }],
-    ['$(date)', { type: 'word', value: '$(date)', mask: '0111111' }],
-    ['"$(date)"', { type: 'word', value: '$(date)', mask: '2111111' }],
-    ['`date`', { type: 'word', value: '`date`', mask: '011111' }],
-    ['*.js', { type: 'word', value: '*.js' }],
-    ['~/bin', { type: 'word', value: '~/bin' }],
-    ['{a,b}', { type: 'word', value: '{a,b}' }],
-    ['[ab]c', { type: 'word', value: '[ab]c' }],
-    ['"$x"""', { type: 'word', value: '${x}', mask: '2222', empty: [4] }],
+  const dated = [{ type: 'command', argv: ['date'] }]
+  for (const [written, pieces] of [
+    ['$x', [{ type: 'parameter', name: 'x' }]],
+    ['"$x"', [{ type: 'parameter', name: 'x', quoted: true }]],
+    ['${x:-a b}', [{ type: 'parameter', name: 'x', operator: ':-', operand: 'a b' }]],
+    ['${#x}', [{ type: 'parameter', name: 'x', operator: 'length' }]],
+    ['$?', [{ type: 'parameter', name: '?' }]],
+    ['$(date)', [{ type: 'substitution', list: dated }]],
+    ['"$(date)"', [{ type: 'substitution', list: dated, quoted: true }]],
+    ['`date`', [{ type: 'substitution', list: dated }]],
+    ['$((1 + 2))', [{ type: 'arithmetic', source: '1 + 2' }]],
+    ['*.js', [pattern('*.js')]],
+    ['~/bin', [{ type: 'tilde', source: '~/bin' }]],
+    ['a{b}', ['a{b}']],
+    ['[ab]c', [pattern('[ab]c')]],
+    ['a*"b"', [pattern('a*'), 'b']],
+    ['a"b"$c', ['ab', { type: 'parameter', name: 'c' }]],
+    ['"$x"""', [{ type: 'parameter', name: 'x', quoted: true }, '']],
+    ['"a $x"', ['a ', { type: 'parameter', name: 'x', quoted: true }]],
   ]) {
-    it(`keeps ${word} as a word`, () => {
-      assert.deepEqual(list(`echo ${word}`)[0].argv[1], node)
+    it(`reads ${written} as the pieces expansion works on`, () => {
+      assert.deepEqual(list(`echo ${written}`)[0].argv[1], parts(...pieces))
     })
   }
+
+  it('reads the commands a substitution runs, however deep', () => {
+    assert.deepEqual(list('foo `bar a b c`')[0].argv, ['foo', parts({ type: 'substitution', list: [{ type: 'command', argv: ['bar', 'a', 'b', 'c'] }] })])
+    assert.deepEqual(list('echo $(cat $(ls))')[0].argv[1], parts({
+      type: 'substitution',
+      list: [{ type: 'command', argv: ['cat', parts({ type: 'substitution', list: [{ type: 'command', argv: ['ls'] }] })] }],
+    }))
+  })
+
+  // Bash reads a backtick when it expands it, so the line still parses.
+  it('keeps the diagnostic of a backtick body that does not parse', () => {
+    assert.deepEqual(list('echo `echo )`')[0].argv[1], parts({ type: 'substitution', list: [], error: 'unexpected `)`' }))
+    assert.equal(parse('echo `echo )`').ok, true)
+    assert.equal(parse('echo $(echo ))').ok, false)
+  })
 
   it('applies the same rule to a command name', () => {
     assert.deepEqual(named('"ls"'), ['ls'])
-    assert.deepEqual(named('$tool a'), [{ type: 'word', value: '$tool' }])
+    assert.deepEqual(named('$tool a'), [parts({ type: 'parameter', name: 'tool' })])
+  })
+})
+
+describe('summarize() answers for a simple chain, and refuses the rest', () => {
+  const CHAINS = [[['foo', '-bar'], ['head', '-10']], [['ls'], ['>', 'file.txt']]]
+
+  for (const [line, summary] of [
+    ['foo -bar | head -10; ls > file.txt', CHAINS],
+    ['foo -bar | head -10\nls > file.txt', CHAINS],
+    ['foo -bar | head -10 && ls > file.txt', [CHAINS[0], '&&', CHAINS[1]]],
+    ['foo -bar | head -10 || ls > file.txt', [CHAINS[0], '||', CHAINS[1]]],
+    ['a && b || c; d', [[['a']], '&&', [['b']], '||', [['c']], [['d']]]],
+  ]) {
+    it(`summarizes ${JSON.stringify(line)}`, () => {
+      assert.deepEqual(terminal().summarize(line), summary)
+    })
+  }
+
+  for (const [line, chains] of [
+    ['ls', [[['ls']]]],
+    ['ls -l a.txt', [[['ls', '-l', 'a.txt']]]],
+    ['cat "a b" | wc -l', [[['cat', 'a b'], ['wc', '-l']]]],
+    ['cat a 2> /tmp/err | tr a-z A-Z >> /tmp/out', [[['cat', 'a'], ['2>', '/tmp/err'], ['tr', 'a-z', 'A-Z'], ['>>', '/tmp/out']]]],
+    ['wc < 1.txt || ls', [[['cat', '1.txt'], ['wc']], '||', [['ls']]]],
+    ['wc -l < a.txt > /tmp/out', [[['cat', 'a.txt'], ['wc', '-l'], ['>', '/tmp/out']]]],
+    ['cat 0< a.txt | tr a-z A-Z', [[['cat', 'a.txt'], ['cat'], ['tr', 'a-z', 'A-Z']]]],
+    ['ls 2>&1 | grep x', [[['ls'], ['2>&1'], ['grep', 'x']]]],
+    ['ls >&2', [[['ls'], ['>&2']]]],
+    ['ls 2>&-', [[['ls'], ['2>&-']]]],
+    ['ls &> /tmp/both', [[['ls'], ['&>', '/tmp/both']]]],
+    ['', []],
+    ['# comment', []],
+  ]) {
+    it(`summarizes ${JSON.stringify(line)}`, () => {
+      assert.deepEqual(terminal().summarize(line), chains)
+    })
+  }
+
+  for (const [line, message] of [
+    ['(ls)', 'summarize: a subshell is not a simple chain'],
+    ['{ ls; }', 'summarize: a brace group is not a simple chain'],
+    ['for f in a; do ls; done', 'summarize: `for` is not a simple chain'],
+    ['if ls; then cat a.txt; fi', 'summarize: `if` is not a simple chain'],
+    ['[[ -f a.txt ]]', 'summarize: `[[ … ]]` is not a simple chain'],
+    ['! ls', 'summarize: `!` is not a simple chain'],
+    ['x=1 ls', 'summarize: an assignment is not a simple chain'],
+    ['x=1', 'summarize: an assignment is not a simple chain'],
+    ['> /tmp/out', 'summarize: a command with no name is not a simple chain'],
+    ['cat <<EOF\nbody\nEOF', 'summarize: a here-document is not a simple chain'],
+    ['sort <<<here', 'summarize: a here-string is not a simple chain'],
+    ['ls | wc < a.txt', 'summarize: a pipeline stage reading its own input is not a simple chain'],
+    ['wc < a.txt < b.txt', 'summarize: a command reading from two places is not a simple chain'],
+    ['wc < a.txt <<<here', 'summarize: a command reading from two places is not a simple chain'],
+    ['ls $x', 'summarize: ${x} is not a literal word'],
+    ['ls "$x"', 'summarize: ${x} is not a literal word'],
+    ['ls ${x:-a}', 'summarize: ${x:-a} is not a literal word'],
+    ['ls > {a,b}', 'summarize: {a,b} is not a literal word'],
+    ['ls a*"b"', 'summarize: a word joined from pieces is not a literal word'],
+    ['echo "$x"""', 'summarize: a word joined from pieces is not a literal word'],
+    ['echo `date`', 'summarize: $(…) is not a literal word'],
+    ['echo $(date)', 'summarize: $(…) is not a literal word'],
+    ['echo $((1 + 2))', 'summarize: $((…)) is not a literal word'],
+    ['echo a > $out', 'summarize: ${out} is not a literal word'],
+    ['ls; (cd dir)', 'summarize: a subshell is not a simple chain'],
+  ]) {
+    it(`refuses ${JSON.stringify(line)}`, () => {
+      assert.throws(() => terminal().summarize(line), { message })
+    })
+  }
+
+  for (const [line, message] of [
+    ['echo )', 'unexpected `)`'],
+    ['for f in a; do', 'for: missing `done`'],
+    ['while :; do :; done', '`while` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
+  ]) {
+    it(`throws the parse diagnostic for ${JSON.stringify(line)}`, () => {
+      assert.throws(() => terminal().summarize(line), { message })
+    })
+  }
+
+  // `"$(cat <<'EOF' … EOF)"` is the text it holds, so that is what it says.
+  const HERE = (body, delimiter = "'EOF'", quote = '"') => `echo ${quote}$(cat <<${delimiter}\n${body}\nEOF\n)${quote}`
+
+  it('reads a quoted here-document substitution as the text it produces', () => {
+    assert.deepEqual(terminal().summarize(HERE('multiline text\nover two lines')), [[['echo', 'multiline text\nover two lines']]])
+    assert.deepEqual(terminal().summarize('echo "prefix $(cat <<\'EOF\'\nx\nEOF\n) suffix"'), [[['echo', 'prefix x suffix']]])
+  })
+
+  for (const [label, line] of [
+    ['unquoted, so its text would split into fields', HERE('a b', "'EOF'", '')],
+    ['a delimiter that lets the body expand', HERE('$x', 'EOF')],
+    ['a cat that reads a file as well', 'echo "$(cat f <<\'EOF\'\nx\nEOF\n)"'],
+    ['another command reading it', 'echo "$(wc <<\'EOF\'\nx\nEOF\n)"'],
+    ['a second command after it', 'echo "$(cat <<\'EOF\'\nx\nEOF\nls)"'],
+  ]) {
+    it(`refuses ${label}`, () => {
+      assert.throws(() => terminal().summarize(line), /is not a literal word/u)
+    })
+  }
+
+  // A pattern says what it looks for as plainly as a name does, so long as it
+  // is the whole argument rather than one piece of a word.
+  it('keeps a whole-argument pattern or tilde as what it is', () => {
+    assert.deepEqual(terminal().summarize('ls *.js | head'), [[['ls', pattern('*.js')], ['head']]])
+    assert.deepEqual(terminal().summarize('ls ~/bin'), [[['ls', { type: 'tilde', source: '~/bin' }]]])
+    assert.deepEqual(terminal().summarize('ls a{b,c} {1..3}'), [[['ls', 'ab', 'ac', '1', '2', '3']]])
+    assert.deepEqual(terminal().summarize('wc < *.txt'), [[['cat', pattern('*.txt')], ['wc']]])
+    assert.deepEqual(terminal().summarize('cat x > /tmp/out*'), [[['cat', 'x'], ['>', pattern('/tmp/out*')]]])
+    assert.deepEqual(terminal().summarize('ls "*"'), [[['ls', '*']]])
+  })
+
+  it("refuses a write the terminal's filesystem would, as parse() does", () => {
+    const readOnly = createTerminal(SOURCES, { mount: '/src' })
+    assert.throws(() => readOnly.summarize('ls > out'), { message: '`>` cannot write to `out`: the filesystem is read-only' })
+    assert.deepEqual(terminal().summarize('ls > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
+  })
+
+  it('runs none of it', () => {
+    const t = terminal()
+    assert.deepEqual(t.summarize('cd dir; printf x > /tmp/file'), [[['cd', 'dir']], [['printf', 'x'], ['>', '/tmp/file']]])
+    assert.equal(t.cwd(), '/src')
+    assert.equal(t.run('test -e /tmp/file').exitCode, 1)
   })
 })
 
