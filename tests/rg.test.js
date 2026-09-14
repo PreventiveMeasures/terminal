@@ -457,3 +457,49 @@ describe('rg reads ignore files from above the starting point as well as below',
     assert.deepEqual(result.unsupported, [])
   })
 })
+
+describe('rg refuses Unicode-aware matching rather than approximating it', () => {
+  const MIXED = { 'a.txt': 'oak\nOAK\n', 'sub/b.js': 'oak here\n', 'acc.txt': 'café\nCAFÉ\n' }
+  const ACC = { 'acc.txt': 'café\nCAFÉ\ncafe\n', 'cjk.txt': '日本語\n漢字\n' }
+
+  it('names the refusal for ripgrep, which has no locale to blame', () => {
+    // grep words this as locale sensitivity because its own answer depends on
+    // one. ripgrep matches Unicode the same way everywhere.
+    const result = run('rg -i café acc.txt', ACC)
+    assert.equal(result.exitCode, 2)
+    assert.equal(result.stderr, 'rg: Unicode-aware matching on non-ASCII input is not supported\n')
+    assert.equal(result.unsupported[0].detail, 'non-ASCII matching')
+    assert.doesNotMatch(result.stderr, /locale/u)
+  })
+
+  it('stays on the feed when stderr is hidden', () => {
+    const hidden = run('rg -i café acc.txt 2>/dev/null', ACC)
+    assert.equal(hidden.stderr, '')
+    assert.equal(hidden.unsupported.length, 1)
+  })
+
+  for (const [command, stdout] of [
+    // Literal matching carries no Unicode semantics, so it crosses scripts.
+    ['rg café acc.txt', 'café\n'],
+    ['rg -F café acc.txt', 'café\n'],
+    ['rg 日本語 cjk.txt', '日本語\n'],
+  ]) {
+    it(command, () => assert.equal(run(command, ACC).stdout, stdout))
+  }
+
+  // The guard covers the whole run, not the file that provoked it: one
+  // non-ASCII file in the tree refuses an ASCII pattern too. That is wider
+  // than ripgrep needs, and it is a refusal rather than a wrong answer.
+  for (const command of ['rg -i oak', 'rg -w oak', 'rg "o.k"', String.raw`rg '\w+'`]) {
+    it(`${command} is refused while the tree holds one accented file`, () => {
+      assert.equal(run(command, MIXED).unsupported[0].detail, 'non-ASCII matching')
+      assert.deepEqual(run(command, { 'a.txt': 'oak\nOAK\n', 'sub/b.js': 'oak here\n' }).unsupported, [])
+    })
+  }
+
+  for (const command of ['rg oak', 'rg -n oak', 'rg -l oak', 'rg -c oak', 'rg "^oak"', 'rg -F oak']) {
+    it(`${command} is unaffected by it`, () => {
+      assert.deepEqual(run(command, MIXED).unsupported, [])
+    })
+  }
+})

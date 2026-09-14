@@ -71,3 +71,22 @@
 "rg -A abc oak a.txt" => ! -A value 2
 "rg '[' a.txt" => ! regex parse error 2
 "rg oak .hidden sub" => ! named hidden path 2
+
+# The same commands where one file in the tree is not ASCII.
+@tree scripts
+"rg -n café acc.txt" => "1:café\n"
+"rg -F café acc.txt" => "café\n"
+"rg -n 日本語 cjk.txt" => "1:日本語\n"
+"rg 漢字 cjk.txt" => "漢字\n"
+"rg -n oak" => "a.txt:1:oak\nsub/b.js:1:oak here\n"
+"rg -l oak" => "a.txt\nsub/b.js\n"
+"rg -c oak" => "a.txt:1\nsub/b.js:1\n"
+"rg -n \"^oak\" a.txt" => "1:oak\n"
+"rg -F oak" => "a.txt:oak\nsub/b.js:oak here\n"
+"rg -n '\\w+' a.txt" => "1:oak\n2:OAK\n"
+"rg -i oak a.txt" => "oak\nOAK\n"
+"rg -i café acc.txt" => ! non-ASCII matching 2
+"rg . cjk.txt" => ! non-ASCII matching 2
+"rg -i oak" => ! non-ASCII matching 2
+"rg -w oak" => ! non-ASCII matching 2
+"rg '\\w+'" => ! non-ASCII matching 2

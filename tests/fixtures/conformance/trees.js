@@ -57,6 +57,14 @@ export const TREES = {
     '..odd/g.txt': 'oak odd\n',
   },
 
+  // ASCII files beside one accented and one CJK file. Literal matching crosses
+  // scripts unchanged; case folding and the character classes do not, and the
+  // refusal covers the whole run rather than the file that provoked it.
+  scripts: {
+    'a.txt': 'oak\nOAK\n', 'sub/b.js': 'oak here\n',
+    'acc.txt': 'café\nCAFÉ\ncafe\n', 'cjk.txt': '日本語\n漢字\n',
+  },
+
   // The same shapes plus non-ASCII names, where matching needs a locale.
   wide: {
     a: '1\n', ab: '2\n', 'a b': '3\n', 'a*b': '4\n', 'b.txt': '5\n',

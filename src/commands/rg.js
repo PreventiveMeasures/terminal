@@ -194,6 +194,14 @@ function relabel(result, operands, patterns) {
   const strip = (text) => (operands.length ? text : text.replaceAll(/^\.\//gmu, ''))
   const out = { ...result, stdout: strip(result.stdout), stderr: osError(strip(result.stderr).replaceAll(/^grep: /gmu, 'rg: ')) }
   const note = unsupportedNote(result)
+  // grep blames the locale, because its own answer depends on one. ripgrep has
+  // no locale to blame: it matches Unicode the same way everywhere, which is
+  // what this runtime cannot follow -- case folding across scripts, and `.`,
+  // `\w` and `\b` over codepoints rather than bytes.
+  if (note?.detail === 'non-ASCII regex semantics') {
+    return unsupported('feature', 'rg', 'non-ASCII matching',
+      'rg: Unicode-aware matching on non-ASCII input is not supported', 2)
+  }
   if (note) return unsupported(note.kind, 'rg', note.detail, out.stderr.trimEnd() || note.message, result.exitCode)
   if (PATTERN_ERROR.test(out.stderr)) {
     return unsupported('feature', 'rg', 'regex parse error',

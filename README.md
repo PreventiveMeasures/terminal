@@ -99,7 +99,9 @@ below it -- so a tree carrying one is refused unless `--no-ignore`;
 binary files are left out of a walk but a named one is refused, and `-t`, `-g`,
 `--files` and the other output modes report an unsupported diagnostic. A
 pattern spelling out a newline, and a file starting with a byte-order mark, are
-refused rather than answered differently from ripgrep.
+refused rather than answered differently from ripgrep. Literal matching crosses
+scripts, but Unicode-aware matching does not: `-i`, `-w`, `.` and `\w` over a
+tree holding any non-ASCII file report an unsupported diagnostic.
 
 `stat -c '%s %n' file` reports byte size and name; `%F` reports file type.
 `--printf` adds escape processing and controls line endings. Default `stat`
