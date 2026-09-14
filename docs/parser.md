@@ -41,7 +41,7 @@ quoting:
 ```js
 terminal.parse('grep -rn "$pattern" src/*.js').list[0].argv
 // [ 'grep', '-rn',
-//   { type: 'variable', name: 'pattern', quoted: true },
+//   { type: 'variable', name: 'pattern', multi: false },
 //   { type: 'pattern', pattern: 'src/*.js' } ]
 ```
 
@@ -51,14 +51,33 @@ change it; otherwise it names what it waits for — `pattern`, `variable`,
 `substitution`, `arithmetic`. A word of several pieces is a `parts` node
 holding them in order, and a word of one piece is that piece.
 
+`multi` says whether what comes back is still one word: bare, a reference is
+split into fields and matched as a pattern, and quoting is what settles that.
+`"$@"` is the one quoting does not settle — a word per positional parameter,
+and none at all where a shell has none, as this one does — and `$(( … ))` is
+a number, which is never two words and so says nothing about it.
+
+Where the shell splits nothing it matches nothing either, so an assignment
+value, a here-string and a `[[ … ]]` operand are expanded and then left alone:
+
+```js
+terminal.parse('x=*.js y=$z ls').list[0].assignments
+// [ { name: 'x', value: '*.js' },
+//   { name: 'y', value: { type: 'variable', name: 'z', multi: false } } ]
+```
+
+`x=*.js` is the text bash assigns rather than a pattern, and `$z` there is one
+word however it was written. The one operand still matched is the pattern side
+of `[[ x == a* ]]`.
+
 A `~` is the home directory under another spelling, so it reads as the one it
-shares: `~/bin` is `"$HOME/bin"`, quoted because tilde expansion is no more
+shares: `~/bin` is `"$HOME/bin"`, one word because tilde expansion is no more
 split into fields or matched as a pattern than a quoted reference is.
 
 ```js
 terminal.parse('ls ~/bin').list[0].argv
 // [ 'ls', { type: 'parts', parts: [
-//   { type: 'variable', name: 'HOME', quoted: true }, '/bin' ] } ]
+//   { type: 'variable', name: 'HOME', multi: false }, '/bin' ] } ]
 ```
 
 A prefix stands where bash finds one — opening a word, or an assignment
@@ -138,6 +157,18 @@ is the `echo` that writes it, and a `cat` left with nothing to read but its own
 input is left out. A quoted `$(cat <<'EOF' … EOF)` comes back as the text that
 here-document holds.
 
+The `A=1 B=2` a command carries stands at the head of its row, where it was
+written — so a row's command name is its first token that is not that one:
+
+```js
+summarize('A=1 B=2 ls -l')
+// [ [ [{ type: 'assignments', assignments: [{ name: 'A', value: '1' },
+//                                           { name: 'B', value: '2' }] }, 'ls', '-l'] ] ]
+
+summarize('x=1')
+// [ [ [{ type: 'assignments', assignments: [{ name: 'x', value: '1' }] }] ] ]
+```
+
 A token is text, or the pattern or variable an argument is written as, or the
 `parts` those join into — one piece of a word says what it reaches for as
 plainly as the whole of one does:
@@ -145,13 +176,13 @@ plainly as the whole of one does:
 ```js
 summarize('ls *.js ~/bin $home a{b,c}')
 // [ [ ['ls', { type: 'pattern', pattern: '*.js' },
-//      { type: 'parts', parts: [{ type: 'variable', name: 'HOME', quoted: true }, '/bin'] },
-//      { type: 'variable', name: 'home', quoted: false }, 'ab', 'ac'] ] ]
+//      { type: 'parts', parts: [{ type: 'variable', name: 'HOME', multi: false }, '/bin'] },
+//      { type: 'variable', name: 'home', multi: true }, 'ab', 'ac'] ] ]
 ```
 
 Anything else throws rather than be summarized into a lie: a line that does not
 parse, `while`, `case` and the other constructs this terminal refuses, a
-subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
+subshell, group, `for`, `if` or `[[ … ]]`, a `!`, a
 here-document whose delimiter leaves its body to expand, and any word a command
 has to run before its text is known — `` `date` `` or `$(( … ))`, whether it is
 the whole argument or one piece of it. `parse()` reads those.

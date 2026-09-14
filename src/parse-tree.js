@@ -73,7 +73,7 @@ function nodeOf(step, op) {
 
 function stageOf(stage) {
   const node = blockOf(stage)
-  if (stage.assigns.length > 0) node.assignments = stage.assigns.map((a) => ({ name: a.name, value: valueOf(a.word, false, true) }))
+  if (stage.assigns.length > 0) node.assignments = stage.assigns.map((a) => ({ name: a.name, value: valueOf(a.word, ASSIGNED) }))
   if (stage.redirs.length > 0) node.redirects = stage.redirs.map(redirectOf)
   return node
 }
@@ -94,12 +94,25 @@ function ifOf(conditional) {
   return node
 }
 
+// What the shell will still do to the word a slot holds. Splitting a result
+// into fields and matching it as a pattern are the two things quoting turns
+// off, so a slot that does neither reads as quoted however it was written: an
+// assignment value, a here-string and a `[[ … ]]` operand are all expanded and
+// then left alone, and `x=*.js` is the text bash assigns rather than a
+// pattern. The one operand quoting still governs is the pattern side of
+// `[[ x == y ]]`, which is matched against the other side rather than split.
+const WORD = { split: true, glob: true }
+const ASSIGNED = { assignment: true }
+const SCALAR = {}
+const PATTERN = { glob: true }
+const PATTERN_OPS = new Set(['==', '=', '!='])
+
 // The one rule the whole tree follows: text that nothing can change any more
 // is that text, and everything else is a word in the pieces expansion works
 // on — literal runs, and the references and substitutions between them.
-function valueOf(w, braces = false, assignment = false) {
+function valueOf(w, slot = WORD, braces = false) {
   if (!expandable(w)) return w.value
-  const parts = partsOf(w, braces, assignment)
+  const parts = partsOf(w, braces ? { ...slot, braces: true } : slot)
   // One piece is that piece: the word around it says nothing the piece does not.
   return parts.length === 1 ? parts[0] : { type: 'parts', parts }
 }
@@ -112,14 +125,14 @@ function valueOf(w, braces = false, assignment = false) {
 // a line should make.
 const valuesOf = (w) => {
   const products = expand(w)
-  return products === null ? [valueOf(w, true)] : products.map((product) => valueOf(product))
+  return products === null ? [valueOf(w, WORD, true)] : products.map((product) => valueOf(product))
 }
 
 // A redirect names one file, so a target that multiplies is an ambiguous
 // redirect — what it was written as is all there is to say about it.
 function targetOf(w) {
   const products = expand(w)
-  return products?.length === 1 ? valueOf(products[0]) : valueOf(w, true)
+  return products?.length === 1 ? valueOf(products[0]) : valueOf(w, WORD, true)
 }
 
 function expand(w) {
@@ -132,7 +145,7 @@ function expand(w) {
 // Quoting belongs to a piece rather than to each character: a literal run is
 // quoted or it is not, and a reference carries whether its result will be
 // split and globbed. An expansion's source never becomes text of its own.
-function partsOf(word, braces, assignment) {
+function partsOf(word, slot) {
   const { value } = word
   const mask = word.mask ?? '0'.repeat(value.length)
   const empty = new Set(word.empty ?? [])
@@ -148,10 +161,10 @@ function partsOf(word, braces, assignment) {
     else parts.push(piece)
   }
   const flush = (end) => {
-    if (text !== '') push(textOf(word, text, quoted, start, end, braces))
+    if (text !== '') push(textOf(word, text, quoted, start, end, slot))
     text = ''
   }
-  const homes = homePrefixes(word, assignment)
+  const homes = homePrefixes(word, slot.assignment === true)
   for (let i = 0; i <= value.length; i++) {
     // An empty quoted fragment is a piece: `$x""` keeps a final empty field.
     if (empty.has(i)) { flush(i); push('') }
@@ -160,10 +173,10 @@ function partsOf(word, braces, assignment) {
     // what it reads as, and a reader needs to know only the one thing. Quoted,
     // because tilde expansion is neither split into fields nor matched as a
     // pattern, which is what quoting a reference settles too.
-    if (homes.has(i)) { flush(i); push({ type: 'variable', name: 'HOME', quoted: true }); continue }
+    if (homes.has(i)) { flush(i); push({ type: 'variable', name: 'HOME', multi: false }); continue }
     const bare = mask[i] !== '1'
     if (bare && (value[i] === '$' || value[i] === '`')) {
-      const found = expansionAt(value, i, mask[i] === '2')
+      const found = expansionAt(value, i, mask[i] === '2', slot.split === true)
       if (found) { flush(i); push(found.part); i = found.end - 1; continue }
     }
     if (text !== '' && (mask[i] !== '0') !== quoted) flush(i)
@@ -179,10 +192,10 @@ function partsOf(word, braces, assignment) {
 // way the piece is the string itself. What is left says which expansion it is
 // waiting for, named for the first one that will reach it — brace expansion
 // runs before the pathname matching a product of it may still go through.
-function textOf(word, value, quoted, from, to, braces) {
+function textOf(word, value, quoted, from, to, slot) {
   if (quoted) return value
-  if (braces && /[{},]/u.test(value) && hasBraces(word)) return { type: 'brace', source: value }
-  if (globbed(word, from, to)) return { type: 'pattern', pattern: value }
+  if (slot.braces && /[{},]/u.test(value) && hasBraces(word)) return { type: 'brace', source: value }
+  if (slot.glob && globbed(word, from, to)) return { type: 'pattern', pattern: value }
   return value
 }
 
@@ -216,10 +229,14 @@ function substitutionOf(source, mark) {
 
 // Re-read the construct from the source the tokenizer copied into the word.
 // It parsed once already, so the only question left is what it is.
-function expansionAt(value, at, quoted) {
-  // Whether a result is split into fields and matched as a pattern is half of
-  // what a reference does, so it is said either way rather than by omission.
-  const mark = { quoted }
+//
+// `multi` is what quoting decides and what a reader of one argument has to
+// know: whether what comes back is still one word. Quotes settle it, and so
+// does a slot that splits nothing — an assignment value, a here-string, a
+// `[[ … ]]` operand — since only its own top level is settled, and the
+// commands inside a substitution are read as commands wherever it stands.
+function expansionAt(value, at, quoted, splits) {
+  const mark = { multi: splits && !quoted }
   if (value[at] === '`') {
     const { raw, command } = readBacktickSubstitution(value, at)
     return { part: substitutionOf(command, mark), end: at + raw.length }
@@ -228,7 +245,9 @@ function expansionAt(value, at, quoted) {
   if (!ref) return null
   const end = at + ref.raw.length
   if (ref.command !== undefined) return { part: substitutionOf(ref.command, mark), end }
-  if (ref.arithmetic !== undefined) return { part: { type: 'arithmetic', source: ref.arithmetic, ...mark }, end }
+  // A sum is a number, and no number is two words: nothing splits on a digit
+  // here, since a custom `IFS` is refused, and no digit matches a file.
+  if (ref.arithmetic !== undefined) return { part: { type: 'arithmetic', source: ref.arithmetic }, end }
   const { name, operator, word } = ref.parameter ?? { name: ref.name, operator: '' }
   return {
     part: {
@@ -236,7 +255,9 @@ function expansionAt(value, at, quoted) {
       name,
       ...(operator ? { operator } : {}),
       ...(word === undefined ? {} : { operand: word }),
-      ...mark,
+      // `"$@"` is the one reference quotes do not settle: a word for each
+      // parameter, and none at all where a shell has none, as this one does.
+      multi: splits && (!quoted || name === '@'),
     },
     end,
   }
@@ -274,7 +295,7 @@ function redirectOf(r) {
   if (r.op === 'dup') return { fd: r.fd, op: '>&', toFd: r.toFd }
   if (r.op === 'close') return { fd: r.fd, op: '>&-' }
   if (r.op === 'text') return { fd: 0, op: '<<', text: r.body, expand: r.expand }
-  if (r.op === 'herestring') return { fd: 0, op: '<<<', text: valueOf(r.word) }
+  if (r.op === 'herestring') return { fd: 0, op: '<<<', text: valueOf(r.word, SCALAR) }
   if (r.op === 'read') return { fd: 0, op: '<', target: targetOf(r.word) }
   return { fd: r.fd, op: (r.both ? '&>' : '>') + (r.append ? '>' : ''), target: r.target ?? targetOf(r.word) }
 }
@@ -282,8 +303,8 @@ function redirectOf(r) {
 function conditionOf(e) {
   if (e.kind === 'and' || e.kind === 'or') return { type: e.kind, left: conditionOf(e.left), right: conditionOf(e.right) }
   if (e.kind === 'not') return { type: 'not', expression: conditionOf(e.expression) }
-  if (e.kind === 'unary') return { type: 'unary', op: e.op, word: valueOf(e.word) }
-  return { type: 'binary', op: e.op, left: valueOf(e.left), right: valueOf(e.right) }
+  if (e.kind === 'unary') return { type: 'unary', op: e.op, word: valueOf(e.word, SCALAR) }
+  return { type: 'binary', op: e.op, left: valueOf(e.left, SCALAR), right: valueOf(e.right, PATTERN_OPS.has(e.op) ? PATTERN : SCALAR) }
 }
 
 // A chain is what a line looks like when nothing in it needs explaining: the
@@ -316,12 +337,12 @@ function chainOf(node) {
   let commands = 0
   for (const [index, stage] of stages.entries()) {
     if (stage.type !== 'command') throw refuse(BLOCKS[stage.type])
-    if (stage.assignments) throw refuse('an assignment')
-    if (stage.argv.length === 0) throw refuse('a command with no name')
+    if (stage.argv.length === 0 && !stage.assignments) throw refuse('a command with no name')
     const redirects = stage.redirects ?? []
     const input = inputOf(redirects, index)
     if (input) { chain.push(inputStage(input)); commands++ }
     const argv = stage.argv.map(literal)
+    if (stage.assignments) argv.unshift(assignmentsOf(stage.assignments))
     // A `cat` with no file of its own hands its input straight on, so once
     // something is feeding the chain it says nothing: `echo x | cat > f` is
     // `echo x > f`, and its own redirects stay where they were.
@@ -334,6 +355,12 @@ function chainOf(node) {
 }
 
 const passthrough = (argv, commands) => commands > 0 && argv.length === 1 && argv[0] === 'cat'
+
+// `A=1 B=2 cmd` sets those for that command alone and `A=1` on its own sets
+// them for the shell, so they stand at the head of the row they were written
+// at the head of — one token, since one command takes them all together, and
+// a row's name is the first token that is not this one.
+const assignmentsOf = (assignments) => ({ type: 'assignments', assignments: assignments.map((a) => ({ name: a.name, value: literal(a.value) })) })
 
 // A summary says what a line does, not how it was spelled, so whatever feeds
 // a command is the command that feeds it. Only the first stage can be fed that
@@ -354,10 +381,14 @@ function inputOf(redirects, index) {
 // expanded when it runs, which is not text anyone can write down yet.
 function inputStage(redirect) {
   if (redirect.op === '<') return ['cat', literal(redirect.target)]
-  if (redirect.op === '<<<') return textStage(`${literal(redirect.text)}\n`)
+  if (redirect.op === '<<<') return hereStringStage(literal(redirect.text))
   if (redirect.expand && /[$`\\]/u.test(redirect.text)) throw refuse('a here-document its delimiter leaves to expand')
   return textStage(redirect.text)
 }
+
+// A here-string is its word and a newline. Where only running the line settles
+// the word, `printf` says it exactly, whatever it turns out to be.
+const hereStringStage = (text) => (typeof text === 'string' ? textStage(`${text}\n`) : ['printf', '%s\\n', text])
 
 // `echo` writes its argument and a newline, which is how a here-document ends,
 // so the body gives one up to it. Where echo would say something else — a body
@@ -401,7 +432,7 @@ function literalText(value) {
   let text = ''
   for (const part of value.type === 'parts' ? value.parts : [value]) {
     if (typeof part === 'string') { text += part; continue }
-    if (!part.quoted) return null
+    if (part.multi) return null
     const here = heredocText(part)
     if (here === null) return null
     text += here

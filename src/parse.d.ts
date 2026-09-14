@@ -21,18 +21,22 @@ export interface Parts {
  *
  * A piece is a plain string once nothing can change it, quoted or not: `"a b"`
  * is `'a b'`, and so is `a" "b`, whose runs join. Every other piece names the
- * expansion it is waiting for; the ones whose result quoting still governs say
- * so either way, since inside quotes a result is neither split into fields nor
- * matched as a pattern. A pattern and a brace are bare by definition — quoting
- * either settles the text instead.
+ * expansion it is waiting for, and the ones that may come back as more than
+ * one word say so either way. A pattern and a brace are bare by definition —
+ * quoting either settles the text instead.
  */
 export type Part = string | PatternPart | BracePart | VariablePart | SubstitutionPart | ArithmeticPart
 
 /**
  * Bare text carrying glob syntax — `*`, `?`, or a `[` a bare `]` closes —
- * matched against the filesystem rather than read as text. Quoting settles the
- * text instead, so a pattern is never quoted: `a*` is one of these and `'a*'`
- * is the string `a*`.
+ * matched rather than read as text. Quoting settles the text instead, so a
+ * pattern is never quoted: `a*` is one of these and `'a*'` is the string `a*`.
+ *
+ * Only where the shell matches: against the filesystem in a word list or a
+ * redirect target, and against the other side in `[[ x == a* ]]`. An
+ * assignment value, a here-string and every other `[[ … ]]` operand are
+ * expanded and then left alone, so `x=*.js` is the string `*.js`, exactly as
+ * bash assigns it.
  *
  * In a word of several pieces the pattern is the whole of it, with the other
  * pieces matching as the text they produce: `a*"b"` matches a name that starts
@@ -62,12 +66,12 @@ export interface BracePart {
 
 /**
  * `$x`, `${x}`, `${x:-default}`, and the ones a shell keeps for itself: `$?`,
- * `$1`, `$@`. `quoted` marks a reference inside double quotes, whose result is
- * neither split into fields nor matched as a pattern.
+ * `$1`, `$@`.
  *
  * A `~` prefix is one of these: it names the home directory, which is what
- * `"$HOME"` names, and quoted for the same reason — tilde expansion is never
- * split or matched either. `~/a` reads exactly as `"$HOME/a"` does, and so
+ * `"$HOME"` names, and never more than one word for the same reason — tilde
+ * expansion is neither split nor matched. `~/a` reads exactly as `"$HOME/a"`
+ * does, and so
  * does the `~/a` in `PATH=~/a:~/b`, since a prefix opens a word or an
  * assignment component. Quoting one leaves the text alone: `a~b`, `~''/x` and
  * `~"/x"` are the paths they spell. A prefix naming a user or the directory
@@ -82,8 +86,15 @@ export interface VariablePart {
   operator?: string
   /** The operator's operand, as written: the default in `${x:-a b}`, the pattern in `${x##prefix}`. Absent when the operator takes none. */
   operand?: string
-  /** Whether it stands inside quotes, said either way: it decides whether the result is split into fields and matched as a pattern. */
-  quoted: boolean
+  /**
+   * Whether what comes back may be more than one word, said either way: bare,
+   * a result is split into fields and matched as a pattern, and quoting is
+   * what settles it — as does a slot that splits nothing, an assignment
+   * value, a here-string or a `[[ … ]]` operand. `"$@"` is the one quotes do
+   * not settle: a word for each positional parameter, and none at all where a
+   * shell has none, as this one does.
+   */
+  multi: boolean
 }
 
 /**
@@ -101,16 +112,20 @@ export interface SubstitutionPart {
   list: Node[]
   /** Why the body did not parse, when it did not. Absent otherwise. */
   error?: string
-  /** Whether it stands inside quotes, said either way: it decides whether the output is split into fields and matched as a pattern. */
-  quoted: boolean
+  /** Whether the output may be more than one word, said either way: bare, it is split into fields and matched as a pattern, and quoting or a slot that splits nothing settles it. */
+  multi: boolean
 }
 
-/** `$(( … ))`: the expression as written, which this parser does not read further. */
+/**
+ * `$(( … ))`: the expression as written, which this parser does not read
+ * further. A sum is a number and no number is two words — nothing splits on a
+ * digit, since a custom `IFS` is refused, and no digit matches a file — so
+ * unlike the other expansions this one says nothing about how many words come
+ * back. It is always the one.
+ */
 export interface ArithmeticPart {
   type: 'arithmetic'
   source: string
-  /** Whether it stands inside quotes, said either way. */
-  quoted: boolean
 }
 
 /** One piece, or the pieces a word joins. */
@@ -317,13 +332,16 @@ export interface ParseResult {
 }
 
 /**
- * One token of a chain: the text it will be, the pattern it will be matched
- * by, the variable it reads, or the word those are joined into. Each says what
- * it reaches for as plainly as a name does — `ls *.js` is
- * `['ls', { type: 'pattern', pattern: '*.js' }]` and `ls ~/bin` is
- * `['ls', { type: 'parts', parts: [{ type: 'variable', name: 'HOME', quoted: true }, '/bin'] }]`.
+ * One token of a chain that stands for a word: the text it will be, the
+ * pattern it will be matched by, the variable it reads, or the pieces those
+ * are joined from. Each says what it reaches for as plainly as a name does —
+ * `ls *.js` is `['ls', { type: 'pattern', pattern: '*.js' }]` and `ls ~/bin`
+ * is `['ls', { type: 'parts', parts: [{ type: 'variable', name: 'HOME', multi: false }, '/bin'] }]`.
  */
-export type Token = string | PatternPart | VariablePart | TokenParts
+export type WordToken = string | PatternPart | VariablePart | TokenParts
+
+/** One token of a chain: a word, or the assignments a command carries. */
+export type Token = WordToken | AssignmentsToken
 
 /**
  * A token in pieces: `a*"b"` is a pattern and the text behind it, and `~/bin`
@@ -336,8 +354,28 @@ export interface TokenParts {
 }
 
 /**
- * One command of a chain: each pipeline stage's `argv`, and each redirect as
- * the tokens it was written with — `['>', 'out']`, `['2>&1']`.
+ * The `A=1 B=2` a command carries, in one token at the head of its row —
+ * where they were written, and where bash reads them. `A=1 B=2 cmd` sets them
+ * for that command alone and `A=1 B=2` on its own sets them for the shell, so
+ * a row may hold this and nothing else.
+ *
+ * A row's command name is its first token that is not this one.
+ */
+export interface AssignmentsToken {
+  type: 'assignments'
+  assignments: TokenAssignment[]
+}
+
+/** One `NAME=value` of an {@link AssignmentsToken}. Its value is never a pattern and never more than one word: an assignment value is expanded and then left alone. */
+export interface TokenAssignment {
+  name: string
+  value: WordToken
+}
+
+/**
+ * One command of a chain: each pipeline stage's `argv`, with the assignments
+ * it carries in front, and each redirect as the tokens it was written with —
+ * `['>', 'out']`, `['2>&1']`.
  */
 export type Chain = Token[][]
 
@@ -397,14 +435,15 @@ export function parse(line: string): ParseResult
  * says: the here-document, minus the trailing newlines `$( )` strips.
  * `echo "$(cat <<'EOF'` … `EOF` … `)"` summarizes as `[[['echo', '…']]]`.
  * The delimiter has to be quoted, since an expanding body is not settled
- * text, and the substitution has to be quoted, since bare its text would be
+ * text, and the substitution has to be one word, since bare its text would be
  * split into fields and globbed.
  *
  * A token is text, or the pattern or variable an argument is written as, or
- * the word those are joined into — each of which says what it reaches for as
- * plainly as a name says what it runs. Anything a summary
+ * the word those are joined into, or the `A=1 B=2` a command carries — each
+ * of which says what it reaches for as plainly as a name says what it runs.
+ * Anything a summary
  * would have to lie about throws instead: a line that does not parse, a
- * subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
+ * subshell, group, `for`, `if` or `[[ … ]]`, a `!`, a
  * here-document whose delimiter leaves its body to expand, a stage that reads
  * its own input from inside a pipeline, and any word a command has to run
  * before its text is known — `` `date` ``, `$(( … ))`, or the braces of an
