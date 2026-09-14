@@ -347,7 +347,8 @@ export interface Terminal {
   /**
    * What the line runs, at a glance: one {@link Chain} per command, each
    * holding its pipeline stages' `argv` and its redirects as written, with
-   * `&&` and `||` standing between the chains they gate. It reports what the
+   * `&&` and `||` standing between the chains they gate and `&` after the one
+   * it hands to the background. It reports what the
    * line does rather than how it was spelled, so whatever feeds a command is
    * the command that feeds it: `wc < 1.txt` summarizes as
    * `[['cat', '1.txt'], ['wc']]`, and `cat > notes.md <<EOF … EOF` as

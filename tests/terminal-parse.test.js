@@ -57,6 +57,18 @@ describe('parse() hands back the line as the parser read it', () => {
     ])
   })
 
+  // `&` ends the list it follows rather than joining what comes next, so it
+  // marks the command it ends and separates like `;` — and may end the line.
+  it('marks what `&` hands to the background, and separates on it', () => {
+    assert.deepEqual(list('ls & cat a.txt &'), [
+      { type: 'command', background: true, argv: ['ls'] },
+      { type: 'command', op: ';', background: true, argv: ['cat', 'a.txt'] },
+    ])
+    assert.deepEqual(list('ls | wc -l &'), [{ type: 'pipeline', background: true, stages: [{ type: 'command', argv: ['ls'] }, { type: 'command', argv: ['wc', '-l'] }] }])
+    assert.deepEqual(list('ls && cat a.txt &').at(-1), { type: 'command', op: '&&', background: true, argv: ['cat', 'a.txt'] })
+    assert.deepEqual(verdict('ls &'), { ok: true, incomplete: false, error: null })
+  })
+
   it('reads a newline as the separator it is, in one list', () => {
     assert.deepEqual(list('ls\ncat a.txt\n# comment\nwc -l a.txt'), [
       { type: 'command', argv: ['ls'] },
@@ -270,6 +282,10 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['foo -bar | head -10 && ls > file.txt', [CHAINS[0], '&&', CHAINS[1]]],
     ['foo -bar | head -10 || ls > file.txt', [CHAINS[0], '||', CHAINS[1]]],
     ['a && b || c; d', [[['a']], '&&', [['b']], '||', [['c']], [['d']]]],
+    ['ls & ls &', [[['ls']], '&', [['ls']], '&']],
+    ['ls & cat a.txt', [[['ls']], '&', [['cat', 'a.txt']]]],
+    ['a && b &', [[['a']], '&&', [['b']], '&']],
+    ['ls | wc -l > /tmp/out &', [[['ls'], ['wc', '-l'], ['>', '/tmp/out']], '&']],
   ]) {
     it(`summarizes ${JSON.stringify(line)}`, () => {
       assert.deepEqual(terminal().summarize(line), summary)
@@ -464,7 +480,6 @@ describe('parse() reports the gaps parsing itself finds', () => {
     'case x in y) :;; esac',
     'echo $((1 + 1)) && ((x++))',
     'f() { :; }',
-    'echo a & echo b',
     'echo ${x@Q}',
     'echo @(a|b)',
     'for ((i = 0; i < 3; i++)); do :; done',
@@ -480,6 +495,20 @@ describe('parse() reports the gaps parsing itself finds', () => {
       assert.equal(run.stderr, `error: ${parsed.error}\n`)
     })
   }
+
+  // Reading `&` is bash's grammar, which the parser has. Handing a list to
+  // the background is the terminal's, which has nowhere to put one.
+  it('reads `&` and leaves the backgrounding to run()', () => {
+    const result = parse('echo a & echo b')
+    assert.deepEqual({ ok: result.ok, unsupported: result.unsupported }, { ok: true, unsupported: [] })
+    assert.deepEqual(result.list, [
+      { type: 'command', background: true, argv: ['echo', 'a'] },
+      { type: 'command', op: ';', argv: ['echo', 'b'] },
+    ])
+    assert.deepEqual(terminal().run('echo a & echo b').unsupported, [
+      { kind: 'feature', command: null, detail: '&', message: 'background processes (`&`) are not supported' },
+    ])
+  })
 
   // Dispatch, expansion and the commands themselves are never reached here.
   for (const line of ['frobnicate', 'ls --frobnicate', 'echo a > /etc/passwd', 'echo `while true; do :; done`', 'sed -e "s/a/b/w f" a.txt']) {

@@ -15,7 +15,7 @@ export { NAME_RE }
 
 // These tokens already separate commands or require a continued operand.
 // Other newlines become separators, including after a completed group.
-const NEWLINE_ABSORB = new Set(['semi', 'and', 'or', 'pipe', 'pipe_err', 'paren_open'])
+const NEWLINE_ABSORB = new Set(['semi', 'amp', 'and', 'or', 'pipe', 'pipe_err', 'paren_open'])
 
 // Shell token boundaries are space and tab; CR and Unicode spaces stay literal.
 const isBlank = (c) => c === ' ' || c === '\t'
@@ -240,6 +240,6 @@ function newline(st) {
   }
   const prev = st.tokens.at(-1)
   if (prev && !NEWLINE_ABSORB.has(prev.kind)) st.tokens.push({ kind: 'semi', newline: true })
-  else if (prev?.kind === 'semi') prev.lineEnd = true
+  else if (prev?.kind === 'semi' || prev?.kind === 'amp') prev.lineEnd = true
   st.i++
 }

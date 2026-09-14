@@ -1,6 +1,5 @@
 import { createTokenizer, tokenize } from './tokenize.js'
 import { advanceAliases } from './aliases.js'
-import { UnsupportedError } from '../unsupported.js'
 
 export class IncompleteInput extends Error {
   constructor(error) { super(error.message); this.finalError = error }
@@ -14,9 +13,7 @@ export function tokenAt(p, index = p.i) {
     p.raw = next.tokens
     p.done = next.done
   }
-  const token = p.raw[index]
-  if (token?.kind === 'amp') throw new UnsupportedError('feature', '&', 'background processes (`&`) are not supported')
-  return token
+  return p.raw[index]
 }
 
 function validationOptions(hasCommand, options, parseTokens) {

@@ -27,7 +27,8 @@ terminal.parse('while :; do echo x; done').unsupported[0].detail  // 'while'
 
 `list` is the whole line: each command carries the `op` that joins it to the
 one before (`;`, `&&`, `||`, and a newline reads as `;`), its `argv`, and
-whatever else it has — `assignments`, `redirects`, a `negate` for `!`.
+whatever else it has — `assignments`, `redirects`, a `negate` for `!`, a
+`background` for the `&` that ends it.
 Pipelines, subshells, `{ …; }` groups, `for` loops, `if` branches and
 `[[ … ]]` tests are nodes of their own, each named by `type`. A field that
 would only say "nothing here" is left out, and a line that fails partway still
@@ -96,7 +97,8 @@ a command exists, what an option means, and what an expansion produces are
 ## The short answer
 
 `summarize(line)` is for a caller that only wants to know what a line runs:
-every command in plain text, with `&&` and `||` between the chains they gate.
+every command in plain text, with `&&` and `||` between the chains they gate
+and `&` after the one it hands to the background.
 
 ```js
 import { summarize } from '@preventive/terminal/parse.js'
@@ -112,7 +114,15 @@ summarize('wc < 1.txt || ls')
 
 summarize("cat > notes.md <<EOF\nhello\nEOF\n")
 // [ [['echo', 'hello'], ['>', 'notes.md']] ]
+
+summarize('ls & ls &')
+// [ [['ls']], '&', [['ls']], '&' ]
 ```
+
+`&` ends a command rather than joining the next one, so it comes after the
+chain it backgrounds and may be the last thing the summary says. Nothing runs
+in the background here — `run()` reports the gap — but a line still says so,
+and a reader still gets to see it.
 
 It reports what a line does rather than how it was written, so whatever feeds a
 command is the command that feeds it: a file is the `cat` that reads it, text

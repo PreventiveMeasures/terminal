@@ -56,11 +56,13 @@ describe('incremental parsing retains compound-command progress', () => {
     assert.deepEqual(result, { stdout: 'before\n', stderr: '', exitCode: 7, cwd: '/', unsupported: [], notes: [] })
   })
 
-  it('retains background-syntax diagnostics while reading a loop header', () => {
+  // `&` ends a command, so a loop header is the one place it cannot stand.
+  it('retains a loop header the input ends in the middle of', () => {
     const result = createTerminal({}).run('echo before\nfor value in one & echo bad\n')
     assert.equal(result.stdout, 'before\n')
+    assert.equal(result.stderr, 'error: for: unexpected `&` in word list\n')
     assert.notEqual(result.exitCode, 0)
-    assert.equal(result.unsupported.at(-1)?.detail, '&')
+    assert.deepEqual(result.unsupported, [])
     assert.deepEqual(result.notes, [])
   })
 })

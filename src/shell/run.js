@@ -25,6 +25,11 @@ export function routeExternalOutput(result, ctx) {
 // A list shares stdin across its steps: { cat; cat; } consumes it once.
 // `exit` bypasses pipeline negation; break/continue still carry its status.
 export function runSteps(steps, ctx, stream, condition = false) {
+  // `&` hands the whole list it closes to the background, and nothing here
+  // runs there. Running it in the foreground instead is a different answer —
+  // a different order, and a status the shell would not have waited for — so
+  // the list refuses before any of it runs.
+  if (steps.some((step) => step.background)) throw new UnsupportedError('feature', '&', 'background processes (`&`) are not supported')
   const result = emptyOutput()
   // An `if` reads the whole chain for its status, which is what `&&` is for
   // there; only a chain run for its effects has anything to report.
@@ -340,13 +345,10 @@ function runConditional(conditional, ctx, stdin) {
     appendOutput(result, body)
     return { ...result, halt: body.halt, control: body.control, blame: body.blame }
   }
-  if (conditional.otherwise) {
-    const body = runSteps(conditional.otherwise, ctx, stream)
-    appendOutput(result, body)
-    return { ...result, halt: body.halt, control: body.control, blame: body.blame }
-  }
-  result.exitCode = 0
-  return result
+  if (!conditional.otherwise) { result.exitCode = 0; return result }
+  const last = runSteps(conditional.otherwise, ctx, stream)
+  appendOutput(result, last)
+  return { ...result, halt: last.halt, control: last.control, blame: last.blame }
 }
 
 

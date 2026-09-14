@@ -162,7 +162,6 @@ export const SHELL_WORKFLOWS = [
     purpose: 'Run a source line-count audit in the background',
     command: 'wc -l src/*.js &',
     expected: feature('&'),
-    parseTime: true,
   },
   {
     purpose: 'Nest legacy command-substitution syntax, which needs escaped backticks',

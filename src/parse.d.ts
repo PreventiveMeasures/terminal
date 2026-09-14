@@ -163,6 +163,16 @@ export interface NodeBase {
   op?: Operator
   /** `!`: the status is inverted. Absent otherwise. */
   negate?: true
+  /**
+   * `&`: this command runs in the background, and the shell goes straight on
+   * to the next. `&` ends a whole `a && b` list rather than one command of
+   * it, so on a command carrying an `op` of `&&` or `||` it is the chain
+   * ending here that runs there. Absent otherwise.
+   *
+   * Nothing runs in the background in this terminal: `run()` reports the gap
+   * instead, which is why reading a line says this and running one refuses.
+   */
+  background?: true
   /** Redirects, in source order. Absent when there are none. */
   redirects?: Redirect[]
   /** What bash warns about before running the command, such as a here-document the input ended before its delimiter. Absent when there is nothing to warn about. */
@@ -293,7 +303,7 @@ export interface ParseResult {
   list: Node[]
   /**
    * Gaps this implementation has, that parsing itself reached: refused shell
-   * constructs (`while`, `case`, `((`, `&`), unsupported `${…}` operators and
+   * constructs (`while`, `case`, `((`), unsupported `${…}` operators and
    * `[[ … ]]` forms. Frozen and deduplicated, in the shape a run reports.
    *
    * Only what parsing can see: whether a command exists, what an option means
@@ -329,10 +339,15 @@ export type Chain = Token[][]
 
 /**
  * A summarized line: its chains in order, with `&&` or `||` standing between
- * the two it gates. A `;` decides nothing about what follows, so nothing
- * stands between those.
+ * the two it gates, and `&` standing after the chain it hands to the
+ * background — which may be the last of the line, since `&` ends one. A `;`
+ * decides nothing about what follows, so nothing stands between those.
+ *
+ * ```js
+ * summarize('ls & ls &')   // [ [['ls']], '&', [['ls']], '&' ]
+ * ```
  */
-export type Summary = Array<Chain | '&&' | '||'>
+export type Summary = Array<Chain | '&&' | '||' | '&'>
 
 /**
  * Parse one command line and run none of it.
@@ -349,7 +364,7 @@ export function parse(line: string): ParseResult
 /**
  * The same line at a glance, for a caller that only wants to know what it
  * runs: one {@link Chain} per command, in order, with `&&` and `||` between
- * the chains they gate.
+ * the chains they gate and `&` after the chain it backgrounds.
  *
  * ```js
  * summarize('foo -bar | head -10; ls > file.txt')

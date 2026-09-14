@@ -53,6 +53,7 @@ function nodeOf(step, op) {
     type,
     ...(op ? { op } : {}),
     ...(step.negate ? { negate: true } : {}),
+    ...(step.background ? { background: true } : {}),
     ...(step.warnings ? { warnings: step.warnings } : {}),
     ...rest,
   }
@@ -301,6 +302,7 @@ export function summarize(line, writable) {
   for (const node of result.list) {
     if (node.op === '&&' || node.op === '||') summary.push(node.op)
     summary.push(chainOf(node))
+    if (node.background) summary.push('&')
   }
   return summary
 }

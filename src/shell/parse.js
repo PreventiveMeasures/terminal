@@ -78,6 +78,12 @@ const UNIMPLEMENTED_BLOCKS = new Map([
 
 const ASSIGNMENT_COMMANDS = new Set(['alias', 'declare', 'typeset', 'local', 'readonly', 'export', 'eval', 'let'])
 
+// What stands between two commands, and which of those end the one before
+// rather than join it to the next: `;` and `&` both close a list, so either
+// may be the last thing a line says.
+const SEPARATORS = new Set(['pipe', 'pipe_err', 'and', 'or', 'semi', 'amp'])
+const ENDS_LIST = new Set(['semi', 'amp'])
+
 // Recursive readers share one cursor, positioned after any consumed closer.
 function buildSteps(p, end) {
   const { raw } = p
@@ -101,13 +107,16 @@ function buildSteps(p, end) {
       openParen(p, stage)
       continue
     }
-    if (t.kind === 'pipe' || t.kind === 'pipe_err' || t.kind === 'and' || t.kind === 'or' || t.kind === 'semi') {
+    if (SEPARATORS.has(t.kind)) {
       // `|&` is `2>&1 |`, applied after the stage's own redirects.
       if (t.kind === 'pipe_err' && (isCommand(stage) || isBlock(stage))) stage.redirs.push({ fd: 2, op: 'dup', toFd: 1 })
       if (!(t.kind === 'semi' && bareBang(steps.at(-1), stage))) appendStage(p, steps.at(-1), stage)
+      // `&` gives the whole `a && b` list it closes to the background, and
+      // bash takes it as the separator it also is: `a & b` runs both.
+      if (t.kind === 'amp') steps.at(-1).background = true
       stage = newStage()
       if (t.kind === 'and' || t.kind === 'or') steps.push(newStep(t.kind))
-      else if (t.kind === 'semi') steps.push(newStep('seq'))
+      else if (ENDS_LIST.has(t.kind)) steps.push(newStep('seq'))
       if (end === null && (t.newline || t.lineEnd)) {
         if (p.unitOnly) { p.i++; steps.pop(); return steps }
         p.aliases = advanceAliases(steps.slice(unitStart, -1), p.aliases, p.hasCommand)
@@ -146,7 +155,7 @@ function buildSteps(p, end) {
   if (end === 'done') throw incomplete('for: missing `done`')
   if (end) throw incomplete(`if: missing \`${end === 'then' ? 'then' : 'fi'}\``)
   if (!p.emptyStage && !isBlock(stage) && !isCommand(stage) && ['and', 'or', 'pipe', 'pipe_err'].includes(raw.at(-1)?.kind)) throw incomplete('empty pipeline stage')
-  if (raw.at(-1)?.kind === 'semi') steps.pop()
+  if (ENDS_LIST.has(raw.at(-1)?.kind)) steps.pop()
   else if (!bareBang(steps.at(-1), stage)) appendStage(p, steps.at(-1), stage)
   return steps
 }
