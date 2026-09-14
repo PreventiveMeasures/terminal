@@ -221,19 +221,22 @@ summarize('echo "`a|b`"')
 ```
 
 A `( … )` is a list of its own, so it holds a summary too, in place of the row
-a command would have stood in:
+a command would have stood in — and `{ …; }` is the same list run where it
+stands rather than beside it, which is the whole of what the brackets decide:
 
 ```js
 summarize('(cd dir; ls) | wc -l')
-// [ [ { type: 'braces', summary: [[['cd', 'dir']], [['ls']]] }, ['wc', '-l'] ] ]
+// [ [ { type: 'parens', summary: [[['cd', 'dir']], [['ls']]] }, ['wc', '-l'] ] ]
 
-summarize('(ls) > out')
-// [ [['ls'], ['>', 'out']] ]
+summarize('a || { b; c; }')
+// [ [['a']], '||', [ { type: 'braces', summary: [[['b']], [['c']]] } ] ]
 ```
 
-Parentheses holding one command that changes nothing the shell around them
-keeps are the command they hold — `(ls)` is `ls` — while `(cd dir)` keeps
-them, since stopping the `cd` from reaching the shell is all they are for.
+Brackets around a single command say nothing the command does not, so they
+come off: `(ls)` and `{ ls; }` are both `ls`. The exception is what
+parentheses are for — `(cd dir)` keeps its row, since the parentheses are
+what stops the `cd` reaching the shell, while `{ cd dir; }` is the `cd`
+itself.
 
 A `for` is a list of its own as well, run once for each word after `in`:
 

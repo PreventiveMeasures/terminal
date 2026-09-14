@@ -31,11 +31,11 @@ function summaryOf(nodes) {
   return summary
 }
 
-const BLOCKS = { group: 'a brace group', if: '`if`', test: '`[[ … ]]`', pipeline: 'a pipeline of pipelines' }
+const BLOCKS = { if: '`if`', test: '`[[ … ]]`', pipeline: 'a pipeline of pipelines' }
 
 // What a chain's rows can be: a command, and the two blocks that are a list of
 // commands and nothing a summary would have to leave out.
-const ROWS = new Set(['command', 'subshell', 'for'])
+const ROWS = new Set(['command', 'subshell', 'group', 'for'])
 
 function chainOf(node) {
   if (node.negate) throw refuse('`!`')
@@ -64,25 +64,29 @@ function chainOf(node) {
 // A command is its words; the blocks that are a list of commands are that
 // list, summarized as a line of its own, with whatever the block says about
 // how it runs one — a `for` says which name it runs the list over, and what
-// it gives that name in turn.
+// it gives that name in turn. `( … )` and `{ …; }` are told apart by the
+// brackets they were written with, which is the whole of the difference: one
+// keeps what it runs to itself, and the other does not.
 function rowOf(stage) {
-  if (stage.type === 'subshell') return { type: 'braces', summary: summaryOf(stage.list) }
+  if (stage.type === 'subshell') return { type: 'parens', summary: summaryOf(stage.list) }
+  if (stage.type === 'group') return { type: 'braces', summary: summaryOf(stage.list) }
   if (stage.type === 'for') return { type: 'for', name: stage.name, words: stage.words.map(literal), summary: summaryOf(stage.list) }
   const argv = stage.argv.map(literal)
   if (stage.assignments) argv.unshift(assignmentsOf(stage.assignments))
   return argv
 }
 
-// `( ls )` runs what `ls` runs. Parentheses are what keeps a command's
-// directory, its variables and its exit from reaching the shell around it, so
-// one holding a command that changes none of those is the command it holds.
-// Redirects on both sides belong to neither: `(ls > a) > b` writes to `a` and
-// leaves `b` empty, where `ls > a > b` would leave `a` empty instead.
+// `( ls )` and `{ ls; }` run what `ls` runs. Brackets around one command say
+// nothing the command does not, with one exception: parentheses keep a
+// command's directory, its variables and its exit from reaching the shell
+// around them, so those keep theirs. Redirects on both sides belong to
+// neither pair: `(ls > a) > b` writes to `a` and leaves `b` empty, where
+// `ls > a > b` would leave `a` empty instead.
 function opened(stage) {
-  if (stage.type !== 'subshell' || stage.list.length !== 1) return stage
+  if ((stage.type !== 'subshell' && stage.type !== 'group') || stage.list.length !== 1) return stage
   const [inner] = stage.list
-  if (inner.type !== 'command' || inner.negate || inner.background || inner.assignments) return stage
-  if (typeof inner.argv[0] !== 'string' || OUTLIVES.has(inner.argv[0])) return stage
+  if (inner.type !== 'command' || inner.negate || inner.background) return stage
+  if (stage.type === 'subshell' && (inner.assignments || typeof inner.argv[0] !== 'string' || OUTLIVES.has(inner.argv[0]))) return stage
   if ((stage.redirects ?? []).length > 0 && (inner.redirects ?? []).length > 0) return stage
   return { ...inner, redirects: [...(inner.redirects ?? []), ...(stage.redirects ?? [])] }
 }

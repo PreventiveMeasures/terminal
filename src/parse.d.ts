@@ -464,12 +464,12 @@ export interface TokenAssignment {
 export type Chain = ChainRow[]
 
 /** One row of a {@link Chain}: a command's tokens, or the block that stands where one would. */
-export type ChainRow = Token[] | ChainBraces | ChainFor
+export type ChainRow = Token[] | ChainParens | ChainBraces | ChainFor
 
 /**
  * A `( … )` a chain runs: the commands inside, summarized as a line of their
  * own, since a subshell holds a list like any other — `(cd dir; ls) > out` is
- * `[{ type: 'braces', summary: [[['cd', 'dir']], [['ls']]] }, ['>', 'out']]`.
+ * `[{ type: 'parens', summary: [[['cd', 'dir']], [['ls']]] }, ['>', 'out']]`.
  *
  * Parentheses holding one command that changes nothing the shell around them
  * keeps are the command they hold: `(ls)` is `['ls']` and `(ls) | wc` is two
@@ -477,6 +477,21 @@ export type ChainRow = Token[] | ChainBraces | ChainFor
  * reaching the shell. This is not the tree's `subshell`: a chain's rows are
  * commands, and what it holds is a {@link Summary} rather than a list of
  * nodes — which is why it is a `summary` here and a `list` there.
+ */
+export interface ChainParens {
+  type: 'parens'
+  /** What it runs, summarized as a line of its own. */
+  summary: Summary
+}
+
+/**
+ * A `{ …; }` a chain runs, which is a {@link ChainParens} but for the one
+ * thing brackets decide: a brace group runs in the shell it stands in, so
+ * a `cd`, an assignment or an `exit` inside it reaches the line around it.
+ *
+ * Which is why braces around a single command are dropped wherever
+ * parentheses would only be dropped around a harmless one: `{ cd dir; }` is
+ * `['cd', 'dir']`, while `(cd dir)` keeps its row.
  */
 export interface ChainBraces {
   type: 'braces'
@@ -567,8 +582,8 @@ export function parse(line: string): ParseResult
  * shell whose output it will be, the word those are joined into, or the
  * `A=1 B=2` a command carries — each of which says what it reaches for as
  * plainly as a name says what it runs. Anything a summary
- * would have to lie about throws instead: a line that does not parse, a
- * brace group, `if` or `[[ … ]]`, a `!`, a
+ * would have to lie about throws instead: a line that does not parse, an
+ * `if` or `[[ … ]]`, a `!`, a
  * here-document whose delimiter leaves its body to expand, a stage that reads
  * its own input from inside a pipeline, and any word no line settles the text
  * of — `$(( … ))`, or the braces of an ambiguous redirect. {@link parse}

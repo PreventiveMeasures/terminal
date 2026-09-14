@@ -400,7 +400,6 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   }
 
   for (const [line, message] of [
-    ['{ ls; }', 'summarize: a brace group is not a simple chain'],
     ['if ls; then cat a.txt; fi', 'summarize: `if` is not a simple chain'],
     ['[[ -f a.txt ]]', 'summarize: `[[ … ]]` is not a simple chain'],
     ['! ls', 'summarize: `!` is not a simple chain'],
@@ -411,7 +410,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['wc < a.txt <<<here', 'summarize: a command reading from two places is not a simple chain'],
     ['ls > {a,b}', 'summarize: {a,b} is not a literal word'],
     ['echo $((1 + 2))', 'summarize: $((…)) is not a literal word'],
-    ['ls; { cd dir; }', 'summarize: a brace group is not a simple chain'],
+    ['ls; if a; then b; fi', 'summarize: `if` is not a simple chain'],
   ]) {
     it(`refuses ${JSON.stringify(line)}`, () => {
       assert.throws(() => terminal().summarize(line), { message })
@@ -486,22 +485,37 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
       { type: 'for', name: 'f', words: [], summary: [[['ls']]] },
       ['>', '/tmp/out'],
     ]])
-    assert.throws(() => terminal().summarize('for f in a; do { ls; }; done'), { message: 'summarize: a brace group is not a simple chain' })
+    assert.throws(() => terminal().summarize('for f in a; do if a; then b; fi; done'), { message: 'summarize: `if` is not a simple chain' })
   })
 
   // `( … )` is a list of its own, and a summary of a list is a summary.
   it('summarizes a subshell as the line it runs, and drops what it keeps from nothing', () => {
-    const braces = (chains) => ({ type: 'braces', summary: chains })
+    const parens = (chains) => ({ type: 'parens', summary: chains })
     assert.deepEqual(terminal().summarize('(ls)'), [[['ls']]])
     assert.deepEqual(terminal().summarize('(ls -a) | wc'), [[['ls', '-a'], ['wc']]])
     assert.deepEqual(terminal().summarize('(ls) > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
     assert.deepEqual(terminal().summarize('echo x | (cat) > /tmp/f'), [[['echo', 'x'], ['>', '/tmp/f']]])
-    assert.deepEqual(terminal().summarize('(cd dir; ls)'), [[braces([[['cd', 'dir']], [['ls']]])]])
-    assert.deepEqual(terminal().summarize('(cd dir)'), [[braces([[['cd', 'dir']]])]])
-    assert.deepEqual(terminal().summarize('(a && b &)'), [[braces([[['a']], '&&', [['b']], '&'])]])
-    assert.deepEqual(terminal().summarize('(ls; cd x) | wc -l > /tmp/out'), [[braces([[['ls']], [['cd', 'x']]]), ['wc', '-l'], ['>', '/tmp/out']]])
-    assert.deepEqual(terminal().summarize('(ls > /tmp/a) > /tmp/b'), [[braces([[['ls'], ['>', '/tmp/a']]]), ['>', '/tmp/b']]])
-    assert.deepEqual(terminal().summarize('(x=1)'), [[braces([[[{ type: 'assignments', assignments: [{ name: 'x', value: '1' }] }]]])]])
+    assert.deepEqual(terminal().summarize('(cd dir; ls)'), [[parens([[['cd', 'dir']], [['ls']]])]])
+    assert.deepEqual(terminal().summarize('(cd dir)'), [[parens([[['cd', 'dir']]])]])
+    assert.deepEqual(terminal().summarize('(a && b &)'), [[parens([[['a']], '&&', [['b']], '&'])]])
+    assert.deepEqual(terminal().summarize('(ls; cd x) | wc -l > /tmp/out'), [[parens([[['ls']], [['cd', 'x']]]), ['wc', '-l'], ['>', '/tmp/out']]])
+    assert.deepEqual(terminal().summarize('(ls > /tmp/a) > /tmp/b'), [[parens([[['ls'], ['>', '/tmp/a']]]), ['>', '/tmp/b']]])
+    assert.deepEqual(terminal().summarize('(x=1)'), [[parens([[[{ type: 'assignments', assignments: [{ name: 'x', value: '1' }] }]]])]])
+  })
+
+  // `{ …; }` is the same list, run where it stands rather than beside it —
+  // which is the one thing the brackets decide, and all they are told apart by.
+  it('summarizes a brace group as the line it runs, in the shell it runs in', () => {
+    const braces = (chains) => ({ type: 'braces', summary: chains })
+    assert.deepEqual(terminal().summarize('a || { b; c; }'), [[['a']], '||', [braces([[['b']], [['c']]])]])
+    assert.deepEqual(terminal().summarize('{ cd dir; ls; }'), [[braces([[['cd', 'dir']], [['ls']]])]])
+    assert.deepEqual(terminal().summarize('{ a | b; } > /tmp/out'), [[braces([[['a'], ['b']]]), ['>', '/tmp/out']]])
+    // Braces keep nothing to itself, so one command inside is that command —
+    // where parentheses keep the `cd` they hold, and stay.
+    assert.deepEqual(terminal().summarize('{ ls; }'), [[['ls']]])
+    assert.deepEqual(terminal().summarize('{ cd dir; }'), [[['cd', 'dir']]])
+    assert.deepEqual(terminal().summarize('{ ls; } > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
+    assert.deepEqual(terminal().summarize('{ ls > /tmp/a; } > /tmp/b'), [[braces([[['ls'], ['>', '/tmp/a']]]), ['>', '/tmp/b']]])
   })
 
   // Whatever feeds a command is the command that feeds it, and text is written
