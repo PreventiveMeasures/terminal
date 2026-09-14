@@ -235,7 +235,7 @@ describe('parse() spells a value out only when expansion still decides it', () =
     ['~/bin', [home(), '/bin']],
     ['"$HOME/bin"', [home(), '/bin']],
     ['~/bin*', [home(), pattern('/bin*')]],
-    ['~user/bin', ['~user/bin']],
+    ['x=~/a', ['x=', home(), '/a']],
     ["~''/bin", ['~/bin']],
     ['~"/bin"', ['~/bin']],
     ['a~b', ['a~b']],
@@ -250,6 +250,26 @@ describe('parse() spells a value out only when expansion still decides it', () =
       assert.deepEqual(list(`echo ${written}`)[0].argv[1], parts(...pieces))
     })
   }
+
+  // Bash expands `~alice` to that user's home directory, and this shell has
+  // no users to look one up in. Reading it as the text it is would answer a
+  // question nobody asked, so a word holding one is refused where a syntax
+  // error is — and, like one, leaves the commands ahead of it readable.
+  it('refuses a tilde prefix that names anything but the home directory', () => {
+    const message = 'named-user and directory-stack tilde prefixes are not supported'
+    for (const line of ['ls ~user/bin', 'ls ~+', 'echo x=~-/a', 'echo $(ls ~user)', 'x=~user/a', 'cat < ~user/f']) {
+      assert.deepEqual(verdict(line), { ok: false, incomplete: false, error: message }, line)
+      assert.deepEqual(parse(line).unsupported, [{ kind: 'feature', command: null, detail: 'tilde prefix', message }], line)
+    }
+    assert.deepEqual(list('ls; ls ~user'), [{ type: 'command', argv: ['ls'] }])
+  })
+
+  // A prefix opens a word, and an assignment component after `=` or a `:`,
+  // which is where bash expands one and so where the reading finds one.
+  it('finds a tilde prefix everywhere bash expands one, and nowhere else', () => {
+    assert.deepEqual(list('PATH=~/a:~/b ls')[0].assignments, [{ name: 'PATH', value: parts(home(), '/a:', home(), '/b') }])
+    assert.deepEqual(list('echo a~b ~"/a" "~/a" x~/a')[0].argv, ['echo', 'a~b', '~/a', '~/a', 'x~/a'])
+  })
 
   it('reads the commands a substitution runs, however deep', () => {
     assert.deepEqual(list('foo `bar a b c`')[0].argv, ['foo', parts({ type: 'substitution', quoted: false, list: [{ type: 'command', argv: ['bar', 'a', 'b', 'c'] }] })])
@@ -347,6 +367,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['echo )', 'unexpected `)`'],
     ['for f in a; do', 'for: missing `done`'],
     ['while :; do :; done', '`while` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
+    ['ls ~user', 'named-user and directory-stack tilde prefixes are not supported'],
   ]) {
     it(`throws the parse diagnostic for ${JSON.stringify(line)}`, () => {
       assert.throws(() => terminal().summarize(line), { message })
@@ -481,6 +502,7 @@ describe('parse() reports the gaps parsing itself finds', () => {
     'echo $((1 + 1)) && ((x++))',
     'f() { :; }',
     'echo ${x@Q}',
+    'echo ~x',
     'echo @(a|b)',
     'for ((i = 0; i < 3; i++)); do :; done',
     'x=(a b)',

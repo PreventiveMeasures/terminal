@@ -4,7 +4,7 @@
 // names expand to nothing with a warning and an unsupported entry. Process
 // parameters such as $$ remain literal with the same diagnostic.
 
-import { assignmentOf, sliceWord } from './word.js'
+import { assignmentOf, homePrefixes, sliceWord } from './word.js'
 import { UnsupportedError } from '../unsupported.js'
 import { expandBraces } from './braces.js'
 import { globPaths, hasGlobMeta } from '../glob.js'
@@ -69,50 +69,31 @@ export const homeOf = (ctx) => ctx.vars.get('HOME') ?? ctx.home
 
 const maskAt = (w, i) => (w.mask === null ? '0' : w.mask[i])
 
-// Tilde prefixes begin a word or an assignment component (after '=' or ':').
-// Named users and directory-stack prefixes are unsupported. Preserve quoted
-// tildes and empty-fragment offsets while replacing an unquoted home prefix.
+// Put the home directory where the word says one. Quoted tildes and
+// empty-fragment offsets are preserved; which `~` is a prefix at all, and
+// which refuses, is the word's own rule.
 function tilde(w, ctx, assignmentValue = false) {
-  if (!w.value.includes('~')) return w
+  const marks = homePrefixes(w, assignmentValue)
+  if (marks.size === 0) return w
   const v = w.value
-  const bare = (i) => maskAt(w, i) === '0'
-  const eqLen = assignmentValue ? null : assignmentOf(w)?.end ?? null
-  const inValue = (i) => assignmentValue === true || (eqLen !== null && i >= eqLen)
   const home = homeOf(ctx)
   let value = ''
   let mask = ''
   const empty = []
   for (let i = 0; i < v.length; i++) {
     if (w.empty?.includes(i)) empty.push(value.length)
-    const prefixStart = i === 0 || i === eqLen || (inValue(i) && v[i - 1] === ':' && bare(i - 1))
-    if (prefixStart && v[i] === '~' && bare(i) && unquotedTilde(w, i, inValue(i) || assignmentValue === 'parameterAssign')) {
-      const n = v[i + 1]
-      if (n && n !== '/' && n !== ':' && bare(i + 1)) throw new UnsupportedError('feature', 'tilde prefix', 'named-user and directory-stack tilde prefixes are not supported')
-      const ends = n === undefined || (bare(i + 1) && (n === '/' || (n === ':' && (inValue(i) || assignmentValue === 'parameterAssign'))))
-      if (ends) {
-        // A root home makes `~/x` `/x`, not `//x`.
-        const h = home === '/' && n === '/' ? '' : home
-        value += h
-        mask += '1'.repeat(h.length)
-        continue
-      }
+    if (marks.has(i)) {
+      // A root home makes `~/x` `/x`, not `//x`.
+      const h = home === '/' && v[i + 1] === '/' ? '' : home
+      value += h
+      mask += '1'.repeat(h.length)
+      continue
     }
     value += v[i]
     mask += maskAt(w, i)
   }
   if (w.empty?.includes(v.length)) empty.push(value.length)
   return { value, mask: /[12]/u.test(mask) ? mask : null, ...(empty.length ? { empty } : {}) }
-}
-
-function unquotedTilde(w, start, assignment) {
-  // Empty quotes also inhibit expansion: ~''/x and ''~/x are literal paths.
-  for (let i = start; i <= w.value.length; i++) {
-    if (w.empty?.includes(i)) return false
-    if (i === w.value.length) return true
-    if (maskAt(w, i) !== '0') return false
-    if (w.value[i] === '/' || (assignment && w.value[i] === ':')) return true
-  }
-  return true
 }
 
 // Keep quoting until both conditional pattern matching and ordinary shell

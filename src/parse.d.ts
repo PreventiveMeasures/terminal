@@ -65,11 +65,14 @@ export interface BracePart {
  * `$1`, `$@`. `quoted` marks a reference inside double quotes, whose result is
  * neither split into fields nor matched as a pattern.
  *
- * A `~` opening a word is one of these: it names the home directory, which is
- * what `"$HOME"` names, and quoted for the same reason — tilde expansion is
- * never split or matched either. `~/a` reads exactly as `"$HOME/a"` does, and
- * `a~b`, `~''/x` and `~user` are text, since a tilde expands only at the start
- * of a word, only unquoted, and here only as the home directory.
+ * A `~` prefix is one of these: it names the home directory, which is what
+ * `"$HOME"` names, and quoted for the same reason — tilde expansion is never
+ * split or matched either. `~/a` reads exactly as `"$HOME/a"` does, and so
+ * does the `~/a` in `PATH=~/a:~/b`, since a prefix opens a word or an
+ * assignment component. Quoting one leaves the text alone: `a~b`, `~''/x` and
+ * `~"/x"` are the paths they spell. A prefix naming a user or the directory
+ * stack — `~alice`, `~+` — is refused rather than read, since bash expands it
+ * and this shell has no users to look one up in.
  */
 export interface VariablePart {
   type: 'variable'
@@ -304,7 +307,8 @@ export interface ParseResult {
   /**
    * Gaps this implementation has, that parsing itself reached: refused shell
    * constructs (`while`, `case`, `((`), unsupported `${…}` operators and
-   * `[[ … ]]` forms. Frozen and deduplicated, in the shape a run reports.
+   * `[[ … ]]` forms, a `~alice` home this shell cannot look up. Frozen and
+   * deduplicated, in the shape a run reports.
    *
    * Only what parsing can see: whether a command exists, what an option means
    * and what an expansion produces are not settled here.

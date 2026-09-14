@@ -61,9 +61,17 @@ terminal.parse('ls ~/bin').list[0].argv
 //   { type: 'variable', name: 'HOME', quoted: true }, '/bin' ] } ]
 ```
 
-Only a bare `~` opening a word is one, and only where bash expands it: `a~b`,
-`~"/bin"` and `~''/bin` are the text they spell, and `~user`, which names
-someone else's home, is text this terminal refuses when it comes to expand it.
+A prefix stands where bash finds one — opening a word, or an assignment
+component after `=` or a bare `:` — and a quote anywhere in it leaves the text
+alone, so `a~b`, `~"/bin"` and `~''/bin` are the paths they spell. `~alice`
+names someone else's home, and this shell has no users to look one up in, so a
+word holding one is refused rather than read as the text bash would have
+expanded:
+
+```js
+terminal.parse('ls ~alice/bin').error
+// 'named-user and directory-stack tilde prefixes are not supported'
+```
 
 Braces need nothing but the text, so they are already expanded: `ls a{b,c}`
 reads as `['ls', 'ab', 'ac']`, exactly as bash reads it before anything else

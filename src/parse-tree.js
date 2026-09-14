@@ -8,19 +8,30 @@
 
 import { createUnsupportedFeed, unsupportedNote } from './unsupported.js'
 import { expandBraces, hasBraces } from './shell/braces.js'
+import { homePrefixes } from './shell/word.js'
 import { readBacktickSubstitution, readExpansion } from './shell/lex.js'
 import { parseAll } from './shell/parse.js'
 
 export function read(line, writable) {
   const feed = createUnsupportedFeed()
   const { units, error, incomplete } = parseAll(line, writable)
-  const note = error === null ? null : unsupportedNote(error)
+  const list = []
+  // A gap the tree itself reaches — a `~user` home this shell cannot look up
+  // — stops the reading where a syntax error does, and leaves the commands
+  // ahead of it readable as one does.
+  let refused = null
+  try { extend(list, units) } catch (e) {
+    if (!unsupportedNote(e)) throw e
+    refused = e
+  }
+  const failure = error ?? refused
+  const note = failure === null ? null : unsupportedNote(failure)
   if (note) feed.add(note)
   return {
-    ok: error === null,
+    ok: failure === null,
     incomplete,
-    error: error === null ? null : error.message,
-    list: listOf(units),
+    error: failure === null ? null : failure.message,
+    list,
     unsupported: Object.freeze(feed.entries),
   }
 }
@@ -32,8 +43,9 @@ const OPERATORS = { seq: ';', and: '&&', or: '||' }
 // ahead of an error are the ones a terminal would have executed. A newline
 // between them separates commands exactly as `;` does, so they flatten into
 // one list rather than nesting a level for every reader to unwrap.
-function listOf(units) {
-  const list = []
+const listOf = (units) => extend([], units)
+
+function extend(list, units) {
   for (const steps of units) {
     for (const step of steps) list.push(nodeOf(step, list.length === 0 ? OPERATORS[step.gate] : OPERATORS[step.gate] ?? ';'))
   }
@@ -61,7 +73,7 @@ function nodeOf(step, op) {
 
 function stageOf(stage) {
   const node = blockOf(stage)
-  if (stage.assigns.length > 0) node.assignments = stage.assigns.map((a) => ({ name: a.name, value: valueOf(a.word) }))
+  if (stage.assigns.length > 0) node.assignments = stage.assigns.map((a) => ({ name: a.name, value: valueOf(a.word, false, true) }))
   if (stage.redirs.length > 0) node.redirects = stage.redirs.map(redirectOf)
   return node
 }
@@ -85,9 +97,9 @@ function ifOf(conditional) {
 // The one rule the whole tree follows: text that nothing can change any more
 // is that text, and everything else is a word in the pieces expansion works
 // on — literal runs, and the references and substitutions between them.
-function valueOf(w, braces = false) {
+function valueOf(w, braces = false, assignment = false) {
   if (!expandable(w)) return w.value
-  const parts = partsOf(w, braces)
+  const parts = partsOf(w, braces, assignment)
   // One piece is that piece: the word around it says nothing the piece does not.
   return parts.length === 1 ? parts[0] : { type: 'parts', parts }
 }
@@ -120,7 +132,7 @@ function expand(w) {
 // Quoting belongs to a piece rather than to each character: a literal run is
 // quoted or it is not, and a reference carries whether its result will be
 // split and globbed. An expansion's source never becomes text of its own.
-function partsOf(word, braces) {
+function partsOf(word, braces, assignment) {
   const { value } = word
   const mask = word.mask ?? '0'.repeat(value.length)
   const empty = new Set(word.empty ?? [])
@@ -139,16 +151,16 @@ function partsOf(word, braces) {
     if (text !== '') push(textOf(word, text, quoted, start, end, braces))
     text = ''
   }
-  // A `~` opening a word is the home directory under another spelling, so that
-  // is what it reads as, and a reader needs to know only the one thing. Quoted,
-  // because tilde expansion is neither split into fields nor matched as a
-  // pattern, which is what quoting a reference settles too.
-  const home = homePrefix(value, mask, empty)
-  if (home) parts.push({ type: 'variable', name: 'HOME', quoted: true })
-  for (let i = home ? 1 : 0; i <= value.length; i++) {
+  const homes = homePrefixes(word, assignment)
+  for (let i = 0; i <= value.length; i++) {
     // An empty quoted fragment is a piece: `$x""` keeps a final empty field.
     if (empty.has(i)) { flush(i); push('') }
     if (i === value.length) break
+    // A `~` prefix is the home directory under another spelling, so that is
+    // what it reads as, and a reader needs to know only the one thing. Quoted,
+    // because tilde expansion is neither split into fields nor matched as a
+    // pattern, which is what quoting a reference settles too.
+    if (homes.has(i)) { flush(i); push({ type: 'variable', name: 'HOME', quoted: true }); continue }
     const bare = mask[i] !== '1'
     if (bare && (value[i] === '$' || value[i] === '`')) {
       const found = expansionAt(value, i, mask[i] === '2')
@@ -172,17 +184,6 @@ function textOf(word, value, quoted, from, to, braces) {
   if (braces && /[{},]/u.test(value) && hasBraces(word)) return { type: 'brace', source: value }
   if (globbed(word, from, to)) return { type: 'pattern', pattern: value }
   return value
-}
-
-// Bash's tilde prefix, which here names nothing but the home directory: a bare
-// `~` that the end of the word or a bare `/` closes. Quoting anywhere in the
-// prefix leaves the text alone — `~''/x` and `''~/x` are the literal paths
-// they spell — and a prefix naming a user or the directory stack is text this
-// terminal refuses when it comes to expand it.
-function homePrefix(value, mask, empty) {
-  if (value[0] !== '~' || mask[0] !== '0') return false
-  if (empty.has(0) || empty.has(1)) return false
-  return value.length === 1 || (value[1] === '/' && mask[1] === '0')
 }
 
 // A run is matched as a pattern once it holds a `*` or `?`, or a `[` that a
@@ -242,8 +243,7 @@ function expansionAt(value, at, quoted) {
 }
 
 // A word an expansion could still change: a `$` or backtick that quoting has
-// not disarmed, a bare `*`, `?` or `{`, or a bare `~` opening the word, which
-// is the only place one expands. A `[` counts only once a `]`
+// not disarmed, or a bare `~`, `*`, `?` or `{`. A `[` counts only once a `]`
 // could close it, since a bracket expression nothing closes matches its own
 // text and nothing else — which is all `[` in `[ -f x ]` ever is. Masks count
 // UTF-16 units, so index the value the same way rather than by code point.
@@ -253,7 +253,7 @@ function expandable(word) {
     const mask = word.mask === null ? '0' : word.mask[i]
     if ((ch === '$' || ch === '`') && mask !== '1') return true
     if (mask !== '0') continue
-    if ('*?{'.includes(ch) || (i === 0 && ch === '~')) return true
+    if ('~*?{'.includes(ch)) return true
     if (ch === '[' && closesBracket(word, i)) return true
   }
   return false
