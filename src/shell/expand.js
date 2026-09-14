@@ -116,6 +116,9 @@ function expandedWord(w, ctx, assignment = false) {
     if (i === w.value.length) break
     const m = maskAt(w, i)
     const c = w.value[i]
+    // A `<( … )` reaches expansion as the text it was written as: nothing here
+    // opens a command on a descriptor, so nothing can hand one a path.
+    if (m === '0' && (c === '<' || c === '>') && w.value[i + 1] === '(') throw new UnsupportedError('feature', `${c}(`, `process substitution (\`${c}(…)\`) is not supported`)
     const active = m !== '1' && (c === '$' || c === '`')
     const compound = w.value[i + 1] === '(' || w.value[i + 1] === '{'
     const ref = active ? substitutionRef(w, i, c, m, compound) : null

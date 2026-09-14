@@ -251,6 +251,23 @@ describe('parse() spells a value out only when expansion still decides it', () =
     })
   }
 
+  // `<( … )` runs commands and the word is the path their output arrives on,
+  // so what it holds is what it runs. Opening one needs a descriptor this
+  // shell has none of, which is a gap running the line reports, not reading it.
+  it('reads a process substitution as the commands it runs', () => {
+    const process = (op, nodes) => ({ type: 'process', op, list: nodes })
+    assert.deepEqual(list('cat <(ls)')[0].argv, ['cat', process('<', [{ type: 'command', argv: ['ls'] }])])
+    assert.deepEqual(list('tee >(wc -l)')[0].argv, ['tee', process('>', [{ type: 'command', argv: ['wc', '-l'] }])])
+    assert.deepEqual(list('diff <(a; b) <(c | d)')[0].argv.slice(1), [
+      process('<', [{ type: 'command', argv: ['a'] }, { type: 'command', op: ';', argv: ['b'] }]),
+      process('<', [{ type: 'pipeline', stages: [{ type: 'command', argv: ['c'] }, { type: 'command', argv: ['d'] }] }]),
+    ])
+    assert.deepEqual(list('echo <(ls) > /tmp/out')[0].redirects, [{ fd: 1, op: '>', target: '/tmp/out' }])
+    // Quoting settles it as the text it spells, as it settles a pattern.
+    assert.deepEqual(list('echo "<(ls)" \'<(ls)\'')[0].argv, ['echo', '<(ls)', '<(ls)'])
+    assert.deepEqual(terminal().summarize('cat <(ls)'), [[['cat', { type: 'process', op: '<', summary: [[['ls']]] }]]])
+  })
+
   // Bash expands `~alice` to that user's home directory, and this shell has
   // no users to look one up in. Reading it as the text it is would answer a
   // question nobody asked, so a word holding one is refused where a syntax
@@ -626,7 +643,7 @@ describe('parse() reports the gaps parsing itself finds', () => {
   })
 
   // Dispatch, expansion and the commands themselves are never reached here.
-  for (const line of ['frobnicate', 'ls --frobnicate', 'echo a > /etc/passwd', 'echo `while true; do :; done`', 'sed -e "s/a/b/w f" a.txt']) {
+  for (const line of ['frobnicate', 'ls --frobnicate', 'echo a > /etc/passwd', 'echo `while true; do :; done`', 'sed -e "s/a/b/w f" a.txt', 'cat <(ls)']) {
     it(`leaves ${JSON.stringify(line)} to run()`, () => {
       assert.deepEqual(parse(line).unsupported, [])
       assert.ok(terminal().run(line).unsupported.length > 0)

@@ -152,6 +152,7 @@ const literal = (value) => {
 // the one slot it sits in takes, so neither is a word to say outright.
 function piece(part) {
   if (typeof part === 'string' || part.type === 'pattern' || part.type === 'variable') return part
+  if (part.type === 'process') return { type: 'process', op: part.op, summary: summaryOf(part.list) }
   if (part.type !== 'substitution') throw refuse(spell(part), 'a literal word')
   // Bash parses a backtick when it comes to run it, so a body that does not
   // parse is a line that does not parse, reported as any other one is.

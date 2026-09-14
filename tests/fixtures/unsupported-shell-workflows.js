@@ -114,7 +114,6 @@ export const SHELL_WORKFLOWS = [
     purpose: 'Read a generated documentation excerpt through process substitution',
     command: 'cat <(head -n 10 README.md)',
     expected: feature('<('),
-    parseTime: true,
   },
   {
     purpose: 'Save project documentation as an analysis artifact',

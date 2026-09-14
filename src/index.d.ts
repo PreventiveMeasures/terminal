@@ -283,6 +283,8 @@ export type {
   PatternPart,
   ParseResult,
   Pipeline,
+  ProcessPart,
+  ProcessToken,
   Redirect,
   ShellToken,
   Subshell,

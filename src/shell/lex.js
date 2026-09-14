@@ -51,6 +51,16 @@ export function readExpansion(line, i, depth = 0, quoted = false, options = {}) 
   return scanRef(line, i)
 }
 
+// `<( … )` and `>( … )` run commands too, so their body is found the same
+// way: the parenthesis that closes it, with nothing inside read any further.
+export function readProcessSubstitution(line, i, options = {}) {
+  const nested = (source, at, level, inQuotes) => readExpansion(source, at, level, inQuotes, options)
+  const open = skipContinuations(line, i + 1)
+  const result = readCommandSubstitution(line, i, open, 0, { readExpansion: nested, decodeAnsiC, readHeredocBodies, readOperator, readConditional, skipContinuations })
+  options.validateSubstitution?.(result.command)
+  return result
+}
+
 // A backtick outside single quotes opens the other command substitution.
 export { readBacktickSubstitution } from './substitution.js'
 export const backtickGap = () => new UnsupportedError('feature', '`', 'command substitution (backticks) is not supported')
@@ -148,7 +158,6 @@ function readRedirect(line, i, fd) {
   const c = line[i]
   const next = skipContinuations(line, i + 1)
   const n = line[next]
-  if (n === '(') throw new UnsupportedError('feature', `${c}(`, `process substitution (\`${c}(…)\`) is not supported`)
   if (n === '&') return readDup(line, next, fd, c === '<' ? '<&' : `${fd === 1 && c === '>' ? '' : fd}>&`)
   if (c === '<') {
     if (n === '>') throw new UnsupportedError('feature', '<>', 'read/write file redirects are not supported')

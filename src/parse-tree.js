@@ -9,7 +9,7 @@
 import { createUnsupportedFeed, unsupportedNote } from './unsupported.js'
 import { expandBraces, hasBraces } from './shell/braces.js'
 import { homePrefixes } from './shell/word.js'
-import { readBacktickSubstitution, readExpansion } from './shell/lex.js'
+import { readBacktickSubstitution, readExpansion, readProcessSubstitution } from './shell/lex.js'
 import { parseAll } from './shell/parse.js'
 
 export function read(line, writable) {
@@ -179,6 +179,15 @@ function partsOf(word, slot) {
     // because tilde expansion is neither split into fields nor matched as a
     // pattern, which is what quoting a reference settles too.
     if (homes.has(i)) { flush(i); push({ type: 'variable', name: 'HOME', multi: false }); continue }
+    // `<( … )` is a command whose output the word is a path to, so what it
+    // holds is what it runs. Quoting settles it as text: `"<(ls)"` is `<(ls)`.
+    if (mask[i] === '0' && (value[i] === '<' || value[i] === '>') && value[i + 1] === '(') {
+      const found = processAt(value, i)
+      flush(i)
+      push(found.part)
+      i = found.end - 1
+      continue
+    }
     const bare = mask[i] !== '1'
     if (bare && (value[i] === '$' || value[i] === '`')) {
       const found = expansionAt(value, i, mask[i] === '2', slot)
@@ -238,6 +247,11 @@ function substitutionOf(source, mark) {
   }
 }
 
+function processAt(value, at) {
+  const { raw, command } = readProcessSubstitution(value, at)
+  return { part: { type: 'process', op: value[at], list: listOf(parseAll(command, true).units) }, end: at + raw.length }
+}
+
 // Re-read the construct from the source the tokenizer copied into the word.
 // It parsed once already, so the only question left is what it is.
 //
@@ -280,6 +294,7 @@ function expandable(word) {
     if ((ch === '$' || ch === '`') && mask !== '1') return true
     if (mask !== '0') continue
     if ('~*?{'.includes(ch)) return true
+    if ((ch === '<' || ch === '>') && word.value[i + 1] === '(') return true
     if (ch === '[' && closesBracket(word, i)) return true
   }
   return false

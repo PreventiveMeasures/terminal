@@ -7,7 +7,7 @@
 // quotes only $, backtick, quote, backslash and newline are escaped.
 // lex.js handles substitutions, operators, ANSI-C strings and here-documents.
 
-import { NAME_RE, decodeAnsiC, readBacktickSubstitution, readExpansion, readHeredocBodies, readOperator, skipContinuations } from './lex.js'
+import { NAME_RE, decodeAnsiC, readBacktickSubstitution, readExpansion, readHeredocBodies, readOperator, readProcessSubstitution, skipContinuations } from './lex.js'
 import { UnsupportedError } from '../unsupported.js'
 import { readConditional } from './conditional-lex.js'
 
@@ -59,6 +59,9 @@ function scan(st, incremental) {
     if (c === '(' && st.mask.at(-1) === '0' && /[?*+@!]/u.test(st.cur.at(-1)) && !st.empty.includes(st.cur.length)) {
       throw new UnsupportedError('feature', 'extglob', 'extended glob patterns are not supported')
     }
+    // `<( … )` opens a command rather than a redirect, and the word it becomes
+    // is the path that command's output arrives on, so it stays in the word.
+    if ((c === '<' || c === '>') && st.line[skipContinuations(st.line, st.i + 1)] === '(') { takeProcess(st); continue }
     const op = readOperator(st.line, st.i, !inToken)
     if (op?.token.kind === 'paren_open') op.token.wordAdjacent = inToken
     if (op) { flush(st); emit(st, op.token); st.i = op.end; continue }
@@ -75,6 +78,7 @@ function newScanner(line, options = {}) {
   return {
     line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoted: false, quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2,
     readExpansion: (source, at, depth = 0, quoted = false) => readExpansion(source, at, depth, quoted, options),
+    readProcess: (source, at) => readProcessSubstitution(source, at, options),
   }
 }
 
@@ -218,6 +222,14 @@ function readDollar(st) {
 // keeps its own and re-read at expansion. Rewriting it into `$(command)` here
 // would be simpler but wrong: unescaping can leave a trailing backslash, and
 // that backslash would escape the synthesised closing parenthesis.
+function takeProcess(st) {
+  spliceContinuations(st, st.i + 1)
+  const { raw } = st.readProcess(st.line, st.i)
+  put(st, st.line[st.i], '0')
+  put(st, raw.slice(1), '1', false)
+  st.i += raw.length
+}
+
 function readBacktick(st) {
   const m = st.quote === '"' || st.fragmentQuoted ? '2' : '0'
   const { raw } = readBacktickSubstitution(st.line, st.i)

@@ -117,6 +117,18 @@ terminal.parse('foo `bar a b c`').list[0].argv[1]
 // { type: 'substitution', list: [ { type: 'command', argv: ['bar', 'a', 'b', 'c'] } ] }
 ```
 
+So does a `<( … )`, whose word is the path its output arrives on rather than
+the output itself:
+
+```js
+terminal.parse('cat <(ls)').list[0].argv[1]
+// { type: 'process', op: '<', list: [ { type: 'command', argv: ['ls'] } ] }
+```
+
+`op` is the direction as written, `>( … )` being the other one. Reading it
+takes no descriptors; opening one does, and this shell has none — so `run()`
+reports that gap where reading the line reports the commands.
+
 ## Without a terminal
 
 The parser is published separately, for a caller with no source tree to mount:

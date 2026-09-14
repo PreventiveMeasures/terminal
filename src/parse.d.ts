@@ -27,7 +27,7 @@ export interface Parts {
  * pattern and a brace are bare by definition — quoting either settles the text
  * instead.
  */
-export type Part = string | PatternPart | BracePart | VariablePart | SubstitutionPart | ArithmeticPart
+export type Part = string | PatternPart | BracePart | VariablePart | SubstitutionPart | ProcessPart | ArithmeticPart
 
 /**
  * Bare text carrying glob syntax — `*`, `?`, or a `[` a bare `]` closes —
@@ -136,6 +136,23 @@ export interface SubstitutionPart {
   error?: string
   /** Whether the output may be more than one word, said either way: bare, it is split into fields and matched as a pattern, and quoting or a slot that splits nothing settles it. */
   multi: boolean
+}
+
+/**
+ * `<( … )` or `>( … )`: commands again, so the commands are what it holds.
+ * The word they become is a path — the one their output arrives on, or the
+ * one they read what is written to — rather than the output itself, which is
+ * what a {@link SubstitutionPart} becomes.
+ *
+ * `op` is the direction as written. There is no `multi`: a path is one word,
+ * neither split into fields nor matched as a pattern. Quoting settles it as
+ * text instead, so `"<(ls)"` is the string `<(ls)`, and nothing here opens a
+ * command on a descriptor, so running one reports the gap rather than a path.
+ */
+export interface ProcessPart {
+  type: 'process'
+  op: '<' | '>'
+  list: Node[]
 }
 
 /**
@@ -376,7 +393,7 @@ export interface ParseResult {
 export type WordToken = TokenPiece | TokenParts
 
 /** One piece of a {@link WordToken}, or the whole of one where it is the only piece. */
-export type TokenPiece = string | StringPatternPart | VariablePart | ShellToken
+export type TokenPiece = string | StringPatternPart | VariablePart | ShellToken | ProcessToken
 
 /** One token of a chain: a word, or the assignments a command carries. */
 export type Token = WordToken | AssignmentsToken
@@ -407,6 +424,17 @@ export interface ShellToken {
   /** What it runs, summarized as a line of its own. */
   summary: Summary
   multi: boolean
+}
+
+/**
+ * `<( … )` or `>( … )`: what it runs, summarized as a line of its own, and the
+ * direction as written. The word is the path rather than the output, so unlike
+ * a {@link ShellToken} it is one word however it was written.
+ */
+export interface ProcessToken {
+  type: 'process'
+  op: '<' | '>'
+  summary: Summary
 }
 
 /**
