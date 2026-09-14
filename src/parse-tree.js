@@ -164,6 +164,11 @@ function partsOf(word, slot) {
     if (text !== '') push(textOf(word, text, quoted, start, end, slot))
     text = ''
   }
+  // Matching without splitting is the pattern side of `[[ x == y ]]`, and the
+  // only slot where what a reference comes back as is read rather than
+  // compared. Everywhere else matching travels with splitting, which `multi`
+  // already answers, so there is nothing left for a piece to say.
+  const matches = slot.glob === true && slot.split !== true
   const homes = homePrefixes(word, slot.assignment === true)
   for (let i = 0; i <= value.length; i++) {
     // An empty quoted fragment is a piece: `$x""` keeps a final empty field.
@@ -173,10 +178,10 @@ function partsOf(word, slot) {
     // what it reads as, and a reader needs to know only the one thing. Quoted,
     // because tilde expansion is neither split into fields nor matched as a
     // pattern, which is what quoting a reference settles too.
-    if (homes.has(i)) { flush(i); push({ type: 'variable', name: 'HOME', multi: false }); continue }
+    if (homes.has(i)) { flush(i); push({ type: 'variable', name: 'HOME', multi: false, ...(matches ? { matched: false } : {}) }); continue }
     const bare = mask[i] !== '1'
     if (bare && (value[i] === '$' || value[i] === '`')) {
-      const found = expansionAt(value, i, mask[i] === '2', slot.split === true)
+      const found = expansionAt(value, i, mask[i] === '2', slot)
       if (found) { flush(i); push(found.part); i = found.end - 1; continue }
     }
     if (text !== '' && (mask[i] !== '0') !== quoted) flush(i)
@@ -195,7 +200,7 @@ function partsOf(word, slot) {
 function textOf(word, value, quoted, from, to, slot) {
   if (quoted) return value
   if (slot.braces && /[{},]/u.test(value) && hasBraces(word)) return { type: 'brace', source: value }
-  if (slot.glob && globbed(word, from, to)) return { type: 'pattern', pattern: value }
+  if (slot.glob && globbed(word, from, to)) return { type: 'pattern', pattern: value, multi: slot.split === true }
   return value
 }
 
@@ -235,8 +240,12 @@ function substitutionOf(source, mark) {
 // does a slot that splits nothing — an assignment value, a here-string, a
 // `[[ … ]]` operand — since only its own top level is settled, and the
 // commands inside a substitution are read as commands wherever it stands.
-function expansionAt(value, at, quoted, splits) {
-  const mark = { multi: splits && !quoted }
+function expansionAt(value, at, quoted, slot) {
+  const splits = slot.split === true
+  // `matched` is the same question in the one slot that matches what it does
+  // not split: whether what comes back is read as a pattern or compared as
+  // the text it is. `[[ a == $b ]]` matches by `b`'s value; `"$b"` is text.
+  const mark = { multi: splits && !quoted, ...(slot.glob === true && !splits ? { matched: !quoted } : {}) }
   if (value[at] === '`') {
     const { raw, command } = readBacktickSubstitution(value, at)
     return { part: substitutionOf(command, mark), end: at + raw.length }
@@ -249,18 +258,11 @@ function expansionAt(value, at, quoted, splits) {
   // here, since a custom `IFS` is refused, and no digit matches a file.
   if (ref.arithmetic !== undefined) return { part: { type: 'arithmetic', source: ref.arithmetic }, end }
   const { name, operator, word } = ref.parameter ?? { name: ref.name, operator: '' }
-  return {
-    part: {
-      type: 'variable',
-      name,
-      ...(operator ? { operator } : {}),
-      ...(word === undefined ? {} : { operand: word }),
-      // `"$@"` is the one reference quotes do not settle: a word for each
-      // parameter, and none at all where a shell has none, as this one does.
-      multi: splits && (!quoted || name === '@'),
-    },
-    end,
-  }
+  const part = { type: 'variable', name, ...(operator ? { operator } : {}), ...(word === undefined ? {} : { operand: word }), ...mark }
+  // `"$@"` is the one reference quotes do not settle: a word for each
+  // positional parameter, and none at all where a shell has none, as this does.
+  if (name === '@' && splits) part.multi = true
+  return { part, end }
 }
 
 // A word an expansion could still change: a `$` or backtick that quoting has

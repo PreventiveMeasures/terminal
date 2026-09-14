@@ -21,9 +21,11 @@ export interface Parts {
  *
  * A piece is a plain string once nothing can change it, quoted or not: `"a b"`
  * is `'a b'`, and so is `a" "b`, whose runs join. Every other piece names the
- * expansion it is waiting for, and the ones that may come back as more than
- * one word say so either way. A pattern and a brace are bare by definition —
- * quoting either settles the text instead.
+ * expansion it is waiting for, and says with `multi` whether what comes back
+ * is still one word — except where its own kind already answers that: a brace
+ * group is always more than one word, and a sum is never more than one. A
+ * pattern and a brace are bare by definition — quoting either settles the text
+ * instead.
  */
 export type Part = string | PatternPart | BracePart | VariablePart | SubstitutionPart | ArithmeticPart
 
@@ -45,6 +47,8 @@ export type Part = string | PatternPart | BracePart | VariablePart | Substitutio
 export interface PatternPart {
   type: 'pattern'
   pattern: string
+  /** Whether matching it may come back as more than one word: against the filesystem it may come back as any number of names, while the pattern side of `[[ x == a* ]]` is matched against the other side rather than expanded, and is the one operand it was written as. */
+  multi: boolean
 }
 
 /**
@@ -57,7 +61,8 @@ export interface PatternPart {
  *
  * Braces nothing expands are never this: `a{b}` is the string `a{b}`, and so
  * are the braces in an assignment, a here-string or a `[[ … ]]` operand, none
- * of which the shell expands.
+ * of which the shell expands. A group that does expand is always more than one
+ * word, so unlike a pattern it has nothing to say about how many come back.
  */
 export interface BracePart {
   type: 'brace'
@@ -95,6 +100,14 @@ export interface VariablePart {
    * shell has none, as this one does.
    */
   multi: boolean
+  /**
+   * Whether what comes back is read as a pattern rather than compared as the
+   * text it is — `[[ a == $b ]]` matches by `b`'s value, where `"$b"` is the
+   * text `b` holds. Present only on the pattern side of `[[ x == y ]]`, the
+   * one slot that matches what it does not split; everywhere else matching
+   * travels with splitting, which {@link VariablePart.multi} already answers.
+   */
+  matched?: boolean
 }
 
 /**
@@ -114,6 +127,8 @@ export interface SubstitutionPart {
   error?: string
   /** Whether the output may be more than one word, said either way: bare, it is split into fields and matched as a pattern, and quoting or a slot that splits nothing settles it. */
   multi: boolean
+  /** Whether the output is read as a pattern rather than compared as text. Present only on the pattern side of `[[ x == y ]]`, as on {@link VariablePart.matched}. */
+  matched?: boolean
 }
 
 /**
@@ -284,7 +299,15 @@ export interface ConditionUnary {
   word: Value
 }
 
-/** `[[ x == y ]]`, `[[ a -lt b ]]`, `[[ f -nt g ]]`. */
+/**
+ * `[[ x == y ]]`, `[[ a -lt b ]]`, `[[ f -nt g ]]`.
+ *
+ * Under `==`, `=` and `!=` the right side is a pattern and the left is the
+ * text it matches: `*.js` there is a {@link PatternPart}, `"*.js"` is the
+ * string it spells, and a reference says which it is with
+ * {@link VariablePart.matched}. Every other operand of every operator is
+ * compared as the text it holds.
+ */
 export interface ConditionBinary {
   type: 'binary'
   op: string
@@ -335,7 +358,7 @@ export interface ParseResult {
  * One token of a chain that stands for a word: the text it will be, the
  * pattern it will be matched by, the variable it reads, or the pieces those
  * are joined from. Each says what it reaches for as plainly as a name does —
- * `ls *.js` is `['ls', { type: 'pattern', pattern: '*.js' }]` and `ls ~/bin`
+ * `ls *.js` is `['ls', { type: 'pattern', pattern: '*.js', multi: true }]` and `ls ~/bin`
  * is `['ls', { type: 'parts', parts: [{ type: 'variable', name: 'HOME', multi: false }, '/bin'] }]`.
  */
 export type WordToken = string | PatternPart | VariablePart | TokenParts

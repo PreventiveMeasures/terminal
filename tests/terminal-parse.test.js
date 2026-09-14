@@ -34,7 +34,7 @@ function commandNames(nodes) {
 
 const named = (line, opts) => commandNames(list(line, opts))
 const parts = (...pieces) => pieces.length === 1 ? pieces[0] : { type: 'parts', parts: pieces }
-const pattern = (source) => ({ type: 'pattern', pattern: source })
+const pattern = (source, multi = true) => ({ type: 'pattern', pattern: source, multi })
 const home = () => ({ type: 'variable', name: 'HOME', multi: false })
 
 describe('parse() hands back the line as the parser read it', () => {
@@ -283,8 +283,23 @@ describe('parse() spells a value out only when expansion still decides it', () =
     assert.deepEqual(list('cat <<< *.js')[0].redirects, [{ fd: 0, op: '<<<', text: '*.js' }])
     assert.deepEqual(list('cat <<< $x')[0].redirects, [{ fd: 0, op: '<<<', text: { type: 'variable', name: 'x', multi: false } }])
     assert.deepEqual(list('[[ -f *.js ]]')[0].expression, { type: 'unary', op: '-f', word: '*.js' })
-    assert.deepEqual(list('[[ $x == *.js ]]')[0].expression, { type: 'binary', op: '==', left: { type: 'variable', name: 'x', multi: false }, right: pattern('*.js') })
+    assert.deepEqual(list('[[ $x == *.js ]]')[0].expression, { type: 'binary', op: '==', left: { type: 'variable', name: 'x', multi: false }, right: pattern('*.js', false) })
     assert.deepEqual(list('ls *.js > out*')[0], { type: 'command', argv: ['ls', pattern('*.js')], redirects: [{ fd: 1, op: '>', target: pattern('out*') }] })
+  })
+
+  // The pattern side of `[[ x == y ]]` is the one slot that matches what it
+  // does not split, so quoting there decides matching alone, and a reference
+  // says which of the two it is where `multi` has nothing left to say.
+  it('says whether a reference on the pattern side is matched or compared', () => {
+    const right = (line) => list(line)[0].expression.right
+    assert.deepEqual(right('[[ a == $b ]]'), { type: 'variable', name: 'b', multi: false, matched: true })
+    assert.deepEqual(right('[[ a == "$b" ]]'), { type: 'variable', name: 'b', multi: false, matched: false })
+    assert.deepEqual(right('[[ a == x*$b ]]'), parts(pattern('x*', false), { type: 'variable', name: 'b', multi: false, matched: true }))
+    assert.deepEqual(right('[[ a != `x` ]]'), { type: 'substitution', list: [{ type: 'command', argv: ['x'] }], multi: false, matched: true })
+    assert.deepEqual(right('[[ a -eq $b ]]'), { type: 'variable', name: 'b', multi: false })
+    assert.deepEqual(list('[[ -f $b ]]')[0].expression.word, { type: 'variable', name: 'b', multi: false })
+    assert.deepEqual(list('ls a*')[0].argv[1], pattern('a*'))
+    assert.throws(() => terminal().summarize('[[ a == $b ]]'), { message: 'summarize: `[[ … ]]` is not a simple chain' })
   })
 
   // Quotes settle how many words come back, and `"$@"` is the one they do not.

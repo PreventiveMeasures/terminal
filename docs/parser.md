@@ -42,7 +42,7 @@ quoting:
 terminal.parse('grep -rn "$pattern" src/*.js').list[0].argv
 // [ 'grep', '-rn',
 //   { type: 'variable', name: 'pattern', multi: false },
-//   { type: 'pattern', pattern: 'src/*.js' } ]
+//   { type: 'pattern', pattern: 'src/*.js', multi: true } ]
 ```
 
 `'*'` is the string `*`, because quoting settled it; `*.js` is a pattern,
@@ -67,8 +67,22 @@ terminal.parse('x=*.js y=$z ls').list[0].assignments
 ```
 
 `x=*.js` is the text bash assigns rather than a pattern, and `$z` there is one
-word however it was written. The one operand still matched is the pattern side
-of `[[ x == a* ]]`.
+word however it was written.
+
+The one slot that matches what it does not split is the pattern side of
+`[[ x == y ]]`, where quoting decides matching alone. A reference there says
+which it is with `matched`:
+
+```js
+terminal.parse('[[ $f == $pat ]]').list[0].expression.right
+// { type: 'variable', name: 'pat', multi: false, matched: true }
+
+terminal.parse('[[ $f == "$pat" ]]').list[0].expression.right
+// { type: 'variable', name: 'pat', multi: false, matched: false }
+```
+
+Everywhere else matching travels with splitting, which `multi` already
+answers, so nothing is left for a piece to say.
 
 A `~` is the home directory under another spelling, so it reads as the one it
 shares: `~/bin` is `"$HOME/bin"`, one word because tilde expansion is no more
@@ -175,7 +189,7 @@ plainly as the whole of one does:
 
 ```js
 summarize('ls *.js ~/bin $home a{b,c}')
-// [ [ ['ls', { type: 'pattern', pattern: '*.js' },
+// [ [ ['ls', { type: 'pattern', pattern: '*.js', multi: true },
 //      { type: 'parts', parts: [{ type: 'variable', name: 'HOME', multi: false }, '/bin'] },
 //      { type: 'variable', name: 'home', multi: true }, 'ab', 'ac'] ] ]
 ```
