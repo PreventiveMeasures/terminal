@@ -404,7 +404,8 @@ export interface TokenParts {
  */
 export interface ShellToken {
   type: 'shell'
-  list: Summary
+  /** What it runs, summarized as a line of its own. */
+  statements: Summary
   multi: boolean
 }
 
@@ -438,17 +439,19 @@ export type Chain = Array<Token[] | ChainBraces>
 /**
  * A `( … )` a chain runs: the commands inside, summarized as a line of their
  * own, since a subshell holds a list like any other — `(cd dir; ls) > out` is
- * `[{ type: 'braces', list: [[['cd', 'dir']], [['ls']]] }, ['>', 'out']]`.
+ * `[{ type: 'braces', statements: [[['cd', 'dir']], [['ls']]] }, ['>', 'out']]`.
  *
  * Parentheses holding one command that changes nothing the shell around them
  * keeps are the command they hold: `(ls)` is `['ls']` and `(ls) | wc` is two
  * plain rows, while `(cd dir)` keeps them, since they are what stops the `cd`
  * reaching the shell. This is not the tree's `subshell`: a chain's rows are
- * commands, and `list` is a {@link Summary} rather than a list of nodes.
+ * commands, and what it holds is a {@link Summary} rather than a list of
+ * nodes — which is why it is `statements` here and `list` there.
  */
 export interface ChainBraces {
   type: 'braces'
-  list: Summary
+  /** What it runs, summarized as a line of its own. */
+  statements: Summary
 }
 
 /**
