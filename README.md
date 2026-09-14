@@ -94,11 +94,4 @@ Behaviour is checked against the real tools: bash 5.2, GNU grep 3.11, GNU sed
 4.9 and gawk 5.2 in the C locale, alongside the BusyBox, GNU/Spencer regex and
 Oils spec corpora.
 
-## Development
-
-```sh
-npm test
-npm run lint
-```
-
 MIT
