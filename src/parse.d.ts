@@ -103,11 +103,13 @@ export interface VariablePart {
   /**
    * Whether what comes back is read as a pattern rather than compared as the
    * text it is — `[[ a == $b ]]` matches by `b`'s value, where `"$b"` is the
-   * text `b` holds. Present only on the pattern side of `[[ x == y ]]`, the
-   * one slot that matches what it does not split; everywhere else matching
-   * travels with splitting, which {@link VariablePart.multi} already answers.
+   * text `b` holds. It is the {@link PatternPart} question for a piece whose
+   * text only running the line settles, and it is asked only on the pattern
+   * side of `[[ x == y ]]`, the one slot that matches what it does not split;
+   * everywhere else matching travels with splitting, which
+   * {@link VariablePart.multi} already answers.
    */
-  matched?: boolean
+  pattern?: boolean
 }
 
 /**
@@ -127,8 +129,8 @@ export interface SubstitutionPart {
   error?: string
   /** Whether the output may be more than one word, said either way: bare, it is split into fields and matched as a pattern, and quoting or a slot that splits nothing settles it. */
   multi: boolean
-  /** Whether the output is read as a pattern rather than compared as text. Present only on the pattern side of `[[ x == y ]]`, as on {@link VariablePart.matched}. */
-  matched?: boolean
+  /** Whether the output is read as a pattern rather than compared as text. Present only on the pattern side of `[[ x == y ]]`, as on {@link VariablePart.pattern}. */
+  pattern?: boolean
 }
 
 /**
@@ -305,7 +307,7 @@ export interface ConditionUnary {
  * Under `==`, `=` and `!=` the right side is a pattern and the left is the
  * text it matches: `*.js` there is a {@link PatternPart}, `"*.js"` is the
  * string it spells, and a reference says which it is with
- * {@link VariablePart.matched}. Every other operand of every operator is
+ * {@link VariablePart.pattern}. Every other operand of every operator is
  * compared as the text it holds.
  */
 export interface ConditionBinary {

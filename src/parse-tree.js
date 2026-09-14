@@ -178,7 +178,7 @@ function partsOf(word, slot) {
     // what it reads as, and a reader needs to know only the one thing. Quoted,
     // because tilde expansion is neither split into fields nor matched as a
     // pattern, which is what quoting a reference settles too.
-    if (homes.has(i)) { flush(i); push({ type: 'variable', name: 'HOME', multi: false, ...(matches ? { matched: false } : {}) }); continue }
+    if (homes.has(i)) { flush(i); push({ type: 'variable', name: 'HOME', multi: false, ...(matches ? { pattern: false } : {}) }); continue }
     const bare = mask[i] !== '1'
     if (bare && (value[i] === '$' || value[i] === '`')) {
       const found = expansionAt(value, i, mask[i] === '2', slot)
@@ -242,10 +242,10 @@ function substitutionOf(source, mark) {
 // commands inside a substitution are read as commands wherever it stands.
 function expansionAt(value, at, quoted, slot) {
   const splits = slot.split === true
-  // `matched` is the same question in the one slot that matches what it does
+  // `pattern` is the same question in the one slot that matches what it does
   // not split: whether what comes back is read as a pattern or compared as
   // the text it is. `[[ a == $b ]]` matches by `b`'s value; `"$b"` is text.
-  const mark = { multi: splits && !quoted, ...(slot.glob === true && !splits ? { matched: !quoted } : {}) }
+  const mark = { multi: splits && !quoted, ...(slot.glob === true && !splits ? { pattern: !quoted } : {}) }
   if (value[at] === '`') {
     const { raw, command } = readBacktickSubstitution(value, at)
     return { part: substitutionOf(command, mark), end: at + raw.length }

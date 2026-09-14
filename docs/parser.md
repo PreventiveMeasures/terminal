@@ -71,14 +71,14 @@ word however it was written.
 
 The one slot that matches what it does not split is the pattern side of
 `[[ x == y ]]`, where quoting decides matching alone. A reference there says
-which it is with `matched`:
+which it is with `pattern`:
 
 ```js
 terminal.parse('[[ $f == $pat ]]').list[0].expression.right
-// { type: 'variable', name: 'pat', multi: false, matched: true }
+// { type: 'variable', name: 'pat', multi: false, pattern: true }
 
 terminal.parse('[[ $f == "$pat" ]]').list[0].expression.right
-// { type: 'variable', name: 'pat', multi: false, matched: false }
+// { type: 'variable', name: 'pat', multi: false, pattern: false }
 ```
 
 Everywhere else matching travels with splitting, which `multi` already
