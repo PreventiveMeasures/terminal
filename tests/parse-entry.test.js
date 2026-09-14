@@ -91,11 +91,11 @@ describe('the parse entry point reads a line with no terminal at all', () => {
   }
 
   it('names no command as unknown, having no commands to check against', () => {
-    const result = parse('rg foo | wc -l')
+    const result = parse('jq foo | wc -l')
     assert.equal(result.ok, true)
     assert.deepEqual(result.unsupported, [])
-    assert.deepEqual(result.list[0].stages.map((stage) => stage.argv[0]), ['rg', 'wc'])
-    assert.equal(createTerminal({}).run('rg foo | wc -l').unsupported[0].kind, 'command')
+    assert.deepEqual(result.list[0].stages.map((stage) => stage.argv[0]), ['jq', 'wc'])
+    assert.equal(createTerminal({}).run('jq foo | wc -l').unsupported[0].kind, 'command')
   })
 
   for (const line of [

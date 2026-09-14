@@ -38,7 +38,7 @@ export const FILESYSTEM_WORKFLOWS = [
   gap('Inspect the permissions of an entry point', "stat -c '%a %n' src/index.js", 'stat', '%a', 'feature'),
   unavailable('Inspect every component of a source path', 'namei -l src/index.js', 'namei'),
 
-  unavailable('Search for unfinished work with ripgrep', "rg -n 'TODO|FIXME' src", 'rg'),
+  gap('Restrict a ripgrep search to one file type', "rg -t js -n 'TODO|FIXME' src", 'rg', '-t'),
   unavailable('List version-controlled files', 'git ls-files', 'git'),
   unavailable('Summarize the size of pending changes', 'git diff --stat', 'git'),
   unavailable('Read package scripts with a JSON query', "jq '.scripts' package.json", 'jq'),

@@ -6,6 +6,7 @@ import { INT64_MAX, INT64_MIN, UINT64_MAX } from '../numeric.js'
 import { base64 } from './base64.js'
 import { cp } from './cp.js'
 import { rm } from './rm.js'
+import { rg } from './rg.js'
 
 // tac reverses each file separately. Separators stay attached to the preceding
 // record, so an unterminated final record in a\nb produces ba\n.
@@ -315,5 +316,5 @@ function tzOffset(d, utc) {
   return `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}${String(abs % 60).padStart(2, '0')}`
 }
 
-export const EXTRA_COMMANDS = { cut, tac, tr, seq, nl, which: whichCmd, hexdump, base64, cp, rm }
+export const EXTRA_COMMANDS = { rg, cut, tac, tr, seq, nl, which: whichCmd, hexdump, base64, cp, rm }
 export const HIDDEN_EXTRAS = { whoami, date, od, xxd }
