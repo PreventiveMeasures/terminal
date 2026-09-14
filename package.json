@@ -36,6 +36,7 @@
     }
   },
   "files": [
+    "docs/parser.md",
     "src/args.js",
     "src/awk/builtins.js",
     "src/awk/common.js",
