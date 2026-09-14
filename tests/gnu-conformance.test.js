@@ -522,11 +522,11 @@ describe('GNU conformance — what cut and tr say about a list they cannot read'
   })
 
   it('names a reversed range and an empty set the way tr names them', () => {
-    const run = (command) => createTerminal({}).run(`printf 'abc\\n' | ${command}`)
-    assert.equal(run("tr 'c-a' x").stderr, "tr: range-endpoints of 'c-a' are in reverse collating sequence order\n")
-    assert.equal(run("tr 'a' ''").stderr, 'tr: when not truncating set1, string2 must be non-empty\n')
-    assert.equal(run("tr '' 'a'").stdout, 'abc\n')
-    assert.equal(run("tr 'abc' 'x'").stdout, 'xxx\n')
-    assert.equal(run("tr 'a-' x").stdout, 'xbc\n')
+    const fed = (command) => createTerminal({}).run(`printf 'abc\\n' | ${command}`)
+    assert.equal(fed("tr 'c-a' x").stderr, "tr: range-endpoints of 'c-a' are in reverse collating sequence order\n")
+    assert.equal(fed("tr 'a' ''").stderr, 'tr: when not truncating set1, string2 must be non-empty\n')
+    assert.equal(fed("tr '' 'a'").stdout, 'abc\n')
+    assert.equal(fed("tr 'abc' 'x'").stdout, 'xxx\n')
+    assert.equal(fed("tr 'a-' x").stdout, 'xbc\n')
   })
 })
