@@ -65,13 +65,13 @@ describe('the parse entry point reads a line with no terminal at all', () => {
           stages: [
             {
               type: 'subshell',
-              body: [
-                { type: 'command', argv: ['echo', '1'], redirs: [{ fd: 2, op: '>', target: 'a' }] },
+              list: [
+                { type: 'command', argv: ['echo', '1'], redirects: [{ fd: 2, op: '>', target: 'a' }] },
                 { type: 'command', op: ';', argv: ['foo'] },
                 { type: 'command', op: ';', argv: ['bar', '-opt'] },
               ],
             },
-            { type: 'command', argv: ['head', '-20'], redirs: [{ fd: 1, op: '>', target: 'x' }] },
+            { type: 'command', argv: ['head', '-20'], redirects: [{ fd: 1, op: '>', target: 'x' }] },
           ],
         },
         { type: 'command', op: ';', argv: ['ls'] },

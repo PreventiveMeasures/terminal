@@ -58,21 +58,23 @@ function nodeOf(step, op) {
 
 function stageOf(stage) {
   const node = blockOf(stage)
-  if (stage.assigns.length > 0) node.assigns = stage.assigns.map((a) => ({ name: a.name, value: valueOf(a.word) }))
-  if (stage.redirs.length > 0) node.redirs = stage.redirs.map(redirectOf)
+  if (stage.assigns.length > 0) node.assignments = stage.assigns.map((a) => ({ name: a.name, value: valueOf(a.word) }))
+  if (stage.redirs.length > 0) node.redirects = stage.redirs.map(redirectOf)
   return node
 }
 
+// A list of commands is a `list` wherever one appears, as the grammar has it:
+// `( list )`, `{ list; }`, `do list; done`, `then list`.
 function blockOf(stage) {
-  if (stage.group) return { type: stage.isolate ? 'subshell' : 'group', body: listFrom(stage.group) }
-  if (stage.loop) return { type: 'for', name: stage.loop.name, words: stage.loop.words.map(valueOf), body: listFrom(stage.loop.body) }
+  if (stage.group) return { type: stage.isolate ? 'subshell' : 'group', list: listFrom(stage.group) }
+  if (stage.loop) return { type: 'for', name: stage.loop.name, words: stage.loop.words.map(valueOf), list: listFrom(stage.loop.body) }
   if (stage.conditional) return ifOf(stage.conditional)
   if (stage.test) return { type: 'test', expression: conditionOf(stage.test) }
   return { type: 'command', argv: stage.words.map(valueOf) }
 }
 
 function ifOf(conditional) {
-  const node = { type: 'if', branches: conditional.branches.map((b) => ({ condition: listFrom(b.condition), body: listFrom(b.body) })) }
+  const node = { type: 'if', branches: conditional.branches.map((b) => ({ condition: listFrom(b.condition), list: listFrom(b.body) })) }
   if (conditional.otherwise) node.otherwise = listFrom(conditional.otherwise)
   return node
 }
@@ -121,7 +123,7 @@ function closesBracket(word, from) {
 function redirectOf(r) {
   if (r.op === 'dup') return { fd: r.fd, op: '>&', toFd: r.toFd }
   if (r.op === 'close') return { fd: r.fd, op: '>&-' }
-  if (r.op === 'text') return { fd: 0, op: '<<', body: r.body, expand: r.expand }
+  if (r.op === 'text') return { fd: 0, op: '<<', text: r.body, expand: r.expand }
   if (r.op === 'herestring') return { fd: 0, op: '<<<', text: valueOf(r.word) }
   if (r.op === 'read') return { fd: 0, op: '<', target: valueOf(r.word) }
   return { fd: r.fd, op: (r.both ? '&>' : '>') + (r.append ? '>' : ''), target: r.target ?? valueOf(r.word) }

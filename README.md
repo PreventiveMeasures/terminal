@@ -68,7 +68,8 @@ terminal.parse('while :; do echo x; done').unsupported[0].detail  // 'while'
 
 `list` is the whole line: each command carries the `op` that joins it to the
 one before (`;`, `&&`, `||`, and a newline reads as `;`), its `argv`, and
-whatever else it has — `assigns`, `redirs`, a `negate` for `!`. Pipelines,
+whatever else it has — `assignments`, `redirects`, a `negate` for `!`.
+Pipelines,
 subshells, `{ …; }` groups, `for` loops, `if` branches and `[[ … ]]` tests are
 nodes of their own, each named by `type`. A field that would only say "nothing
 here" is left out, and a line that fails partway still carries the commands

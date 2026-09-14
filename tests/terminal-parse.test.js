@@ -22,10 +22,10 @@ function commandNames(nodes) {
   for (const node of nodes) {
     if (node.type === 'command') { if (node.argv.length > 0) out.push(node.argv[0]) }
     else if (node.type === 'pipeline') out.push(...commandNames(node.stages))
-    else if (node.type === 'subshell' || node.type === 'group') out.push(...commandNames(node.body))
-    else if (node.type === 'for') out.push(...commandNames(node.body))
+    else if (node.type === 'subshell' || node.type === 'group') out.push(...commandNames(node.list))
+    else if (node.type === 'for') out.push(...commandNames(node.list))
     else if (node.type === 'if') {
-      for (const branch of node.branches) out.push(...commandNames(branch.condition), ...commandNames(branch.body))
+      for (const branch of node.branches) out.push(...commandNames(branch.condition), ...commandNames(branch.list))
       if (node.otherwise) out.push(...commandNames(node.otherwise))
     }
   }
@@ -73,24 +73,24 @@ describe('parse() hands back the line as the parser read it', () => {
 
   it('separates a subshell from a brace group', () => {
     assert.deepEqual(list('(cd dir) ; { cd dir; }'), [
-      { type: 'subshell', body: [{ type: 'command', argv: ['cd', 'dir'] }] },
-      { type: 'group', op: ';', body: [{ type: 'command', argv: ['cd', 'dir'] }] },
+      { type: 'subshell', list: [{ type: 'command', argv: ['cd', 'dir'] }] },
+      { type: 'group', op: ';', list: [{ type: 'command', argv: ['cd', 'dir'] }] },
     ])
   })
 
-  it("carries a loop's variable, its unexpanded list and its body", () => {
+  it("carries a loop's variable, the words after `in` and the list it runs", () => {
     assert.deepEqual(list('for f in *.js a; do wc -l "$f"; done'), [{
       type: 'for',
       name: 'f',
       words: [{ type: 'word', value: '*.js' }, 'a'],
-      body: [{ type: 'command', argv: ['wc', '-l', { type: 'word', value: '${f}', mask: '2222' }] }],
+      list: [{ type: 'command', argv: ['wc', '-l', { type: 'word', value: '${f}', mask: '2222' }] }],
     }])
     assert.deepEqual(list('for f in; do ls; done')[0].words, [])
   })
 
-  it('orders if branches, each condition ahead of its body', () => {
+  it('orders if branches, each condition ahead of the list it guards', () => {
     const [node] = list('if ls; then cat a.txt; elif grep -q x a.txt; then head a.txt; else tail a.txt; fi')
-    assert.deepEqual(node.branches.map((b) => [commandNames(b.condition), commandNames(b.body)]), [
+    assert.deepEqual(node.branches.map((b) => [commandNames(b.condition), commandNames(b.list)]), [
       [['ls'], ['cat']], [['grep'], ['head']],
     ])
     assert.deepEqual(commandNames(node.otherwise), ['tail'])
@@ -112,14 +112,14 @@ describe('parse() hands back the line as the parser read it', () => {
     assert.deepEqual(list('x=1 y=$z'), [{
       type: 'command',
       argv: [],
-      assigns: [{ name: 'x', value: '1' }, { name: 'y', value: { type: 'word', value: '$z' } }],
+      assignments: [{ name: 'x', value: '1' }, { name: 'y', value: { type: 'word', value: '$z' } }],
     }])
-    assert.deepEqual(list('x=1 ls'), [{ type: 'command', argv: ['ls'], assigns: [{ name: 'x', value: '1' }] }])
+    assert.deepEqual(list('x=1 ls'), [{ type: 'command', argv: ['ls'], assignments: [{ name: 'x', value: '1' }] }])
   })
 
   it('reads every redirect form, in source order', () => {
     const line = 'cat < a.txt > /tmp/out 2>> /tmp/log &> /tmp/both 2>&1 2>&- <<<here <<EOF\nbody\nEOF'
-    assert.deepEqual(list(line)[0].redirs, [
+    assert.deepEqual(list(line)[0].redirects, [
       { fd: 0, op: '<', target: 'a.txt' },
       { fd: 1, op: '>', target: '/tmp/out' },
       { fd: 2, op: '>>', target: '/tmp/log' },
@@ -127,20 +127,20 @@ describe('parse() hands back the line as the parser read it', () => {
       { fd: 2, op: '>&', toFd: 1 },
       { fd: 2, op: '>&-' },
       { fd: 0, op: '<<<', text: 'here' },
-      { fd: 0, op: '<<', body: 'body\n', expand: true },
+      { fd: 0, op: '<<', text: 'body\n', expand: true },
     ])
   })
 
   it('marks a redirect target expansion has yet to settle', () => {
-    assert.deepEqual(list('echo a > $out')[0].redirs, [{ fd: 1, op: '>', target: { type: 'word', value: '$out' } }])
-    assert.deepEqual(list("cat <<'EOF'\n$x\nEOF")[0].redirs, [{ fd: 0, op: '<<', body: '$x\n', expand: false }])
+    assert.deepEqual(list('echo a > $out')[0].redirects, [{ fd: 1, op: '>', target: { type: 'word', value: '$out' } }])
+    assert.deepEqual(list("cat <<'EOF'\n$x\nEOF")[0].redirects, [{ fd: 0, op: '<<', text: '$x\n', expand: false }])
   })
 
   it('carries a block its own redirects', () => {
     assert.deepEqual(list('{ ls; } > /tmp/out'), [{
       type: 'group',
-      body: [{ type: 'command', argv: ['ls'] }],
-      redirs: [{ fd: 1, op: '>', target: '/tmp/out' }],
+      list: [{ type: 'command', argv: ['ls'] }],
+      redirects: [{ fd: 1, op: '>', target: '/tmp/out' }],
     }])
   })
 

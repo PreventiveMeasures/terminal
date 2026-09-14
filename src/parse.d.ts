@@ -63,11 +63,11 @@ export interface HereString {
   text: Value
 }
 
-/** `<<`: the body collected from the lines after the command. `expand` is false for a quoted delimiter (`<<'EOF'`), whose body is literal. */
+/** `<<`: the text collected from the lines after the command. `expand` is false for a quoted delimiter (`<<'EOF'`), whose text is literal. */
 export interface HereDocument {
   fd: 0
   op: '<<'
-  body: string
+  text: string
   expand: boolean
 }
 
@@ -81,7 +81,7 @@ export interface NodeBase {
   /** `!`: the status is inverted. Absent otherwise. */
   negate?: true
   /** Redirects, in source order. Absent when there are none. */
-  redirs?: Redirect[]
+  redirects?: Redirect[]
   /** What bash warns about before running the command, such as a here-document the input ended before its delimiter. Absent when there is nothing to warn about. */
   warnings?: string
 }
@@ -95,7 +95,7 @@ export interface Command extends NodeBase {
   type: 'command'
   argv: Value[]
   /** `NAME=value` prefixes. Without `argv` they assign; with it they are the command's own. Absent when there are none. */
-  assigns?: Assignment[]
+  assignments?: Assignment[]
 }
 
 /** `a | b`: two or more stages. A pipeline of one is that command, not this. */
@@ -108,13 +108,13 @@ export interface Pipeline extends NodeBase {
 /** `( … )`: a list with its own working directory and variables. */
 export interface Subshell extends NodeBase {
   type: 'subshell'
-  body: Node[]
+  list: Node[]
 }
 
 /** `{ …; }`: a list sharing the enclosing shell's directory and variables. */
 export interface Group extends NodeBase {
   type: 'group'
-  body: Node[]
+  list: Node[]
 }
 
 /** `for NAME in WORD...; do LIST; done`. */
@@ -122,15 +122,16 @@ export interface ForLoop extends NodeBase {
   type: 'for'
   /** The loop variable, which keeps its last value after the loop. */
   name: string
-  /** The list after `in`; empty for `for f in; do …; done`. */
+  /** The words after `in`; empty for `for f in; do …; done`. */
   words: Value[]
-  body: Node[]
+  /** The loop body. */
+  list: Node[]
 }
 
-/** One `if`/`elif` arm: the list whose status decides, and what it guards. */
+/** One `if`/`elif` arm: the list whose status decides, and the list it guards. */
 export interface Branch {
   condition: Node[]
-  body: Node[]
+  list: Node[]
 }
 
 /** `if … then … elif … else … fi`. */
@@ -138,7 +139,7 @@ export interface If extends NodeBase {
   type: 'if'
   /** The `if` arm first, then each `elif`, in order. */
   branches: Branch[]
-  /** The `else` body. Absent when there is none. */
+  /** The `else` list. Absent when there is none. */
   otherwise?: Node[]
 }
 
