@@ -172,6 +172,13 @@ describe('parse() hands back the line as the parser read it', () => {
 
   it('marks a redirect target expansion has yet to settle', () => {
     assert.deepEqual(list('echo a > $out')[0].redirects, [{ fd: 1, op: '>', target: parts({ type: 'variable', name: 'out', multi: true }) }])
+    // A target is its text only once nothing can change it: commands to run,
+    // a path nothing has opened, and a reference behind an astral character
+    // are all read rather than taken for the name of a file.
+    assert.deepEqual(list('ls > `echo x`')[0].redirects[0].target, parts({ type: 'substitution', list: [{ type: 'command', argv: ['echo', 'x'] }], multi: true }))
+    assert.deepEqual(list('ls > >(tee -a log)')[0].redirects[0].target, { type: 'process', op: '>', list: [{ type: 'command', argv: ['tee', '-a', 'log'] }] })
+    assert.deepEqual(list("ls > '\u{1F600}'$x")[0].redirects[0].target, parts('\u{1F600}', { type: 'variable', name: 'x', multi: true }))
+    assert.deepEqual(list('ls > /tmp/plain.txt')[0].redirects[0].target, '/tmp/plain.txt')
     assert.deepEqual(list("cat <<'EOF'\n$x\nEOF")[0].redirects, [{ fd: 0, op: '<<', text: '$x\n', expand: false }])
   })
 

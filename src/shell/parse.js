@@ -365,14 +365,20 @@ function parseRedirect(p) {
   return { fd: op.fd, op: 'to', target: word.value, both, append, label }
 }
 
-// A target that is not yet its final text: a `$` that is not hard-quoted
-// (a reference), or a bare `~`, glob character or brace — expanded when
-// the stage runs, and checked then (`>/dev/nu*` may well be `/dev/null`).
+// A target that is not yet its final text: a `$` or a backtick that quoting
+// has not disarmed — a reference, or commands whose output the name is — a
+// `<( … )`, whose name is a path nothing has opened yet, or a bare `~`, glob
+// character or brace. All of those are expanded when the stage runs and
+// checked then, `>/dev/nu*` may well being `/dev/null`. Masks count UTF-16
+// units, so index the value the same way rather than by code point.
 function needsExpansion(word) {
-  return [...word.value].some((ch, i) => {
+  for (let i = 0; i < word.value.length; i++) {
+    const ch = word.value[i]
     const m = word.mask === null ? '0' : word.mask[i]
-    return (ch === '$' && m !== '1') || (m === '0' && /[~*?[{]/u.test(ch))
-  })
+    if ((ch === '$' || ch === '`') && m !== '1') return true
+    if (m === '0' && (/[~*?[{]/u.test(ch) || ((ch === '<' || ch === '>') && word.value[i + 1] === '('))) return true
+  }
+  return false
 }
 
 export function refusedWrite(label, target, writable) {
