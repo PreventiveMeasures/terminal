@@ -7,6 +7,7 @@
 // quoting.
 
 import { createUnsupportedFeed, unsupportedNote } from './unsupported.js'
+import { hasBraces } from './shell/braces.js'
 import { readBacktickSubstitution, readExpansion } from './shell/lex.js'
 import { parseAll } from './shell/parse.js'
 
@@ -84,7 +85,10 @@ function ifOf(conditional) {
 // is that text, and everything else is a word in the pieces expansion works
 // on — literal runs, and the references and substitutions between them.
 function valueOf(w) {
-  return expandable(w) ? { type: 'word', parts: partsOf(w) } : w.value
+  if (!expandable(w)) return w.value
+  const parts = partsOf(w)
+  // One piece is that piece: the word around it says nothing the piece does not.
+  return parts.length === 1 ? parts[0] : { type: 'parts', parts }
 }
 
 // Quoting belongs to a piece rather than to each character: a literal run is
@@ -97,28 +101,59 @@ function partsOf(word) {
   const parts = []
   let text = ''
   let quoted = false
-  const flush = () => {
-    if (text !== '') parts.push(textOf(text, quoted))
+  let start = 0
+  // Text nothing can change any more is that text, so neighbouring runs of it
+  // are one piece however each was quoted: `a"b"` is `ab`.
+  const push = (piece) => {
+    const last = parts.at(-1)
+    if (typeof piece === 'string' && typeof last === 'string') parts[parts.length - 1] = last + piece
+    else parts.push(piece)
+  }
+  const flush = (end) => {
+    if (text !== '') push(textOf(word, text, quoted, start, end))
     text = ''
   }
   for (let i = 0; i <= value.length; i++) {
     // An empty quoted fragment is a piece: `$x""` keeps a final empty field.
-    if (empty.has(i)) { flush(); parts.push(textOf('', true)) }
+    if (empty.has(i)) { flush(i); push('') }
     if (i === value.length) break
     const bare = mask[i] !== '1'
     if (bare && (value[i] === '$' || value[i] === '`')) {
       const found = expansionAt(value, i, mask[i] === '2')
-      if (found) { flush(); parts.push(found.part); i = found.end - 1; continue }
+      if (found) { flush(i); push(found.part); i = found.end - 1; continue }
     }
-    if (text !== '' && (mask[i] !== '0') !== quoted) flush()
+    if (text !== '' && (mask[i] !== '0') !== quoted) flush(i)
+    if (text === '') start = i
     quoted = mask[i] !== '0'
     text += value[i]
   }
-  flush()
+  flush(value.length)
   return parts
 }
 
-const textOf = (value, quoted) => ({ type: 'text', value, ...(quoted ? { quoted: true } : {}) })
+// Quoting settles text, and so does having nothing in it that expands: either
+// way the piece is the string itself. What is left says which expansion it is
+// waiting for, named for the first one that will reach it — brace expansion
+// runs before the pathname matching a product of it may still go through.
+function textOf(word, value, quoted, from, to) {
+  if (quoted) return value
+  if (/[{},]/u.test(value) && hasBraces(word)) return { type: 'brace', source: value }
+  if (globbed(word, from, to)) return { type: 'pattern', pattern: value }
+  if (from === 0 && value.startsWith('~')) return { type: 'tilde', source: value }
+  return value
+}
+
+// A run is matched as a pattern once it holds a `*` or `?`, or a `[` that a
+// bare `]` closes — which may be in a later run, since quoting inside a
+// bracket expression makes its text literal without ending it.
+function globbed(word, from, to) {
+  for (let i = from; i < to; i++) {
+    const ch = word.value[i]
+    if (ch === '*' || ch === '?') return true
+    if (ch === '[' && closesBracket(word, i)) return true
+  }
+  return false
+}
 
 // A substitution runs commands, so it holds commands: `foo `bar a b c`` names
 // `foo` and, inside its argument, `bar`. Writes are read rather than refused
@@ -274,19 +309,21 @@ function redirectTokens(redirect) {
 const literal = (value) => {
   if (typeof value === 'string') return value
   const text = literalText(value)
-  if (text === null) throw refuse(`${value.parts.map(spell).join('')}`, 'a literal word')
+  if (text === null) throw refuse(`${piecesOf(value).map(spell).join('')}`, 'a literal word')
   return text
 }
+
+const piecesOf = (value) => value.type === 'parts' ? value.parts : [value]
 
 // `"$(cat <<'EOF' … EOF)"` is the text it holds and nothing else: a literal
 // here-document, cat, and the trailing newlines `$( )` strips. Every part has
 // to be quoted for that to hold — bare, the text would be split into fields
 // and globbed, and no single token would stand for it.
-function literalText(word) {
+function literalText(value) {
   let text = ''
-  for (const part of word.parts) {
+  for (const part of piecesOf(value)) {
+    if (typeof part === 'string') { text += part; continue }
     if (!part.quoted) return null
-    if (part.type === 'text') { text += part.value; continue }
     const here = heredocText(part)
     if (here === null) return null
     text += here
@@ -306,7 +343,9 @@ function heredocText(part) {
 
 // Name the piece that needs expanding the way it was written.
 const spell = (part) => {
-  if (part.type === 'text') return part.value
+  if (typeof part === 'string') return part
+  if (part.type === 'pattern') return part.pattern
+  if (part.type === 'brace' || part.type === 'tilde') return part.source
   if (part.type === 'parameter') return `\${${part.name}${part.operator ?? ''}${part.operand ?? ''}}`
   return part.type === 'arithmetic' ? '$((…))' : '$(…)'
 }

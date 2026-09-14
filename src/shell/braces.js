@@ -46,6 +46,19 @@ export function expandBraces(word) {
   return [word]
 }
 
+// Whether brace expansion has anything to do with this word: a balanced,
+// unquoted pair holding a comma list or a sequence. Reading a word does not
+// expand it, but it does have to say which of its text is brace syntax.
+export function hasBraces(word) {
+  if (!word.value.includes('{')) return false
+  const pairs = pairBraces(word)
+  for (const [start, { end, commas }] of pairs) {
+    if (maskAt(word, start) !== '0') continue
+    if (commas.length > 0 || sequenceRange(slice(word, start + 1, end)) !== null) return true
+  }
+  return false
+}
+
 // Collect each pair's top-level comma positions during the same scan.
 // Unmatched braces have no entry; nested commas belong to the inner pair.
 function pairBraces(w) {
@@ -66,7 +79,11 @@ function pairBraces(w) {
 // Quoted or overflowing sequences stay literal. Bash uses the step's absolute
 // value in the endpoints' direction, treats zero as one, and rejects a span
 // or step magnitude outside its signed 64-bit arithmetic.
-function sequence(body) {
+// What a sequence names, or null when the body is not one: quoted, malformed,
+// or outside the bounds bash counts in. Reading it is separate from
+// materializing it, so asking whether a word has brace expansion at all costs
+// nothing and cannot hit the limit below.
+function sequenceRange(body) {
   if (body.mask !== null && /[12]/u.test(body.mask)) return null
   const num = NUM_RANGE.exec(body.value)
   const range = num ?? CHAR_RANGE.exec(body.value)
@@ -76,7 +93,13 @@ function sequence(body) {
   if (from === null || to === null || rawStep === null || rawStep === INT64_MIN) return null
   const span = to >= from ? to - from : from - to
   if (span > INT64_MAX) return null
-  const step = (rawStep < 0n ? -rawStep : rawStep) || 1n
+  return { num, range, from, to, step: (rawStep < 0n ? -rawStep : rawStep) || 1n, span }
+}
+
+function sequence(body) {
+  const found = sequenceRange(body)
+  if (found === null) return null
+  const { num, from, to, step, span } = found
   const count = span / step + 1n
   if (count > SEQ_LIMIT) throw new UnsupportedError('feature', 'brace expansion limit', `brace expansion \`{${body.value}}\` would produce ${count} words (limit ${SEQ_LIMIT})`)
   const width = num ? padWidth(num[1], num[2]) : 0

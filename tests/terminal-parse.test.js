@@ -33,8 +33,8 @@ function commandNames(nodes) {
 }
 
 const named = (line, opts) => commandNames(list(line, opts))
-const word = (...parts) => ({ type: 'word', parts })
-const text = (value, quoted) => ({ type: 'text', value, ...(quoted ? { quoted: true } : {}) })
+const parts = (...pieces) => pieces.length === 1 ? pieces[0] : { type: 'parts', parts: pieces }
+const pattern = (source) => ({ type: 'pattern', pattern: source })
 
 describe('parse() hands back the line as the parser read it', () => {
   it('describes a simple command as its argv', () => {
@@ -84,8 +84,8 @@ describe('parse() hands back the line as the parser read it', () => {
     assert.deepEqual(list('for f in *.js a; do wc -l "$f"; done'), [{
       type: 'for',
       name: 'f',
-      words: [word(text('*.js')), 'a'],
-      list: [{ type: 'command', argv: ['wc', '-l', word({ type: 'parameter', name: 'f', quoted: true })] }],
+      words: [pattern('*.js'), 'a'],
+      list: [{ type: 'command', argv: ['wc', '-l', parts({ type: 'parameter', name: 'f', quoted: true })] }],
     }])
     assert.deepEqual(list('for f in; do ls; done')[0].words, [])
   })
@@ -105,7 +105,7 @@ describe('parse() hands back the line as the parser read it', () => {
       expression: {
         type: 'and',
         left: { type: 'not', expression: { type: 'unary', op: '-f', word: 'a.txt' } },
-        right: { type: 'binary', op: '==', left: word({ type: 'parameter', name: 'x', quoted: true }), right: 'y' },
+        right: { type: 'binary', op: '==', left: parts({ type: 'parameter', name: 'x', quoted: true }), right: 'y' },
       },
     }])
   })
@@ -114,7 +114,7 @@ describe('parse() hands back the line as the parser read it', () => {
     assert.deepEqual(list('x=1 y=$z'), [{
       type: 'command',
       argv: [],
-      assignments: [{ name: 'x', value: '1' }, { name: 'y', value: word({ type: 'parameter', name: 'z' }) }],
+      assignments: [{ name: 'x', value: '1' }, { name: 'y', value: parts({ type: 'parameter', name: 'z' }) }],
     }])
     assert.deepEqual(list('x=1 ls'), [{ type: 'command', argv: ['ls'], assignments: [{ name: 'x', value: '1' }] }])
   })
@@ -134,7 +134,7 @@ describe('parse() hands back the line as the parser read it', () => {
   })
 
   it('marks a redirect target expansion has yet to settle', () => {
-    assert.deepEqual(list('echo a > $out')[0].redirects, [{ fd: 1, op: '>', target: word({ type: 'parameter', name: 'out' }) }])
+    assert.deepEqual(list('echo a > $out')[0].redirects, [{ fd: 1, op: '>', target: parts({ type: 'parameter', name: 'out' }) }])
     assert.deepEqual(list("cat <<'EOF'\n$x\nEOF")[0].redirects, [{ fd: 0, op: '<<', text: '$x\n', expand: false }])
   })
 
@@ -183,7 +183,7 @@ describe('parse() spells a value out only when expansion still decides it', () =
   }
 
   const dated = [{ type: 'command', argv: ['date'] }]
-  for (const [written, parts] of [
+  for (const [written, pieces] of [
     ['$x', [{ type: 'parameter', name: 'x' }]],
     ['"$x"', [{ type: 'parameter', name: 'x', quoted: true }]],
     ['${x:-a b}', [{ type: 'parameter', name: 'x', operator: ':-', operand: 'a b' }]],
@@ -193,37 +193,40 @@ describe('parse() spells a value out only when expansion still decides it', () =
     ['"$(date)"', [{ type: 'substitution', list: dated, quoted: true }]],
     ['`date`', [{ type: 'substitution', list: dated }]],
     ['$((1 + 2))', [{ type: 'arithmetic', source: '1 + 2' }]],
-    ['*.js', [text('*.js')]],
-    ['~/bin', [text('~/bin')]],
-    ['{a,b}', [text('{a,b}')]],
-    ['[ab]c', [text('[ab]c')]],
-    ['a"b"$c', [text('a'), text('b', true), { type: 'parameter', name: 'c' }]],
-    ['"$x"""', [{ type: 'parameter', name: 'x', quoted: true }, text('', true)]],
-    ['"a $x"', [text('a ', true), { type: 'parameter', name: 'x', quoted: true }]],
+    ['*.js', [pattern('*.js')]],
+    ['~/bin', [{ type: 'tilde', source: '~/bin' }]],
+    ['{a,b}', [{ type: 'brace', source: '{a,b}' }]],
+    ['a{b}', ['a{b}']],
+    ['{1..3}', [{ type: 'brace', source: '{1..3}' }]],
+    ['[ab]c', [pattern('[ab]c')]],
+    ['a*"b"', [pattern('a*'), 'b']],
+    ['a"b"$c', ['ab', { type: 'parameter', name: 'c' }]],
+    ['"$x"""', [{ type: 'parameter', name: 'x', quoted: true }, '']],
+    ['"a $x"', ['a ', { type: 'parameter', name: 'x', quoted: true }]],
   ]) {
     it(`reads ${written} as the pieces expansion works on`, () => {
-      assert.deepEqual(list(`echo ${written}`)[0].argv[1], word(...parts))
+      assert.deepEqual(list(`echo ${written}`)[0].argv[1], parts(...pieces))
     })
   }
 
   it('reads the commands a substitution runs, however deep', () => {
-    assert.deepEqual(list('foo `bar a b c`')[0].argv, ['foo', word({ type: 'substitution', list: [{ type: 'command', argv: ['bar', 'a', 'b', 'c'] }] })])
-    assert.deepEqual(list('echo $(cat $(ls))')[0].argv[1], word({
+    assert.deepEqual(list('foo `bar a b c`')[0].argv, ['foo', parts({ type: 'substitution', list: [{ type: 'command', argv: ['bar', 'a', 'b', 'c'] }] })])
+    assert.deepEqual(list('echo $(cat $(ls))')[0].argv[1], parts({
       type: 'substitution',
-      list: [{ type: 'command', argv: ['cat', word({ type: 'substitution', list: [{ type: 'command', argv: ['ls'] }] })] }],
+      list: [{ type: 'command', argv: ['cat', parts({ type: 'substitution', list: [{ type: 'command', argv: ['ls'] }] })] }],
     }))
   })
 
   // Bash reads a backtick when it expands it, so the line still parses.
   it('keeps the diagnostic of a backtick body that does not parse', () => {
-    assert.deepEqual(list('echo `echo )`')[0].argv[1], word({ type: 'substitution', list: [], error: 'unexpected `)`' }))
+    assert.deepEqual(list('echo `echo )`')[0].argv[1], parts({ type: 'substitution', list: [], error: 'unexpected `)`' }))
     assert.equal(parse('echo `echo )`').ok, true)
     assert.equal(parse('echo $(echo ))').ok, false)
   })
 
   it('applies the same rule to a command name', () => {
     assert.deepEqual(named('"ls"'), ['ls'])
-    assert.deepEqual(named('$tool a'), [word({ type: 'parameter', name: 'tool' })])
+    assert.deepEqual(named('$tool a'), [parts({ type: 'parameter', name: 'tool' })])
   })
 })
 

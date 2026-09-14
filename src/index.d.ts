@@ -257,6 +257,7 @@ export interface RunResult {
 export type {
   ArithmeticPart,
   Assignment,
+  BracePart,
   Branch,
   Chain,
   CloseRedirect,
@@ -278,6 +279,8 @@ export type {
   Operator,
   ParameterPart,
   Part,
+  Parts,
+  PatternPart,
   ParseResult,
   Pipeline,
   Redirect,
@@ -285,9 +288,8 @@ export type {
   SubstitutionPart,
   Summary,
   Test,
-  TextPart,
+  TildePart,
   Value,
-  Word,
 } from './parse.js'
 
 /** A virtual terminal instance with a mutable cwd carried across {@link Terminal.run} calls. */

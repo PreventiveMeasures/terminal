@@ -81,19 +81,19 @@ quoting:
 ```js
 terminal.parse('grep -rn "$pattern" src/*.js').list[0].argv
 // [ 'grep', '-rn',
-//   { type: 'word', parts: [ { type: 'parameter', name: 'pattern', quoted: true } ] },
-//   { type: 'word', parts: [ { type: 'text', value: 'src/*.js' } ] } ]
+//   { type: 'parameter', name: 'pattern', quoted: true },
+//   { type: 'pattern', pattern: 'src/*.js' } ]
 ```
 
-`'*'` is the string `*`, because quoting settled it; `*.js` is a word, because
-the filesystem has yet to. A word's parts are the literal runs and the
-references, substitutions and arithmetic between them, each marked `quoted`
-when it sits inside quotes and so expands to itself. A substitution holds the
-commands it runs, parsed the same way:
+`'*'` is the string `*`, because quoting settled it; `*.js` is a pattern,
+because the filesystem has yet to. A piece is a plain string once nothing can
+change it; otherwise it names what it waits for — `pattern`, `brace`, `tilde`,
+`parameter`, `substitution`, `arithmetic`. A word of several pieces is a
+`parts` node holding them in order, and a word of one piece is that piece. A substitution holds the commands it runs, parsed the same way:
 
 ```js
-terminal.parse('foo `bar a b c`').list[0].argv[1].parts
-// [ { type: 'substitution', list: [ { type: 'command', argv: ['bar', 'a', 'b', 'c'] } ] } ]
+terminal.parse('foo `bar a b c`').list[0].argv[1]
+// { type: 'substitution', list: [ { type: 'command', argv: ['bar', 'a', 'b', 'c'] } ] }
 ```
 
 ## The parser on its own

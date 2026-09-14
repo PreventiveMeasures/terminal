@@ -6,32 +6,57 @@ export type { Unsupported, UnsupportedKind } from './index.js'
 export type Operator = ';' | '&&' | '||'
 
 /**
- * A word expansion has yet to settle, in the pieces expansion works on: the
- * literal runs, and the references and substitutions between them. Anything
- * already final is not one of these but a plain string, so `'*'` is `"*"`
- * while `*.js` is a word of one bare text part.
+ * A word in more than one piece: the text, patterns, references and
+ * substitutions it is made of, joined in order. A word of one piece is that
+ * piece, and text nothing can change is a plain string — so `a*` is a
+ * {@link PatternPart}, `'a*'` is `"a*"`, and only `a*"b"` is one of these.
  */
-export interface Word {
-  type: 'word'
+export interface Parts {
+  type: 'parts'
   parts: Part[]
 }
 
-/** One piece of a word. */
-export type Part = TextPart | ParameterPart | SubstitutionPart | ArithmeticPart
+/**
+ * One piece of a word — or the whole word, when it is the only piece.
+ *
+ * A piece is a plain string once nothing can change it, quoted or not: `"a b"`
+ * is `'a b'`, and so is `a" "b`, whose runs join. Every other piece names the
+ * expansion it is waiting for, and carries `quoted` when it stands inside
+ * quotes, where its result is neither split into fields nor matched as a
+ * pattern.
+ */
+export type Part = string | PatternPart | BracePart | TildePart | ParameterPart | SubstitutionPart | ArithmeticPart
 
 /**
- * Literal text, as written with its quotes removed. `quoted` marks text that
- * expands to itself; bare text is still subject to `~`, `{a,b}` and the glob
- * characters `*`, `?` and `[…]`, and to word splitting when a neighbouring
- * expansion produces separators.
+ * Bare text carrying glob syntax — `*`, `?`, or a `[` a bare `]` closes —
+ * matched against the filesystem rather than read as text. Quoting settles the
+ * text instead, so a pattern is never quoted: `a*` is one of these and `'a*'`
+ * is the string `a*`.
  *
- * An empty quoted part is a piece like any other, and a meaningful one:
- * `$x""` keeps a final empty field that `$x` alone would not.
+ * In a word of several pieces the pattern is the whole of it, with the other
+ * pieces matching as the text they produce: `a*"b"` matches a name that starts
+ * with `a` and ends with a literal `b`.
  */
-export interface TextPart {
-  type: 'text'
-  value: string
-  quoted?: true
+export interface PatternPart {
+  type: 'pattern'
+  pattern: string
+}
+
+/**
+ * Bare text carrying brace expansion — `{a,b}`, `{1..9}` — which multiplies
+ * the word into several before anything else happens to them, so a product may
+ * still be matched as a pattern afterwards. Braces nothing expands are text:
+ * `a{b}` is the string `a{b}`.
+ */
+export interface BracePart {
+  type: 'brace'
+  source: string
+}
+
+/** A word opening with a bare `~`, which becomes a home directory. `a~b` is text: only the start of a word expands. */
+export interface TildePart {
+  type: 'tilde'
+  source: string
 }
 
 /**
@@ -51,7 +76,7 @@ export interface ParameterPart {
 
 /**
  * `$( … )` or `` ` … ` ``: commands, so the commands are what it holds.
- * `foo `bar a b c`` names `foo`, and `bar` inside its argument.
+ * ``foo `bar a b c` `` names `foo`, and `bar` inside its argument.
  *
  * Bash parses a backtick when it expands it rather than when it reads the
  * line, so a backtick body that does not parse carries its diagnostic here and
@@ -74,8 +99,8 @@ export interface ArithmeticPart {
   quoted?: true
 }
 
-/** Final text, or the word that still has to become it. */
-export type Value = string | Word
+/** One piece, or the pieces a word joins. */
+export type Value = Part | Parts
 
 /** `NAME=value`, in front of a command or on its own. */
 export interface Assignment {

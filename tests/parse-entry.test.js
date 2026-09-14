@@ -43,9 +43,11 @@ describe('the parse entry point is published on its own', () => {
     for (const file of files) {
       assert.doesNotMatch(file, /^src\/(commands|awk)\//u, file)
       assert.ok(!['src/index.js', 'src/registry.js', 'src/custom.js', 'src/fs.js', 'src/glob.js', 'src/mount.js', 'src/writable.js', 'src/complete.js', 'src/notes.js'].includes(file), file)
-      assert.doesNotMatch(file, /^src\/shell\/(run|expand|state|io|output|capture|builtins|variables|arithmetic.*|conditional|parameter|parameter-pattern|parameter-transform|braces)\.js$/u, file)
+      assert.doesNotMatch(file, /^src\/shell\/(run|expand|state|io|output|capture|builtins|variables|arithmetic.*|conditional|parameter|parameter-pattern|parameter-transform)\.js$/u, file)
     }
-    // A budget, not a target: the parser, its lexers, and the leaves they need.
+    // A budget, not a target: the parser, its lexers, and the leaves they need
+    // — brace syntax among them, since reading a word has to say which of its
+    // text a `{a,b}` claims.
     assert.ok(files.length <= 17, `${files.length} modules: ${files.join(', ')}`)
     assert.deepEqual(external, ['@exodus/bytes/utf8.js'])
     assert.ok(moduleGraph('src/index.js').files.length > 80, 'the whole terminal is much more than the parser')
