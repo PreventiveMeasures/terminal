@@ -178,11 +178,11 @@ function partsOf(word, slot) {
     // what it reads as, and a reader needs to know only the one thing. Quoted,
     // because tilde expansion is neither split into fields nor matched as a
     // pattern, which is what quoting a reference settles too.
-    if (homes.has(i)) { flush(i); push({ type: 'variable', name: 'HOME', multi: false, ...(matches ? { pattern: false } : {}) }); continue }
+    if (homes.has(i)) { flush(i); push({ type: 'variable', name: 'HOME', multi: false }); continue }
     const bare = mask[i] !== '1'
     if (bare && (value[i] === '$' || value[i] === '`')) {
       const found = expansionAt(value, i, mask[i] === '2', slot)
-      if (found) { flush(i); push(found.part); i = found.end - 1; continue }
+      if (found) { flush(i); push(matches && mask[i] !== '2' ? matchedBy(found.part) : found.part); i = found.end - 1; continue }
     }
     if (text !== '' && (mask[i] !== '0') !== quoted) flush(i)
     if (text === '') start = i
@@ -203,6 +203,12 @@ function textOf(word, value, quoted, from, to, slot) {
   if (slot.glob && globbed(word, from, to)) return { type: 'pattern', pattern: value, multi: slot.split === true }
   return value
 }
+
+// A bare reference on the pattern side of `[[ x == y ]]` is not text to
+// compare but the pattern to compare by, so it stands where a pattern's text
+// would: `[[ a == $b ]]` matches by what `b` holds, and `"$b"` is that text.
+// A sum is a number, and no pattern syntax survives being one.
+const matchedBy = (part) => (part.type === 'variable' || part.type === 'substitution' ? { type: 'pattern', pattern: part, multi: false } : part)
 
 // A run is matched as a pattern once it holds a `*` or `?`, or a `[` that a
 // bare `]` closes — which may be in a later run, since quoting inside a
@@ -242,10 +248,7 @@ function substitutionOf(source, mark) {
 // commands inside a substitution are read as commands wherever it stands.
 function expansionAt(value, at, quoted, slot) {
   const splits = slot.split === true
-  // `pattern` is the same question in the one slot that matches what it does
-  // not split: whether what comes back is read as a pattern or compared as
-  // the text it is. `[[ a == $b ]]` matches by `b`'s value; `"$b"` is text.
-  const mark = { multi: splits && !quoted, ...(slot.glob === true && !splits ? { pattern: !quoted } : {}) }
+  const mark = { multi: splits && !quoted }
   if (value[at] === '`') {
     const { raw, command } = readBacktickSubstitution(value, at)
     return { part: substitutionOf(command, mark), end: at + raw.length }

@@ -292,10 +292,12 @@ describe('parse() spells a value out only when expansion still decides it', () =
   // says which of the two it is where `multi` has nothing left to say.
   it('says whether a reference on the pattern side is matched or compared', () => {
     const right = (line) => list(line)[0].expression.right
-    assert.deepEqual(right('[[ a == $b ]]'), { type: 'variable', name: 'b', multi: false, pattern: true })
-    assert.deepEqual(right('[[ a == "$b" ]]'), { type: 'variable', name: 'b', multi: false, pattern: false })
-    assert.deepEqual(right('[[ a == x*$b ]]'), parts(pattern('x*', false), { type: 'variable', name: 'b', multi: false, pattern: true }))
-    assert.deepEqual(right('[[ a != `x` ]]'), { type: 'substitution', list: [{ type: 'command', argv: ['x'] }], multi: false, pattern: true })
+    const variable = { type: 'variable', name: 'b', multi: false }
+    assert.deepEqual(right('[[ a == $b ]]'), pattern(variable, false))
+    assert.deepEqual(right('[[ a == "$b" ]]'), variable)
+    assert.deepEqual(right('[[ a == x*$b ]]'), parts(pattern('x*', false), pattern(variable, false)))
+    assert.deepEqual(right('[[ a != `x` ]]'), pattern({ type: 'substitution', list: [{ type: 'command', argv: ['x'] }], multi: false }, false))
+    assert.deepEqual(right('[[ a == $((1+2)) ]]'), { type: 'arithmetic', source: '1+2' })
     assert.deepEqual(right('[[ a -eq $b ]]'), { type: 'variable', name: 'b', multi: false })
     assert.deepEqual(list('[[ -f $b ]]')[0].expression.word, { type: 'variable', name: 'b', multi: false })
     assert.deepEqual(list('ls a*')[0].argv[1], pattern('a*'))

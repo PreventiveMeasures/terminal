@@ -43,10 +43,18 @@ export type Part = string | PatternPart | BracePart | VariablePart | Substitutio
  * In a word of several pieces the pattern is the whole of it, with the other
  * pieces matching as the text they produce: `a*"b"` matches a name that starts
  * with `a` and ends with a literal `b`.
+ *
+ * `pattern` is the text where the line settles it, and the piece whose result
+ * is that text where only running it does — `[[ a == $b ]]` matches by
+ * whatever `b` holds, where `[[ a == "$b" ]]` compares that text and is a
+ * {@link VariablePart} of its own. A piece stands here only on the pattern
+ * side of `[[ x == y ]]`: it is the one slot that matches what it does not
+ * split, and everywhere else matching travels with splitting, which
+ * {@link VariablePart.multi} already answers.
  */
 export interface PatternPart {
   type: 'pattern'
-  pattern: string
+  pattern: string | VariablePart | SubstitutionPart
   /** Whether matching it may come back as more than one word: against the filesystem it may come back as any number of names, while the pattern side of `[[ x == a* ]]` is matched against the other side rather than expanded, and is the one operand it was written as. */
   multi: boolean
 }
@@ -100,16 +108,6 @@ export interface VariablePart {
    * shell has none, as this one does.
    */
   multi: boolean
-  /**
-   * Whether what comes back is read as a pattern rather than compared as the
-   * text it is — `[[ a == $b ]]` matches by `b`'s value, where `"$b"` is the
-   * text `b` holds. It is the {@link PatternPart} question for a piece whose
-   * text only running the line settles, and it is asked only on the pattern
-   * side of `[[ x == y ]]`, the one slot that matches what it does not split;
-   * everywhere else matching travels with splitting, which
-   * {@link VariablePart.multi} already answers.
-   */
-  pattern?: boolean
 }
 
 /**
@@ -129,8 +127,6 @@ export interface SubstitutionPart {
   error?: string
   /** Whether the output may be more than one word, said either way: bare, it is split into fields and matched as a pattern, and quoting or a slot that splits nothing settles it. */
   multi: boolean
-  /** Whether the output is read as a pattern rather than compared as text. Present only on the pattern side of `[[ x == y ]]`, as on {@link VariablePart.pattern}. */
-  pattern?: boolean
 }
 
 /**
@@ -306,9 +302,9 @@ export interface ConditionUnary {
  *
  * Under `==`, `=` and `!=` the right side is a pattern and the left is the
  * text it matches: `*.js` there is a {@link PatternPart}, `"*.js"` is the
- * string it spells, and a reference says which it is with
- * {@link VariablePart.pattern}. Every other operand of every operator is
- * compared as the text it holds.
+ * string it spells, and a bare `$b` is a {@link PatternPart} holding the
+ * reference whose result is the pattern. Every other operand of every
+ * operator is compared as the text it holds.
  */
 export interface ConditionBinary {
   type: 'binary'

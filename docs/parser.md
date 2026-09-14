@@ -70,19 +70,21 @@ terminal.parse('x=*.js y=$z ls').list[0].assignments
 word however it was written.
 
 The one slot that matches what it does not split is the pattern side of
-`[[ x == y ]]`, where quoting decides matching alone. A reference there says
-which it is with `pattern`:
+`[[ x == y ]]`, where quoting decides matching alone. A bare reference there
+is not text to compare but the pattern to compare by, so it stands where a
+pattern's text would:
 
 ```js
 terminal.parse('[[ $f == $pat ]]').list[0].expression.right
-// { type: 'variable', name: 'pat', multi: false, pattern: true }
+// { type: 'pattern', pattern: { type: 'variable', name: 'pat', multi: false }, multi: false }
 
 terminal.parse('[[ $f == "$pat" ]]').list[0].expression.right
-// { type: 'variable', name: 'pat', multi: false, pattern: false }
+// { type: 'variable', name: 'pat', multi: false }
 ```
 
-Everywhere else matching travels with splitting, which `multi` already
-answers, so nothing is left for a piece to say.
+So a pattern is a `pattern` however its text arrives. Everywhere else matching
+travels with splitting, which `multi` already answers, so nothing is left for
+a piece to say.
 
 A `~` is the home directory under another spelling, so it reads as the one it
 shares: `~/bin` is `"$HOME/bin"`, one word because tilde expansion is no more
