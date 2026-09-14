@@ -247,6 +247,76 @@ export interface RunResult {
   notes: readonly string[]
 }
 
+/** One simple command a line contains, as {@link Terminal.parse} read it. */
+export interface ParsedCommand {
+  /**
+   * The command word with its quoting removed, exactly as it was typed:
+   * `"ls"` and `l''s` are both `ls`, and a bin prefix is kept (`/bin/ls`).
+   * `null` when expansion decides the name — `$tool`, `` `which ls` ``,
+   * `~/bin/x`, or a glob — since parsing cannot know what it becomes.
+   */
+  name: string | null
+  /**
+   * The registered command `name` resolves to, with any bin prefix
+   * dropped (`/usr/bin/grep` → `grep`), or `null` when this terminal has
+   * nothing under that name — `run()` would then report a `command`
+   * gap — or when `name` itself is `null`. A shell builtin spelled with
+   * a bin prefix (`/bin/cd`) resolves to `null` too: dispatch refuses it.
+   */
+  resolved: string | null
+}
+
+/** Result of reading a command line with {@link Terminal.parse}. */
+export interface ParseResult {
+  /** Whether the whole line parses, so `run()` would get past parsing. */
+  ok: boolean
+  /**
+   * Whether the line stops inside a construct more input could finish: an
+   * unclosed `(` or `{`, an `if` or `for` still missing its `then`, `do`,
+   * `fi` or `done`, or a trailing `&&`, `||` or `|`. This is what an
+   * interactive caller reads a continuation line for. `ok` is `false`
+   * either way; an unterminated quote or `$( … )` is a syntax error
+   * rather than incomplete input, and a here-document body ends with the
+   * input, exactly as they do for `run()`.
+   */
+  incomplete: boolean
+  /**
+   * The diagnostic that stopped the parse, or `null` when `ok`. It is the
+   * `run()` stderr line without the generic `error: ` prefix and the
+   * trailing newline.
+   */
+  error: string | null
+  /**
+   * The simple commands the line contains, in source order, descending
+   * into pipelines, gates, subshells, groups, loop bodies and `if`
+   * branches (each condition ahead of the body it guards). Frozen.
+   *
+   * These are the commands the line *names*, not the ones it will run:
+   * a gate, an `if` or an empty `for` list decides what actually runs,
+   * `xargs rm` and `find . -exec rm {} +` name only `xargs` and `find`,
+   * and a command inside `$( … )` or backticks belongs to the word it
+   * sits in rather than appearing here. It answers what a line reaches
+   * for; it is not a permission boundary.
+   *
+   * A line that fails partway still lists the commands of the input
+   * units that parsed — the ones `run()` executes before reporting the
+   * error, since bash reads a unit and runs it before reading the next.
+   */
+  commands: readonly ParsedCommand[]
+  /**
+   * Gaps parsing itself found, in the shape and with the deduplication
+   * {@link RunResult.unsupported} uses, and frozen like it: refused shell
+   * constructs (`while`, `case`, `((`), unsupported `${…}` operators, and
+   * a redirect that would write where nothing may be written.
+   *
+   * Only what parsing can see. A command that is not registered, an
+   * option it refuses, an expansion that hits a gap, and the body of a
+   * backtick substitution (which bash parses when it expands it) are
+   * found by `run()`, not here.
+   */
+  unsupported: readonly Unsupported[]
+}
+
 /** A virtual terminal instance with a mutable cwd carried across {@link Terminal.run} calls. */
 export interface Terminal {
   /**
@@ -286,6 +356,15 @@ export interface Terminal {
    * completing the prefix would require evaluating an expansion.
    */
   complete(line: string): string[]
+  /**
+   * Read a command line without running any of it: whether it parses,
+   * whether it is merely unfinished, the diagnostic if it is neither, the
+   * commands it names, and the gaps parsing found. Nothing is executed and
+   * nothing changes — not the working directory, the variables, or the
+   * `/tmp/` overlay — so a caller can look at a line before deciding to
+   * run it, continue reading it, or report why it will not work.
+   */
+  parse(line: string): ParseResult
 }
 
 /**

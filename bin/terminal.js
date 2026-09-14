@@ -56,7 +56,7 @@ function main(argv) {
   // short however deep the host path is.
   const options = { mount, writable, user: safely(() => userInfo().username, 'user') }
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY)
-  start({ terminal: createTerminal(tree.sources, options), tree, mount, home: mount, writable, interactive, exitCode: 0, closing: false })
+  start({ terminal: createTerminal(tree.sources, options), tree, mount, home: mount, writable, interactive, exitCode: 0, closing: false, unfinished: null })
 }
 
 function directoryAt(arg) {
@@ -118,7 +118,12 @@ function start(session) {
     action() { note(banner(session) + omissions(session.tree)); this.displayPrompt() },
   })
   // Report the session's own status the way a shell reports its last command.
-  server.on('exit', () => { process.exitCode = session.exitCode })
+  // Piped input that ends mid-construct never ran, which bash reports at EOF;
+  // a typed session leaves its continuation behind instead, as Ctrl-C does.
+  server.on('exit', () => {
+    if (session.unfinished && !session.interactive) { note(`error: ${session.unfinished}`); session.exitCode = 2 }
+    process.exitCode = session.exitCode
+  })
 }
 
 function evaluate(session, server, input, callback) {
@@ -132,6 +137,12 @@ function evaluate(session, server, input, callback) {
   // line and hand the tokenizer the whole thing, newline included.
   if (trailingBackslashes(line) % 2 === 1) return callback(new repl.Recoverable(new Error('line continuation')))
   if (line.trim() === '') return callback(null)
+  // `parse()` runs none of the line, and says when it stops inside a compound
+  // command or after a gate: collect the next line rather than fail, as a bash
+  // prompt does. Everything else, including a syntax error, is run()'s to report.
+  const parsed = attempt(() => session.terminal.parse(line))
+  session.unfinished = parsed?.incomplete ? parsed.error : null
+  if (session.unfinished) return callback(new repl.Recoverable(new Error(session.unfinished)))
   const result = attempt(() => session.terminal.run(line))
   if (!result) return callback(null)
   session.exitCode = result.exitCode
