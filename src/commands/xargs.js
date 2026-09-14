@@ -41,6 +41,11 @@ export function xargs(stdin, tokens, ctx) {
   return { stdout, stderr, exitCode }
 }
 
+// Dispatch names the command, so the message says only what went wrong —
+// which quote it was, and that `-0` is the way to stop reading them.
+const unmatched = (quote) =>
+  new Error(`unmatched ${quote === "'" ? 'single' : 'double'} quote; by default quotes are special to xargs unless you use the -0 option`)
+
 function inputWords(input) {
   const words = []
   let quote = null, started = false, word = ''
@@ -51,7 +56,7 @@ function inputWords(input) {
     if (!started && /[ \t\n\r\f\v]/u.test(c)) continue
     if (quote) {
       if (c === quote) quote = null
-      else if (c === '\n') throw new Error('xargs: unmatched quote')
+      else if (c === '\n') throw unmatched(quote)
       else word += c
     } else if (c === '"' || c === "'") { quote = c; started = true }
     else if (c === '\\') {
@@ -62,7 +67,7 @@ function inputWords(input) {
       word = ''; started = false
     } else { word += c; started = true }
   }
-  if (quote) throw new Error('xargs: unmatched quote')
+  if (quote) throw unmatched(quote)
   if (started) words.push(word)
   return words
 }

@@ -560,3 +560,21 @@ describe('GNU conformance — a call awk finds when it runs one', () => {
     }
   })
 })
+
+describe('GNU conformance — an unmatched quote in xargs input', () => {
+  // The message named the command, and so did dispatch, so it came back as
+  // `xargs: xargs: unmatched quote`. GNU names which quote it was and what
+  // to do about it. Recorded from findutils 4.9.
+  const fed = (line) => createTerminal({}).run(line)
+
+  it('names the quote, once', () => {
+    assert.deepEqual(fed(`printf "a'b\\n" | xargs echo`), {
+      stdout: '',
+      stderr: 'xargs: unmatched single quote; by default quotes are special to xargs unless you use the -0 option\n',
+      exitCode: 1, cwd: '/', notes: [], unsupported: [],
+    })
+    assert.equal(fed(`printf 'a"b\\n' | xargs echo`).stderr, 'xargs: unmatched double quote; by default quotes are special to xargs unless you use the -0 option\n')
+    // `-0` is what the message points at, and it reads the quote as text.
+    assert.equal(fed(`printf "a'b\\n" | xargs -0 echo`).stdout, "a'b\n\n")
+  })
+})
