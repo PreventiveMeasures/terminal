@@ -292,14 +292,19 @@ function chainOf(node) {
   if (node.negate) throw refuse('`!`')
   const stages = node.type === 'pipeline' ? node.stages : [node]
   const chain = []
+  let commands = 0
   for (const [index, stage] of stages.entries()) {
     if (stage.type !== 'command') throw refuse(BLOCKS[stage.type])
     if (stage.assignments) throw refuse('an assignment')
     if (stage.argv.length === 0) throw refuse('a command with no name')
     const redirects = stage.redirects ?? []
     const input = inputOf(redirects, index)
-    if (input) chain.push(['cat', literal(input.target)])
-    chain.push(stage.argv.map(literal))
+    if (input) { chain.push(inputStage(input)); commands++ }
+    const argv = stage.argv.map(literal)
+    // A `cat` with no file of its own hands its input straight on, so once
+    // something is feeding the chain it says nothing: `echo x | cat > f` is
+    // `echo x > f`, and its own redirects stay where they were.
+    if (!passthrough(argv, commands)) { chain.push(argv); commands++ }
     for (const redirect of redirects) {
       if (redirect !== input) chain.push(redirectTokens(redirect))
     }
@@ -307,24 +312,44 @@ function chainOf(node) {
   return chain
 }
 
-// A summary says what a line does, not how it was spelled, so a command
-// reading a file is the `cat` that feeds it: `wc < 1.txt` is `cat 1.txt | wc`.
-// Only the first stage can be fed that way — a later one reading a file leaves
-// the stage before it writing into nothing, which no chain says — and one
-// stage reads from one place, so a second source has no equivalent either.
+const passthrough = (argv, commands) => commands > 0 && argv.length === 1 && argv[0] === 'cat'
+
+// A summary says what a line does, not how it was spelled, so whatever feeds
+// a command is the command that feeds it. Only the first stage can be fed that
+// way — a later one reading its own input leaves the stage before it writing
+// into nothing, which no chain says — and one stage reads from one place, so a
+// second source has no equivalent either.
 function inputOf(redirects, index) {
-  const inputs = redirects.filter((r) => r.op === '<' || r.op === '<<<')
+  const inputs = redirects.filter((r) => r.op === '<' || r.op === '<<' || r.op === '<<<')
   if (inputs.length === 0) return null
   if (index > 0) throw refuse('a pipeline stage reading its own input')
   if (inputs.length > 1) throw refuse('a command reading from two places')
-  if (inputs[0].op === '<<<') throw refuse('a here-string')
   return inputs[0]
+}
+
+// A file is the `cat` that reads it: `wc < 1.txt` is `cat 1.txt | wc`. Text is
+// the command that writes it: `cat > notes.md <<EOF … EOF` is
+// `echo … | cat > notes.md`. An unquoted delimiter leaves the body to be
+// expanded when it runs, which is not text anyone can write down yet.
+function inputStage(redirect) {
+  if (redirect.op === '<') return ['cat', literal(redirect.target)]
+  if (redirect.op === '<<<') return textStage(`${literal(redirect.text)}\n`)
+  if (redirect.expand && /[$`\\]/u.test(redirect.text)) throw refuse('a here-document its delimiter leaves to expand')
+  return textStage(redirect.text)
+}
+
+// `echo` writes its argument and a newline, which is how a here-document ends,
+// so the body gives one up to it. Where echo would say something else — a body
+// that ends without one, or a first word it would read as an option — `printf`
+// says it exactly.
+function textStage(text) {
+  const line = text.endsWith('\n') ? text.slice(0, -1) : null
+  return line !== null && !line.startsWith('-') ? ['echo', line] : ['printf', '%s', text]
 }
 
 // The operator as it was typed, with the descriptor it defaults to left off.
 function redirectTokens(redirect) {
   const { fd, op } = redirect
-  if (op === '<<') throw refuse('a here-document')
   const lead = op.startsWith('&') || fd === 1 ? '' : String(fd)
   if (op === '>&') return [`${lead}>&${redirect.toFd}`]
   if (op === '>&-') return [`${lead}>&-`]

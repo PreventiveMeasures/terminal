@@ -348,17 +348,19 @@ export interface Terminal {
    * What the line runs, at a glance: one {@link Chain} per command, each
    * holding its pipeline stages' `argv` and its redirects as written, with
    * `&&` and `||` standing between the chains they gate. It reports what the
-   * line does rather than how it was spelled, so `wc < 1.txt` summarizes as
-   * `[['cat', '1.txt'], ['wc']]`, and a quoted `$(cat <<'EOF' … EOF)` as the
-   * text that here-document holds.
+   * line does rather than how it was spelled, so whatever feeds a command is
+   * the command that feeds it: `wc < 1.txt` summarizes as
+   * `[['cat', '1.txt'], ['wc']]`, and `cat > notes.md <<EOF … EOF` as
+   * `[['echo', '…'], ['>', 'notes.md']]`, the pass-through `cat` left out.
    *
    * A token is text, or a {@link PatternPart} or {@link TildePart} when one is
    * the whole of its argument, so it throws rather than summarize what it
    * cannot: a line
    * that does not parse (including a redirect this filesystem would refuse),
    * a subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
-   * here-document or here-string, a stage reading its own input from inside a
-   * pipeline, or a word whose text only expansion settles.
+   * here-document whose delimiter leaves its body to expand, a stage reading
+   * its own input from inside a pipeline, or a word whose text only expansion
+   * settles.
    * {@link Terminal.parse} reads those.
    *
    * @throws if the line does not parse, or holds anything but simple chains.

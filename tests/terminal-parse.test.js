@@ -274,7 +274,12 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['cat a 2> /tmp/err | tr a-z A-Z >> /tmp/out', [[['cat', 'a'], ['2>', '/tmp/err'], ['tr', 'a-z', 'A-Z'], ['>>', '/tmp/out']]]],
     ['wc < 1.txt || ls', [[['cat', '1.txt'], ['wc']], '||', [['ls']]]],
     ['wc -l < a.txt > /tmp/out', [[['cat', 'a.txt'], ['wc', '-l'], ['>', '/tmp/out']]]],
-    ['cat 0< a.txt | tr a-z A-Z', [[['cat', 'a.txt'], ['cat'], ['tr', 'a-z', 'A-Z']]]],
+    ['cat 0< a.txt | tr a-z A-Z', [[['cat', 'a.txt'], ['tr', 'a-z', 'A-Z']]]],
+    ['cat < a.txt', [[['cat', 'a.txt']]]],
+    ['echo x | cat > /tmp/f', [[['echo', 'x'], ['>', '/tmp/f']]]],
+    ['cat', [[['cat']]]],
+    ['cat > /tmp/f', [[['cat'], ['>', '/tmp/f']]]],
+    ['cat -n < a.txt', [[['cat', 'a.txt'], ['cat', '-n']]]],
     ['ls 2>&1 | grep x', [[['ls'], ['2>&1'], ['grep', 'x']]]],
     ['ls >&2', [[['ls'], ['>&2']]]],
     ['ls 2>&-', [[['ls'], ['2>&-']]]],
@@ -297,8 +302,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['x=1 ls', 'summarize: an assignment is not a simple chain'],
     ['x=1', 'summarize: an assignment is not a simple chain'],
     ['> /tmp/out', 'summarize: a command with no name is not a simple chain'],
-    ['cat <<EOF\nbody\nEOF', 'summarize: a here-document is not a simple chain'],
-    ['sort <<<here', 'summarize: a here-string is not a simple chain'],
+    ['cat <<EOF\n$x\nEOF', 'summarize: a here-document its delimiter leaves to expand is not a simple chain'],
     ['ls | wc < a.txt', 'summarize: a pipeline stage reading its own input is not a simple chain'],
     ['wc < a.txt < b.txt', 'summarize: a command reading from two places is not a simple chain'],
     ['wc < a.txt <<<here', 'summarize: a command reading from two places is not a simple chain'],
@@ -348,6 +352,21 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
       assert.throws(() => terminal().summarize(line), /is not a literal word/u)
     })
   }
+
+  // Whatever feeds a command is the command that feeds it, and text is written
+  // by the command that writes text.
+  it('reads a here-document as the command that writes it', () => {
+    assert.deepEqual(terminal().summarize('cat > /tmp/notes.md <<EOF\nhello\nEOF\n'), [[['echo', 'hello'], ['>', '/tmp/notes.md']]])
+    assert.deepEqual(terminal().summarize("wc -l <<'EOF'\nline one\nline two\nEOF\n"), [[['echo', 'line one\nline two'], ['wc', '-l']]])
+    assert.deepEqual(terminal().summarize('sort <<<here'), [[['echo', 'here'], ['sort']]])
+  })
+
+  // `echo` writes a newline of its own, and reads a leading `-` as an option,
+  // so a body it would not say exactly is written by `printf` instead.
+  it('writes with printf what echo would not say exactly', () => {
+    assert.deepEqual(terminal().summarize('wc <<EOF\n-n\nEOF\n'), [[['printf', '%s', '-n\n'], ['wc']]])
+    assert.deepEqual(terminal().summarize('cat <<EOF\nEOF\n'), [[['printf', '%s', '']]])
+  })
 
   // A pattern says what it looks for as plainly as a name does, so long as it
   // is the whole argument rather than one piece of a word.

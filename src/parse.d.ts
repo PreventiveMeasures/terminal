@@ -343,12 +343,21 @@ export function parse(line: string): ParseResult
  * // [ [['foo', '-bar'], ['head', '-10']], '&&', [['ls'], ['>', 'file.txt']] ]
  * ```
  *
- * It says what the line does rather than how it was spelled, so a command
- * reading a file is the `cat` that feeds it:
+ * It says what the line does rather than how it was spelled, so whatever feeds
+ * a command is the command that feeds it — a file is the `cat` that reads it,
+ * and text is the `echo` that writes it:
  *
  * ```js
  * summarize('wc < 1.txt || ls')   // [ [['cat', '1.txt'], ['wc']], '||', [['ls']] ]
+ * summarize("cat > notes.md <<EOF\nhello\nEOF\n")
+ * // [ [['echo', 'hello'], ['>', 'notes.md']] ]
  * ```
+ *
+ * A `cat` left with nothing to read but its own input hands it straight on, so
+ * it is left out once something is feeding the chain — which is why writing a
+ * here-document to a file is one `echo` and its redirect. Where `echo` would
+ * say something else than the text does — a body ending without a newline, or
+ * a first word it would read as an option — `printf` says it exactly.
  *
  * A quoted `$(cat <<'EOF' … EOF)` is the text it holds, so that is what it
  * says: the here-document, minus the trailing newlines `$( )` strips.
@@ -361,8 +370,9 @@ export function parse(line: string): ParseResult
  * which says what it looks for as plainly as a name does. Anything a summary
  * would have to lie about throws instead: a line that does not parse, a
  * subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
- * here-document or here-string, a stage that reads its own input from inside
- * a pipeline, and any word whose text only running it settles — `$x`,
+ * here-document whose delimiter leaves its body to expand, a stage that reads
+ * its own input from inside a pipeline, and any word whose text only running
+ * it settles — `$x`,
  * `` `date` ``, and a word joined from pieces such as `a*"b"`. {@link parse}
  * reads those; this is the short answer while a line stays simple, and an
  * error the moment it does not.

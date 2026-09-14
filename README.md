@@ -136,11 +136,16 @@ summarize('foo -bar | head -10 && ls > file.txt')
 
 summarize('wc < 1.txt || ls')
 // [ [['cat', '1.txt'], ['wc']], '||', [['ls']] ]
+
+summarize("cat > notes.md <<EOF\nhello\nEOF\n")
+// [ [['echo', 'hello'], ['>', 'notes.md']] ]
 ```
 
-It reports what a line does rather than how it was written, which is why a
-command reading a file comes back as the `cat` that feeds it, and why a quoted
-`$(cat <<'EOF' … EOF)` comes back as the text that here-document holds.
+It reports what a line does rather than how it was written, so whatever feeds a
+command is the command that feeds it: a file is the `cat` that reads it, text
+is the `echo` that writes it, and a `cat` left with nothing to read but its own
+input is left out. A quoted `$(cat <<'EOF' … EOF)` comes back as the text that
+here-document holds.
 
 A token is text, or the pattern or `~` an argument is written as:
 
