@@ -45,7 +45,7 @@ function chainOf(node) {
     const redirects = stage.redirects ?? []
     const input = inputOf(redirects, index)
     if (input) { chain.push(inputStage(input)); commands++ }
-    const row = stage.type === 'subshell' ? { type: 'braces', statements: summaryOf(stage.list) } : rowOf(stage)
+    const row = stage.type === 'subshell' ? { type: 'braces', list: summaryOf(stage.list) } : rowOf(stage)
     // A `cat` with no file of its own hands its input straight on, so once
     // something is feeding the chain it says nothing: `echo x | cat > f` is
     // `echo x > f`, and its own redirects stay where they were.
@@ -156,7 +156,7 @@ function piece(part) {
   // Bash parses a backtick when it comes to run it, so a body that does not
   // parse is a line that does not parse, reported as any other one is.
   if (part.error) throw new Error(part.error)
-  return { type: 'shell', statements: summaryOf(part.list), multi: part.multi }
+  return { type: 'shell', list: summaryOf(part.list), multi: part.multi }
 }
 
 // `"$(cat <<'EOF' … EOF)"` is the text it holds and nothing else: a literal

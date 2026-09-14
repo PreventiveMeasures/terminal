@@ -202,10 +202,10 @@ whether that output stays one word:
 
 ```js
 summarize('echo `a;b`')
-// [ [ ['echo', { type: 'shell', statements: [[['a']], [['b']]], multi: true }] ] ]
+// [ [ ['echo', { type: 'shell', list: [[['a']], [['b']]], multi: true }] ] ]
 
 summarize('echo "`a|b`"')
-// [ [ ['echo', { type: 'shell', statements: [[['a'], ['b']]], multi: false }] ] ]
+// [ [ ['echo', { type: 'shell', list: [[['a'], ['b']]], multi: false }] ] ]
 ```
 
 A `( … )` is a list of its own, so it holds a summary too, in place of the row
@@ -213,7 +213,7 @@ a command would have stood in:
 
 ```js
 summarize('(cd dir; ls) | wc -l')
-// [ [ { type: 'braces', statements: [[['cd', 'dir']], [['ls']]] }, ['wc', '-l'] ] ]
+// [ [ { type: 'braces', list: [[['cd', 'dir']], [['ls']]] }, ['wc', '-l'] ] ]
 
 summarize('(ls) > out')
 // [ [['ls'], ['>', 'out']] ]
