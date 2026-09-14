@@ -567,7 +567,7 @@ describe('shell syntax — compound commands', () => {
   })
 
   it('bash constructs this shell lacks are named as such', () => {
-    assert.deepEqual(gaps('f() { echo hi; }; f'), ['feature:function'])
+    assert.deepEqual(gaps('f() { echo $hi; }; f'), ['feature:function'])
     assert.deepEqual(gaps('((1+2))'), ['feature:(('])
     assert.deepEqual(gaps('for ((i=0;i<3;i++)); do echo $i; done'), ['feature:for (('])
     assert.deepEqual(gaps('for f; do echo $f; done'), ['feature:for NAME; do'])

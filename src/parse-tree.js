@@ -82,6 +82,7 @@ function stageOf(stage) {
 // `( list )`, `{ list; }`, `do list; done`, `then list`.
 function blockOf(stage) {
   if (stage.group) return { type: stage.isolate ? 'subshell' : 'group', list: listFrom(stage.group) }
+  if (stage.define) return { type: 'function', name: stage.define.name, list: listFrom(stage.define.body) }
   if (stage.loop) return loopOf(stage.loop)
   if (stage.conditional) return ifOf(stage.conditional)
   if (stage.test) return { type: 'test', expression: conditionOf(stage.test) }

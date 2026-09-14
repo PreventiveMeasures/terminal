@@ -9,6 +9,8 @@ import { isolated } from './state.js'
 import { evaluateConditional } from './conditional.js'
 
 export function runBlock(stage, ctx, stdin, runSteps) {
+  // A definition runs nothing and leaves the body where a call can reach it.
+  if (stage.define) { ctx.functions.set(stage.define.name, stage.define.body); return emptyOutput() }
   if (stage.test) return evaluateConditional(stage.test, ctx)
   if (stage.group) return runGroup(stage, ctx, stdin, runSteps)
   if (stage.loop) return stage.loop.words ? runLoop(stage.loop, ctx, runSteps) : runWhile(stage.loop, ctx, runSteps)

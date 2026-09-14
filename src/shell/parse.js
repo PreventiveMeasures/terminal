@@ -5,8 +5,8 @@
 // Token kinds and quoting distinguish operators/keywords from literal words.
 
 import { assignmentOf, sliceWord } from './word.js'
-import { NAME_RE } from './tokenize.js'
 import { tokenLabel } from './lex.js'
+import { parseConditional, parseFor, parseFunction, parseWhile, skipNewlines } from './parse-blocks.js'
 import { UnsupportedError } from '../unsupported.js'
 import { advanceAliases } from './aliases.js'
 import { IncompleteInput, incomplete, readAll, readLine, readUnits, tokenAt } from './parse-input.js'
@@ -45,7 +45,7 @@ function appendStage(p, step, stage) {
 // Assignments and redirects alone are valid commands. Check emptiness before
 // adding |&'s implicit redirect, which must not legitimize an empty stage.
 const isCommand = (s) => s.words.length > 0 || s.assigns.length > 0 || s.redirs.length > 0
-const isBlock = (s) => s.group || s.loop || s.conditional || s.test
+const isBlock = (s) => s.group || s.loop || s.conditional || s.test || s.define
 
 const newStage = () => ({ words: [], assigns: [], redirs: [] })
 const newStep = (gate) => ({ gate, stages: [], negate: false, bang: false })
@@ -175,7 +175,8 @@ function openParen(p, stage) {
     throw new UnsupportedError('feature', '((', 'arithmetic evaluation (`((…))`) is not supported')
   }
   if (stage.words.length === 1 && stage.assigns.length === 0 && stage.redirs.length === 0 && next?.kind === 'paren_close') {
-    throw new UnsupportedError('feature', 'function', `shell functions (\`${stage.words[0].value}() { … }\`) are not supported`)
+    stage.define = parseFunction(p, stage.words.pop(), buildSteps)
+    return
   }
   // A subshell occupies a whole stage, but retains any leading redirects.
   if (!commandPosition(stage)) throw new Error('unexpected `(`')
@@ -207,100 +208,9 @@ function commandWord(t, p, step, stage) {
   if (v === '}') throw new Error('syntax error near unexpected token `}`')
   if (v === 'done') throw new Error('unexpected `done`')
   if (v === 'do') throw new Error('unexpected `do`')
-  if (v === 'if') stage.conditional = parseConditional(p)
-  else stage.loop = v === 'for' ? parseFor(p) : parseWhile(p, v)
+  if (v === 'if') stage.conditional = parseConditional(p, buildSteps)
+  else stage.loop = v === 'for' ? parseFor(p, buildSteps) : parseWhile(p, v, buildSteps)
   return true
-}
-
-const BRANCH_ENDS = ['elif', 'else', 'fi']
-
-function parseConditional(p) {
-  const branches = []
-  let closer
-  do {
-    skipNewlines(p)
-    const condition = buildSteps(p, 'then')
-    skipNewlines(p)
-    const body = buildSteps(p, BRANCH_ENDS)
-    branches.push({ condition, body })
-    closer = p.raw[p.i - 1].value
-  } while (closer === 'elif')
-  let otherwise = null
-  if (closer === 'else') {
-    skipNewlines(p)
-    otherwise = buildSteps(p, 'fi')
-  }
-  return { branches, otherwise }
-}
-
-// Parse NAME in WORDS; do BODY; done. Headers skip exactly one separator;
-// bodies allow newlines after do, but not semicolons. Implicit positional-
-// parameter loops remain explicitly unsupported.
-function parseFor(p) {
-  const { raw } = p
-  const outer = p.loop
-  p.loop = 'for'
-  const nameTok = tokenAt(p)
-  if (nameTok?.kind === 'paren_open') throw new UnsupportedError('feature', 'for ((', 'arithmetic `for ((…))` loops are not supported; use `for NAME in WORD...`')
-  if (nameTok === undefined || nameTok.kind !== 'word') throw new Error('for: expected a variable name')
-  const name = nameTok.value
-  if (nameTok.quoted || !NAME_RE.test(name)) throw new Error(`for: \`${name}\` is not a valid variable name`)
-  p.i++
-  const separator = tokenAt(p)
-  if (separator?.kind === 'semi') p.i++
-  const inToken = tokenAt(p)
-  if (separator?.kind === 'semi' && !separator.newline && isWord(inToken, 'in')) throw new Error('for: unexpected `in` after `;`')
-  if (!isWord(inToken, 'in')) {
-    if (isWord(inToken, 'do') || inToken === undefined) {
-      const gap = new UnsupportedError('feature', 'for NAME; do', `\`for ${name}; do …\` iterates the positional parameters, which this shell does not have; write \`for ${name} in WORD...\``)
-      throw inToken === undefined ? new IncompleteInput(gap) : gap
-    }
-    throw new Error(`for: expected \`in\` after \`${name}\``)
-  }
-  p.i++
-  const words = []
-  // 'do' is a legal list item; remember it only for a missing-separator error.
-  let sawDo = false
-  for (let t; (t = tokenAt(p)) && t.kind !== 'semi'; p.i++) {
-    if (t.kind !== 'word') throw new Error(`for: unexpected \`${tokenLabel(t)}\` in word list`)
-    if (isWord(t, 'do')) sawDo = true
-    words.push(sliceWord(t))
-  }
-  if (raw[p.i]?.kind === 'semi') p.i++
-  const doToken = tokenAt(p)
-  if (!isWord(doToken, 'do')) {
-    if (doToken === undefined) throw incomplete(sawDo ? 'for: expected `;` or newline before `do`' : 'for: missing `do`')
-    if (sawDo) throw new Error('for: expected `;` or newline before `do`')
-    throw new Error(`for: expected \`do\`, got \`${tokenLabel(doToken)}\``)
-  }
-  p.i++
-  skipNewlines(p)
-  const loop = { name, words, body: buildSteps(p, 'done') }
-  p.loop = outer
-  return loop
-}
-
-// `while LIST; do LIST; done`, and `until`, which runs its body for as long
-// as the condition fails instead. The keyword stays on the cursor for the
-// diagnostics a missing `do` or `done` reports.
-function parseWhile(p, keyword) {
-  const outer = p.loop
-  p.loop = keyword
-  skipNewlines(p)
-  const condition = buildSteps(p, 'do')
-  skipNewlines(p)
-  const loop = { until: keyword === 'until', condition, body: buildSteps(p, 'done') }
-  p.loop = outer
-  return loop
-}
-
-// Block-opening keywords allow newlines before their lists, but not semicolons.
-function skipNewlines(p) {
-  for (let t; (t = tokenAt(p))?.kind === 'semi' && t.newline;) p.i++
-}
-
-function isWord(t, value) {
-  return t !== undefined && t.kind === 'word' && !t.quoted && t.value === value
 }
 
 // A trailing ';' creates an empty tail to discard, while trailing &&/||

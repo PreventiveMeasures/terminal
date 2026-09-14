@@ -212,7 +212,7 @@ describe('upstream shell audit — explicit unsupported constructs', () => {
     ['nested legacy substitution', 'echo `echo \\`printf value\\``', '\\`'],
     ['case pattern syntax in substitution', 'echo "$(case word in word) echo yes;; esac)"', 'case'],
     ['custom IFS', 'IFS=:; x=red:blue; echo $x', 'IFS'],
-    ['shell function declaration', 'show() { echo value; }; show', 'function'],
+    ['shell function reading its arguments', 'show() { echo "$1"; }; show value', 'function'],
     ['arithmetic conditional', 'if (( 0 )); then echo lost; fi', '(('],
     ['select loop', 'select x in a b; do echo lost; done', 'select'],
     ['heredoc on another descriptor', 'cat 3<<HERE\nvalue\nHERE', '3<<'],

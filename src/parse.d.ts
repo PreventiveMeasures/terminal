@@ -283,6 +283,24 @@ export interface ForLoop extends NodeBase {
 }
 
 /**
+ * `name () { list; }`: the list runs wherever the name is called, which is
+ * all a function can be here — this shell supports one only while its body
+ * reads and writes no variable, so a call cannot tell itself from the line it
+ * stands in. What a caller would otherwise hand it is then nothing the body
+ * could have read: its arguments as `$1`, a variable of its own, a `local`.
+ *
+ * Defining one runs nothing. Anything else — a body reading `$1`, a name that
+ * calls itself — is refused with the gap `function` rather than run as
+ * something it is not.
+ */
+export interface FunctionDefinition extends NodeBase {
+  type: 'function'
+  name: string
+  /** The body, which runs where the name is called. */
+  list: Node[]
+}
+
+/**
  * `while LIST; do LIST; done`, and `until`, which reads the same test the
  * other way round: `while` runs its body for as long as the condition
  * succeeds, `until` for as long as it fails.
@@ -322,7 +340,7 @@ export interface Test extends NodeBase {
 }
 
 /** One command in a list. */
-export type Node = Command | Pipeline | Subshell | Group | ForLoop | WhileLoop | If | Test
+export type Node = Command | Pipeline | Subshell | Group | ForLoop | WhileLoop | FunctionDefinition | If | Test
 
 /** `[[ a && b ]]`, `[[ a || b ]]`. */
 export interface ConditionJunction {
@@ -555,6 +573,11 @@ export interface ChainFor {
 }
 
 /**
+ * A definition is not a chain: it runs nothing, and the body stands where the
+ * name is called instead — `f() { ls; }; f | wc` summarizes as `ls | wc`, a
+ * body of one command reading as that command. A call that reaches its own
+ * name has no end to stand in for, and is refused.
+ *
  * A summarized line: its chains in order, with `&&` or `||` standing between
  * the two it gates, and `&` standing after the chain it hands to the
  * background — which may be the last of the line, since `&` ends one. A `;`

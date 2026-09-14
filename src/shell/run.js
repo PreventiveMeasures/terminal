@@ -3,7 +3,7 @@ import { readBacktickSubstitution, readExpansion } from './lex.js'
 import { refusedWrite } from './parse.js'
 import { BindingMap } from './bindings.js'
 import { gateBlame, gateTracker, lookupWithNote, missingPathNote } from '../notes.js'
-import { UnsupportedError, unsupportedNote } from '../unsupported.js'
+import { UnsupportedError, unsupported, unsupportedNote } from '../unsupported.js'
 import { err, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
@@ -81,7 +81,7 @@ function runPipeline(stages, ctx, stream) {
 function pipelineStage(stage, ctx, stdin, stdinFile, fds) {
   const initial = { fds, stdin, stdinFile, stdinOrigin: stdinFile ? ctx.stdinOrigin : null, stdinHandle: stdinFile ? ctx.stdinHandle : null }
   return withState(ctx, { substitutionExit: null, expansionOutput: emptyOutput(), expansionFds: fds }, () => withStreams(initial, ctx, () => {
-    const simple = !stage.group && !stage.loop && !stage.conditional && !stage.test
+    const simple = !stage.group && !stage.loop && !stage.conditional && !stage.test && !stage.define
     let expanded, expansionError
     try {
       if (simple) {
@@ -110,6 +110,22 @@ function pipelineStage(stage, ctx, stdin, stdinFile, fds) {
         routed = true
         blame = r.blame ?? null
         return r
+      }
+      // A function is its body run here, which is all one can be while its
+      // body reads nothing of the call: the words a caller added are no more
+      // readable from inside it than the line it was defined on.
+      const name = expanded.argv.length > 0 ? expanded.argv[0] : null
+      const body = name === null ? undefined : ctx.functions.get(name)
+      if (body) {
+        routed = true
+        // A body standing where it is called cannot stand inside itself.
+        if (ctx.calling.has(name)) {
+          const gap = unsupported('feature', name, 'function recursion', `${name}: a function calling itself is not supported`)
+          ctx.unsupported.add(unsupportedNote(gap))
+          return gap
+        }
+        ctx.calling.add(name)
+        try { return withTemporaries(expanded.temps, ctx, () => runSteps(body, ctx, { text: io.stdin })) } finally { ctx.calling.delete(name) }
       }
       const r = runStage(ctx, expanded)
       if (expanded.argv.length) blame = gateBlame(ctx.registry.chainRole(expanded.argv), expanded.argv[0])

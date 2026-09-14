@@ -72,6 +72,12 @@ expansion, globs with bracket expressions, `$(…)` and backticks, `$(( … ))`,
 and the `${…}` family. A loop that never ends is stopped and reported, since
 nothing here runs beside the line.
 
+`name() { … }` runs wherever the name is called, while its body reads and
+writes no variable — then a call cannot tell itself from the line it stands
+in, and `$1`, a `local` and the rest are nothing the body could have read. A
+body that needs any of them is refused rather than run as something it is
+not.
+
 `ls` `cd` `cat` `grep` `egrep` `fgrep` `sed` `awk` `find` `head` `tail` `wc`
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
 `printf` `test` `cp` `rm` `du` `stat` `realpath` `pwd` `seq` `which` `basename`

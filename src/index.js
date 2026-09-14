@@ -21,7 +21,7 @@ export function createTerminal(sources, opts = {}) {
   // /dev/stdin to reopen a redirected file independently of that offset.
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
   const ctx = {
-    cwd, fs, io: createIoGuard(fs), user: opts.user ?? 'user', home, mount, writable, registry, outputFds: { 1: 'out', 2: 'err' },
+    cwd, fs, io: createIoGuard(fs), user: opts.user ?? 'user', home, mount, writable, registry, functions: new Map(), calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
     vars: new BindingMap(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '',
     unsupported: createUnsupportedFeed(), notes: new Set(),
   }

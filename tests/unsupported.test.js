@@ -383,6 +383,15 @@ describe('run().unsupported — shell constructs', () => {
     assert.deepEqual(t().run('x=0; while test $x -lt 3; do x=$((x+1)); done; echo $x').stdout, '3\n')
   })
 
+  // A body standing where it is called cannot stand inside itself.
+  it('refuses a function that calls itself, rather than run out of stack', () => {
+    const r = t().run('f() { f; }; f')
+    assert.equal(r.exitCode, 1)
+    assert.deepEqual(r.unsupported.map((gap) => gap.detail), ['function recursion'])
+    assert.match(r.stderr, /a function calling itself is not supported/u)
+    assert.deepEqual(t().run('f() { g; }; g() { f; }; f').unsupported.map((gap) => gap.detail), ['function recursion'])
+  })
+
   it('names the construct, not the word the parser choked on', () => {
     // Unsupported blocks identify their opening construct, not a later keyword.
     for (const [line, detail] of [

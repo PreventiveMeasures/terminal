@@ -144,7 +144,7 @@ describe('diagnostic completeness — runtime and parser limitations', () => {
     ['cat <(cat f)', '<('],
     ['cat f > out', '>'],
     ['while true; do case x in a) :;; esac; done', 'case'],
-    ['fn() { cat f; }; fn', 'function'],
+    ['fn() { cat $f; }; fn', 'function'],
   ]) {
     it(command, () => {
       const r = run(command)

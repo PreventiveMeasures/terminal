@@ -141,8 +141,8 @@ export const SHELL_WORKFLOWS = [
     parseTime: true,
   },
   {
-    purpose: 'Define a reusable source-summary shell function',
-    command: 'summarize() { wc -l src/*.js; }; summarize',
+    purpose: 'Define a reusable source-summary shell function that takes a path',
+    command: 'summarize() { wc -l "$1"; }; summarize src/index.js',
     expected: feature('function'),
     parseTime: true,
   },

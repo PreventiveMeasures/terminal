@@ -238,6 +238,23 @@ parentheses are for — `(cd dir)` keeps its row, since the parentheses are
 what stops the `cd` reaching the shell, while `{ cd dir; }` is the `cd`
 itself.
 
+A definition is not a chain — it runs nothing — and the body stands where the
+name is called instead, which is all a function can be here: this shell keeps
+one only while its body reads and writes no variable, so a call cannot tell
+itself from the line it stands in.
+
+```js
+summarize("bench() { node -e 'work'; }; LABEL=after bench; LABEL=before bench")
+// [ [[{ type: 'assignments', assignments: [{ name: 'LABEL', value: 'after' }] },
+//     'node', '-e', 'work']],
+//   [[{ type: 'assignments', assignments: [{ name: 'LABEL', value: 'before' }] },
+//     'node', '-e', 'work']] ]
+```
+
+A body of one command reads as that command; a longer one is the `braces` it
+would be written as. A call that reaches its own name has no end to stand in
+for, and is refused.
+
 A `while` holds two lists — what it repeats and what it asks before every
 turn — and `until` reads that question the other way round:
 

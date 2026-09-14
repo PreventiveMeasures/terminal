@@ -258,6 +258,19 @@ describe('parse() spells a value out only when expansion still decides it', () =
     })
   }
 
+  // A function is a body that runs where its name is called, which is all one
+  // can be while the body reads nothing of the call.
+  it('reads a function definition as the body it names', () => {
+    assert.deepEqual(list('f() { ls; }; f'), [
+      { type: 'function', name: 'f', list: [{ type: 'command', argv: ['ls'] }] },
+      { type: 'command', op: ';', argv: ['f'] },
+    ])
+    assert.deepEqual(verdict('f() { echo $x; }'), { ok: false, incomplete: false, error: '`f()` is supported only while its body reads and writes no variable' })
+    assert.deepEqual(verdict('f() { x=1; }'), { ok: false, incomplete: false, error: '`f()` is supported only while its body reads and writes no variable' })
+    assert.deepEqual(verdict('f() ( ls )'), { ok: false, incomplete: false, error: '`f()` needs a `{ … }` body' })
+    assert.deepEqual(parse('f() { echo $x; }').unsupported.map((gap) => gap.detail), ['function'])
+  })
+
   // `while LIST; do LIST; done` reads as the two lists it holds, and `until`
   // is the same loop with the question read the other way round.
   it('reads a while loop as the list it repeats and the list it asks', () => {
@@ -493,6 +506,22 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     assert.throws(() => terminal().summarize('echo `echo )`'), { message: 'unexpected `)`' })
   })
 
+  // A definition runs nothing, so it says nothing; the body stands where the
+  // name is called, and a body of one command reads as that command.
+  it('stands a function where it is called, and says nothing where it is defined', () => {
+    assert.deepEqual(terminal().summarize("bench() { wc -l a.txt; }; LABEL=after bench; ls; LABEL=before bench"), [
+      [[{ type: 'assignments', assignments: [{ name: 'LABEL', value: 'after' }] }, 'wc', '-l', 'a.txt']],
+      [['ls']],
+      [[{ type: 'assignments', assignments: [{ name: 'LABEL', value: 'before' }] }, 'wc', '-l', 'a.txt']],
+    ])
+    assert.deepEqual(terminal().summarize('f() { ls; }'), [])
+    assert.deepEqual(terminal().summarize('f() { ls; }; f | wc'), [[['ls'], ['wc']]])
+    assert.deepEqual(terminal().summarize('f() { ls; }; f > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
+    assert.deepEqual(terminal().summarize('f() { a; b; }; f | wc'), [[{ type: 'braces', summary: [[['a']], [['b']]] }, ['wc']]])
+    assert.deepEqual(terminal().summarize('f() { date; }; echo "$(f)"'), [[['echo', { type: 'shell', summary: [[['date']]], multi: false }]]])
+    assert.throws(() => terminal().summarize('f() { f; }; f'), { message: 'summarize: a function that calls itself is not a simple chain' })
+  })
+
   // A `while` asks before every turn, and `until` reads the answer the other
   // way round. Both are a list run more than once, so both are a row.
   it('summarizes a while loop as the list it repeats and the list it asks', () => {
@@ -684,7 +713,7 @@ describe('parse() reports the gaps parsing itself finds', () => {
   for (const line of [
     'case x in y) :;; esac',
     'echo $((1 + 1)) && ((x++))',
-    'f() { :; }',
+    'f() { echo $x; }',
     'echo ${x@Q}',
     'echo ~x',
     'echo @(a|b)',

@@ -275,6 +275,7 @@ export type {
   DuplicateRedirect,
   FileRedirect,
   ForLoop,
+  FunctionDefinition,
   Group,
   HereDocument,
   HereString,

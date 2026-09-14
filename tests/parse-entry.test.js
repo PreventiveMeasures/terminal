@@ -48,7 +48,7 @@ describe('the parse entry point is published on its own', () => {
     // A budget, not a target: the parser, its lexers, and the leaves they need
     // — brace syntax among them, since reading a word has to say which of its
     // text a `{a,b}` claims.
-    assert.ok(files.length <= 18, `${files.length} modules: ${files.join(', ')}`)
+    assert.ok(files.length <= 19, `${files.length} modules: ${files.join(', ')}`)
     assert.deepEqual(external, ['@exodus/bytes/utf8.js'])
     assert.ok(moduleGraph('src/index.js').files.length > 80, 'the whole terminal is much more than the parser')
   })

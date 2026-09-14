@@ -163,7 +163,13 @@ x=1; while test -n "$x"; do x=; false; done; echo $? => "1\n"
 while echo tick; do break; done => "tick\n"
 until test -e input; do echo waiting; done; echo $? => "0\n"
 case a in a) echo yes;; esac => ! case 1
-f() { echo hi; }; f => ! function 1
+f() { echo hi; }; f => "hi\n"
+f() { echo a; echo b; }; f | tr a-z A-Z => "A\nB\n"
+g() { cat; }; echo z | g => "z\n"
+f() { cat input; }; f; f => "oak\nelm\nfir\noak\nelm\nfir\n"
+f() { echo hi; }; f arg1 arg2 => "hi\n"
+f() { echo one; }; f; echo $? => "one\n0\n"
+f() { echo $x; }; f => ! function 1
 set -e => ! set 127
 shopt -s nullglob => ! shopt 127
 "trap \"echo bye\" EXIT" => ! trap 127
