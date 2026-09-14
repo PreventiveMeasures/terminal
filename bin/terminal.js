@@ -9,6 +9,7 @@
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
+import { colorizeDiff } from './diff-color.js'
 import { createTerminal } from '@preventive/terminal'
 import process from 'node:process'
 import repl from 'node:repl'
@@ -155,7 +156,7 @@ function evaluate(session, server, input, callback) {
 // Streams first, exactly as the command wrote them, then the two channels no
 // redirect inside the line could have suppressed, then the status.
 function report(session, result) {
-  write(session, process.stdout, result.stdout)
+  write(session, process.stdout, colorizeDiff(result.stdout, process.stdout))
   write(session, process.stderr, result.stderr)
   for (const gap of result.unsupported) note(styleText('red', `UNSUPPORTED: ${gap.message}`, { stream: process.stderr }))
   for (const text of result.notes) note(styleText('gray', `NOTE: ${text}`, { stream: process.stderr }))
