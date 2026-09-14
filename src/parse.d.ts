@@ -23,10 +23,10 @@ export interface Parts {
  * is `'a b'`, and so is `a" "b`, whose runs join. Every other piece names the
  * expansion it is waiting for; the ones whose result quoting still governs say
  * so either way, since inside quotes a result is neither split into fields nor
- * matched as a pattern. A pattern, a brace and a `~` are bare by definition —
- * quoting any of them settles the text instead.
+ * matched as a pattern. A pattern and a brace are bare by definition — quoting
+ * either settles the text instead.
  */
-export type Part = string | PatternPart | BracePart | TildePart | VariablePart | SubstitutionPart | ArithmeticPart
+export type Part = string | PatternPart | BracePart | VariablePart | SubstitutionPart | ArithmeticPart
 
 /**
  * Bare text carrying glob syntax — `*`, `?`, or a `[` a bare `]` closes —
@@ -60,16 +60,16 @@ export interface BracePart {
   source: string
 }
 
-/** A word opening with a bare `~`, which becomes a home directory. `a~b` is text: only the start of a word expands. */
-export interface TildePart {
-  type: 'tilde'
-  source: string
-}
-
 /**
  * `$x`, `${x}`, `${x:-default}`, and the ones a shell keeps for itself: `$?`,
  * `$1`, `$@`. `quoted` marks a reference inside double quotes, whose result is
  * neither split into fields nor matched as a pattern.
+ *
+ * A `~` opening a word is one of these: it names the home directory, which is
+ * what `"$HOME"` names, and quoted for the same reason — tilde expansion is
+ * never split or matched either. `~/a` reads exactly as `"$HOME/a"` does, and
+ * `a~b`, `~''/x` and `~user` are text, since a tilde expands only at the start
+ * of a word, only unquoted, and here only as the home directory.
  */
 export interface VariablePart {
   type: 'variable'
@@ -303,14 +303,23 @@ export interface ParseResult {
 }
 
 /**
- * One token of a chain: the text it will be, or the pattern it will be
- * matched by, the home directory it opens with, or the variable it reads.
- * Each says what it reaches for as plainly as a name does, so long as it is
- * the whole of its argument — `ls *.js` is
- * `['ls', { type: 'pattern', pattern: '*.js' }]`, while `ls a*"b"`, whose word
- * is pieces joined together, is not summarized at all.
+ * One token of a chain: the text it will be, the pattern it will be matched
+ * by, the variable it reads, or the word those are joined into. Each says what
+ * it reaches for as plainly as a name does — `ls *.js` is
+ * `['ls', { type: 'pattern', pattern: '*.js' }]` and `ls ~/bin` is
+ * `['ls', { type: 'parts', parts: [{ type: 'variable', name: 'HOME', quoted: true }, '/bin'] }]`.
  */
-export type Token = string | PatternPart | TildePart | VariablePart
+export type Token = string | PatternPart | VariablePart | TokenParts
+
+/**
+ * A token in pieces: `a*"b"` is a pattern and the text behind it, and `~/bin`
+ * is `$HOME` and the path behind that. Every piece is a token of its own, so
+ * what the word reaches for stays as plain as the pieces are.
+ */
+export interface TokenParts {
+  type: 'parts'
+  parts: Array<string | PatternPart | VariablePart>
+}
 
 /**
  * One command of a chain: each pipeline stage's `argv`, and each redirect as
@@ -372,15 +381,15 @@ export function parse(line: string): ParseResult
  * text, and the substitution has to be quoted, since bare its text would be
  * split into fields and globbed.
  *
- * A token is text, or the pattern, `~` or variable an argument is written as —
- * each of which says what it reaches for as plainly as a name says what it
- * runs. Anything a summary
+ * A token is text, or the pattern or variable an argument is written as, or
+ * the word those are joined into — each of which says what it reaches for as
+ * plainly as a name says what it runs. Anything a summary
  * would have to lie about throws instead: a line that does not parse, a
  * subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
  * here-document whose delimiter leaves its body to expand, a stage that reads
- * its own input from inside a pipeline, and any word whose text only running
- * it settles — `` `date` ``,
- * `$(( … ))`, and a word joined from pieces such as `a*"b"`. {@link parse}
+ * its own input from inside a pipeline, and any word a command has to run
+ * before its text is known — `` `date` ``, `$(( … ))`, or the braces of an
+ * ambiguous redirect. {@link parse}
  * reads those; this is the short answer while a line stays simple, and an
  * error the moment it does not.
  *

@@ -287,8 +287,8 @@ export type {
   SubstitutionPart,
   Summary,
   Test,
-  TildePart,
   Token,
+  TokenParts,
   Value,
   VariablePart,
 } from './parse.js'
@@ -353,14 +353,14 @@ export interface Terminal {
    * `[['cat', '1.txt'], ['wc']]`, and `cat > notes.md <<EOF … EOF` as
    * `[['echo', '…'], ['>', 'notes.md']]`, the pass-through `cat` left out.
    *
-   * A token is text, or a {@link PatternPart}, {@link TildePart} or
-   * {@link VariablePart} when one is the whole of its argument, so it throws
-   * rather than summarize what it cannot: a line
+   * A token is text, a {@link PatternPart} or {@link VariablePart}, or the
+   * {@link TokenParts} those join into — a `~` among them, which reads as the
+   * `$HOME` it names. It throws rather than summarize what it cannot: a line
    * that does not parse (including a redirect this filesystem would refuse),
    * a subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
    * here-document whose delimiter leaves its body to expand, a stage reading
-   * its own input from inside a pipeline, or a word whose text only expansion
-   * settles.
+   * its own input from inside a pipeline, or a word a command has to run before
+   * its text is known.
    * {@link Terminal.parse} reads those.
    *
    * @throws if the line does not parse, or holds anything but simple chains.

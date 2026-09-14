@@ -35,6 +35,7 @@ function commandNames(nodes) {
 const named = (line, opts) => commandNames(list(line, opts))
 const parts = (...pieces) => pieces.length === 1 ? pieces[0] : { type: 'parts', parts: pieces }
 const pattern = (source) => ({ type: 'pattern', pattern: source })
+const home = () => ({ type: 'variable', name: 'HOME', quoted: true })
 
 describe('parse() hands back the line as the parser read it', () => {
   it('describes a simple command as its argv', () => {
@@ -84,7 +85,7 @@ describe('parse() hands back the line as the parser read it', () => {
   // word list arrives with its braces already worked out.
   it('expands braces in a word list, and leaves alone what they are not', () => {
     assert.deepEqual(list('ls a{b,c} {1..3} a{b} "{a,b}"')[0].argv, ['ls', 'ab', 'ac', '1', '2', '3', 'a{b}', '{a,b}'])
-    assert.deepEqual(list('ls ~/x{x,2}*')[0].argv, ['ls', pattern('~/xx*'), pattern('~/x2*')])
+    assert.deepEqual(list('ls ~/x{x,2}*')[0].argv, ['ls', parts(home(), pattern('/xx*')), parts(home(), pattern('/x2*'))])
     assert.deepEqual(list('for f in {1..3}; do ls; done')[0].words, ['1', '2', '3'])
   })
 
@@ -218,7 +219,14 @@ describe('parse() spells a value out only when expansion still decides it', () =
     ['`date`', [{ type: 'substitution', list: dated, quoted: false }]],
     ['$((1 + 2))', [{ type: 'arithmetic', source: '1 + 2', quoted: false }]],
     ['*.js', [pattern('*.js')]],
-    ['~/bin', [{ type: 'tilde', source: '~/bin' }]],
+    ['~', [home()]],
+    ['~/bin', [home(), '/bin']],
+    ['"$HOME/bin"', [home(), '/bin']],
+    ['~/bin*', [home(), pattern('/bin*')]],
+    ['~user/bin', ['~user/bin']],
+    ["~''/bin", ['~/bin']],
+    ['~"/bin"', ['~/bin']],
+    ['a~b', ['a~b']],
     ['a{b}', ['a{b}']],
     ['[ab]c', [pattern('[ab]c')]],
     ['a*"b"', [pattern('a*'), 'b']],
@@ -307,10 +315,8 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['ls | wc < a.txt', 'summarize: a pipeline stage reading its own input is not a simple chain'],
     ['wc < a.txt < b.txt', 'summarize: a command reading from two places is not a simple chain'],
     ['wc < a.txt <<<here', 'summarize: a command reading from two places is not a simple chain'],
-    ['ls a$x', 'summarize: a word joined from pieces is not a literal word'],
     ['ls > {a,b}', 'summarize: {a,b} is not a literal word'],
-    ['ls a*"b"', 'summarize: a word joined from pieces is not a literal word'],
-    ['echo "$x"""', 'summarize: a word joined from pieces is not a literal word'],
+    ['ls a$(date)', 'summarize: $(…) is not a literal word'],
     ['echo `date`', 'summarize: $(…) is not a literal word'],
     ['echo $(date)', 'summarize: $(…) is not a literal word'],
     ['echo $((1 + 2))', 'summarize: $((…)) is not a literal word'],
@@ -366,11 +372,12 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     assert.deepEqual(terminal().summarize('cat <<EOF\nEOF\n'), [[['printf', '%s', '']]])
   })
 
-  // A pattern says what it looks for as plainly as a name does, so long as it
-  // is the whole argument rather than one piece of a word.
-  it('keeps a whole-argument pattern, tilde or variable as what it is', () => {
+  // A pattern says what it looks for as plainly as a name does, whether it is
+  // the whole argument or one piece of a word joined from several.
+  it('keeps a pattern, a variable and the word they join as what they are', () => {
     assert.deepEqual(terminal().summarize('ls *.js | head'), [[['ls', pattern('*.js')], ['head']]])
-    assert.deepEqual(terminal().summarize('ls ~/bin'), [[['ls', { type: 'tilde', source: '~/bin' }]]])
+    assert.deepEqual(terminal().summarize('ls ~/bin'), [[['ls', parts(home(), '/bin')]]])
+    assert.deepEqual(terminal().summarize('ls a*"b" a$x'), [[['ls', parts(pattern('a*'), 'b'), parts('a', { type: 'variable', name: 'x', quoted: false })]]])
     assert.deepEqual(terminal().summarize('ls $x "$y"'), [[['ls', { type: 'variable', name: 'x', quoted: false }, { type: 'variable', name: 'y', quoted: true }]]])
     assert.deepEqual(terminal().summarize('ls ${x:-a}'), [[['ls', { type: 'variable', name: 'x', operator: ':-', operand: 'a', quoted: false }]]])
     assert.deepEqual(terminal().summarize('echo a > $out'), [[['echo', 'a'], ['>', { type: 'variable', name: 'out', quoted: false }]]])

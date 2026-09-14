@@ -46,9 +46,23 @@ terminal.parse('grep -rn "$pattern" src/*.js').list[0].argv
 
 `'*'` is the string `*`, because quoting settled it; `*.js` is a pattern,
 because the filesystem has yet to. A piece is a plain string once nothing can
-change it; otherwise it names what it waits for — `pattern`, `tilde`,
-`variable`, `substitution`, `arithmetic`. A word of several pieces is a
-`parts` node holding them in order, and a word of one piece is that piece.
+change it; otherwise it names what it waits for — `pattern`, `variable`,
+`substitution`, `arithmetic`. A word of several pieces is a `parts` node
+holding them in order, and a word of one piece is that piece.
+
+A `~` is the home directory under another spelling, so it reads as the one it
+shares: `~/bin` is `"$HOME/bin"`, quoted because tilde expansion is no more
+split into fields or matched as a pattern than a quoted reference is.
+
+```js
+terminal.parse('ls ~/bin').list[0].argv
+// [ 'ls', { type: 'parts', parts: [
+//   { type: 'variable', name: 'HOME', quoted: true }, '/bin' ] } ]
+```
+
+Only a bare `~` opening a word is one, and only where bash expands it: `a~b`,
+`~"/bin"` and `~''/bin` are the text they spell, and `~user`, which names
+someone else's home, is text this terminal refuses when it comes to expand it.
 
 Braces need nothing but the text, so they are already expanded: `ls a{b,c}`
 reads as `['ls', 'ab', 'ac']`, exactly as bash reads it before anything else
@@ -106,20 +120,23 @@ is the `echo` that writes it, and a `cat` left with nothing to read but its own
 input is left out. A quoted `$(cat <<'EOF' … EOF)` comes back as the text that
 here-document holds.
 
-A token is text, or the pattern, `~` or variable an argument is written as:
+A token is text, or the pattern or variable an argument is written as, or the
+`parts` those join into — one piece of a word says what it reaches for as
+plainly as the whole of one does:
 
 ```js
 summarize('ls *.js ~/bin $home a{b,c}')
-// [ [ ['ls', { type: 'pattern', pattern: '*.js' }, { type: 'tilde', source: '~/bin' },
+// [ [ ['ls', { type: 'pattern', pattern: '*.js' },
+//      { type: 'parts', parts: [{ type: 'variable', name: 'HOME', quoted: true }, '/bin'] },
 //      { type: 'variable', name: 'home', quoted: false }, 'ab', 'ac'] ] ]
 ```
 
 Anything else throws rather than be summarized into a lie: a line that does not
 parse, `while`, `case` and the other constructs this terminal refuses, a
 subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
-here-document whose delimiter leaves its body to expand, and any word whose
-text only running it settles — `` `date` ``, `$(( … ))`, or a word joined from
-pieces like `a*"b"`. `parse()` reads those.
+here-document whose delimiter leaves its body to expand, and any word a command
+has to run before its text is known — `` `date` `` or `$(( … ))`, whether it is
+the whole argument or one piece of it. `parse()` reads those.
 
 A terminal has the same method, under its own write policy: `summarize('ls >
 out')` throws there when nothing may be written.

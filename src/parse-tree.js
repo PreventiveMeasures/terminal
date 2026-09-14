@@ -138,7 +138,13 @@ function partsOf(word, braces) {
     if (text !== '') push(textOf(word, text, quoted, start, end, braces))
     text = ''
   }
-  for (let i = 0; i <= value.length; i++) {
+  // A `~` opening a word is the home directory under another spelling, so that
+  // is what it reads as, and a reader needs to know only the one thing. Quoted,
+  // because tilde expansion is neither split into fields nor matched as a
+  // pattern, which is what quoting a reference settles too.
+  const home = homePrefix(value, mask, empty)
+  if (home) parts.push({ type: 'variable', name: 'HOME', quoted: true })
+  for (let i = home ? 1 : 0; i <= value.length; i++) {
     // An empty quoted fragment is a piece: `$x""` keeps a final empty field.
     if (empty.has(i)) { flush(i); push('') }
     if (i === value.length) break
@@ -164,8 +170,18 @@ function textOf(word, value, quoted, from, to, braces) {
   if (quoted) return value
   if (braces && /[{},]/u.test(value) && hasBraces(word)) return { type: 'brace', source: value }
   if (globbed(word, from, to)) return { type: 'pattern', pattern: value }
-  if (from === 0 && value.startsWith('~')) return { type: 'tilde', source: value }
   return value
+}
+
+// Bash's tilde prefix, which here names nothing but the home directory: a bare
+// `~` that the end of the word or a bare `/` closes. Quoting anywhere in the
+// prefix leaves the text alone — `~''/x` and `''~/x` are the literal paths
+// they spell — and a prefix naming a user or the directory stack is text this
+// terminal refuses when it comes to expand it.
+function homePrefix(value, mask, empty) {
+  if (value[0] !== '~' || mask[0] !== '0') return false
+  if (empty.has(0) || empty.has(1)) return false
+  return value.length === 1 || (value[1] === '/' && mask[1] === '0')
 }
 
 // A run is matched as a pattern once it holds a `*` or `?`, or a `[` that a
@@ -225,7 +241,8 @@ function expansionAt(value, at, quoted) {
 }
 
 // A word an expansion could still change: a `$` or backtick that quoting has
-// not disarmed, or a bare `~`, `*`, `?` or `{`. A `[` counts only once a `]`
+// not disarmed, a bare `*`, `?` or `{`, or a bare `~` opening the word, which
+// is the only place one expands. A `[` counts only once a `]`
 // could close it, since a bracket expression nothing closes matches its own
 // text and nothing else — which is all `[` in `[ -f x ]` ever is. Masks count
 // UTF-16 units, so index the value the same way rather than by code point.
@@ -235,7 +252,7 @@ function expandable(word) {
     const mask = word.mask === null ? '0' : word.mask[i]
     if ((ch === '$' || ch === '`') && mask !== '1') return true
     if (mask !== '0') continue
-    if ('~*?{'.includes(ch)) return true
+    if ('*?{'.includes(ch) || (i === 0 && ch === '~')) return true
     if (ch === '[' && closesBracket(word, i)) return true
   }
   return false
@@ -358,17 +375,20 @@ function redirectTokens(redirect) {
   return [lead + op, literal(redirect.target)]
 }
 
-// A token is the text it will be, or what stands in for it: a pattern, a `~`,
-// a variable. Each says what it reaches for as plainly as a name says what it
-// runs, so long as it is the whole of its argument. Pieces joined into a word
-// are not that, and a substitution is a command rather than a token.
+// A token is the text it will be, or what stands in for it: a pattern, a
+// variable, or the word those are joined into. Each says what it reaches for
+// as plainly as a name says what it runs. A substitution does not — it is a
+// command, and a command is a row of its own — and neither does arithmetic,
+// nor a brace group left unexpanded, whose word is more than one word.
 const literal = (value) => {
   if (typeof value === 'string') return value
   const text = literalText(value)
   if (text !== null) return text
-  if (value.type === 'pattern' || value.type === 'tilde' || value.type === 'variable') return value
-  if (value.type === 'parts') throw refuse('a word joined from pieces', 'a literal word')
-  throw refuse(spell(value), 'a literal word')
+  for (const part of value.type === 'parts' ? value.parts : [value]) {
+    if (typeof part === 'string') continue
+    if (part.type !== 'pattern' && part.type !== 'variable') throw refuse(spell(part), 'a literal word')
+  }
+  return value
 }
 
 // `"$(cat <<'EOF' … EOF)"` is the text it holds and nothing else: a literal
@@ -401,7 +421,7 @@ function heredocText(part) {
 const spell = (part) => {
   if (typeof part === 'string') return part
   if (part.type === 'pattern') return part.pattern
-  if (part.type === 'brace' || part.type === 'tilde') return part.source
+  if (part.type === 'brace') return part.source
   if (part.type === 'variable') return `\${${part.name}${part.operator ?? ''}${part.operand ?? ''}}`
   return part.type === 'arithmetic' ? '$((…))' : '$(…)'
 }
