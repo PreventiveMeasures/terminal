@@ -80,8 +80,8 @@ not.
 
 `ls` `cd` `cat` `grep` `rg` `egrep` `fgrep` `sed` `awk` `find` `head` `tail` `wc`
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
-`printf` `test` `cp` `rm` `du` `stat` `realpath` `pwd` `seq` `which` `basename`
-`dirname` — plus your own, via `opts.commands`.
+`printf` `test` `cp` `rm` `diff` `patch` `du` `stat` `realpath` `pwd` `seq`
+`which` `basename` `dirname` — plus your own, via `opts.commands`.
 
 `du -b` measures UTF-8 content bytes recursively, including hidden files;
 `du -bs src` reports a directory total. `--apparent-size` (also accepted as the
@@ -108,12 +108,34 @@ tree holding any non-ASCII file report an unsupported diagnostic.
 output, directory byte sizes, and fields requiring ownership, permissions,
 timestamps or other absent metadata report an unsupported diagnostic.
 
+`diff` compares files and, with `-r`, directories, in normal, unified (`-u`,
+`-U N`) and context (`-c`, `-C N`) format, with `-q`, `-s`, `-N`, `-x`, `-a`,
+`-i`, `-w`, `-b`, `-Z`, `--strip-trailing-cr`, `-p`, `-L` and `-d`. The change
+set comes from the linear-space Myers algorithm GNU diff uses, and is
+replayed against the first file before anything is printed: a change set
+that would not reconstruct the second file is refused as trouble rather
+than printed, so no diff this terminal emits loses a line. Which of several
+shortest change sets it picks can differ from GNU's; given the same change
+set, the bytes are GNU's. The virtual filesystem keeps no modification
+times, so headers carry the name alone, as they do under `--label`; a file
+`-N` stands in for gets the epoch, which is what tells `patch` it did not
+exist. `-y`, `-e`, `-B`, `-I` and the rest report an unsupported diagnostic.
+
+`patch` applies unified, context and normal diffs (and git-style headers,
+including renames), locating each hunk by line number, then nearby, then
+with fuzz, exactly as GNU patch does, with the same messages, reject files,
+`.orig` backups, `-p`, `-R`, `-N`, `-f`, `-t`, `-E`, `-l`, `-F`, `-i`, `-o`,
+`-d`, `-r`, `-b`, `-z`, `--dry-run` and `--reject-format`. It writes only
+inside a writable `/tmp/` overlay; a target anywhere else is refused with an
+unsupported diagnostic, while `--dry-run` and `-o -` work everywhere. Ed
+scripts and git binary patches are refused the same way.
+
 `realpath` supports GNU canonicalization modes (`-e`, `-m`, and the default),
 relative output (`--relative-to`, `--relative-base`), quiet errors (`-q`) and
 NUL terminators (`-z`). It resolves paths within the virtual filesystem.
 
 Behaviour is checked against the real tools: bash 5.2, GNU grep 3.11, GNU sed
-4.9, gawk 5.2 and ripgrep 14.1 in the C locale, alongside the BusyBox, GNU/Spencer regex and
-Oils spec corpora.
+4.9, gawk 5.2, ripgrep 14.1, GNU diff 3.10 and GNU patch 2.7.6 in the C
+locale, alongside the BusyBox, GNU/Spencer regex and Oils spec corpora.
 
 MIT

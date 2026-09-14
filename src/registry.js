@@ -28,7 +28,7 @@ const COMMAND_ORDER = [
   'ls', 'cd', 'cat', 'grep', 'rg', 'find',
   'head', 'tail', 'wc', 'tree', 'du', 'stat', 'realpath',
   'sort', 'uniq', 'cut', 'tr', 'awk', 'nl', 'tac', 'hexdump', 'base64',
-  'xargs', 'echo', 'printf', 'test', 'cp', 'rm',
+  'xargs', 'echo', 'printf', 'test', 'cp', 'rm', 'diff', 'patch',
   'pwd', 'seq', 'which', 'basename', 'dirname',
 ]
 const BUILTIN_NAMES = orderedCommandNames()
@@ -37,7 +37,7 @@ const BUILTIN_NAMES = orderedCommandNames()
 const PIPE_NAMES = [
   'grep', 'head', 'tail', 'wc',
   'sort', 'uniq', 'cut', 'xargs', 'awk',
-  'tr', 'nl', 'tac', 'hexdump', 'cat', 'base64',
+  'tr', 'nl', 'tac', 'hexdump', 'cat', 'base64', 'diff', 'patch',
 ]
 
 function orderedCommandNames() {

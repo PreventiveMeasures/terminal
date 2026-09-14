@@ -5608,10 +5608,10 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat | l'), [])
     // Pipeable: every PIPE_NAMES entry surfaces for the empty trailing word.
     const c = t.complete('cat | ')
-    for (const name of ['grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'xargs', 'awk', 'tr', 'nl', 'tac', 'hexdump', 'cat', 'base64']) {
+    for (const name of ['grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'xargs', 'awk', 'tr', 'nl', 'tac', 'hexdump', 'cat', 'base64', 'diff', 'patch']) {
       assert.ok(c.includes('cat | ' + name), `${name} should be a pipe target`)
     }
-    assert.equal(c.length, 15)
+    assert.equal(c.length, 17)
   })
 
   it('pipe-target priority lists grep first', () => {
@@ -5677,7 +5677,7 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat|l'), [])
     // Empty trailing word: full pipe set, each glued to `cat| ` with a space.
     const c = t.complete('cat|')
-    assert.equal(c.length, 15)
+    assert.equal(c.length, 17)
     assert.equal(c[0], 'cat| grep')
     // Every variant has the inserted space — no `cat|grep` leaks through.
     for (const variant of c) assert.ok(variant.startsWith('cat| '), `expected "cat| " prefix on ${variant}`)
@@ -5779,11 +5779,13 @@ describe('createTerminal — complete: corner cases', () => {
       'cat 1 | grep', 'cat 1 | head', 'cat 1 | tail', 'cat 1 | wc',
       'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs', 'cat 1 | awk',
       'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | hexdump', 'cat 1 | cat', 'cat 1 | base64',
+      'cat 1 | diff', 'cat 1 | patch',
     ])
     assert.deepEqual(t.complete('cat 1 | '), [
       'cat 1 | grep', 'cat 1 | head', 'cat 1 | tail', 'cat 1 | wc',
       'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs', 'cat 1 | awk',
       'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | hexdump', 'cat 1 | cat', 'cat 1 | base64',
+      'cat 1 | diff', 'cat 1 | patch',
     ])
     // A partial target is extended without inserting text before it.
     assert.deepEqual(t.complete('cat |gre'), ['cat |grep'])

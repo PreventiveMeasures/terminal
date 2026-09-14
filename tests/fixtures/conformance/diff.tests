@@ -1,0 +1,217 @@
+# diff, answered by GNU diff 3.10 in the C locale. The three output styles,
+# their context and label options, the whitespace and case options, binary
+# files, standard input, names that need quoting, -N, and the usage errors.
+# The virtual filesystem keeps no modification times, so a header carries
+# the name alone, as it does under --label: what GNU printed after the tab
+# was dropped when these were recorded, except the epoch stamp -N gives a
+# file that does not exist, which patch reads as meaning exactly that.
+# Which of several shortest change sets diff picks is its own; every case
+# here has one shortest change set, so the bytes are GNU's bytes.
+@tree pair
+@mode readonly
+diff ten ten2 => "3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n" 1
+diff -u ten ten2 => "--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n" 1
+diff -u ten ten3 => "--- ten\n+++ ten3\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n i\n-j\n+Y\n" 1
+diff -U1 ten ten2 => "--- ten\n+++ ten2\n@@ -2,3 +2,3 @@\n b\n-c\n+X\n d\n@@ -8,3 +8,3 @@\n h\n-i\n+Y\n j\n" 1
+diff -U0 ten ten2 => "--- ten\n+++ ten2\n@@ -3 +3 @@\n-c\n+X\n@@ -9 +9 @@\n-i\n+Y\n" 1
+diff -U 1 -U 2 ten ten2 => "--- ten\n+++ ten2\n@@ -1,5 +1,5 @@\n a\n b\n-c\n+X\n d\n e\n@@ -7,4 +7,4 @@\n g\n h\n-i\n+Y\n j\n" 1
+diff -U 2 -U 1 ten ten2 => "--- ten\n+++ ten2\n@@ -1,5 +1,5 @@\n a\n b\n-c\n+X\n d\n e\n@@ -7,4 +7,4 @@\n g\n h\n-i\n+Y\n j\n" 1
+diff -u -U1 ten ten2 => "--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n" 1
+diff -uU1 ten ten2 => "--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n" 1
+diff --unified=1 ten ten2 => "--- ten\n+++ ten2\n@@ -2,3 +2,3 @@\n b\n-c\n+X\n d\n@@ -8,3 +8,3 @@\n h\n-i\n+Y\n j\n" 1
+diff --unified ten ten2 => "--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n" 1
+diff -U 010 ten ten2 => "--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n" 1
+diff -U1000000000000000000000 ten ten2 => "--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n" 1
+diff -c ten ten2 => "*** ten\n--- ten2\n***************\n*** 1,10 ****\n  a\n  b\n! c\n  d\n  e\n  f\n  g\n  h\n! i\n  j\n--- 1,10 ----\n  a\n  b\n! X\n  d\n  e\n  f\n  g\n  h\n! Y\n  j\n" 1
+diff -C1 ten ten2 => "*** ten\n--- ten2\n***************\n*** 2,4 ****\n  b\n! c\n  d\n--- 2,4 ----\n  b\n! X\n  d\n***************\n*** 8,10 ****\n  h\n! i\n  j\n--- 8,10 ----\n  h\n! Y\n  j\n" 1
+diff -C 1 -c ten ten2 => "*** ten\n--- ten2\n***************\n*** 1,10 ****\n  a\n  b\n! c\n  d\n  e\n  f\n  g\n  h\n! i\n  j\n--- 1,10 ----\n  a\n  b\n! X\n  d\n  e\n  f\n  g\n  h\n! Y\n  j\n" 1
+diff --context=1 ten ten2 => "*** ten\n--- ten2\n***************\n*** 2,4 ****\n  b\n! c\n  d\n--- 2,4 ----\n  b\n! X\n  d\n***************\n*** 8,10 ****\n  h\n! i\n  j\n--- 8,10 ----\n  h\n! Y\n  j\n" 1
+diff --context ten ten2 => "*** ten\n--- ten2\n***************\n*** 1,10 ****\n  a\n  b\n! c\n  d\n  e\n  f\n  g\n  h\n! i\n  j\n--- 1,10 ----\n  a\n  b\n! X\n  d\n  e\n  f\n  g\n  h\n! Y\n  j\n" 1
+diff -C0 ten ten2 => "*** ten\n--- ten2\n***************\n*** 3 ****\n! c\n--- 3 ----\n! X\n***************\n*** 9 ****\n! i\n--- 9 ----\n! Y\n" 1
+diff -c ten ins => "*** ten\n--- ins\n***************\n*** 1,6 ****\n--- 1,7 ----\n  a\n  b\n  c\n+ NEW\n  d\n  e\n  f\n" 1
+diff -c ten del => "*** ten\n--- del\n***************\n*** 1,6 ****\n  a\n  b\n- c\n  d\n  e\n  f\n--- 1,5 ----\n" 1
+diff ten rep => "3c3,5\n< c\n---\n> P\n> Q\n> R\n" 1
+diff ten app => "10a11,12\n> k\n> l\n" 1
+diff app ten => "11,12d10\n< k\n< l\n" 1
+diff -c ten rep => "*** ten\n--- rep\n***************\n*** 1,6 ****\n  a\n  b\n! c\n  d\n  e\n  f\n--- 1,8 ----\n  a\n  b\n! P\n! Q\n! R\n  d\n  e\n  f\n" 1
+diff -u ten rep => "--- ten\n+++ rep\n@@ -1,6 +1,8 @@\n a\n b\n-c\n+P\n+Q\n+R\n d\n e\n f\n" 1
+diff -u ten app => "--- ten\n+++ app\n@@ -8,3 +8,5 @@\n h\n i\n j\n+k\n+l\n" 1
+diff -u app ten => "--- app\n+++ ten\n@@ -8,5 +8,3 @@\n h\n i\n j\n-k\n-l\n" 1
+diff a1 a2 => "1c1\n< a\n---\n> a\n\\ No newline at end of file\n" 1
+diff -u a1 a2 => "--- a1\n+++ a2\n@@ -1 +1 @@\n-a\n+a\n\\ No newline at end of file\n" 1
+diff -c a1 a2 => "*** a1\n--- a2\n***************\n*** 1 ****\n! a\n--- 1 ----\n! a\n\\ No newline at end of file\n" 1
+diff a2 a1 => "1c1\n< a\n\\ No newline at end of file\n---\n> a\n" 1
+diff -u a2 a1 => "--- a2\n+++ a1\n@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+a\n" 1
+diff -c a2 a1 => "*** a2\n--- a1\n***************\n*** 1 ****\n! a\n\\ No newline at end of file\n--- 1 ----\n! a\n" 1
+diff -u empty x1 => "--- empty\n+++ x1\n@@ -0,0 +1 @@\n+x\n" 1
+diff -u x1 empty => "--- x1\n+++ empty\n@@ -1 +0,0 @@\n-x\n" 1
+diff empty x1 => "0a1\n> x\n" 1
+diff x1 empty => "1d0\n< x\n" 1
+diff -c empty x1 => "*** empty\n--- x1\n***************\n*** 0 ****\n--- 1 ----\n+ x\n" 1
+diff -c x1 empty => "*** x1\n--- empty\n***************\n*** 1 ****\n- x\n--- 0 ----\n" 1
+diff -U0 a1 app => "--- a1\n+++ app\n@@ -1,0 +2,11 @@\n+b\n+c\n+d\n+e\n+f\n+g\n+h\n+i\n+j\n+k\n+l\n" 1
+diff -U0 app a1 => "--- app\n+++ a1\n@@ -2,11 +1,0 @@\n-b\n-c\n-d\n-e\n-f\n-g\n-h\n-i\n-j\n-k\n-l\n" 1
+diff -C0 a1 app => "*** a1\n--- app\n***************\n*** 1 ****\n--- 2,12 ----\n+ b\n+ c\n+ d\n+ e\n+ f\n+ g\n+ h\n+ i\n+ j\n+ k\n+ l\n" 1
+diff -C0 app a1 => "*** app\n--- a1\n***************\n*** 2,12 ****\n- b\n- c\n- d\n- e\n- f\n- g\n- h\n- i\n- j\n- k\n- l\n--- 1 ----\n" 1
+diff -U1 twelve twelve2 => "--- twelve\n+++ twelve2\n@@ -2,6 +2,6 @@\n 2\n-3\n+X\n 4\n 5\n-6\n+Y\n 7\n" 1
+diff -U1 twelve twelve3 => "--- twelve\n+++ twelve3\n@@ -2,3 +2,3 @@\n 2\n-3\n+X\n 4\n@@ -6,3 +6,3 @@\n 6\n-7\n+Y\n 8\n" 1
+diff -C1 twelve twelve2 => "*** twelve\n--- twelve2\n***************\n*** 2,7 ****\n  2\n! 3\n  4\n  5\n! 6\n  7\n--- 2,7 ----\n  2\n! X\n  4\n  5\n! Y\n  7\n" 1
+diff -C1 twelve twelve3 => "*** twelve\n--- twelve3\n***************\n*** 2,4 ****\n  2\n! 3\n  4\n--- 2,4 ----\n  2\n! X\n  4\n***************\n*** 6,8 ****\n  6\n! 7\n  8\n--- 6,8 ----\n  6\n! Y\n  8\n" 1
+diff ten ten; echo $? => "0\n"
+diff -s ten ten => "Files ten and ten are identical\n"
+diff -s ten ./ten => "Files ten and ./ten are identical\n"
+diff -q ten ten2; echo $? => "Files ten and ten2 differ\n1\n"
+diff -sq ten ten2 => "Files ten and ten2 differ\n" 1
+diff -sq ten ten => "Files ten and ten are identical\n"
+diff -q -u ten ten2 => "Files ten and ten2 differ\n" 1
+diff ten ten2 > /dev/null; echo $? => "1\n"
+diff --label one --label two -u ten ten2 => "--- one\n+++ two\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n" 1
+diff -L one -u ten ten2 => "--- one\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n" 1
+diff -c -L L1 -L L2 ten ten2 => "*** L1\n--- L2\n***************\n*** 1,10 ****\n  a\n  b\n! c\n  d\n  e\n  f\n  g\n  h\n! i\n  j\n--- 1,10 ----\n  a\n  b\n! X\n  d\n  e\n  f\n  g\n  h\n! Y\n  j\n" 1
+diff -L only ten ten2 => "3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n" 1
+diff -u --label=x ten ten2 => "--- x\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n" 1
+diff -q -L a -L b ten ten2 => "Files a and b differ\n" 1
+diff -up f1 f2 => "--- f1\n+++ f2\n@@ -3,13 +3,13 @@ int main() {\n   int b;\n   int c;\n   int d;\n-  int e;\n+  int E;\n   return 0;\n }\n void other() {\n   x;\n   y;\n   z;\n-  w;\n+  W;\n   v;\n }\n" 1
+diff -cp f1 f2 => "*** f1\n--- f2\n*************** int main() {\n*** 3,15 ****\n    int b;\n    int c;\n    int d;\n!   int e;\n    return 0;\n  }\n  void other() {\n    x;\n    y;\n    z;\n!   w;\n    v;\n  }\n--- 3,15 ----\n    int b;\n    int c;\n    int d;\n!   int E;\n    return 0;\n  }\n  void other() {\n    x;\n    y;\n    z;\n!   W;\n    v;\n  }\n" 1
+diff -up g1 g2 => "--- g1\n+++ g2\n@@ -2,5 +2,5 @@ function_with_a_very_long_name_indeed_ex\n   x\n   y\n   z\n-  q\n+  Q\n }\n" 1
+diff -up h1 h2 => "--- h1\n+++ h2\n@@ -3,4 +3,4 @@ abc\n 2\n 3\n 4\n-5\n+5x\n" 1
+diff -up ten ins => "--- ten\n+++ ins\n@@ -1,6 +1,7 @@\n a\n b\n c\n+NEW\n d\n e\n f\n" 1
+# --show-function-line takes a regex of its own, which is refused; GNU
+# would have read `-u` as that regex and printed a normal diff.
+diff --show-function-line -u ten ins => ! --show-function-line 2
+diff -p ten ins => "*** ten\n--- ins\n***************\n*** 1,6 ****\n--- 1,7 ----\n  a\n  b\n  c\n+ NEW\n  d\n  e\n  f\n" 1
+diff -w a1 a2; echo $? => "0\n"
+diff -w w1 w2; echo $? => "0\n"
+diff -b w1 w2 => "1c1\n<  a  b \n---\n> a b\n" 1
+diff -b w3 w4; echo $? => "0\n"
+diff -Z w1 w2 => "1c1\n<  a  b \n---\n> a b\n" 1
+diff -Z w3 w5; echo $? => "0\n"
+diff -b w3 w5; echo $? => "0\n"
+diff -b wt w3; echo $? => "0\n"
+diff -b w3 w6 => "1c1\n< a b\n---\n> ab\n" 1
+diff -w w3 w6; echo $? => "0\n"
+diff -Z a1 a2; echo $? => "0\n"
+diff -b a1 a2; echo $? => "0\n"
+diff -i i1 i2; echo $? => "0\n"
+diff -i iu il => "1c1\n< É\n---\n> é\n" 1
+diff -uw wc1 wc2 => "--- wc1\n+++ wc2\n@@ -1,3 +1,3 @@\n a  b\n c\n-d\n+D\n" 1
+diff -w wc1 wc2 => "3c3\n< d\n---\n> D\n" 1
+diff -wi wc1 wc2 => ""
+diff --ignore-all-space --ignore-case ten ten2 => "3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n" 1
+diff -bZ w1 w5 => "1c1\n<  a  b \n---\n> a b  \n" 1
+diff -wb w1 w2; echo $? => "0\n"
+diff --strip-trailing-cr cr1 cr3; echo $? => "0\n"
+diff --strip-trailing-cr cr1 cr2 => "2c2\n< b\n---\n> c\n" 1
+diff -u --strip-trailing-cr cr1 cr2 => "--- cr1\n+++ cr2\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n" 1
+diff cr1 cr3 => "1,2c1,2\n< a\r\n< b\r\n---\n> a\n> b\n" 1
+diff bin1 bin2 => "Binary files bin1 and bin2 differ\n" 1
+diff -q bin1 bin2 => "Files bin1 and bin2 differ\n" 1
+diff bin1 bin3; echo $? => "0\n"
+diff -s bin1 bin3 => "Files bin1 and bin3 are identical\n"
+diff bn1 bn3 => "Binary files bn1 and bn3 differ\n" 1
+diff -a bin1 bin2 => "1c1\n< bin\u0000ary\n---\n> bin\u0000aryx\n" 1
+diff -u -a bin1 bin2 => "--- bin1\n+++ bin2\n@@ -1 +1 @@\n-bin\u0000ary\n+bin\u0000aryx\n" 1
+diff --text bin1 bin1; echo $? => "0\n"
+diff -a -q bin1 bin2 => "Files bin1 and bin2 differ\n" 1
+diff -i bin1 bin3; echo $? => "0\n"
+printf 'x\n' | diff - a1 => "1c1\n< x\n---\n> a\n" 1
+printf 'a\n' | diff a1 -; echo $? => "0\n"
+printf 'x\n' | diff -u - a1 => "--- -\n+++ a1\n@@ -1 +1 @@\n-x\n+a\n" 1
+printf 'x\n' | diff -u a1 - => "--- a1\n+++ -\n@@ -1 +1 @@\n-a\n+x\n" 1
+printf 'x\n' | diff -c - a1 => "*** -\n--- a1\n***************\n*** 1 ****\n! x\n--- 1 ----\n! a\n" 1
+echo hi | diff - -; echo $? => "0\n"
+printf 'x\n' | diff -s - - => "Files - and - are identical\n"
+diff -u 'sp ace' 'sp ace2' => "--- \"sp ace\"\n+++ \"sp ace2\"\n@@ -1 +1 @@\n-q\n+r\n" 1
+diff -c 'sp ace' 'sp ace2' => "*** \"sp ace\"\n--- \"sp ace2\"\n***************\n*** 1 ****\n! q\n--- 1 ----\n! r\n" 1
+diff -u "$(printf 'ta\tb')" a1 => "--- \"ta\\tb\"\n+++ a1\n@@ -1 +1 @@\n-t\n+a\n" 1
+diff -u 'quo"te' a1 => "--- \"quo\\\"te\"\n+++ a1\n@@ -1 +1 @@\n-s\n+a\n" 1
+diff -u 'back\slash' a1 => "--- \"back\\\\slash\"\n+++ a1\n@@ -1 +1 @@\n-r\n+a\n" 1
+diff -u "apos'" a1 => "--- apos'\n+++ a1\n@@ -1 +1 @@\n-t\n+a\n" 1
+diff -q 'sp ace' 'sp ace2' => "Files sp ace and sp ace2 differ\n" 1
+diff -s 'sp ace' 'sp ace' => "Files sp ace and sp ace are identical\n"
+diff -u -- -dash dashed => "--- -dash\n+++ dashed\n@@ -1 +1 @@\n-d\n+e\n" 1
+diff -u dashed -- -dash => "--- dashed\n+++ -dash\n@@ -1 +1 @@\n-e\n+d\n" 1
+diff -N ten nope => "1,10d0\n< a\n< b\n< c\n< d\n< e\n< f\n< g\n< h\n< i\n< j\n" 1
+diff -N nope ten => "0a1,10\n> a\n> b\n> c\n> d\n> e\n> f\n> g\n> h\n> i\n> j\n" 1
+diff -Nu nope ten => "--- nope\t1970-01-01 00:00:00.000000000 +0000\n+++ ten\n@@ -0,0 +1,10 @@\n+a\n+b\n+c\n+d\n+e\n+f\n+g\n+h\n+i\n+j\n" 1
+diff -Nc nope ten => "*** nope\tThu Jan  1 00:00:00 1970\n--- ten\n***************\n*** 0 ****\n--- 1,10 ----\n+ a\n+ b\n+ c\n+ d\n+ e\n+ f\n+ g\n+ h\n+ i\n+ j\n" 1
+diff -Nu ten nope => "--- ten\n+++ nope\t1970-01-01 00:00:00.000000000 +0000\n@@ -1,10 +0,0 @@\n-a\n-b\n-c\n-d\n-e\n-f\n-g\n-h\n-i\n-j\n" 1
+diff -N a1 nope; echo $? => "1d0\n< a\n1\n"
+diff -d ten ten2 => "3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n" 1
+diff --minimal -u ten ten2 => "--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n a\n b\n-c\n+X\n d\n e\n f\n g\n h\n-i\n+Y\n j\n" 1
+diff --normal ten ten2 => "3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n" 1
+diff --normal --normal ten ten2 => "3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n" 1
+diff -u -u ten ten2 | head -3 => "--- ten\n+++ ten2\n@@ -1,10 +1,10 @@\n"
+diff blank1 blank2 => "2,3d1\n< \n< \n" 1
+diff -u blank1 blank2 => "--- blank1\n+++ blank2\n@@ -1,4 +1,2 @@\n a\n-\n-\n b\n" 1
+diff -c blank1 blank2 => "*** blank1\n--- blank2\n***************\n*** 1,4 ****\n  a\n- \n- \n  b\n--- 1,2 ----\n" 1
+diff -u big big2 => "--- big\n+++ big2\n@@ -2,6 +2,7 @@\n 2\n 3\n 4\n+NEW1\n 5\n 6\n 7\n@@ -17,7 +18,7 @@\n 17\n 18\n 19\n-20\n+twenty\n 21\n 22\n 23\n" 1
+diff -c big big2 => "*** big\n--- big2\n***************\n*** 2,7 ****\n--- 2,8 ----\n  2\n  3\n  4\n+ NEW1\n  5\n  6\n  7\n***************\n*** 17,23 ****\n  17\n  18\n  19\n! 20\n  21\n  22\n  23\n--- 18,24 ----\n  17\n  18\n  19\n! twenty\n  21\n  22\n  23\n" 1
+diff big big2 => "4a5\n> NEW1\n20c21\n< 20\n---\n> twenty\n" 1
+diff -U1 big big2 => "--- big\n+++ big2\n@@ -4,2 +4,3 @@\n 4\n+NEW1\n 5\n@@ -19,3 +20,3 @@\n 19\n-20\n+twenty\n 21\n" 1
+diff -u big2 big => "--- big2\n+++ big\n@@ -2,7 +2,6 @@\n 2\n 3\n 4\n-NEW1\n 5\n 6\n 7\n@@ -18,7 +17,7 @@\n 17\n 18\n 19\n-twenty\n+20\n 21\n 22\n 23\n" 1
+diff -c big2 big => "*** big2\n--- big\n***************\n*** 2,8 ****\n  2\n  3\n  4\n- NEW1\n  5\n  6\n  7\n--- 2,7 ----\n***************\n*** 18,24 ****\n  17\n  18\n  19\n! twenty\n  21\n  22\n  23\n--- 17,23 ----\n  17\n  18\n  19\n! 20\n  21\n  22\n  23\n" 1
+diff big2 big => "5d4\n< NEW1\n21c20\n< twenty\n---\n> 20\n" 1
+diff => % 2
+diff ten => % 2
+diff ten ten2 extra => % 2
+diff -U x ten ten2 => % 2
+diff -U -1 ten ten2 => % 2
+diff -U '' ten ten2 => "--- ten\n+++ ten2\n@@ -3 +3 @@\n-c\n+X\n@@ -9 +9 @@\n-i\n+Y\n" 1
+diff -u -c ten ten2 => % 2
+diff -U3 -c ten ten2 => % 2
+diff -c -u ten ten2 => % 2
+diff --normal -u ten ten2 => % 2
+diff -u --normal ten ten2 => % 2
+diff -u -L a -L b -L c ten ten2 => % 2
+diff ten nope => % 2
+diff nope ten => % 2
+diff nope nope2 => % 2
+diff -N nope nope2 => % 2
+diff -u ten nope => % 2
+diff -q ten nope => % 2
+
+@tree dirs
+@mode readonly
+diff d1 d2 => "diff d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\ndiff \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\nCommon subdirectories: d1/sub and d2/sub\n" 1
+diff -r d1 d2 => "diff -r d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -r d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -r d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\ndiff -r \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\ndiff -r d1/sub/deep/x d2/sub/deep/x\n1c1\n< deep1\n---\n> deep2\ndiff -r d1/sub/f d2/sub/f\n1c1\n< a\n---\n> b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff -ru d1 d2 => "diff -ru d1/.hidden d2/.hidden\n--- d1/.hidden\n+++ d2/.hidden\n@@ -1 +1 @@\n-.h1\n+.h2\ndiff -ru d1/Zed d2/Zed\n--- d1/Zed\n+++ d2/Zed\n@@ -1 +1 @@\n-Z\n+Z2\nBinary files d1/bin and d2/bin differ\ndiff -ru d1/diff d2/diff\n--- d1/diff\n+++ d2/diff\n@@ -1 +1 @@\n-one\n+two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\ndiff -ru \"d1/sp ace\" \"d2/sp ace\"\n--- \"d1/sp ace\"\n+++ \"d2/sp ace\"\n@@ -1 +1 @@\n-u\n+v\ndiff -ru d1/sub/deep/x d2/sub/deep/x\n--- d1/sub/deep/x\n+++ d2/sub/deep/x\n@@ -1 +1 @@\n-deep1\n+deep2\ndiff -ru d1/sub/f d2/sub/f\n--- d1/sub/f\n+++ d2/sub/f\n@@ -1 +1 @@\n-a\n+b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff -r -u d1 d2 => "diff -r -u d1/.hidden d2/.hidden\n--- d1/.hidden\n+++ d2/.hidden\n@@ -1 +1 @@\n-.h1\n+.h2\ndiff -r -u d1/Zed d2/Zed\n--- d1/Zed\n+++ d2/Zed\n@@ -1 +1 @@\n-Z\n+Z2\nBinary files d1/bin and d2/bin differ\ndiff -r -u d1/diff d2/diff\n--- d1/diff\n+++ d2/diff\n@@ -1 +1 @@\n-one\n+two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\ndiff -r -u \"d1/sp ace\" \"d2/sp ace\"\n--- \"d1/sp ace\"\n+++ \"d2/sp ace\"\n@@ -1 +1 @@\n-u\n+v\ndiff -r -u d1/sub/deep/x d2/sub/deep/x\n--- d1/sub/deep/x\n+++ d2/sub/deep/x\n@@ -1 +1 @@\n-deep1\n+deep2\ndiff -r -u d1/sub/f d2/sub/f\n--- d1/sub/f\n+++ d2/sub/f\n@@ -1 +1 @@\n-a\n+b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff --recursive -U2 d1 d2 => "diff --recursive -U2 d1/.hidden d2/.hidden\n--- d1/.hidden\n+++ d2/.hidden\n@@ -1 +1 @@\n-.h1\n+.h2\ndiff --recursive -U2 d1/Zed d2/Zed\n--- d1/Zed\n+++ d2/Zed\n@@ -1 +1 @@\n-Z\n+Z2\nBinary files d1/bin and d2/bin differ\ndiff --recursive -U2 d1/diff d2/diff\n--- d1/diff\n+++ d2/diff\n@@ -1 +1 @@\n-one\n+two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\ndiff --recursive -U2 \"d1/sp ace\" \"d2/sp ace\"\n--- \"d1/sp ace\"\n+++ \"d2/sp ace\"\n@@ -1 +1 @@\n-u\n+v\ndiff --recursive -U2 d1/sub/deep/x d2/sub/deep/x\n--- d1/sub/deep/x\n+++ d2/sub/deep/x\n@@ -1 +1 @@\n-deep1\n+deep2\ndiff --recursive -U2 d1/sub/f d2/sub/f\n--- d1/sub/f\n+++ d2/sub/f\n@@ -1 +1 @@\n-a\n+b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff d1 d2 -r -c => "diff -r -c d1/.hidden d2/.hidden\n*** d1/.hidden\n--- d2/.hidden\n***************\n*** 1 ****\n! .h1\n--- 1 ----\n! .h2\ndiff -r -c d1/Zed d2/Zed\n*** d1/Zed\n--- d2/Zed\n***************\n*** 1 ****\n! Z\n--- 1 ----\n! Z2\nBinary files d1/bin and d2/bin differ\ndiff -r -c d1/diff d2/diff\n*** d1/diff\n--- d2/diff\n***************\n*** 1 ****\n! one\n--- 1 ----\n! two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\ndiff -r -c \"d1/sp ace\" \"d2/sp ace\"\n*** \"d1/sp ace\"\n--- \"d2/sp ace\"\n***************\n*** 1 ****\n! u\n--- 1 ----\n! v\ndiff -r -c d1/sub/deep/x d2/sub/deep/x\n*** d1/sub/deep/x\n--- d2/sub/deep/x\n***************\n*** 1 ****\n! deep1\n--- 1 ----\n! deep2\ndiff -r -c d1/sub/f d2/sub/f\n*** d1/sub/f\n--- d2/sub/f\n***************\n*** 1 ****\n! a\n--- 1 ----\n! b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff -rc d1 d2 => "diff -rc d1/.hidden d2/.hidden\n*** d1/.hidden\n--- d2/.hidden\n***************\n*** 1 ****\n! .h1\n--- 1 ----\n! .h2\ndiff -rc d1/Zed d2/Zed\n*** d1/Zed\n--- d2/Zed\n***************\n*** 1 ****\n! Z\n--- 1 ----\n! Z2\nBinary files d1/bin and d2/bin differ\ndiff -rc d1/diff d2/diff\n*** d1/diff\n--- d2/diff\n***************\n*** 1 ****\n! one\n--- 1 ----\n! two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\ndiff -rc \"d1/sp ace\" \"d2/sp ace\"\n*** \"d1/sp ace\"\n--- \"d2/sp ace\"\n***************\n*** 1 ****\n! u\n--- 1 ----\n! v\ndiff -rc d1/sub/deep/x d2/sub/deep/x\n*** d1/sub/deep/x\n--- d2/sub/deep/x\n***************\n*** 1 ****\n! deep1\n--- 1 ----\n! deep2\ndiff -rc d1/sub/f d2/sub/f\n*** d1/sub/f\n--- d2/sub/f\n***************\n*** 1 ****\n! a\n--- 1 ----\n! b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff -rN d1 d2 => "diff -rN d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -rN d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -rN d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\ndiff -rN d1/only-in-1 d2/only-in-1\n1d0\n< x\ndiff -rN d1/only-in-2 d2/only-in-2\n0a1\n> y\ndiff -rN d1/only1/inside d2/only1/inside\n1d0\n< i\ndiff -rN d1/only2/inside d2/only2/inside\n0a1\n> j\ndiff -rN \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\ndiff -rN d1/sub/deep/x d2/sub/deep/x\n1c1\n< deep1\n---\n> deep2\ndiff -rN d1/sub/f d2/sub/f\n1c1\n< a\n---\n> b\ndiff -rN d1/sub/only-sub-1 d2/sub/only-sub-1\n1d0\n< s\ndiff -rN d1/sub/only-sub-2 d2/sub/only-sub-2\n0a1\n> t\n" 1
+diff -ruN d1 d2 => "diff -ruN d1/.hidden d2/.hidden\n--- d1/.hidden\n+++ d2/.hidden\n@@ -1 +1 @@\n-.h1\n+.h2\ndiff -ruN d1/Zed d2/Zed\n--- d1/Zed\n+++ d2/Zed\n@@ -1 +1 @@\n-Z\n+Z2\nBinary files d1/bin and d2/bin differ\ndiff -ruN d1/diff d2/diff\n--- d1/diff\n+++ d2/diff\n@@ -1 +1 @@\n-one\n+two\nFile d1/fd is a regular file while file d2/fd is a directory\ndiff -ruN d1/only-in-1 d2/only-in-1\n--- d1/only-in-1\n+++ d2/only-in-1\t1970-01-01 00:00:00.000000000 +0000\n@@ -1 +0,0 @@\n-x\ndiff -ruN d1/only-in-2 d2/only-in-2\n--- d1/only-in-2\t1970-01-01 00:00:00.000000000 +0000\n+++ d2/only-in-2\n@@ -0,0 +1 @@\n+y\ndiff -ruN d1/only1/inside d2/only1/inside\n--- d1/only1/inside\n+++ d2/only1/inside\t1970-01-01 00:00:00.000000000 +0000\n@@ -1 +0,0 @@\n-i\ndiff -ruN d1/only2/inside d2/only2/inside\n--- d1/only2/inside\t1970-01-01 00:00:00.000000000 +0000\n+++ d2/only2/inside\n@@ -0,0 +1 @@\n+j\ndiff -ruN \"d1/sp ace\" \"d2/sp ace\"\n--- \"d1/sp ace\"\n+++ \"d2/sp ace\"\n@@ -1 +1 @@\n-u\n+v\ndiff -ruN d1/sub/deep/x d2/sub/deep/x\n--- d1/sub/deep/x\n+++ d2/sub/deep/x\n@@ -1 +1 @@\n-deep1\n+deep2\ndiff -ruN d1/sub/f d2/sub/f\n--- d1/sub/f\n+++ d2/sub/f\n@@ -1 +1 @@\n-a\n+b\ndiff -ruN d1/sub/only-sub-1 d2/sub/only-sub-1\n--- d1/sub/only-sub-1\n+++ d2/sub/only-sub-1\t1970-01-01 00:00:00.000000000 +0000\n@@ -1 +0,0 @@\n-s\ndiff -ruN d1/sub/only-sub-2 d2/sub/only-sub-2\n--- d1/sub/only-sub-2\t1970-01-01 00:00:00.000000000 +0000\n+++ d2/sub/only-sub-2\n@@ -0,0 +1 @@\n+t\n" 1
+diff -N d1 d2 => "diff -N d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -N d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -N d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\ndiff -N d1/only-in-1 d2/only-in-1\n1d0\n< x\ndiff -N d1/only-in-2 d2/only-in-2\n0a1\n> y\nCommon subdirectories: d1/only1 and d2/only1\nCommon subdirectories: d1/only2 and d2/only2\ndiff -N \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\nCommon subdirectories: d1/sub and d2/sub\n" 1
+diff -rq d1 d2 => "Files d1/.hidden and d2/.hidden differ\nFiles d1/Zed and d2/Zed differ\nFiles d1/bin and d2/bin differ\nFiles d1/diff and d2/diff differ\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\nFiles d1/sp ace and d2/sp ace differ\nFiles d1/sub/deep/x and d2/sub/deep/x differ\nFiles d1/sub/f and d2/sub/f differ\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff -rs d1 d2 => "diff -rs d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -rs d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -rs d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\nFiles d1/same and d2/same are identical\nFiles d1/same2 and d2/same2 are identical\ndiff -rs \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\ndiff -rs d1/sub/deep/x d2/sub/deep/x\n1c1\n< deep1\n---\n> deep2\ndiff -rs d1/sub/f d2/sub/f\n1c1\n< a\n---\n> b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff -q d1 d2 => "Files d1/.hidden and d2/.hidden differ\nFiles d1/Zed and d2/Zed differ\nFiles d1/bin and d2/bin differ\nFiles d1/diff and d2/diff differ\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\nFiles d1/sp ace and d2/sp ace differ\nCommon subdirectories: d1/sub and d2/sub\n" 1
+diff -s d1 d2 => "diff -s d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -s d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -s d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\nFiles d1/same and d2/same are identical\nFiles d1/same2 and d2/same2 are identical\ndiff -s \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\nCommon subdirectories: d1/sub and d2/sub\n" 1
+diff -r -x 'only*' d1 d2 => "diff -r -x 'only*' d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -r -x 'only*' d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -r -x 'only*' d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\ndiff -r -x 'only*' \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\ndiff -r -x 'only*' d1/sub/deep/x d2/sub/deep/x\n1c1\n< deep1\n---\n> deep2\ndiff -r -x 'only*' d1/sub/f d2/sub/f\n1c1\n< a\n---\n> b\n" 1
+diff -r -x '*' d1 d2; echo $? => "0\n"
+diff -r -x sub d1 d2 => "diff -r -x sub d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -r -x sub d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -r -x sub d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\ndiff -r -x sub \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\n" 1
+diff -r --exclude=same --exclude='.*' d1 d2 => "diff -r '--exclude=same' '--exclude=.*' d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -r '--exclude=same' '--exclude=.*' d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\ndiff -r '--exclude=same' '--exclude=.*' \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\ndiff -r '--exclude=same' '--exclude=.*' d1/sub/deep/x d2/sub/deep/x\n1c1\n< deep1\n---\n> deep2\ndiff -r '--exclude=same' '--exclude=.*' d1/sub/f d2/sub/f\n1c1\n< a\n---\n> b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff -x same -r d1 d2 => "diff -x same -r d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -x same -r d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -x same -r d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\ndiff -x same -r \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\ndiff -x same -r d1/sub/deep/x d2/sub/deep/x\n1c1\n< deep1\n---\n> deep2\ndiff -x same -r d1/sub/f d2/sub/f\n1c1\n< a\n---\n> b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff -r -x 'sp ace' d1 d2 => "diff -r -x 'sp ace' d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -r -x 'sp ace' d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -r -x 'sp ace' d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1: only-in-1\nOnly in d2: only-in-2\nOnly in d1: only1\nOnly in d2: only2\ndiff -r -x 'sp ace' d1/sub/deep/x d2/sub/deep/x\n1c1\n< deep1\n---\n> deep2\ndiff -r -x 'sp ace' d1/sub/f d2/sub/f\n1c1\n< a\n---\n> b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff -r d1/ d2/ => "diff -r d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -r d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -r d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1/: only-in-1\nOnly in d2/: only-in-2\nOnly in d1/: only1\nOnly in d2/: only2\ndiff -r \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\ndiff -r d1/sub/deep/x d2/sub/deep/x\n1c1\n< deep1\n---\n> deep2\ndiff -r d1/sub/f d2/sub/f\n1c1\n< a\n---\n> b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff -r d1// d2 => "diff -r d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -r d1/Zed d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files d1/bin and d2/bin differ\ndiff -r d1/diff d2/diff\n1c1\n< one\n---\n> two\nFile d1/fd is a regular file while file d2/fd is a directory\nOnly in d1//: only-in-1\nOnly in d2: only-in-2\nOnly in d1//: only1\nOnly in d2: only2\ndiff -r \"d1/sp ace\" \"d2/sp ace\"\n1c1\n< u\n---\n> v\ndiff -r d1/sub/deep/x d2/sub/deep/x\n1c1\n< deep1\n---\n> deep2\ndiff -r d1/sub/f d2/sub/f\n1c1\n< a\n---\n> b\nOnly in d1/sub: only-sub-1\nOnly in d2/sub: only-sub-2\n" 1
+diff -r ./d1 ./d2 => "diff -r ./d1/.hidden ./d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -r ./d1/Zed ./d2/Zed\n1c1\n< Z\n---\n> Z2\nBinary files ./d1/bin and ./d2/bin differ\ndiff -r ./d1/diff ./d2/diff\n1c1\n< one\n---\n> two\nFile ./d1/fd is a regular file while file ./d2/fd is a directory\nOnly in ./d1: only-in-1\nOnly in ./d2: only-in-2\nOnly in ./d1: only1\nOnly in ./d2: only2\ndiff -r \"./d1/sp ace\" \"./d2/sp ace\"\n1c1\n< u\n---\n> v\ndiff -r ./d1/sub/deep/x ./d2/sub/deep/x\n1c1\n< deep1\n---\n> deep2\ndiff -r ./d1/sub/f ./d2/sub/f\n1c1\n< a\n---\n> b\nOnly in ./d1/sub: only-sub-1\nOnly in ./d2/sub: only-sub-2\n" 1
+diff d1/diff d2 => "1c1\n< one\n---\n> two\n" 1
+diff d2 d1/diff => "1c1\n< two\n---\n> one\n" 1
+diff d1/diff d1/sub => % 2
+diff -u d1/diff d2 => "--- d1/diff\n+++ d2/diff\n@@ -1 +1 @@\n-one\n+two\n" 1
+diff -N d1/only-in-1 d2 => % 2
+diff d1 nope => % 2
+diff -r d1/sub nope => % 2
+echo a | diff - d1 => % 2
+diff -r e1 e2 => "Only in e1: x\n" 1
+diff -rN e1 e2 => "diff -rN e1/x/f e2/x/f\n1d0\n< a\n" 1
+diff -N e1 e2 => "Common subdirectories: e1/x and e2/x\n"
+diff -r f1 f2 => "diff -r f1/a f2/a\n1c1\n< a\n---\n> b\n" 1
+diff -rs f1 f1; echo $? => "0\n"
+diff -r d1 d1; echo $? => "0\n"
+diff -ru -L left -L right f1 f2 => "diff -ru -L left -L right left right\n--- left\n+++ right\n@@ -1 +1 @@\n-a\n+b\n" 1
+diff -rq -L left -L right f1 f2 => "Files left and right differ\n" 1
+diff -r -p d1 d2 | head -4 => "diff -r -p d1/.hidden d2/.hidden\n*** d1/.hidden\n--- d2/.hidden\n***************\n"
+diff -r -a d1 d2 | head -6 => "diff -r -a d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -r -a d1/Zed d2/Zed\n"
+diff -r d1 d2 2>/dev/null | wc -l => "38\n"

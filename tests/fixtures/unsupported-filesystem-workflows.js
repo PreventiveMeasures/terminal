@@ -45,7 +45,7 @@ export const FILESYSTEM_WORKFLOWS = [
   unavailable('Inspect the package version through Node', `node -p "require('./package.json').version"`, 'node'),
   unavailable('Run the package test command', 'npm test', 'npm'),
   unavailable('Parse the manifest using Python', `python3 -c "import json; print(json.load(open('package.json'))['name'])"`, 'python3'),
-  unavailable('Compare two source files', 'diff -u src/index.js src/util.js', 'diff'),
+  gap('Compare two source files side by side', 'diff -y src/index.js src/util.js', 'diff', '-y'),
   unavailable('Compare sorted name lists', 'comm -23 data/declared-names.txt data/used-names.txt', 'comm'),
   unavailable('Save a listing while passing it down a pipeline', 'find src -type f | tee data/paths.txt', 'tee'),
   unavailable('Identify a source file format', 'file src/index.js', 'file'),
