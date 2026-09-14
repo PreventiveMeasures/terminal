@@ -423,7 +423,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
 
   // Only a here-document nothing else touches is the text it holds. The rest
   // is the shell it runs, which a summary says rather than refuses.
-  const shell = (chains, multi) => ({ type: 'shell', list: chains, multi })
+  const shell = (chains, multi) => ({ type: 'shell', summary: chains, multi })
 
   for (const [label, line, token] of [
     ['unquoted, so its text would split into fields', HERE('a b', "'EOF'", ''), shell([[['echo', 'a b']]], true)],
@@ -456,7 +456,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
 
   // `( … )` is a list of its own, and a summary of a list is a summary.
   it('summarizes a subshell as the line it runs, and drops what it keeps from nothing', () => {
-    const braces = (chains) => ({ type: 'braces', list: chains })
+    const braces = (chains) => ({ type: 'braces', summary: chains })
     assert.deepEqual(terminal().summarize('(ls)'), [[['ls']]])
     assert.deepEqual(terminal().summarize('(ls -a) | wc'), [[['ls', '-a'], ['wc']]])
     assert.deepEqual(terminal().summarize('(ls) > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
