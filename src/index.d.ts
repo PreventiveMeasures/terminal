@@ -289,6 +289,7 @@ export type {
   Summary,
   Test,
   TildePart,
+  Token,
   Value,
 } from './parse.js'
 
@@ -351,11 +352,12 @@ export interface Terminal {
    * `[['cat', '1.txt'], ['wc']]`, and a quoted `$(cat <<'EOF' … EOF)` as the
    * text that here-document holds.
    *
-   * Plain text throughout, so it throws rather than summarize what it cannot:
-   * a line that does not parse (including a redirect this filesystem would
-   * refuse), a subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an
-   * assignment, a here-document or here-string, a stage reading its own input
-   * from inside a pipeline, or a word an expansion still decides.
+   * A token is text, or a {@link PatternPart} when a pattern is the whole of
+   * its argument, so it throws rather than summarize what it cannot: a line
+   * that does not parse (including a redirect this filesystem would refuse),
+   * a subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
+   * here-document or here-string, a stage reading its own input from inside a
+   * pipeline, or a word whose text only expansion settles.
    * {@link Terminal.parse} reads those.
    *
    * @throws if the line does not parse, or holds anything but simple chains.

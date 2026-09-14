@@ -136,12 +136,21 @@ summarize('wc < 1.txt || ls')
 
 It reports what a line does rather than how it was written, which is why a
 command reading a file comes back as the `cat` that feeds it, and why a quoted
-`$(cat <<'EOF' … EOF)` comes back as the text that here-document holds. Everything it
-returns is final text, so it throws rather than summarize what it cannot: a
-line that does not parse, `while`, `case` and the other constructs this
-terminal refuses, a subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an
-assignment, a here-document or here-string, and any word an expansion still
-decides — `$x`, `${x:-a}`, `*.js`, `` `date` ``. `parse()` reads those.
+`$(cat <<'EOF' … EOF)` comes back as the text that here-document holds.
+
+A token is text, or a pattern when one is the whole of its argument:
+
+```js
+summarize('ls *.js | head')
+// [ [ ['ls', { type: 'pattern', pattern: '*.js' }], ['head'] ] ]
+```
+
+Anything else throws rather than be summarized into a lie: a line that does not
+parse, `while`, `case` and the other constructs this terminal refuses, a
+subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
+here-document or here-string, and any word whose text only expansion settles —
+`$x`, `~/bin`, `{a,b}`, `` `date` ``, or a word joined from pieces like
+`a*"b"`. `parse()` reads those.
 
 A terminal has the same method, under its own write policy: `summarize('ls >
 out')` throws there when nothing may be written.

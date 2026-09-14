@@ -283,8 +283,10 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['ls $x', 'summarize: ${x} is not a literal word'],
     ['ls "$x"', 'summarize: ${x} is not a literal word'],
     ['ls ${x:-a}', 'summarize: ${x:-a} is not a literal word'],
-    ['ls *.js', 'summarize: *.js is not a literal word'],
     ['ls ~/bin', 'summarize: ~/bin is not a literal word'],
+    ['ls {a,b}', 'summarize: {a,b} is not a literal word'],
+    ['ls a*"b"', 'summarize: a word joined from pieces is not a literal word'],
+    ['echo "$x"""', 'summarize: a word joined from pieces is not a literal word'],
     ['echo `date`', 'summarize: $(…) is not a literal word'],
     ['echo $(date)', 'summarize: $(…) is not a literal word'],
     ['echo $((1 + 2))', 'summarize: $((…)) is not a literal word'],
@@ -325,6 +327,15 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
       assert.throws(() => terminal().summarize(line), /is not a literal word/u)
     })
   }
+
+  // A pattern says what it looks for as plainly as a name does, so long as it
+  // is the whole argument rather than one piece of a word.
+  it('keeps a whole-argument pattern as the pattern it is', () => {
+    assert.deepEqual(terminal().summarize('ls *.js | head'), [[['ls', pattern('*.js')], ['head']]])
+    assert.deepEqual(terminal().summarize('wc < *.txt'), [[['cat', pattern('*.txt')], ['wc']]])
+    assert.deepEqual(terminal().summarize('cat x > /tmp/out*'), [[['cat', 'x'], ['>', pattern('/tmp/out*')]]])
+    assert.deepEqual(terminal().summarize('ls "*"'), [[['ls', '*']]])
+  })
 
   it("refuses a write the terminal's filesystem would, as parse() does", () => {
     const readOnly = createTerminal(SOURCES, { mount: '/src' })

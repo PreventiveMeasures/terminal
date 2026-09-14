@@ -292,10 +292,19 @@ export interface ParseResult {
 }
 
 /**
+ * One token of a chain: the text it will be, or the pattern it will be
+ * matched by. A pattern says what it looks for as plainly as a name does, so
+ * long as it is the whole of its argument — `ls *.js` is `['ls', { type:
+ * 'pattern', pattern: '*.js' }]`, while `ls a*"b"`, whose word is pieces
+ * joined together, is not summarized at all.
+ */
+export type Token = string | PatternPart
+
+/**
  * One command of a chain: each pipeline stage's `argv`, and each redirect as
  * the tokens it was written with — `['>', 'out']`, `['2>&1']`.
  */
-export type Chain = string[][]
+export type Chain = Token[][]
 
 /**
  * A summarized line: its chains in order, with `&&` or `||` standing between
@@ -342,13 +351,14 @@ export function parse(line: string): ParseResult
  * text, and the substitution has to be quoted, since bare its text would be
  * split into fields and globbed.
  *
- * Everything here is plain text, so anything a summary would have to lie
- * about throws instead: a line that does not parse, a subshell, group, `for`,
- * `if` or `[[ … ]]`, a `!`, an assignment, a here-document or here-string, a
- * stage that reads its own input from inside a pipeline, and any word an
- * expansion still decides — `$x`, `*.js`, `` `date` ``. {@link parse} reads
- * those; this is the short answer while a line stays simple, and an error the
- * moment it does not.
+ * A token is text or a pattern and nothing else, so anything a summary would
+ * have to lie about throws instead: a line that does not parse, a subshell,
+ * group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a here-document or
+ * here-string, a stage that reads its own input from inside a pipeline, and
+ * any word whose text only expansion settles — `$x`, `~/bin`, `{a,b}`,
+ * `` `date` ``, and a word joined from pieces such as `a*"b"`. {@link parse}
+ * reads those; this is the short answer while a line stays simple, and an
+ * error the moment it does not.
  *
  * @throws if the line does not parse, or holds anything but simple chains.
  */

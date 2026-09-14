@@ -306,14 +306,18 @@ function redirectTokens(redirect) {
   return [lead + op, literal(redirect.target)]
 }
 
+// A token is the text it will be, or the pattern it will be matched by — a
+// pattern says what it looks for as plainly as a name does, so long as it is
+// the whole of its argument. Pieces joined into a word are not that, and a
+// substitution is a command rather than a token.
 const literal = (value) => {
   if (typeof value === 'string') return value
   const text = literalText(value)
-  if (text === null) throw refuse(`${piecesOf(value).map(spell).join('')}`, 'a literal word')
-  return text
+  if (text !== null) return text
+  if (value.type === 'pattern') return value
+  if (value.type === 'parts') throw refuse('a word joined from pieces', 'a literal word')
+  throw refuse(spell(value), 'a literal word')
 }
-
-const piecesOf = (value) => value.type === 'parts' ? value.parts : [value]
 
 // `"$(cat <<'EOF' … EOF)"` is the text it holds and nothing else: a literal
 // here-document, cat, and the trailing newlines `$( )` strips. Every part has
@@ -321,7 +325,7 @@ const piecesOf = (value) => value.type === 'parts' ? value.parts : [value]
 // and globbed, and no single token would stand for it.
 function literalText(value) {
   let text = ''
-  for (const part of piecesOf(value)) {
+  for (const part of value.type === 'parts' ? value.parts : [value]) {
     if (typeof part === 'string') { text += part; continue }
     if (!part.quoted) return null
     const here = heredocText(part)
