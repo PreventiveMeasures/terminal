@@ -7,7 +7,7 @@
 // quoting.
 
 import { createUnsupportedFeed, unsupportedNote } from './unsupported.js'
-import { hasBraces } from './shell/braces.js'
+import { expandBraces, hasBraces } from './shell/braces.js'
 import { readBacktickSubstitution, readExpansion } from './shell/lex.js'
 import { parseAll } from './shell/parse.js'
 
@@ -69,10 +69,10 @@ function stageOf(stage) {
 // `( list )`, `{ list; }`, `do list; done`, `then list`.
 function blockOf(stage) {
   if (stage.group) return { type: stage.isolate ? 'subshell' : 'group', list: listFrom(stage.group) }
-  if (stage.loop) return { type: 'for', name: stage.loop.name, words: stage.loop.words.map(valueOf), list: listFrom(stage.loop.body) }
+  if (stage.loop) return { type: 'for', name: stage.loop.name, words: stage.loop.words.flatMap(valuesOf), list: listFrom(stage.loop.body) }
   if (stage.conditional) return ifOf(stage.conditional)
   if (stage.test) return { type: 'test', expression: conditionOf(stage.test) }
-  return { type: 'command', argv: stage.words.map(valueOf) }
+  return { type: 'command', argv: stage.words.flatMap(valuesOf) }
 }
 
 function ifOf(conditional) {
@@ -84,17 +84,42 @@ function ifOf(conditional) {
 // The one rule the whole tree follows: text that nothing can change any more
 // is that text, and everything else is a word in the pieces expansion works
 // on — literal runs, and the references and substitutions between them.
-function valueOf(w) {
+function valueOf(w, braces = false) {
   if (!expandable(w)) return w.value
-  const parts = partsOf(w)
+  const parts = partsOf(w, braces)
   // One piece is that piece: the word around it says nothing the piece does not.
   return parts.length === 1 ? parts[0] : { type: 'parts', parts }
+}
+
+// Brace expansion is the one expansion a line settles on its own: no
+// filesystem, no variables, only text, and bash runs it before anything else.
+// So a word list is read with its braces already expanded — `a{b,c}` is `ab`
+// and `ac` — and only the two places that cannot be keep a `brace` piece: a
+// slot that takes a single word, and a group with more products than reading
+// a line should make.
+const valuesOf = (w) => {
+  const products = expand(w)
+  return products === null ? [valueOf(w, true)] : products.map((product) => valueOf(product))
+}
+
+// A redirect names one file, so a target that multiplies is an ambiguous
+// redirect — what it was written as is all there is to say about it.
+function targetOf(w) {
+  const products = expand(w)
+  return products?.length === 1 ? valueOf(products[0]) : valueOf(w, true)
+}
+
+function expand(w) {
+  try { return expandBraces(w) } catch (e) {
+    if (unsupportedNote(e)) return null
+    throw e
+  }
 }
 
 // Quoting belongs to a piece rather than to each character: a literal run is
 // quoted or it is not, and a reference carries whether its result will be
 // split and globbed. An expansion's source never becomes text of its own.
-function partsOf(word) {
+function partsOf(word, braces) {
   const { value } = word
   const mask = word.mask ?? '0'.repeat(value.length)
   const empty = new Set(word.empty ?? [])
@@ -110,7 +135,7 @@ function partsOf(word) {
     else parts.push(piece)
   }
   const flush = (end) => {
-    if (text !== '') push(textOf(word, text, quoted, start, end))
+    if (text !== '') push(textOf(word, text, quoted, start, end, braces))
     text = ''
   }
   for (let i = 0; i <= value.length; i++) {
@@ -135,9 +160,9 @@ function partsOf(word) {
 // way the piece is the string itself. What is left says which expansion it is
 // waiting for, named for the first one that will reach it — brace expansion
 // runs before the pathname matching a product of it may still go through.
-function textOf(word, value, quoted, from, to) {
+function textOf(word, value, quoted, from, to, braces) {
   if (quoted) return value
-  if (/[{},]/u.test(value) && hasBraces(word)) return { type: 'brace', source: value }
+  if (braces && /[{},]/u.test(value) && hasBraces(word)) return { type: 'brace', source: value }
   if (globbed(word, from, to)) return { type: 'pattern', pattern: value }
   if (from === 0 && value.startsWith('~')) return { type: 'tilde', source: value }
   return value
@@ -230,8 +255,8 @@ function redirectOf(r) {
   if (r.op === 'close') return { fd: r.fd, op: '>&-' }
   if (r.op === 'text') return { fd: 0, op: '<<', text: r.body, expand: r.expand }
   if (r.op === 'herestring') return { fd: 0, op: '<<<', text: valueOf(r.word) }
-  if (r.op === 'read') return { fd: 0, op: '<', target: valueOf(r.word) }
-  return { fd: r.fd, op: (r.both ? '&>' : '>') + (r.append ? '>' : ''), target: r.target ?? valueOf(r.word) }
+  if (r.op === 'read') return { fd: 0, op: '<', target: targetOf(r.word) }
+  return { fd: r.fd, op: (r.both ? '&>' : '>') + (r.append ? '>' : ''), target: r.target ?? targetOf(r.word) }
 }
 
 function conditionOf(e) {
@@ -314,7 +339,7 @@ const literal = (value) => {
   if (typeof value === 'string') return value
   const text = literalText(value)
   if (text !== null) return text
-  if (value.type === 'pattern') return value
+  if (value.type === 'pattern' || value.type === 'tilde') return value
   if (value.type === 'parts') throw refuse('a word joined from pieces', 'a literal word')
   throw refuse(spell(value), 'a literal word')
 }

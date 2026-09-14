@@ -20,7 +20,7 @@ const maskAt = (w, i) => (w.mask === null ? '0' : w.mask[i])
 // Find the leftmost balanced, unquoted `{...}` that is a comma list or
 // a sequence; expand it and recurse on each product so adjacent and
 // nested groups multiply naturally. Anything else is one word.
-export function expandBraces(word) {
+export function expandBraces(word, limit = SEQ_LIMIT) {
   if (!word.value.includes('{')) return [word]
   const pairs = pairBraces(word)
   for (let i = 0; i < word.value.length; i++) {
@@ -40,7 +40,12 @@ export function expandBraces(word) {
     const prefix = slice(word, 0, i)
     const suffix = slice(word, end + 1)
     const out = []
-    for (const alt of alternatives) out.push(...expandBraces(concat(prefix, alt, suffix)))
+    for (const alt of alternatives) {
+      out.push(...expandBraces(concat(prefix, alt, suffix), limit))
+      // A sequence says how many words it is before making them; a list of
+      // alternatives only says it by multiplying, so count as they arrive.
+      if (out.length > limit) throw new UnsupportedError('feature', 'brace expansion limit', `brace expansion \`${word.value}\` would produce more than ${limit} words`)
+    }
     return out
   }
   return [word]

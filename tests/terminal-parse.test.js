@@ -80,6 +80,30 @@ describe('parse() hands back the line as the parser read it', () => {
     ])
   })
 
+  // Brace expansion needs nothing but the text, and bash runs it first, so a
+  // word list arrives with its braces already worked out.
+  it('expands braces in a word list, and leaves alone what they are not', () => {
+    assert.deepEqual(list('ls a{b,c} {1..3} a{b} "{a,b}"')[0].argv, ['ls', 'ab', 'ac', '1', '2', '3', 'a{b}', '{a,b}'])
+    assert.deepEqual(list('ls ~/x{x,2}*')[0].argv, ['ls', pattern('~/xx*'), pattern('~/x2*')])
+    assert.deepEqual(list('for f in {1..3}; do ls; done')[0].words, ['1', '2', '3'])
+  })
+
+  // Only a word list multiplies: an assignment, a here-string and a `[[ … ]]`
+  // operand take one word, and bash leaves their braces as text.
+  it('leaves braces alone where the shell does not expand them', () => {
+    assert.deepEqual(list('x={a,b} ls')[0].assignments, [{ name: 'x', value: '{a,b}' }])
+    assert.deepEqual(list('cat <<< {a,b}')[0].redirects, [{ fd: 0, op: '<<<', text: '{a,b}' }])
+    assert.deepEqual(list('[[ q == {a,b} ]]')[0].expression, { type: 'binary', op: '==', left: 'q', right: '{a,b}' })
+  })
+
+  // A redirect names one file, so a target that multiplies has nothing to say
+  // for itself but what it was written as.
+  it('keeps a redirect target that brace expansion would multiply', () => {
+    assert.deepEqual(list('ls > {a,b}')[0].redirects, [{ fd: 1, op: '>', target: { type: 'brace', source: '{a,b}' } }])
+    assert.deepEqual(list('ls > {1..1}')[0].redirects, [{ fd: 1, op: '>', target: '1' }])
+    assert.equal(terminal().run('ls > {a,b}').stderr.trim(), 'error: {a,b}: ambiguous redirect')
+  })
+
   it("carries a loop's variable, the words after `in` and the list it runs", () => {
     assert.deepEqual(list('for f in *.js a; do wc -l "$f"; done'), [{
       type: 'for',
@@ -195,9 +219,7 @@ describe('parse() spells a value out only when expansion still decides it', () =
     ['$((1 + 2))', [{ type: 'arithmetic', source: '1 + 2' }]],
     ['*.js', [pattern('*.js')]],
     ['~/bin', [{ type: 'tilde', source: '~/bin' }]],
-    ['{a,b}', [{ type: 'brace', source: '{a,b}' }]],
     ['a{b}', ['a{b}']],
-    ['{1..3}', [{ type: 'brace', source: '{1..3}' }]],
     ['[ab]c', [pattern('[ab]c')]],
     ['a*"b"', [pattern('a*'), 'b']],
     ['a"b"$c', ['ab', { type: 'parameter', name: 'c' }]],
@@ -283,8 +305,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['ls $x', 'summarize: ${x} is not a literal word'],
     ['ls "$x"', 'summarize: ${x} is not a literal word'],
     ['ls ${x:-a}', 'summarize: ${x:-a} is not a literal word'],
-    ['ls ~/bin', 'summarize: ~/bin is not a literal word'],
-    ['ls {a,b}', 'summarize: {a,b} is not a literal word'],
+    ['ls > {a,b}', 'summarize: {a,b} is not a literal word'],
     ['ls a*"b"', 'summarize: a word joined from pieces is not a literal word'],
     ['echo "$x"""', 'summarize: a word joined from pieces is not a literal word'],
     ['echo `date`', 'summarize: $(…) is not a literal word'],
@@ -330,8 +351,10 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
 
   // A pattern says what it looks for as plainly as a name does, so long as it
   // is the whole argument rather than one piece of a word.
-  it('keeps a whole-argument pattern as the pattern it is', () => {
+  it('keeps a whole-argument pattern or tilde as what it is', () => {
     assert.deepEqual(terminal().summarize('ls *.js | head'), [[['ls', pattern('*.js')], ['head']]])
+    assert.deepEqual(terminal().summarize('ls ~/bin'), [[['ls', { type: 'tilde', source: '~/bin' }]]])
+    assert.deepEqual(terminal().summarize('ls a{b,c} {1..3}'), [[['ls', 'ab', 'ac', '1', '2', '3']]])
     assert.deepEqual(terminal().summarize('wc < *.txt'), [[['cat', pattern('*.txt')], ['wc']]])
     assert.deepEqual(terminal().summarize('cat x > /tmp/out*'), [[['cat', 'x'], ['>', pattern('/tmp/out*')]]])
     assert.deepEqual(terminal().summarize('ls "*"'), [[['ls', '*']]])

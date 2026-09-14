@@ -43,10 +43,16 @@ export interface PatternPart {
 }
 
 /**
- * Bare text carrying brace expansion — `{a,b}`, `{1..9}` — which multiplies
- * the word into several before anything else happens to them, so a product may
- * still be matched as a pattern afterwards. Braces nothing expands are text:
- * `a{b}` is the string `a{b}`.
+ * Braces this reading did not expand. Brace expansion needs nothing but the
+ * text, so a word list arrives expanded — `a{b,c}` is the two words `ab` and
+ * `ac` — and this is left for the two places that cannot be: a slot that takes
+ * a single word, where a redirect target like `> {a,b}` is the ambiguous
+ * redirect running it reports, and a group with more products than reading a
+ * line should make.
+ *
+ * Braces nothing expands are never this: `a{b}` is the string `a{b}`, and so
+ * are the braces in an assignment, a here-string or a `[[ … ]]` operand, none
+ * of which the shell expands.
  */
 export interface BracePart {
   type: 'brace'
@@ -293,12 +299,12 @@ export interface ParseResult {
 
 /**
  * One token of a chain: the text it will be, or the pattern it will be
- * matched by. A pattern says what it looks for as plainly as a name does, so
- * long as it is the whole of its argument — `ls *.js` is `['ls', { type:
- * 'pattern', pattern: '*.js' }]`, while `ls a*"b"`, whose word is pieces
- * joined together, is not summarized at all.
+ * matched by, or the home directory it opens with. Each says what it looks
+ * for as plainly as a name does, so long as it is the whole of its argument —
+ * `ls *.js` is `['ls', { type: 'pattern', pattern: '*.js' }]`, while
+ * `ls a*"b"`, whose word is pieces joined together, is not summarized at all.
  */
-export type Token = string | PatternPart
+export type Token = string | PatternPart | TildePart
 
 /**
  * One command of a chain: each pipeline stage's `argv`, and each redirect as
@@ -351,11 +357,12 @@ export function parse(line: string): ParseResult
  * text, and the substitution has to be quoted, since bare its text would be
  * split into fields and globbed.
  *
- * A token is text or a pattern and nothing else, so anything a summary would
- * have to lie about throws instead: a line that does not parse, a subshell,
- * group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a here-document or
- * here-string, a stage that reads its own input from inside a pipeline, and
- * any word whose text only expansion settles — `$x`, `~/bin`, `{a,b}`,
+ * A token is text, or the pattern or `~` an argument is written as — each of
+ * which says what it looks for as plainly as a name does. Anything a summary
+ * would have to lie about throws instead: a line that does not parse, a
+ * subshell, group, `for`, `if` or `[[ … ]]`, a `!`, an assignment, a
+ * here-document or here-string, a stage that reads its own input from inside
+ * a pipeline, and any word whose text only running it settles — `$x`,
  * `` `date` ``, and a word joined from pieces such as `a*"b"`. {@link parse}
  * reads those; this is the short answer while a line stays simple, and an
  * error the moment it does not.
