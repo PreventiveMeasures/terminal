@@ -1,7 +1,7 @@
 // Lexical helpers for operators, parameter references, ANSI-C quotes and
 // here-document bodies. tokenize.js owns the cursor and quoting state.
 
-import { decodeUtf8, encodeUtf8Loose } from '../util.js'
+import { decodeUtf8, encodeUtf8Loose } from '../bytes.js'
 import { UnsupportedError } from '../unsupported.js'
 import { readCommandSubstitution } from './substitution.js'
 import { isUnicodeScalar } from '../unicode.js'

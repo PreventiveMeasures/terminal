@@ -1,42 +1,12 @@
-import { UnsupportedError } from '../unsupported.js'
+// Evaluating a `${…}` reference against the shell's bindings. Reading one —
+// name, operator and operand — is parameter-parse.js, which tokenizing needs
+// before any of this exists.
+
 import { trimParameter } from './parameter-pattern.js'
 import { transformParameter } from './parameter-transform.js'
+import { parameterError } from './parameter-parse.js'
 
-const NAME = /^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[?*@#$!-])(?![\s\S])/u
 const VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/u
-const HEAD = /^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[?*@#$!-])/u
-
-export function parameterError(content, message = 'unsupported or malformed parameter expansion') {
-  return new UnsupportedError('feature', '${', `${message}: \${${content}}`)
-}
-
-const normalizeName = (name) => /^[0-9]+$/u.test(name) ? name.replace(/^0+(?=[0-9])/u, '') : name
-
-export function parseParameter(content) {
-  const logical = content.replaceAll('\\\n', '')
-  if (logical.startsWith('#') && logical.length > 1 && NAME.test(logical.slice(1))) {
-    return { name: normalizeName(logical.slice(1)), operator: 'length' }
-  }
-  // A length expression cannot carry another parameter operator.
-  if (/^#[A-Za-z_0-9]/u.test(logical)) throw parameterError(content)
-  const name = HEAD.exec(logical)?.[0]
-  if (!name) throw parameterError(content)
-  const suffix = logical.slice(name.length)
-  if (!suffix) return { name: normalizeName(name), operator: '' }
-  if (name === '#' && /^[%:=+/]$/u.test(suffix)) throw parameterError(content)
-  const operator = /^(?::[-+=?]|[-+=?]|##?|%%?|:|\/\/?)/u.exec(suffix)?.[0]
-  if (!operator) throw parameterError(content)
-  return { name: normalizeName(name), operator, word: content.slice(prefixEnd(content, name.length + operator.length)) }
-}
-
-function prefixEnd(source, count) {
-  let at = 0
-  while (count > 0) {
-    if (source[at] === '\\' && source[at + 1] === '\n') at += 2
-    else { count--; at++ }
-  }
-  return at
-}
 
 export function evaluateParameter(ref, ctx, options) {
   const { lookup, expand } = options

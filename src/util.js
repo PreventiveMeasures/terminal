@@ -1,38 +1,15 @@
 // Shared command I/O and numeric parsing; independent of the command registry.
 
-import { UnsupportedError } from './unsupported.js'
 import { lookup } from './fs.js'
 import { UINT64_MAX } from './numeric.js'
-import { utf8fromString, utf8toString } from '@exodus/bytes/utf8.js'
+import { err } from './result.js'
 import { lookupWithNote } from './notes.js'
 
-export { utf8fromStringLoose as encodeUtf8Loose } from '@exodus/bytes/utf8.js'
+// Commands reach the byte codec and the result shape through here, where the
+// rest of their shared helpers already live.
+export { encodeUtf8, encodeUtf8Loose, decodeUtf8 } from './bytes.js'
+export { err, ok, usage } from './result.js'
 export { discardedNotes, missingPathNote } from './notes.js'
-
-// Byte operations encode JS strings as UTF-8. Preserve the BOM and refuse
-// slices that cannot be represented losslessly as string output.
-export function encodeUtf8(text) {
-  try { return utf8fromString(text) } catch (e) {
-    if (!(e instanceof TypeError)) throw e
-    throw new UnsupportedError('feature', 'unpaired surrogate', 'unpaired UTF-16 surrogates cannot be encoded as UTF-8')
-  }
-}
-export function decodeUtf8(bytes) {
-  try { return utf8toString(bytes) } catch {
-    throw new UnsupportedError('feature', 'partial UTF-8 byte sequence', 'byte output that is not valid UTF-8 cannot be represented by this string-based terminal')
-  }
-}
-
-export const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0 })
-
-// Terminate stderr once so consecutive errors stay on separate lines.
-export const err = (msg, code = 1) => ({
-  stdout: '',
-  stderr: msg.endsWith('\n') ? msg : msg + '\n',
-  exitCode: code,
-})
-
-export const usage = (line) => err(`usage: ${line}`, 2)
 
 // Empty input has no lines; a trailing newline terminates the preceding line.
 export function splitLines(s, delimiter = '\n') {

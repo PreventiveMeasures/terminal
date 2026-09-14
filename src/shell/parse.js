@@ -248,8 +248,7 @@ function parseFor(p) {
     throw new Error(`for: expected \`in\` after \`${name}\``)
   }
   p.i++
-  // Execution expands the list as argv, then removes the leading keyword.
-  const words = [{ value: 'for', mask: null }]
+  const words = []
   // 'do' is a legal list item; remember it only for a missing-separator error.
   let sawDo = false
   for (let t; (t = tokenAt(p)) && t.kind !== 'semi'; p.i++) {

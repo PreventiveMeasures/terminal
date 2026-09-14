@@ -1,5 +1,5 @@
 import { UnsupportedError } from '../unsupported.js'
-import { parseParameter } from './parameter.js'
+import { parseParameter } from './parameter-parse.js'
 
 const gap = (detail, message) => new UnsupportedError('feature', detail, message)
 const limit = (depth) => {
