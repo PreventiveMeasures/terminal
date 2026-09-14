@@ -5025,7 +5025,7 @@ describe('createTerminal — cut', () => {
     // -d with -c.
     assert.match(t.run('cut -d , -c 1 f.txt').stderr, /-d is only valid with -f/u)
     // Reversed range.
-    assert.match(t.run('cut -c 5-2 f.txt').stderr, /reversed range/u)
+    assert.match(t.run('cut -c 5-2 f.txt').stderr, /invalid decreasing range/u)
     // Multi-char delim.
     assert.match(t.run('cut -d ,, -f 1 f.txt').stderr, /single byte/u)
   })

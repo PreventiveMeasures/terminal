@@ -106,7 +106,7 @@ function cut(stdin, tokens, ctx) {
   if (hasF === hasC) return usage('cut -f LIST [-d DELIM] [-s] [file...]  |  cut -c LIST [file...]')
   if (hasC && values.has('d')) return err('cut: -d is only valid with -f')
   if (hasC && flags.has('s')) return err('cut: -s is only valid with -f')
-  const list = parseCutList(hasF ? values.get('f') : values.get('c'))
+  const list = parseCutList(hasF ? values.get('f') : values.get('c'), hasF ? 'field' : 'position')
   if (list.error) return list.error
   const delim = values.get('d') === '' ? '\0' : values.get('d') ?? '\t'
   if (hasF && encodeUtf8Loose(delim).length !== 1) return err('cut: -d delimiter must be a single byte')
@@ -131,17 +131,44 @@ function cutBytes(line, ranges) {
   return decodeUtf8(Uint8Array.from(pickByPositions(bytes, ranges)))
 }
 
-function parseCutList(spec) {
+// GNU names a bad list by what the list is of, and by what it could not read
+// in it: a number below one, a decreasing range, a range with more than two
+// ends, a number it could not parse — named from the first character it could
+// not read — or one too large to hold. Recorded from coreutils 9.4.
+const CUT_NAMES = {
+  field: {
+    zero: 'fields are numbered from 1',
+    range: 'invalid field range',
+    value: (text) => `invalid field value '${text}'`,
+    large: (digits) => `field number '${digits}' is too large`,
+  },
+  position: {
+    zero: 'byte/character positions are numbered from 1',
+    range: 'invalid byte or character range',
+    value: (text) => `invalid byte/character position '${text}'`,
+    large: (digits) => `byte/character offset '${digits}' is too large`,
+  },
+}
+
+const CUT_ITEM = /^(\d*)(-?)(\d*)/u
+
+function parseCutList(spec, kind) {
+  const names = CUT_NAMES[kind]
+  const fail = (message) => ({ error: err(`cut: ${message}`) })
   const ranges = []
   for (const part of spec.split(/[, \t]/u)) {
-    if (part === '') return { error: err(`cut: empty list item in \`${spec}\``) }
-    if ((part.match(/\d+/gu) ?? []).some((n) => BigInt(n) > UINT64_MAX)) return { error: err(`cut: offset is too large: ${part}`) }
-    const range = /^(\d*)(?:-(\d*))?$/u.exec(part)
-    if (!range || (!range[1] && !range[2])) return { error: err(`cut: invalid list item: ${part}`) }
-    const start = range[1] === '' ? 1 : Number(range[1])
-    const end = range[2] === undefined ? start : range[2] === '' ? Infinity : Number(range[2])
-    if (start < 1) return { error: err('cut: list items must be >= 1') }
-    if (end < start) return { error: err(`cut: reversed range: ${part}`) }
+    if (part === '') return fail(names.zero)
+    const [read, from, dash, to] = CUT_ITEM.exec(part)
+    const rest = part.slice(read.length)
+    if (rest !== '') return fail(rest.startsWith('-') ? names.range : names.value(rest))
+    for (const digits of [from, to]) {
+      if (digits !== '' && BigInt(digits) > UINT64_MAX) return fail(names.large(digits))
+    }
+    if (from === '' && to === '' && dash === '') return fail(names.value(part))
+    const start = from === '' ? 1 : Number(from)
+    const end = dash === '' ? start : to === '' ? Infinity : Number(to)
+    if (start < 1) return fail(names.zero)
+    if (end < start) return fail('invalid decreasing range')
     ranges.push([start, end])
   }
   // Normalize once so every record can use ordered, nonoverlapping slices.
@@ -187,7 +214,7 @@ function tr(stdin, tokens, ctx) {
   if (squeeze) { consumeStdin(ctx); return ok(squeezeChars(stdin, selected)) }
   const set2 = expandTrSet(positional[1])
   if (set2.error) return set2.error
-  if (set2.chars.length === 0) return err('tr: SET2 must not be empty')
+  if (set2.chars.length === 0) return err('tr: when not truncating set1, string2 must be non-empty')
   consumeStdin(ctx)
   // Complement order is byte order; either mode pads SET2 with its last byte.
   const from = complement
@@ -217,7 +244,7 @@ function expandTrSet(spec) {
       if (endC === null) return { error: err('tr: trailing backslash in set') }
       const start = c.codePointAt(0)
       const end = endC.codePointAt(0)
-      if (end < start) return { error: err(`tr: reversed range: ${c}-${endC}`) }
+      if (end < start) return { error: err(`tr: range-endpoints of '${c}-${endC}' are in reverse collating sequence order`) }
       for (let cc = start; cc <= end; cc++) chars.push(String.fromCodePoint(cc))
     } else {
       chars.push(c)

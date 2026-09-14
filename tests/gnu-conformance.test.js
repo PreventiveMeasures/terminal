@@ -481,3 +481,52 @@ describe('GNU conformance — printf reads its operands the way GNU does', () =>
     })
   }
 })
+
+describe('GNU conformance — what cut and tr say about a list they cannot read', () => {
+  // `cut` names a bad list by what the list is of — fields, or bytes and
+  // characters — and by what it could not read in it. This said one thing for
+  // all of them, in wording of its own. `tr` named a reversed range its own
+  // way too. Recorded from coreutils 9.4 in the C locale; GNU adds a
+  // `Try 'cut --help'` line, which this terminal has no --help to back.
+  const rows = { pairs: 'a 1\n' }
+  const list = (option, spec) => createTerminal(rows).run(`cut -${option} '${spec}' pairs`)
+
+  const LISTS = [
+    ['5-2', 'cut: invalid decreasing range', 'cut: invalid decreasing range'],
+    ['-0', 'cut: invalid decreasing range', 'cut: invalid decreasing range'],
+    ['0', 'cut: byte/character positions are numbered from 1', 'cut: fields are numbered from 1'],
+    ['0-2', 'cut: byte/character positions are numbered from 1', 'cut: fields are numbered from 1'],
+    ['', 'cut: byte/character positions are numbered from 1', 'cut: fields are numbered from 1'],
+    ['1,,', 'cut: byte/character positions are numbered from 1', 'cut: fields are numbered from 1'],
+    ['a', "cut: invalid byte/character position 'a'", "cut: invalid field value 'a'"],
+    ['a-b', "cut: invalid byte/character position 'a-b'", "cut: invalid field value 'a-b'"],
+    // A number that will not read is named from the first character of it
+    // that would not, so `1x` is `x`.
+    ['1x', "cut: invalid byte/character position 'x'", "cut: invalid field value 'x'"],
+    ['1-2-3', 'cut: invalid byte or character range', 'cut: invalid field range'],
+    ['-1-2', 'cut: invalid byte or character range', 'cut: invalid field range'],
+    ['99999999999999999999', "cut: byte/character offset '99999999999999999999' is too large", "cut: field number '99999999999999999999' is too large"],
+    ['1-99999999999999999999', "cut: byte/character offset '99999999999999999999' is too large", "cut: field number '99999999999999999999' is too large"],
+  ]
+  for (const [spec, positions, fields] of LISTS) {
+    it(`cut ${JSON.stringify(spec)}`, () => {
+      assert.deepEqual([list('c', spec).stderr, list('c', spec).exitCode], [positions + '\n', 1], spec)
+      assert.deepEqual([list('f', spec).stderr, list('f', spec).exitCode], [fields + '\n', 1], spec)
+    })
+  }
+
+  it('reads the lists GNU reads', () => {
+    for (const [spec, stdout] of [['1', 'a\n'], ['2-3', ' 1\n'], ['1-', 'a 1\n'], ['1,3', 'a1\n'], ['3,1', 'a1\n']]) {
+      assert.deepEqual([list('c', spec).stdout, list('c', spec).exitCode], [stdout, 0], spec)
+    }
+  })
+
+  it('names a reversed range and an empty set the way tr names them', () => {
+    const run = (command) => createTerminal({}).run(`printf 'abc\\n' | ${command}`)
+    assert.equal(run("tr 'c-a' x").stderr, "tr: range-endpoints of 'c-a' are in reverse collating sequence order\n")
+    assert.equal(run("tr 'a' ''").stderr, 'tr: when not truncating set1, string2 must be non-empty\n')
+    assert.equal(run("tr '' 'a'").stdout, 'abc\n')
+    assert.equal(run("tr 'abc' 'x'").stdout, 'xxx\n')
+    assert.equal(run("tr 'a-' x").stdout, 'xbc\n')
+  })
+})
