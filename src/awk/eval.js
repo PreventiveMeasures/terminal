@@ -246,6 +246,7 @@ export function evalExpr(m, n) {
 
 function callUser(m, n) {
   const fn = m.program.functions.get(n.name)
+  if (fn === undefined) throw new AwkError(`function \`${n.name}\` not defined`)
   if (n.args.length > fn.params.length) {
     throw new AwkError(`function \`${n.name}\` called with ${n.args.length} arguments, but it accepts only ${fn.params.length}`)
   }

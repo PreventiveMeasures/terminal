@@ -530,3 +530,33 @@ describe('GNU conformance — what cut and tr say about a list they cannot read'
     assert.equal(fed("tr 'a-' x").stdout, 'xbc\n')
   })
 })
+
+describe('GNU conformance — a call awk finds when it runs one', () => {
+  // A call to a name nothing defines was a parse error here, which refused
+  // programs gawk runs: one that never reaches the call, and one whose body
+  // is never called at all. gawk finds it when the call runs, so what ran
+  // before it still stands, and it exits 2 rather than 1. Recorded from
+  // GNU Awk 5.2.1.
+  const awked = (program) => createTerminal({ input: 'oak\n' }).run(`awk '${program}' input`)
+
+  it('runs everything up to the call, then fails on it', () => {
+    const r = awked('BEGIN {print "a"; print foo(1)}')
+    assert.deepEqual([r.stdout, r.exitCode], ['a\n', 2])
+    assert.equal(r.stderr, 'awk: function `foo` not defined\n')
+  })
+
+  it('runs a program whose call is never reached', () => {
+    assert.deepEqual([awked('BEGIN {if (0) print foo(1); print "b"}').stdout, awked('BEGIN {if (0) print foo(1); print "b"}').exitCode], ['b\n', 0])
+    assert.deepEqual([awked('BEGIN {print "c"} function g(){ return foo() }').stdout, awked('BEGIN {print "c"} function g(){ return foo() }').exitCode], ['c\n', 0])
+  })
+
+  // The table a call is looked up in is the program's own, so a name JS would
+  // answer for is a name nothing defines — the ones every JS object carries
+  // included.
+  it('looks a call up in the program and nowhere else', () => {
+    for (const name of ['eval', 'Function', 'require', 'constructor', '__proto__', 'toString']) {
+      const r = awked(`BEGIN { print ${name}("1+1") }`)
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', `awk: function \`${name}\` not defined\n`, 2], name)
+    }
+  })
+})

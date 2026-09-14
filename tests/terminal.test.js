@@ -6566,7 +6566,7 @@ describe('createTerminal — awk', () => {
   it('rejects gawk-only builtins, undefined functions and unsupported options by name', () => {
     rejects("awk 'BEGIN { print strftime(\"%Y\") }'", /strftime\(\) is not supported \(gawk extension\)/u)
     rejects("awk 'BEGIN { n = asort(a) }'", /asort\(\) is not supported/u)
-    rejects("awk 'BEGIN { print foo(1) }'", /function `foo` is never defined/u)
+    rejects("awk 'BEGIN { print foo(1) }'", /function `foo` not defined/u)
     rejects("awk -z '{ print }'", /unknown option: -z/u)
     rejects("awk --posix '{ print }'", /unknown option: --posix/u)
     const r = run('awk')

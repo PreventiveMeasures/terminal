@@ -376,13 +376,15 @@ describe('no JS execution — runtime', () => {
     // `-v` and operand assignments carry values, never programs: this
     // one is printed, not run.
     assert.equal(t.run("awk -v x='BEGIN{system(\"id\")}' 'BEGIN { print x }'").stdout, 'BEGIN{system("id")}\n')
-    // Names that are evaluators in JS are undefined awk functions, and
-    // an undefined function is a parse error, not a lookup at runtime.
-    for (const name of ['eval', 'Function', 'require', 'constructor']) {
+    // Names that are evaluators in JS are undefined awk functions. A call
+    // is looked up in the program's own table of them and nowhere else, so
+    // a name JS would answer for is a name nothing here defines — including
+    // the ones every JS object carries.
+    for (const name of ['eval', 'Function', 'require', 'constructor', '__proto__', 'toString', 'hasOwnProperty']) {
       const r = t.run(`awk 'BEGIN { print ${name}("1+1") }'`)
-      assert.equal(r.exitCode, 1, name)
+      assert.equal(r.exitCode, 2, name)
       assert.equal(r.stdout, '', name)
-      assert.match(r.stderr, new RegExp(`function \`${name}\` is never defined`, 'u'), name)
+      assert.match(r.stderr, new RegExp(`function \`${name}\` not defined`, 'u'), name)
     }
     // `getline < file` reads the virtual FS: a host path is simply
     // absent (-1), not opened.

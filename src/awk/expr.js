@@ -210,9 +210,11 @@ function parseName(p) {
   return { type: 'var', name }
 }
 
+// A call to a name nothing defines is found when one runs, not when the
+// program is read: gawk runs `if (0) f()` and a body that calls one it never
+// reaches, and so does this.
 function parseCall(p) {
   const name = p.next().value
-  if (!p.funcs.has(name)) p.fail(`function \`${name}\` is never defined`)
   return { type: 'call', name, args: parseCallArgs(p) }
 }
 
