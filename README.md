@@ -69,26 +69,32 @@ terminal.parse('while :; do echo x; done').unsupported[0].detail  // 'while'
 `list` is the whole line: each command carries the `op` that joins it to the
 one before (`;`, `&&`, `||`, and a newline reads as `;`), its `argv`, and
 whatever else it has — `assignments`, `redirects`, a `negate` for `!`.
-Pipelines,
-subshells, `{ …; }` groups, `for` loops, `if` branches and `[[ … ]]` tests are
-nodes of their own, each named by `type`. A field that would only say "nothing
+Pipelines, subshells, `{ …; }` groups, `for` loops, `if` branches and
+`[[ … ]]` tests are nodes of their own, each named by `type`. A field that would only say "nothing
 here" is left out, and a line that fails partway still carries the commands
 ahead of the error.
 
-Values are plain text wherever the text is final, and a word node only where
-expansion still decides it — so reading arguments takes no knowledge of
+Values are plain text wherever the text is final, and a word in pieces only
+where expansion still decides it — so reading arguments takes no knowledge of
 quoting:
 
 ```js
 terminal.parse('grep -rn "$pattern" src/*.js').list[0].argv
 // [ 'grep', '-rn',
-//   { type: 'word', value: '${pattern}', mask: '2222222222' },
-//   { type: 'word', value: 'src/*.js' } ]
+//   { type: 'word', parts: [ { type: 'parameter', name: 'pattern', quoted: true } ] },
+//   { type: 'word', parts: [ { type: 'text', value: 'src/*.js' } ] } ]
 ```
 
 `'*'` is the string `*`, because quoting settled it; `*.js` is a word, because
-the filesystem has yet to. `mask` says which characters were quoted (`0` bare,
-`1` hard-quoted, `2` inside double quotes).
+the filesystem has yet to. A word's parts are the literal runs and the
+references, substitutions and arithmetic between them, each marked `quoted`
+when it sits inside quotes and so expands to itself. A substitution holds the
+commands it runs, parsed the same way:
+
+```js
+terminal.parse('foo `bar a b c`').list[0].argv[1].parts
+// [ { type: 'substitution', list: [ { type: 'command', argv: ['bar', 'a', 'b', 'c'] } ] } ]
+```
 
 ## The parser on its own
 

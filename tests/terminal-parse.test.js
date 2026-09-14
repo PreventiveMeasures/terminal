@@ -33,6 +33,8 @@ function commandNames(nodes) {
 }
 
 const named = (line, opts) => commandNames(list(line, opts))
+const word = (...parts) => ({ type: 'word', parts })
+const text = (value, quoted) => ({ type: 'text', value, ...(quoted ? { quoted: true } : {}) })
 
 describe('parse() hands back the line as the parser read it', () => {
   it('describes a simple command as its argv', () => {
@@ -82,8 +84,8 @@ describe('parse() hands back the line as the parser read it', () => {
     assert.deepEqual(list('for f in *.js a; do wc -l "$f"; done'), [{
       type: 'for',
       name: 'f',
-      words: [{ type: 'word', value: '*.js' }, 'a'],
-      list: [{ type: 'command', argv: ['wc', '-l', { type: 'word', value: '${f}', mask: '2222' }] }],
+      words: [word(text('*.js')), 'a'],
+      list: [{ type: 'command', argv: ['wc', '-l', word({ type: 'parameter', name: 'f', quoted: true })] }],
     }])
     assert.deepEqual(list('for f in; do ls; done')[0].words, [])
   })
@@ -103,7 +105,7 @@ describe('parse() hands back the line as the parser read it', () => {
       expression: {
         type: 'and',
         left: { type: 'not', expression: { type: 'unary', op: '-f', word: 'a.txt' } },
-        right: { type: 'binary', op: '==', left: { type: 'word', value: '${x}', mask: '2222' }, right: 'y' },
+        right: { type: 'binary', op: '==', left: word({ type: 'parameter', name: 'x', quoted: true }), right: 'y' },
       },
     }])
   })
@@ -112,7 +114,7 @@ describe('parse() hands back the line as the parser read it', () => {
     assert.deepEqual(list('x=1 y=$z'), [{
       type: 'command',
       argv: [],
-      assignments: [{ name: 'x', value: '1' }, { name: 'y', value: { type: 'word', value: '$z' } }],
+      assignments: [{ name: 'x', value: '1' }, { name: 'y', value: word({ type: 'parameter', name: 'z' }) }],
     }])
     assert.deepEqual(list('x=1 ls'), [{ type: 'command', argv: ['ls'], assignments: [{ name: 'x', value: '1' }] }])
   })
@@ -132,7 +134,7 @@ describe('parse() hands back the line as the parser read it', () => {
   })
 
   it('marks a redirect target expansion has yet to settle', () => {
-    assert.deepEqual(list('echo a > $out')[0].redirects, [{ fd: 1, op: '>', target: { type: 'word', value: '$out' } }])
+    assert.deepEqual(list('echo a > $out')[0].redirects, [{ fd: 1, op: '>', target: word({ type: 'parameter', name: 'out' }) }])
     assert.deepEqual(list("cat <<'EOF'\n$x\nEOF")[0].redirects, [{ fd: 0, op: '<<', text: '$x\n', expand: false }])
   })
 
@@ -164,7 +166,7 @@ describe('parse() hands back the line as the parser read it', () => {
 })
 
 describe('parse() spells a value out only when expansion still decides it', () => {
-  for (const [word, value] of [
+  for (const [written, value] of [
     ['ls', 'ls'],
     ['"a b"', 'a b'],
     ["l''s", 'ls'],
@@ -175,31 +177,53 @@ describe('parse() spells a value out only when expansion still decides it', () =
     ['[', '['],
     ['a=b', 'a=b'],
   ]) {
-    it(`reads ${word} as the text ${JSON.stringify(value)}`, () => {
-      assert.deepEqual(list(`echo ${word}`)[0].argv, ['echo', value])
+    it(`reads ${written} as the text ${JSON.stringify(value)}`, () => {
+      assert.deepEqual(list(`echo ${written}`)[0].argv, ['echo', value])
     })
   }
 
-  for (const [word, node] of [
-    ['$x', { type: 'word', value: '$x' }],
-    ['"$x"', { type: 'word', value: '${x}', mask: '2222' }],
-    ['$(date)', { type: 'word', value: '$(date)', mask: '0111111' }],
-    ['"$(date)"', { type: 'word', value: '$(date)', mask: '2111111' }],
-    ['`date`', { type: 'word', value: '`date`', mask: '011111' }],
-    ['*.js', { type: 'word', value: '*.js' }],
-    ['~/bin', { type: 'word', value: '~/bin' }],
-    ['{a,b}', { type: 'word', value: '{a,b}' }],
-    ['[ab]c', { type: 'word', value: '[ab]c' }],
-    ['"$x"""', { type: 'word', value: '${x}', mask: '2222', empty: [4] }],
+  const dated = [{ type: 'command', argv: ['date'] }]
+  for (const [written, parts] of [
+    ['$x', [{ type: 'parameter', name: 'x' }]],
+    ['"$x"', [{ type: 'parameter', name: 'x', quoted: true }]],
+    ['${x:-a b}', [{ type: 'parameter', name: 'x', operator: ':-', operand: 'a b' }]],
+    ['${#x}', [{ type: 'parameter', name: 'x', operator: 'length' }]],
+    ['$?', [{ type: 'parameter', name: '?' }]],
+    ['$(date)', [{ type: 'substitution', list: dated }]],
+    ['"$(date)"', [{ type: 'substitution', list: dated, quoted: true }]],
+    ['`date`', [{ type: 'substitution', list: dated }]],
+    ['$((1 + 2))', [{ type: 'arithmetic', source: '1 + 2' }]],
+    ['*.js', [text('*.js')]],
+    ['~/bin', [text('~/bin')]],
+    ['{a,b}', [text('{a,b}')]],
+    ['[ab]c', [text('[ab]c')]],
+    ['a"b"$c', [text('a'), text('b', true), { type: 'parameter', name: 'c' }]],
+    ['"$x"""', [{ type: 'parameter', name: 'x', quoted: true }, text('', true)]],
+    ['"a $x"', [text('a ', true), { type: 'parameter', name: 'x', quoted: true }]],
   ]) {
-    it(`keeps ${word} as a word`, () => {
-      assert.deepEqual(list(`echo ${word}`)[0].argv[1], node)
+    it(`reads ${written} as the pieces expansion works on`, () => {
+      assert.deepEqual(list(`echo ${written}`)[0].argv[1], word(...parts))
     })
   }
+
+  it('reads the commands a substitution runs, however deep', () => {
+    assert.deepEqual(list('foo `bar a b c`')[0].argv, ['foo', word({ type: 'substitution', list: [{ type: 'command', argv: ['bar', 'a', 'b', 'c'] }] })])
+    assert.deepEqual(list('echo $(cat $(ls))')[0].argv[1], word({
+      type: 'substitution',
+      list: [{ type: 'command', argv: ['cat', word({ type: 'substitution', list: [{ type: 'command', argv: ['ls'] }] })] }],
+    }))
+  })
+
+  // Bash reads a backtick when it expands it, so the line still parses.
+  it('keeps the diagnostic of a backtick body that does not parse', () => {
+    assert.deepEqual(list('echo `echo )`')[0].argv[1], word({ type: 'substitution', list: [], error: 'unexpected `)`' }))
+    assert.equal(parse('echo `echo )`').ok, true)
+    assert.equal(parse('echo $(echo ))').ok, false)
+  })
 
   it('applies the same rule to a command name', () => {
     assert.deepEqual(named('"ls"'), ['ls'])
-    assert.deepEqual(named('$tool a'), [{ type: 'word', value: '$tool' }])
+    assert.deepEqual(named('$tool a'), [word({ type: 'parameter', name: 'tool' })])
   })
 })
 

@@ -2,11 +2,12 @@
 //
 // One `type` per node, operators spelled the way they were written, and no
 // field that only says "nothing here". A value is a plain string wherever the
-// text is final — `head -20` is `['head', '-20']` — and a node only where
-// expansion still decides it, so a caller reading arguments never has to read
-// quoting masks to do it.
+// text is final — `head -20` is `['head', '-20']` — and a word in pieces only
+// where expansion still decides it, so reading arguments never means reading
+// quoting.
 
 import { createUnsupportedFeed, unsupportedNote } from './unsupported.js'
+import { readBacktickSubstitution, readExpansion } from './shell/lex.js'
 import { parseAll } from './shell/parse.js'
 
 export function read(line, writable) {
@@ -80,15 +81,84 @@ function ifOf(conditional) {
 }
 
 // The one rule the whole tree follows: text that nothing can change any more
-// is that text, and everything else is a word node carrying what was written
-// and which of it was quoted.
+// is that text, and everything else is a word in the pieces expansion works
+// on — literal runs, and the references and substitutions between them.
 function valueOf(w) {
-  if (!expandable(w)) return w.value
+  return expandable(w) ? { type: 'word', parts: partsOf(w) } : w.value
+}
+
+// Quoting belongs to a piece rather than to each character: a literal run is
+// quoted or it is not, and a reference carries whether its result will be
+// split and globbed. An expansion's source never becomes text of its own.
+function partsOf(word) {
+  const { value } = word
+  const mask = word.mask ?? '0'.repeat(value.length)
+  const empty = new Set(word.empty ?? [])
+  const parts = []
+  let text = ''
+  let quoted = false
+  const flush = () => {
+    if (text !== '') parts.push(textOf(text, quoted))
+    text = ''
+  }
+  for (let i = 0; i <= value.length; i++) {
+    // An empty quoted fragment is a piece: `$x""` keeps a final empty field.
+    if (empty.has(i)) { flush(); parts.push(textOf('', true)) }
+    if (i === value.length) break
+    const bare = mask[i] !== '1'
+    if (bare && (value[i] === '$' || value[i] === '`')) {
+      const found = expansionAt(value, i, mask[i] === '2')
+      if (found) { flush(); parts.push(found.part); i = found.end - 1; continue }
+    }
+    if (text !== '' && (mask[i] !== '0') !== quoted) flush()
+    quoted = mask[i] !== '0'
+    text += value[i]
+  }
+  flush()
+  return parts
+}
+
+const textOf = (value, quoted) => ({ type: 'text', value, ...(quoted ? { quoted: true } : {}) })
+
+// A substitution runs commands, so it holds commands: `foo `bar a b c`` names
+// `foo` and, inside its argument, `bar`. Writes are read rather than refused
+// here however the enclosing terminal is configured, since the commands inside
+// run when the substitution expands, not when the line is read. Bash parses a
+// backtick that late too, so a body that will not parse keeps its diagnostic
+// instead of taking the line down with it.
+function substitutionOf(source, mark) {
+  const { units, error } = parseAll(source, true)
   return {
-    type: 'word',
-    value: w.value,
-    ...(w.mask === null ? {} : { mask: w.mask }),
-    ...(w.empty ? { empty: w.empty } : {}),
+    type: 'substitution',
+    list: error === null ? listOf(units) : [],
+    ...(error === null ? {} : { error: error.message }),
+    ...mark,
+  }
+}
+
+// Re-read the construct from the source the tokenizer copied into the word.
+// It parsed once already, so the only question left is what it is.
+function expansionAt(value, at, quoted) {
+  const mark = quoted ? { quoted: true } : {}
+  if (value[at] === '`') {
+    const { raw, command } = readBacktickSubstitution(value, at)
+    return { part: substitutionOf(command, mark), end: at + raw.length }
+  }
+  const ref = readExpansion(value, at, 0, quoted)
+  if (!ref) return null
+  const end = at + ref.raw.length
+  if (ref.command !== undefined) return { part: substitutionOf(ref.command, mark), end }
+  if (ref.arithmetic !== undefined) return { part: { type: 'arithmetic', source: ref.arithmetic, ...mark }, end }
+  const { name, operator, word } = ref.parameter ?? { name: ref.name, operator: '' }
+  return {
+    part: {
+      type: 'parameter',
+      name,
+      ...(operator ? { operator } : {}),
+      ...(word === undefined ? {} : { operand: word }),
+      ...mark,
+    },
+    end,
   }
 }
 

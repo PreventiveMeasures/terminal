@@ -6,25 +6,72 @@ export type { Unsupported, UnsupportedKind } from './index.js'
 export type Operator = ';' | '&&' | '||'
 
 /**
- * A word expansion has yet to settle: a `$` or backtick quoting has not
- * disarmed, or a bare `~`, glob or brace. Anything else is already its final
- * text and appears as a plain string, so `'*'` is `"*"` while `*.js` is one of
- * these.
+ * A word expansion has yet to settle, in the pieces expansion works on: the
+ * literal runs, and the references and substitutions between them. Anything
+ * already final is not one of these but a plain string, so `'*'` is `"*"`
+ * while `*.js` is a word of one bare text part.
  */
 export interface Word {
   type: 'word'
-  /** What was written, with quotes removed; an expansion keeps its own source, so `"$x"` reads as `${x}`. */
+  parts: Part[]
+}
+
+/** One piece of a word. */
+export type Part = TextPart | ParameterPart | SubstitutionPart | ArithmeticPart
+
+/**
+ * Literal text, as written with its quotes removed. `quoted` marks text that
+ * expands to itself; bare text is still subject to `~`, `{a,b}` and the glob
+ * characters `*`, `?` and `[…]`, and to word splitting when a neighbouring
+ * expansion produces separators.
+ *
+ * An empty quoted part is a piece like any other, and a meaningful one:
+ * `$x""` keeps a final empty field that `$x` alone would not.
+ */
+export interface TextPart {
+  type: 'text'
   value: string
-  /**
-   * Which characters of `value` were quoted, one per UTF-16 unit: `0` bare,
-   * `1` hard-quoted, `2` inside double quotes, where substitutions still
-   * happen. Absent when none of it was quoted. An expansion's source carries
-   * `1` after its opening `$`, so a later pass reads it rather than expanding
-   * it twice.
-   */
-  mask?: string
-  /** Offsets where an empty quoted fragment (`""`, `''`) stood, which expansion must not lose: `$x""` keeps a final empty field. */
-  empty?: number[]
+  quoted?: true
+}
+
+/**
+ * `$x`, `${x}`, `${x:-default}`, `$?`, `$1`. `quoted` marks a reference
+ * inside double quotes, whose result is neither split nor globbed.
+ */
+export interface ParameterPart {
+  type: 'parameter'
+  /** The name, or the character a special parameter is spelled with: `x`, `?`, `1`, `@`. */
+  name: string
+  /** What the reference does beyond reading the value — `:-`, `:=`, `:?`, `:+`, `#`, `##`, `%`, `%%`, `/`, `//`, `:` for a substring, and `length` for `${#x}`. Absent for a plain reference. */
+  operator?: string
+  /** The operator's operand, as written: the default in `${x:-a b}`, the pattern in `${x##prefix}`. Absent when the operator takes none. */
+  operand?: string
+  quoted?: true
+}
+
+/**
+ * `$( … )` or `` ` … ` ``: commands, so the commands are what it holds.
+ * `foo `bar a b c`` names `foo`, and `bar` inside its argument.
+ *
+ * Bash parses a backtick when it expands it rather than when it reads the
+ * line, so a backtick body that does not parse carries its diagnostic here and
+ * an empty `list`, leaving the line itself readable — which is what running it
+ * does too. A `$( … )` body is parsed with the line, so a broken one fails the
+ * whole parse and never reaches this.
+ */
+export interface SubstitutionPart {
+  type: 'substitution'
+  list: Node[]
+  /** Why the body did not parse, when it did not. Absent otherwise. */
+  error?: string
+  quoted?: true
+}
+
+/** `$(( … ))`: the expression as written, which this parser does not read further. */
+export interface ArithmeticPart {
+  type: 'arithmetic'
+  source: string
+  quoted?: true
 }
 
 /** Final text, or the word that still has to become it. */
