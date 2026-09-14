@@ -60,6 +60,15 @@ export interface PatternPart {
 }
 
 /**
+ * A pattern the line settles the text of, which is every pattern but the one
+ * `[[ x == $y ]]` matches by — so this is what stands wherever a piece cannot,
+ * and reading its text needs no check that there is any.
+ */
+export interface StringPatternPart extends PatternPart {
+  pattern: string
+}
+
+/**
  * Braces this reading did not expand. Brace expansion needs nothing but the
  * text, so a word list arrives expanded — `a{b,c}` is the two words `ab` and
  * `ac` — and this is left for the two places that cannot be: a slot that takes
@@ -358,8 +367,12 @@ export interface ParseResult {
  * are joined from. Each says what it reaches for as plainly as a name does —
  * `ls *.js` is `['ls', { type: 'pattern', pattern: '*.js', multi: true }]` and `ls ~/bin`
  * is `['ls', { type: 'parts', parts: [{ type: 'variable', name: 'HOME', multi: false }, '/bin'] }]`.
+ *
+ * A pattern here is a {@link StringPatternPart}: the one pattern whose text a
+ * command has to run first stands on the pattern side of `[[ x == y ]]`, and
+ * a `[[ … ]]` is not a chain to summarize.
  */
-export type WordToken = string | PatternPart | VariablePart | TokenParts
+export type WordToken = string | StringPatternPart | VariablePart | TokenParts
 
 /** One token of a chain: a word, or the assignments a command carries. */
 export type Token = WordToken | AssignmentsToken
@@ -371,7 +384,7 @@ export type Token = WordToken | AssignmentsToken
  */
 export interface TokenParts {
   type: 'parts'
-  parts: Array<string | PatternPart | VariablePart>
+  parts: Array<string | StringPatternPart | VariablePart>
 }
 
 /**

@@ -284,6 +284,7 @@ export type {
   Pipeline,
   Redirect,
   Subshell,
+  StringPatternPart,
   SubstitutionPart,
   Summary,
   AssignmentsToken,
