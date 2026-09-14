@@ -2,7 +2,7 @@
 // redirects and pipelines may hide stderr or replace a failing exit status.
 // Ordinary command failures (missing files, no matches) stay off this feed.
 
-import { err } from './util.js'
+import { err } from './result.js'
 
 // Keep notes off public result/error fields and out of object spreads.
 const NOTE = Symbol('unsupported')

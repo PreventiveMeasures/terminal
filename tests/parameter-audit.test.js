@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { parseParameter } from '../src/shell/parameter.js'
+import { parseParameter } from '../src/shell/parameter-parse.js'
 import { unsupportedNote } from '../src/unsupported.js'
 
 describe('parameter names require a complete identifier', () => {

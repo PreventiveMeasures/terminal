@@ -302,10 +302,13 @@ function withTemporaries(prepared, ctx, fn) {
   }
 }
 
-// Expand the word list once. The loop variable persists after completion,
-// and nested break/continue signals propagate one level per enclosing loop.
+// Expand the word list once, behind the keyword: expansion reads argv[0] as
+// the command name, and a list whose first word is `export` would otherwise be
+// taken for a declaration. The loop variable persists after completion, and
+// nested break/continue signals propagate one level per enclosing loop.
+const FOR_KEYWORD = { value: 'for', mask: null }
 function runLoop(loop, ctx) {
-  const expanded = expandWords(loop.words, ctx)
+  const expanded = expandWords([FOR_KEYWORD, ...loop.words], ctx)
   const result = emptyOutput()
   const stream = { text: ctx.stdinLeft }
   ctx.loopDepth++

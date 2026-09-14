@@ -29,6 +29,10 @@
     ".": {
       "types": "./src/index.d.ts",
       "default": "./src/index.js"
+    },
+    "./parse.js": {
+      "types": "./src/parse.d.ts",
+      "default": "./src/parse.js"
     }
   },
   "files": [
@@ -50,6 +54,7 @@
     "src/awk/run.js",
     "src/awk/value.js",
     "src/bre.js",
+    "src/bytes.js",
     "src/charclass.js",
     "src/commands/base64.js",
     "src/commands/cat.js",
@@ -92,11 +97,13 @@
     "src/glob.js",
     "src/index.d.ts",
     "src/index.js",
-    "src/inspect.js",
     "src/mount.js",
     "src/notes.js",
     "src/numeric.js",
+    "src/parse.d.ts",
+    "src/parse.js",
     "src/regex-locale.js",
+    "src/result.js",
     "src/registry.js",
     "src/shell/aliases.js",
     "src/shell/arithmetic-ops.js",
@@ -113,6 +120,7 @@
     "src/shell/io.js",
     "src/shell/lex.js",
     "src/shell/output.js",
+    "src/shell/parameter-parse.js",
     "src/shell/parameter-pattern.js",
     "src/shell/parameter-transform.js",
     "src/shell/parameter.js",

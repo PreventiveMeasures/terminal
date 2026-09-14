@@ -9,133 +9,179 @@ const CORPUS = JSON.parse(readFileSync(new URL('./fixtures/source-tree-commands.
 const SOURCES = { 'a.txt': 'A\n', 'dir/b.txt': 'B\n' }
 const terminal = (opts = {}) => createTerminal(SOURCES, { mount: '/src', writable: '/tmp/', ...opts })
 const parse = (line, opts) => terminal(opts).parse(line)
-const named = (line, opts) => parse(line, opts).commands.map((c) => c.name)
-const resolved = (line, opts) => parse(line, opts).commands.map((c) => c.resolved)
 const verdict = (line, opts) => {
   const { ok, incomplete, error } = parse(line, opts)
   return { ok, incomplete, error }
 }
 
-describe('parse() reports the verdict on a line without running it', () => {
-  it('describes a line that parses', () => {
-    assert.deepEqual(terminal().parse('sort a.txt | uniq -c'), {
+// A caller's walk over the tree, and the test's own check that the tree is
+// enough to find what a line reaches for: every command, in source order.
+function commandNames(result) {
+  const out = []
+  const walk = (steps) => {
+    for (const step of steps) {
+      for (const stage of step.stages) {
+        if (stage.group) walk(stage.group)
+        else if (stage.loop) walk(stage.loop.body)
+        else if (stage.conditional) {
+          for (const branch of stage.conditional.branches) { walk(branch.condition); walk(branch.body) }
+          if (stage.conditional.otherwise) walk(stage.conditional.otherwise)
+        } else if (stage.words.length > 0) out.push(stage.words[0].value)
+      }
+    }
+  }
+  for (const unit of result.units) walk(unit)
+  return out
+}
+
+const named = (line, opts) => commandNames(parse(line, opts))
+
+describe('parse() hands back the line as the parser read it', () => {
+  it('describes a simple command', () => {
+    assert.deepEqual(terminal().parse('wc -l a.txt'), {
       ok: true,
       incomplete: false,
       error: null,
-      commands: [{ name: 'sort', resolved: 'sort' }, { name: 'uniq', resolved: 'uniq' }],
       unsupported: [],
+      units: [[{
+        gate: 'first',
+        negate: false,
+        bang: false,
+        stages: [{
+          words: [{ value: 'wc', mask: null }, { value: '-l', mask: null }, { value: 'a.txt', mask: null }],
+          assigns: [],
+          redirs: [],
+        }],
+      }]],
     })
   })
 
-  for (const line of ['', '   ', '\n\n', '# just a comment', 'x=1', 'x=1 y=2', '> /tmp/out', '[[ -f a.txt ]]']) {
-    it(`names no command in ${JSON.stringify(line)}`, () => {
-      assert.deepEqual(verdict(line), { ok: true, incomplete: false, error: null })
-      assert.deepEqual(named(line), [])
-    })
-  }
-
-  it('freezes both lists and every command', () => {
-    const result = terminal().parse('ls | grep x')
-    assert.ok(Object.isFrozen(result.commands))
-    assert.ok(Object.isFrozen(result.commands[0]))
-    assert.ok(Object.isFrozen(result.unsupported))
-  })
-})
-
-describe('parse() names the simple commands a line contains, in source order', () => {
-  for (const [line, names] of [
-    ['ls', ['ls']],
-    ['ls -l | grep x | wc -l', ['ls', 'grep', 'wc']],
-    ['echo a && cat a.txt || rm b', ['echo', 'cat', 'rm']],
-    ['! grep -q x a.txt', ['grep']],
-    ['x=1 ls; y=2 cat a.txt', ['ls', 'cat']],
-    ['cat a.txt > /tmp/out 2>&1', ['cat']],
-    ['{ ls; (cd dir && ls); }', ['ls', 'cd', 'ls']],
-    ['for f in a b; do echo "$f"; cat "$f"; done', ['echo', 'cat']],
-    ['if grep -q x a.txt; then head a.txt; else tail a.txt; fi', ['grep', 'head', 'tail']],
-    ['if false; then ls; elif true; then cat a.txt; fi', ['false', 'ls', 'true', 'cat']],
-    ['[[ -f a.txt ]] && wc -l a.txt', ['wc']],
-    ['[ -f a.txt ] && wc -l a.txt', ['[', 'wc']],
-    ['cat <<EOF | sort\nbody\nEOF', ['cat', 'sort']],
-    ['ls\ncat a.txt\nwc -l a.txt', ['ls', 'cat', 'wc']],
-  ]) {
-    it(`names ${names.join(', ') || 'nothing'} in ${JSON.stringify(line)}`, () => {
-      assert.deepEqual(named(line), names)
-    })
-  }
-
-  it('descends into nested blocks in the order they are written', () => {
-    const line = 'if ls; then for f in a; do { grep x; (sort); }; done; fi'
-    assert.deepEqual(named(line), ['ls', 'grep', 'sort'])
+  it('gates and pipes a chain, keeping source order', () => {
+    const [unit] = parse('! ls | grep x && cat a.txt || rm b; true').units
+    assert.deepEqual(unit.map((step) => [step.gate, step.negate, step.stages.length]), [
+      ['first', true, 2], ['and', false, 1], ['or', false, 1], ['seq', false, 1],
+    ])
+    assert.deepEqual(named('! ls | grep x && cat a.txt || rm b; true'), ['ls', 'grep', 'cat', 'rm', 'true'])
   })
 
-  // Which of them run is the gates' business; parsing only reads the line.
-  for (const line of ['false && rm a.txt', 'true || rm a.txt', 'if false; then rm a.txt; fi', 'for f in; do rm a.txt; done']) {
-    it(`names the command a gate will skip in ${JSON.stringify(line)}`, () => {
-      assert.ok(named(line).includes('rm'))
-    })
-  }
+  it('keeps each line of a multi-line script as its own input unit', () => {
+    const result = parse('ls\ncat a.txt')
+    assert.equal(result.units.length, 2)
+    assert.deepEqual(result.units.map((unit) => unit.length), [1, 1])
+    assert.deepEqual(commandNames(result), ['ls', 'cat'])
+  })
 
-  // A command named in argument position stays an argument.
-  for (const [line, names] of [['xargs rm', ['xargs']], ['find . -exec rm {} +', ['find']], ['echo $(rm a.txt)', ['echo']], ['echo `rm a.txt`', ['echo']]]) {
-    it(`names only ${names.join(', ')} in ${JSON.stringify(line)}`, () => {
-      assert.deepEqual(named(line), names)
-    })
-  }
-})
+  it('separates a subshell from a brace group', () => {
+    const [[step]] = parse('(cd dir) ; { cd dir; }').units.map((unit) => unit)
+    assert.equal(step.stages[0].isolate, true)
+    const second = parse('{ cd dir; }').units[0][0].stages[0]
+    assert.equal(second.isolate, false)
+    assert.equal(second.group.length, 1)
+  })
 
-describe('parse() names a command only when quoting, not expansion, settles it', () => {
-  for (const [line, name] of [
-    ['ls', 'ls'],
-    ['"ls"', 'ls'],
-    ["l''s", 'ls'],
-    ['\\ls', 'ls'],
-    ["'$x'", '$x'],
-    ["'*'", '*'],
-    ['\\~x', '~x'],
-    ['[ -f a.txt ]', '['],
-    ['[abc x', '[abc'],
-  ]) {
-    it(`reads ${JSON.stringify(line)} as ${JSON.stringify(name)}`, () => {
-      assert.deepEqual(named(line), [name])
-    })
-  }
+  it("carries a loop's variable, its unexpanded list and its body", () => {
+    const { loop } = parse('for f in *.js "$x"; do wc -l "$f"; done').units[0][0].stages[0]
+    assert.equal(loop.name, 'f')
+    assert.deepEqual(loop.words, [{ value: '*.js', mask: null }, { value: '${x}', mask: '2222' }])
+    assert.deepEqual(commandNames({ units: [loop.body] }), ['wc'])
+  })
 
-  for (const line of ['$tool a', '${tool} a', '"$tool" a', '`which ls`', '$(which ls)', 'l$s', 'ls*', '?s', '[lc]s', '[a\\]b] x', '~/bin/tool', '{ls,cat}']) {
-    it(`leaves ${JSON.stringify(line)} unnamed`, () => {
-      assert.deepEqual(parse(line).commands, [{ name: null, resolved: null }])
-    })
-  }
-})
+  it('keeps an empty for list empty', () => {
+    assert.deepEqual(parse('for f in; do ls; done').units[0][0].stages[0].loop.words, [])
+  })
 
-describe('parse() resolves names against the terminal that would run them', () => {
-  it('strips bin prefixes that reach a registered command', () => {
-    assert.deepEqual(parse('/bin/ls | /usr/bin/grep x').commands, [
-      { name: '/bin/ls', resolved: 'ls' },
-      { name: '/usr/bin/grep', resolved: 'grep' },
+  it('orders if branches, each condition ahead of its body', () => {
+    const { conditional } = parse('if ls; then cat a.txt; elif grep -q x a.txt; then head a.txt; else tail a.txt; fi').units[0][0].stages[0]
+    assert.deepEqual(conditional.branches.map((b) => [commandNames({ units: [b.condition] }), commandNames({ units: [b.body] })]), [
+      [['ls'], ['cat']], [['grep'], ['head']],
+    ])
+    assert.deepEqual(commandNames({ units: [conditional.otherwise] }), ['tail'])
+    assert.equal(parse('if ls; then cat a.txt; fi').units[0][0].stages[0].conditional.otherwise, null)
+  })
+
+  it('reads [[ … ]] as an expression rather than a command', () => {
+    const { test, words } = parse('[[ -f a.txt && "$x" == y ]]').units[0][0].stages[0]
+    assert.deepEqual(words, [])
+    assert.deepEqual(test, {
+      kind: 'and',
+      left: { kind: 'unary', op: '-f', word: { kind: 'word', value: 'a.txt', mask: null, quoted: false } },
+      right: {
+        kind: 'binary',
+        op: '==',
+        left: { kind: 'word', value: '${x}', mask: '2222', quoted: true },
+        right: { kind: 'word', value: 'y', mask: null, quoted: false },
+      },
+    })
+  })
+
+  it('keeps assignments unexpanded, whether they stand alone or lead a command', () => {
+    assert.deepEqual(parse('x=1 y=$z').units[0][0].stages[0], {
+      words: [],
+      assigns: [{ name: 'x', word: { value: '1', mask: null } }, { name: 'y', word: { value: '$z', mask: null } }],
+      redirs: [],
+    })
+    const prefixed = parse('x=1 ls').units[0][0].stages[0]
+    assert.deepEqual(prefixed.assigns.map((a) => a.name), ['x'])
+    assert.deepEqual(prefixed.words.map((w) => w.value), ['ls'])
+  })
+
+  it('keeps quoting per character, and an expansion as its own source', () => {
+    const words = parse('echo "a $x" \'$y\' "$(date)"').units[0][0].stages[0].words
+    assert.deepEqual(words, [
+      { value: 'echo', mask: null },
+      { value: 'a ${x}', mask: '222222' },
+      { value: '$y', mask: '11' },
+      { value: '$(date)', mask: '2111111' },
     ])
   })
 
-  for (const line of ['frobnicate', '/usr/bin/frobnicate', 'shopt -s nullglob', './ls', '/bin/cd']) {
-    it(`resolves nothing for ${JSON.stringify(line)}`, () => {
-      assert.deepEqual(resolved(line), [null])
-      assert.equal(parse(line).ok, true)
+  it('keeps empty quoted fragments that expansion must not lose', () => {
+    assert.deepEqual(parse('echo "$x"""').units[0][0].stages[0].words[1], { value: '${x}', mask: '2222', empty: [4] })
+  })
+
+  it('reads every redirect form, in source order', () => {
+    const line = 'cat < a.txt > /tmp/out 2>> /tmp/log &> /tmp/both 2>&1 2>&- <<<here <<EOF\nbody\nEOF'
+    assert.deepEqual(parse(line).units[0][0].stages[0].redirs, [
+      { fd: 0, op: 'read', word: { value: 'a.txt', mask: null } },
+      { fd: 1, op: 'to', target: '/tmp/out', both: false, append: false, label: '>' },
+      { fd: 2, op: 'to', target: '/tmp/log', both: false, append: true, label: '2>>' },
+      { fd: 1, op: 'to', target: '/tmp/both', both: true, append: false, label: '&>' },
+      { fd: 2, op: 'dup', toFd: 1 },
+      { fd: 2, op: 'close' },
+      { fd: 0, op: 'herestring', word: { value: 'here', mask: null } },
+      { fd: 0, op: 'text', body: 'body\n', expand: true },
+    ])
+  })
+
+  it('marks a redirect target expansion has yet to settle', () => {
+    assert.deepEqual(parse('echo a > $out').units[0][0].stages[0].redirs, [
+      { fd: 1, op: 'to', word: { value: '$out', mask: null }, both: false, append: false, label: '>' },
+    ])
+  })
+
+  it('leaves a quoted here-document body unexpanded', () => {
+    assert.deepEqual(parse("cat <<'EOF'\n$x\nEOF").units[0][0].stages[0].redirs, [{ fd: 0, op: 'text', body: '$x\n', expand: false }])
+  })
+
+  it('warns about a here-document the input ended before its delimiter', () => {
+    const [step] = parse('cat <<EOF\nbody').units[0]
+    assert.match(step.warnings, /here-document delimited by end-of-file/u)
+    assert.equal(parse('cat <<EOF\nbody\nEOF').units[0][0].warnings, undefined)
+  })
+
+  it('gives the caller a tree of its own, not shared state', () => {
+    const t = terminal()
+    const first = t.parse('wc -l a.txt')
+    first.units[0][0].stages[0].words[1].value = '-c'
+    assert.equal(t.parse('wc -l a.txt').units[0][0].stages[0].words[1].value, '-l')
+    assert.equal(t.run('wc -l a.txt').stdout, '1 a.txt\n')
+  })
+
+  for (const line of ['', '   ', '\n\n', '# just a comment']) {
+    it(`parses ${JSON.stringify(line)} as no units at all`, () => {
+      assert.deepEqual(parse(line), { ok: true, incomplete: false, error: null, units: [], unsupported: [] })
     })
   }
-
-  it('resolves wired commands like built-ins', () => {
-    const opts = { commands: { sha256sum: () => '', quiet: { run: () => '', hidden: true } } }
-    assert.deepEqual(resolved('sha256sum a.txt | quiet', opts), ['sha256sum', 'quiet'])
-    assert.deepEqual(resolved('sha256sum a.txt'), [null])
-  })
-
-  it('agrees with what run() dispatches', () => {
-    const t = terminal()
-    for (const line of ['ls', '/bin/ls', 'frobnicate', '/bin/cd']) {
-      const known = t.parse(line).commands[0].resolved !== null
-      assert.equal(t.run(line).unsupported.length === 0, known, line)
-    }
-  })
 })
 
 describe('parse() reports a syntax error as run() would, and runs nothing', () => {
@@ -150,7 +196,7 @@ describe('parse() reports a syntax error as run() would, and runs nothing', () =
   ]) {
     it(`reports ${JSON.stringify(error)} for ${JSON.stringify(line)}`, () => {
       assert.deepEqual(verdict(line), { ok: false, incomplete: false, error })
-      assert.deepEqual(named(line), [])
+      assert.deepEqual(parse(line).units, [])
       assert.equal(terminal().run(line).stderr, `error: ${error}\n`)
     })
   }
@@ -188,15 +234,10 @@ describe('parse() separates input it could still be handed more of', () => {
     })
   }
 
-  it('keeps the commands of the units that parsed ahead of the error', () => {
+  it('keeps the units that parsed ahead of the error', () => {
     const result = parse('ls\ncat a.txt\nfor f in a; do')
-    assert.deepEqual(result, {
-      ok: false,
-      incomplete: true,
-      error: 'for: missing `done`',
-      commands: [{ name: 'ls', resolved: 'ls' }, { name: 'cat', resolved: 'cat' }],
-      unsupported: [],
-    })
+    assert.deepEqual(verdict('ls\ncat a.txt\nfor f in a; do'), { ok: false, incomplete: true, error: 'for: missing `done`' })
+    assert.deepEqual(commandNames(result), ['ls', 'cat'])
   })
 })
 
@@ -213,6 +254,7 @@ describe('parse() reports the gaps parsing itself finds', () => {
     'for ((i = 0; i < 3; i++)); do :; done',
     'x=(a b)',
     'echo a 3> /tmp/out',
+    '[[ a =~ b ]]',
   ]) {
     it(`matches run() on ${JSON.stringify(line)}`, () => {
       const parsed = terminal().parse(line)
@@ -223,14 +265,6 @@ describe('parse() reports the gaps parsing itself finds', () => {
     })
   }
 
-  it('refuses a literal redirect target the filesystem would not accept', () => {
-    const readOnly = createTerminal(SOURCES, { mount: '/src' })
-    const parsed = readOnly.parse('echo a > out')
-    assert.equal(parsed.ok, false)
-    assert.deepEqual(parsed.unsupported, [{ kind: 'feature', command: null, detail: '>', message: '`>` cannot write to `out`: the filesystem is read-only' }])
-    assert.deepEqual(readOnly.parse('echo a > /dev/null').unsupported, [])
-  })
-
   // Dispatch, expansion and the commands themselves are never reached here.
   for (const line of ['frobnicate', 'ls --frobnicate', 'echo a > /etc/passwd', 'echo `while true; do :; done`', 'sed -e "s/a/b/w f" a.txt']) {
     it(`leaves ${JSON.stringify(line)} to run()`, () => {
@@ -238,6 +272,15 @@ describe('parse() reports the gaps parsing itself finds', () => {
       assert.ok(terminal().run(line).unsupported.length > 0)
     })
   }
+
+  it("applies the terminal's own write policy, as run() does", () => {
+    const readOnly = createTerminal(SOURCES, { mount: '/src' })
+    const parsed = readOnly.parse('echo a > out')
+    assert.equal(parsed.ok, false)
+    assert.deepEqual(parsed.unsupported, [{ kind: 'feature', command: null, detail: '>', message: '`>` cannot write to `out`: the filesystem is read-only' }])
+    assert.deepEqual(readOnly.parse('echo a > /dev/null').unsupported, [])
+    assert.equal(parse('echo a > /tmp/out').ok, true)
+  })
 })
 
 describe('parse() changes nothing', () => {
@@ -254,7 +297,7 @@ describe('parse() changes nothing', () => {
 
   it('reads a line that would have ended the shell', () => {
     const t = terminal()
-    assert.deepEqual(t.parse('exit 7').commands, [{ name: 'exit', resolved: 'exit' }])
+    assert.deepEqual(commandNames(t.parse('exit 7')), ['exit'])
     assert.equal(t.run('echo still here').stdout, 'still here\n')
   })
 
@@ -268,15 +311,16 @@ describe('parse() changes nothing', () => {
 })
 
 // Every one of these runs over the real trees with an empty `unsupported`
-// list, so a name parsing failed to settle, or resolved to nothing, would be
-// this reading of the line falling short of what running it establishes.
+// list, so a line the parser could not read, or a tree its commands could not
+// be walked out of, would be this reading falling short of running it.
 describe('parse() settles every command in the source-analysis corpus', () => {
   for (const { id, purpose, command } of CORPUS) {
     it(`${id}. ${purpose}`, () => {
       const parsed = terminal().parse(command)
       assert.deepEqual({ ok: parsed.ok, error: parsed.error, unsupported: parsed.unsupported }, { ok: true, error: null, unsupported: [] }, command)
-      assert.ok(parsed.commands.length > 0, command)
-      for (const parsedCommand of parsed.commands) assert.equal(parsedCommand.resolved, parsedCommand.name, command)
+      const names = commandNames(parsed)
+      assert.ok(names.length > 0, command)
+      for (const name of names) assert.equal(terminal().run(`which ${name}`).exitCode, 0, `${command}: ${name}`)
     })
   }
 })

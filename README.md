@@ -22,7 +22,7 @@ const terminal = createTerminal({
 
 terminal.run('grep -rn oak src').stdout  // 'src/app.js:1:export const name = "oak"\n'
 terminal.complete('cat src/a')           // ['cat src/app.js']
-terminal.parse('wc -l src/app.js')       // { ok: true, commands: [{ name: 'wc', … }], … }
+terminal.parse('wc -l src/app.js')       // { ok: true, units: [ [ … ] ], … }, running nothing
 terminal.run('cd src; wc -l app.js')     // { stdout: '1 app.js\n', exitCode: 0, cwd: '/src', … }
 ```
 
@@ -50,30 +50,48 @@ terminal.run('shopt -s nullglob').unsupported
 ## Reading a line before running it
 
 `parse(line)` is the parser on its own: nothing runs, nothing changes — not the
-working directory, the variables, or the overlay — and you get the shell's
-verdict on the input.
+working directory, the variables, or the overlay — and you get back what the
+parser made of the input.
 
 ```js
 terminal.parse('sort input | uniq -c')
-// { ok: true, incomplete: false, error: null, unsupported: [],
-//   commands: [{ name: 'sort', resolved: 'sort' }, { name: 'uniq', resolved: 'uniq' }] }
+// { ok: true, incomplete: false, error: null, unsupported: [], units: [ [ {
+//   gate: 'first', negate: false, bang: false, stages: [
+//     { words: [{ value: 'sort', mask: null }, { value: 'input', mask: null }], assigns: [], redirs: [] },
+//     { words: [{ value: 'uniq', mask: null }, { value: '-c', mask: null }], assigns: [], redirs: [] },
+//   ] } ] ] }
 
 terminal.parse('for f in src/*.js; do').incomplete   // true — ask for another line
 terminal.parse('echo )').error                       // 'unexpected `)`'
 terminal.parse('while :; do echo x; done').unsupported[0].detail  // 'while'
 ```
 
-`commands` is what the line *names*, in source order, through pipelines, gates,
-subshells, groups, loop bodies and `if` branches. A name only expansion can
-produce — `$tool`, `` `which ls` ``, `~/bin/x`, a glob — is `null`, `resolved`
-is `null` for a name this terminal has nothing under (`/bin/grep` resolves to
-`grep`), and a command inside `$( … )` stays part of the word it sits in. Which
-of them run is still up to the gates: this is a reading of the line, not a
-permission boundary.
+`units` is the tree this terminal's own engine runs: gated steps, pipeline
+stages, words with the quoting of each character, assignments, redirects, and
+the groups, loops and conditionals nested in them — enough to render the line,
+walk it, or execute it elsewhere. Bash parses one input unit and runs it before
+reading the next, which is why a line that fails partway still carries the
+units ahead of the error.
 
-Only parsing happens, so only parsing's answers come back. An unregistered
-command, an option a command refuses, a gap an expansion hits — `run()` finds
-those.
+## The parser on its own
+
+The parser is published separately, for a caller with no source tree to mount:
+
+```js
+import { parse } from '@preventive/terminal/parse.js'
+
+parse('rg foo | wc -l').units[0][0].stages.map((stage) => stage.words[0].value)  // ['rg', 'wc']
+```
+
+That entry point loads the parser and its lexers and nothing else — no
+commands, no filesystem, no expansion — and answers as `terminal.parse()` does
+but for one thing: it never refuses a redirect. Where a line may write is a
+property of a terminal, so `echo a > out` parses here and is refused by a
+terminal whose filesystem is read-only.
+
+Either way, only parsing happens, so only parsing's answers come back. Whether
+a command exists, what an option means, and what an expansion produces are
+`run()`'s to find.
 
 ## Writing
 
