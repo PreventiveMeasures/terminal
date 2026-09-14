@@ -6,6 +6,7 @@
 
 import { assignmentOf, sliceWord } from './word.js'
 import { NAME_RE } from './tokenize.js'
+import { tokenLabel } from './lex.js'
 import { UnsupportedError } from '../unsupported.js'
 import { advanceAliases } from './aliases.js'
 import { IncompleteInput, incomplete, readAll, readLine, readUnits, tokenAt } from './parse-input.js'
@@ -59,7 +60,7 @@ const bareBang = (step, stage) => step.bang && step.stages.length === 0 && comma
 const commandPosition = (stage) => !isBlock(stage) && stage.words.length === 0 && stage.assigns.length === 0
 
 // Reserved words, recognized unquoted and in command position only.
-const KEYWORDS = new Set(['for', 'do', 'done', 'if', '{', '}', '!'])
+const KEYWORDS = new Set(['for', 'while', 'until', 'do', 'done', 'if', '{', '}', '!'])
 
 // A closer outside its expected block is a syntax error, not an unknown command.
 const CLOSERS = new Set(['then', 'else', 'elif', 'fi', 'esac', 'in'])
@@ -67,8 +68,6 @@ const CLOSERS = new Set(['then', 'else', 'elif', 'fi', 'esac', 'in'])
 // Reserved constructs receive feature diagnostics, not command-not-found.
 // They are special only when unquoted and in command position.
 const UNIMPLEMENTED_BLOCKS = new Map([
-  ['while', '`while` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
-  ['until', '`until` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
   ['case', '`case` statements are not supported; gate on exit status with `&&` / `||` instead'],
   ['select', '`select` loops are not supported'],
   ['function', 'shell functions are not supported'],
@@ -152,7 +151,7 @@ function buildSteps(p, end) {
   }
   if (end === ')') throw incomplete('unmatched `(`')
   if (end === '}') throw incomplete('unmatched `{`')
-  if (end === 'done') throw incomplete('for: missing `done`')
+  if (end === 'do' || end === 'done') throw incomplete(`${p.loop}: missing \`${end}\``)
   if (end) throw incomplete(`if: missing \`${end === 'then' ? 'then' : 'fi'}\``)
   if (!p.emptyStage && !isBlock(stage) && !isCommand(stage) && ['and', 'or', 'pipe', 'pipe_err'].includes(raw.at(-1)?.kind)) throw incomplete('empty pipeline stage')
   if (ENDS_LIST.has(raw.at(-1)?.kind)) steps.pop()
@@ -209,7 +208,7 @@ function commandWord(t, p, step, stage) {
   if (v === 'done') throw new Error('unexpected `done`')
   if (v === 'do') throw new Error('unexpected `do`')
   if (v === 'if') stage.conditional = parseConditional(p)
-  else stage.loop = parseFor(p)
+  else stage.loop = v === 'for' ? parseFor(p) : parseWhile(p, v)
   return true
 }
 
@@ -239,6 +238,8 @@ function parseConditional(p) {
 // parameter loops remain explicitly unsupported.
 function parseFor(p) {
   const { raw } = p
+  const outer = p.loop
+  p.loop = 'for'
   const nameTok = tokenAt(p)
   if (nameTok?.kind === 'paren_open') throw new UnsupportedError('feature', 'for ((', 'arithmetic `for ((…))` loops are not supported; use `for NAME in WORD...`')
   if (nameTok === undefined || nameTok.kind !== 'word') throw new Error('for: expected a variable name')
@@ -274,7 +275,23 @@ function parseFor(p) {
   }
   p.i++
   skipNewlines(p)
-  return { name, words, body: buildSteps(p, 'done') }
+  const loop = { name, words, body: buildSteps(p, 'done') }
+  p.loop = outer
+  return loop
+}
+
+// `while LIST; do LIST; done`, and `until`, which runs its body for as long
+// as the condition fails instead. The keyword stays on the cursor for the
+// diagnostics a missing `do` or `done` reports.
+function parseWhile(p, keyword) {
+  const outer = p.loop
+  p.loop = keyword
+  skipNewlines(p)
+  const condition = buildSteps(p, 'do')
+  skipNewlines(p)
+  const loop = { until: keyword === 'until', condition, body: buildSteps(p, 'done') }
+  p.loop = outer
+  return loop
 }
 
 // Block-opening keywords allow newlines before their lists, but not semicolons.
@@ -286,33 +303,16 @@ function isWord(t, value) {
   return t !== undefined && t.kind === 'word' && !t.quoted && t.value === value
 }
 
-// The token as the user would have typed it, for error messages. A
-// quoted word keeps its quotes, so a `"do"` that failed to be the
-// keyword is not reported as `do`.
-const LABELS = { semi: ';', dsemi: ';;', pipe: '|', pipe_err: '|&', and: '&&', or: '||', amp: '&', paren_open: '(', paren_close: ')' }
-const REDIR_LABELS = { write: '>', append: '>>', read: '<', heredoc: '<<', herestring: '<<<', both: '&>', bothAppend: '&>>', dup: '>&', close: '>&-' }
-function tokenLabel(t) {
-  if (t.kind === 'word') return t.quoted ? `"${t.value}"` : t.value
-  if (t.kind === 'redir') {
-    const base = REDIR_LABELS[t.op]
-    if (t.op === 'both' || t.op === 'bothAppend') return base
-    const fd = t.fd === (t.op === 'read' || t.op === 'heredoc' || t.op === 'herestring' ? 0 : 1) ? '' : String(t.fd)
-    if (t.op === 'dup') return `${fd}${t.fd === 0 ? '<&' : '>&'}${t.toFd}`
-    if (t.op === 'close') return `${fd}${t.fd === 0 ? '<&-' : '>&-'}`
-    return fd + base
-  }
-  return LABELS[t.kind]
-}
-
 // A trailing ';' creates an empty tail to discard, while trailing &&/||
 // must remain invalid. Redirect-only stages are not empty; a truly empty
 // block and a bare '!' before a closer have their own syntax errors.
-const EMPTY_BLOCK_ERRORS = { ')': 'empty subshell `()`', '}': 'empty group `{ }`', done: 'for: empty loop body' }
+const EMPTY_BLOCK_ERRORS = { ')': 'empty subshell `()`', '}': 'empty group `{ }`' }
+const emptyLoop = (p, end) => (end === 'do' ? `${p.loop}: empty condition` : end === 'done' ? `${p.loop}: empty loop body` : end === 'then' ? 'if: empty condition' : 'if: empty branch body')
 
 function finishBlock(p, steps, stage, end) {
   const lastStep = steps.at(-1)
   const emptyTail = commandPosition(stage) && stage.redirs.length === 0 && lastStep.stages.length === 0
-  if (emptyTail && steps.length === 1) throw new Error(end === 'then' ? 'if: empty condition' : EMPTY_BLOCK_ERRORS[end] ?? 'if: empty branch body')
+  if (emptyTail && steps.length === 1) throw new Error(EMPTY_BLOCK_ERRORS[end] ?? emptyLoop(p, end))
   // `{ echo a; ! }`: bash wants a separator after a bare `!`.
   if (emptyTail && lastStep.bang) throw new Error('syntax error near unexpected token after `!`')
   if (emptyTail && lastStep.gate === 'seq') steps.pop()

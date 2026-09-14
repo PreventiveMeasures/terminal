@@ -282,6 +282,24 @@ export interface ForLoop extends NodeBase {
   list: Node[]
 }
 
+/**
+ * `while LIST; do LIST; done`, and `until`, which reads the same test the
+ * other way round: `while` runs its body for as long as the condition
+ * succeeds, `until` for as long as it fails.
+ *
+ * The condition runs before every turn, so it runs at least once and its
+ * output is the loop's. A loop whose body never runs reports 0. Nothing runs
+ * beside a line in this terminal, so one that never ends would never return:
+ * past a bound no line means to cross, `run()` reports the gap `loop limit`.
+ */
+export interface WhileLoop extends NodeBase {
+  type: 'while' | 'until'
+  /** The list whose status decides another turn. */
+  condition: Node[]
+  /** The loop body. */
+  list: Node[]
+}
+
 /** One `if`/`elif` arm: the list whose status decides, and the list it guards. */
 export interface Branch {
   condition: Node[]
@@ -304,7 +322,7 @@ export interface Test extends NodeBase {
 }
 
 /** One command in a list. */
-export type Node = Command | Pipeline | Subshell | Group | ForLoop | If | Test
+export type Node = Command | Pipeline | Subshell | Group | ForLoop | WhileLoop | If | Test
 
 /** `[[ a && b ]]`, `[[ a || b ]]`. */
 export interface ConditionJunction {
@@ -372,7 +390,7 @@ export interface ParseResult {
   list: Node[]
   /**
    * Gaps this implementation has, that parsing itself reached: refused shell
-   * constructs (`while`, `case`, `((`), unsupported `${…}` operators and
+   * constructs (`case`, `select`, `((`), unsupported `${…}` operators and
    * `[[ … ]]` forms, a `~alice` home this shell cannot look up. Frozen and
    * deduplicated, in the shape a run reports.
    *
@@ -468,7 +486,7 @@ export interface TokenAssignment {
 export type Chain = ChainRow[]
 
 /** One row of a {@link Chain}: a command's tokens, or the block that stands where one would. */
-export type ChainRow = Token[] | ChainParens | ChainBraces | ChainFor
+export type ChainRow = Token[] | ChainParens | ChainBraces | ChainFor | ChainWhile
 
 /**
  * A `( … )` a chain runs: the commands inside, summarized as a line of their
@@ -500,6 +518,19 @@ export interface ChainParens {
 export interface ChainBraces {
   type: 'braces'
   /** What it runs, summarized as a line of its own. */
+  summary: Summary
+}
+
+/**
+ * A `while` or `until` a chain runs: the list it repeats and the list it asks
+ * before every turn, each summarized as a line of its own —
+ * `while read -r f; do wc -l; done` is one row holding both.
+ */
+export interface ChainWhile {
+  type: 'while' | 'until'
+  /** What it runs to decide another turn, summarized as a line of its own. */
+  condition: Summary
+  /** The loop body, summarized as a line of its own. */
   summary: Summary
 }
 

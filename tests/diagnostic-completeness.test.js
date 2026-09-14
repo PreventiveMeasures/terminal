@@ -143,7 +143,7 @@ describe('diagnostic completeness — runtime and parser limitations', () => {
     ['echo $((a[0]+2))', 'arithmetic arrays'],
     ['cat <(cat f)', '<('],
     ['cat f > out', '>'],
-    ['while true; do cat f; done', 'while'],
+    ['while true; do case x in a) :;; esac; done', 'case'],
     ['fn() { cat f; }; fn', 'function'],
   ]) {
     it(command, () => {

@@ -82,10 +82,18 @@ function stageOf(stage) {
 // `( list )`, `{ list; }`, `do list; done`, `then list`.
 function blockOf(stage) {
   if (stage.group) return { type: stage.isolate ? 'subshell' : 'group', list: listFrom(stage.group) }
-  if (stage.loop) return { type: 'for', name: stage.loop.name, words: stage.loop.words.flatMap(valuesOf), list: listFrom(stage.loop.body) }
+  if (stage.loop) return loopOf(stage.loop)
   if (stage.conditional) return ifOf(stage.conditional)
   if (stage.test) return { type: 'test', expression: conditionOf(stage.test) }
   return { type: 'command', argv: stage.words.flatMap(valuesOf) }
+}
+
+// A loop is its body and what decides another turn of it: the words a `for`
+// takes one at a time, or the list a `while` runs to ask, which `until` reads
+// the other way round.
+function loopOf(loop) {
+  if (loop.words) return { type: 'for', name: loop.name, words: loop.words.flatMap(valuesOf), list: listFrom(loop.body) }
+  return { type: loop.until ? 'until' : 'while', condition: listFrom(loop.condition), list: listFrom(loop.body) }
 }
 
 function ifOf(conditional) {

@@ -95,8 +95,8 @@ describe('if parser errors', () => {
   }
 
   it('retains diagnostics for unsupported syntax nested in conditionals', () => {
-    assert.throws(() => parseLine('if true; then while true; do echo no; done; fi'), (error) => {
-      assert.equal(unsupportedNote(error).detail, 'while')
+    assert.throws(() => parseLine('if true; then case x in a) echo no;; esac; fi'), (error) => {
+      assert.equal(unsupportedNote(error).detail, 'case')
       return true
     })
   })

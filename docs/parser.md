@@ -238,6 +238,16 @@ parentheses are for — `(cd dir)` keeps its row, since the parentheses are
 what stops the `cd` reaching the shell, while `{ cd dir; }` is the `cd`
 itself.
 
+A `while` holds two lists — what it repeats and what it asks before every
+turn — and `until` reads that question the other way round:
+
+```js
+summarize('while test -e lock; do sleep 1; done')
+// [ [ { type: 'while',
+//        condition: [[['test', '-e', 'lock']]],
+//        summary: [[['sleep', '1']]] } ] ]
+```
+
 A `for` is a list of its own as well, run once for each word after `in`:
 
 ```js

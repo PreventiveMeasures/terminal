@@ -66,9 +66,11 @@ terminal.run('echo x > out').exitCode                       // 1, and `>` refuse
 
 ## What it runs
 
-Pipelines, `&&`/`||`/`;`/`!`, subshells and groups, `if`, `for … in`, `[[ … ]]`
-and `test`, redirects and heredocs, brace expansion, globs with bracket
-expressions, `$(…)` and backticks, `$(( … ))`, and the `${…}` family.
+Pipelines, `&&`/`||`/`;`/`!`, subshells and groups, `if`, `for … in`,
+`while` / `until`, `[[ … ]]` and `test`, redirects and heredocs, brace
+expansion, globs with bracket expressions, `$(…)` and backticks, `$(( … ))`,
+and the `${…}` family. A loop that never ends is stopped and reported, since
+nothing here runs beside the line.
 
 `ls` `cd` `cat` `grep` `egrep` `fgrep` `sed` `awk` `find` `head` `tail` `wc`
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`

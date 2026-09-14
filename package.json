@@ -120,6 +120,7 @@
     "src/shell/arithmetic-parse.js",
     "src/shell/arithmetic.js",
     "src/shell/bindings.js",
+    "src/shell/blocks.js",
     "src/shell/braces.js",
     "src/shell/builtins.js",
     "src/shell/capture.js",

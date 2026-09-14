@@ -30,7 +30,10 @@ function inspectStage(stage, state) {
   if (stage.group) return inspect(stage.group, state)
   if (stage.conditional) return conditional(stage.conditional, state)
   if (stage.loop) {
-    if (stage.loop.words.length > 0) {
+    // A `while` asks before every turn, so its condition always runs; a `for`
+    // with no words never runs its body, and neither loop is known to.
+    if (stage.loop.condition) inspect(stage.loop.condition, state)
+    if (stage.loop.words === undefined || stage.loop.words.length > 0) {
       const before = new Set(state.aliases)
       inspect(stage.loop.body, state)
       state.aliases = union(before, state.aliases)

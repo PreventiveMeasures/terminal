@@ -153,8 +153,8 @@ export interface CreateTerminalOptions {
  * - `option` — a registered command was handed an option it does not
  *   implement, or explicitly rejects.
  * - `feature` — a construct this terminal recognizes and deliberately
- *   goes no further on: `&` backgrounding, `while` / `if` / `case` and
- *   the other shell blocks it does not implement, command substitution
+ *   goes no further on: `&` backgrounding, `case` / `select` and the other
+ *   shell blocks it does not implement, a loop that never ends, command substitution
  *   and arithmetic, the `${…}` parameter-expansion operators, shell
  *   builtins it lacks (`source`, `eval`, …), a variable
  *   nothing set (there is no environment: `$PATH` expands to nothing,
@@ -262,6 +262,7 @@ export type {
   ChainFor,
   ChainParens,
   ChainRow,
+  ChainWhile,
   Branch,
   Chain,
   CloseRedirect,
@@ -302,6 +303,7 @@ export type {
   TokenPiece,
   Value,
   VariablePart,
+  WhileLoop,
   WordToken,
 } from './parse.js'
 

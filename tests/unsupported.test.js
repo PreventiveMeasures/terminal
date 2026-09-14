@@ -371,11 +371,21 @@ describe('run().unsupported — shell constructs', () => {
   const t = () => createTerminal({ 'f.txt': 'a\n' })
   const detailsOf = (line) => t().run(line).unsupported.map((u) => u.detail)
 
+  // Nothing runs beside a line here, so a loop that never ends would never
+  // return. What it ran before the bound stands; the rest is a gap.
+  it('stops a loop that would never end, keeping what it printed', () => {
+    const r = t().run('while true; do echo x; done')
+    assert.equal(r.stdout.split('\n').length - 1, 10_000)
+    assert.equal(r.exitCode, 1)
+    assert.deepEqual(r.unsupported, [{ kind: 'feature', command: null, detail: 'loop limit', message: 'a loop running more than 10000 times is not supported' }])
+    assert.match(r.stderr, /a loop running more than 10000 times/u)
+    // A loop that ends on its own never reaches it.
+    assert.deepEqual(t().run('x=0; while test $x -lt 3; do x=$((x+1)); done; echo $x').stdout, '3\n')
+  })
+
   it('names the construct, not the word the parser choked on', () => {
     // Unsupported blocks identify their opening construct, not a later keyword.
     for (const [line, detail] of [
-      ['while true; do echo a; done', 'while'],
-      ['until false; do echo a; done', 'until'],
       ['case x in a) echo a;; esac', 'case'],
       ['select x in a b; do echo $x; done', 'select'],
       ['function f { echo a; }', 'function'],

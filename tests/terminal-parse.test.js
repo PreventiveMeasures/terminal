@@ -258,6 +258,21 @@ describe('parse() spells a value out only when expansion still decides it', () =
     })
   }
 
+  // `while LIST; do LIST; done` reads as the two lists it holds, and `until`
+  // is the same loop with the question read the other way round.
+  it('reads a while loop as the list it repeats and the list it asks', () => {
+    assert.deepEqual(list('while a && b; do c; d; done'), [{
+      type: 'while',
+      condition: [{ type: 'command', argv: ['a'] }, { type: 'command', op: '&&', argv: ['b'] }],
+      list: [{ type: 'command', argv: ['c'] }, { type: 'command', op: ';', argv: ['d'] }],
+    }])
+    assert.deepEqual(list('until a; do b; done')[0].type, 'until')
+    assert.deepEqual(list('while a; do b; done > /tmp/out')[0].redirects, [{ fd: 1, op: '>', target: '/tmp/out' }])
+    assert.deepEqual(verdict('while a; do b'), { ok: false, incomplete: true, error: 'while: missing `done`' })
+    assert.deepEqual(verdict('until a; do b'), { ok: false, incomplete: true, error: 'until: missing `done`' })
+    assert.deepEqual(verdict('while a'), { ok: false, incomplete: true, error: 'while: missing `do`' })
+  })
+
   // `<( … )` runs commands and the word is the path their output arrives on,
   // so what it holds is what it runs. Opening one needs a descriptor this
   // shell has none of, which is a gap running the line reports, not reading it.
@@ -429,7 +444,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   for (const [line, message] of [
     ['echo )', 'unexpected `)`'],
     ['for f in a; do', 'for: missing `done`'],
-    ['while :; do :; done', '`while` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`'],
+    ['case x in a) :;; esac', '`case` statements are not supported; gate on exit status with `&&` / `||` instead'],
     ['ls ~user', 'named-user and directory-stack tilde prefixes are not supported'],
   ]) {
     it(`throws the parse diagnostic for ${JSON.stringify(line)}`, () => {
@@ -476,6 +491,20 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     assert.deepEqual(terminal().summarize('x=$(date) ls'), [[[{ type: 'assignments', assignments: [{ name: 'x', value: shell([[['date']]], false) }] }, 'ls']]])
     assert.deepEqual(terminal().summarize('ls $(cat f)/x'), [[['ls', parts(shell([[['cat', 'f']]], true), '/x')]]])
     assert.throws(() => terminal().summarize('echo `echo )`'), { message: 'unexpected `)`' })
+  })
+
+  // A `while` asks before every turn, and `until` reads the answer the other
+  // way round. Both are a list run more than once, so both are a row.
+  it('summarizes a while loop as the list it repeats and the list it asks', () => {
+    assert.deepEqual(terminal().summarize('while test -e lock; do ls; done'), [[{
+      type: 'while',
+      condition: [[['test', '-e', 'lock']]],
+      summary: [[['ls']]],
+    }]])
+    assert.deepEqual(terminal().summarize('until a; do b; done | wc'), [[
+      { type: 'until', condition: [[['a']]], summary: [[['b']]] },
+      ['wc'],
+    ]])
   })
 
   // A `for` is a list of its own too, run once for each word after `in`.
@@ -653,8 +682,6 @@ describe('parse() separates input it could still be handed more of', () => {
 
 describe('parse() reports the gaps parsing itself finds', () => {
   for (const line of [
-    'while true; do :; done',
-    'until false; do :; done',
     'case x in y) :;; esac',
     'echo $((1 + 1)) && ((x++))',
     'f() { :; }',

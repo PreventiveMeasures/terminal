@@ -151,6 +151,24 @@ export function readOperator(line, i, atWordStart) {
   }
 }
 
+// The token as the user would have typed it, for error messages. A
+// quoted word keeps its quotes, so a `"do"` that failed to be the
+// keyword is not reported as `do`.
+const LABELS = { semi: ';', dsemi: ';;', pipe: '|', pipe_err: '|&', and: '&&', or: '||', amp: '&', paren_open: '(', paren_close: ')' }
+const REDIR_LABELS = { write: '>', append: '>>', read: '<', heredoc: '<<', herestring: '<<<', both: '&>', bothAppend: '&>>', dup: '>&', close: '>&-' }
+export function tokenLabel(t) {
+  if (t.kind === 'word') return t.quoted ? `"${t.value}"` : t.value
+  if (t.kind === 'redir') {
+    const base = REDIR_LABELS[t.op]
+    if (t.op === 'both' || t.op === 'bothAppend') return base
+    const fd = t.fd === (t.op === 'read' || t.op === 'heredoc' || t.op === 'herestring' ? 0 : 1) ? '' : String(t.fd)
+    if (t.op === 'dup') return `${fd}${t.fd === 0 ? '<&' : '>&'}${t.toFd}`
+    if (t.op === 'close') return `${fd}${t.fd === 0 ? '<&-' : '>&-'}`
+    return fd + base
+  }
+  return LABELS[t.kind]
+}
+
 const tok = (kind, end) => ({ token: { kind }, end })
 const redir = (fd, op, end, fields) => ({ token: { kind: 'redir', fd, op, ...fields }, end })
 

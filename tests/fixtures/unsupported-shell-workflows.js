@@ -124,14 +124,15 @@ export const SHELL_WORKFLOWS = [
   {
     purpose: 'Process a newline-separated list of filenames without losing spaces',
     command: 'while IFS= read -r file; do wc -l "$file"; done < data/paths.txt',
-    expected: feature('while'),
-    parseTime: true,
+    expected: feature('read', 'read'),
+    // A condition that cannot run is a condition that failed, which is how a
+    // loop ends rather than how one fails. The feed is the only signal left.
+    quietStatus: true,
   },
   {
     purpose: 'Wait until a generated source report becomes available',
-    command: 'until test -f generated/report.json; do sleep 1; done',
-    expected: feature('until'),
-    parseTime: true,
+    command: 'sleep 5 && cat generated/report.json',
+    expected: [{ kind: 'command', command: 'sleep', detail: 'sleep' }],
   },
   {
     purpose: 'Exclude test files when counting JavaScript source lines',

@@ -7,7 +7,7 @@ import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { err, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
-import { evaluateConditional } from './conditional.js'
+import { runBlock } from './blocks.js'
 
 export { createIoGuard } from './io.js'
 export { commandWriteError } from './output.js'
@@ -106,7 +106,7 @@ function pipelineStage(stage, ctx, stdin, stdinFile, fds) {
     const result = withStreams(io, ctx, () => shellResult(ctx, () => {
       if (io.error) return io.error
       if (!simple) {
-        const r = stage.test ? evaluateConditional(stage.test, ctx) : stage.group ? runGroup(stage, ctx, io.stdin) : stage.loop ? runLoop(stage.loop, ctx) : runConditional(stage.conditional, ctx, io.stdin)
+        const r = runBlock(stage, ctx, io.stdin, runSteps)
         routed = true
         blame = r.blame ?? null
         return r
@@ -305,56 +305,4 @@ function withTemporaries(prepared, ctx, fn) {
     for (const [name, value] of inner) if (!temps.has(name) || inner.bound?.has(name)) outer.set(name, value)
     for (const name of inner.unsetNames) if (!temps.has(name)) outer.delete(name)
   }
-}
-
-// Expand the word list once, behind the keyword: expansion reads argv[0] as
-// the command name, and a list whose first word is `export` would otherwise be
-// taken for a declaration. The loop variable persists after completion, and
-// nested break/continue signals propagate one level per enclosing loop.
-const FOR_KEYWORD = { value: 'for', mask: null }
-function runLoop(loop, ctx) {
-  const expanded = expandWords([FOR_KEYWORD, ...loop.words], ctx)
-  const result = emptyOutput()
-  const stream = { text: ctx.stdinLeft }
-  ctx.loopDepth++
-  try {
-    for (const value of expanded.argv.slice(1)) {
-      ctx.vars.set(loop.name, value)
-      const r = runSteps(loop.body, ctx, stream)
-      appendOutput(result, r)
-      result.blame = r.blame
-      if (r.halt) return { ...result, halt: true }
-      if (r.control?.levels > 1) return { ...result, control: { ...r.control, levels: r.control.levels - 1 } }
-      if (r.control?.type === 'break') break
-    }
-  } finally {
-    ctx.loopDepth--
-  }
-  return result
-}
-
-function runConditional(conditional, ctx, stdin) {
-  const result = emptyOutput()
-  const stream = { text: stdin }
-  for (const branch of conditional.branches) {
-    const test = runSteps(branch.condition, ctx, stream, true)
-    appendOutput(result, test)
-    if (test.halt || test.control) return { ...result, halt: test.halt, control: test.control, blame: test.blame }
-    if (test.exitCode !== 0) continue
-    const body = runSteps(branch.body, ctx, stream)
-    appendOutput(result, body)
-    return { ...result, halt: body.halt, control: body.control, blame: body.blame }
-  }
-  if (!conditional.otherwise) { result.exitCode = 0; return result }
-  const last = runSteps(conditional.otherwise, ctx, stream)
-  appendOutput(result, last)
-  return { ...result, halt: last.halt, control: last.control, blame: last.blame }
-}
-
-
-function runGroup(stage, ctx, stdin) {
-  const stream = { text: stdin }
-  if (!stage.isolate) return runSteps(stage.group, ctx, stream)
-  const r = isolated(ctx, () => runSteps(stage.group, ctx, stream))
-  return { ...r, halt: false, control: undefined }
 }

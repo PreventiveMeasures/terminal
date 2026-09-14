@@ -53,7 +53,7 @@ describe('100 likely agent commands — unsupported channel', () => {
       it(c.command, () => {
         const result = createTerminal(FILES).run(c.command)
         checkDiagnostics(result, c.expected, c.command)
-        assert.notEqual(result.exitCode, 0, c.command)
+        if (!c.quietStatus) assert.notEqual(result.exitCode, 0, c.command)
         assert.notEqual(result.stderr, '', c.command)
         for (const note of result.unsupported) assert.ok(result.stderr.includes(note.message), c.command)
       })

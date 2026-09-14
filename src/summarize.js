@@ -35,7 +35,7 @@ const BLOCKS = { if: '`if`', test: '`[[ … ]]`', pipeline: 'a pipeline of pipel
 
 // What a chain's rows can be: a command, and the two blocks that are a list of
 // commands and nothing a summary would have to leave out.
-const ROWS = new Set(['command', 'subshell', 'group', 'for'])
+const ROWS = new Set(['command', 'subshell', 'group', 'for', 'while', 'until'])
 
 function chainOf(node) {
   if (node.negate) throw refuse('`!`')
@@ -71,6 +71,7 @@ function rowOf(stage) {
   if (stage.type === 'subshell') return { type: 'parens', summary: summaryOf(stage.list) }
   if (stage.type === 'group') return { type: 'braces', summary: summaryOf(stage.list) }
   if (stage.type === 'for') return { type: 'for', name: stage.name, words: stage.words.map(literal), summary: summaryOf(stage.list) }
+  if (stage.type === 'while' || stage.type === 'until') return { type: stage.type, condition: summaryOf(stage.condition), summary: summaryOf(stage.list) }
   const argv = stage.argv.map(literal)
   if (stage.assignments) argv.unshift(assignmentsOf(stage.assignments))
   return argv

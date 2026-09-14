@@ -110,7 +110,7 @@ describe('the parse entry point reads a line with no terminal at all', () => {
     'ls\ncat a.txt\n# comment',
     'echo )',
     'for f in a; do',
-    'while true; do :; done',
+    'while read -r f; do wc -l "$f"; done',
     'echo ${x@Q}',
   ]) {
     it(`agrees with a terminal's own parse of ${JSON.stringify(line)}`, () => {
@@ -121,11 +121,11 @@ describe('the parse entry point reads a line with no terminal at all', () => {
   it('reports unfinished input, a syntax error and a refused construct apart', () => {
     assert.deepEqual(pick(parse('for f in a; do')), { ok: false, incomplete: true, error: 'for: missing `done`', gaps: [] })
     assert.deepEqual(pick(parse('echo )')), { ok: false, incomplete: false, error: 'unexpected `)`', gaps: [] })
-    assert.deepEqual(pick(parse('while true; do :; done')), {
+    assert.deepEqual(pick(parse('case x in a) :;; esac')), {
       ok: false,
       incomplete: false,
-      error: '`while` loops are not supported; the only loop is `for NAME in WORD...; do LIST; done`',
-      gaps: ['while'],
+      error: '`case` statements are not supported; gate on exit status with `&&` / `||` instead',
+      gaps: ['case'],
     })
   })
 

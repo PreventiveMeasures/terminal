@@ -155,7 +155,13 @@ v=$(echo captured); echo $v => "captured\n"
 v=`echo backtick`; echo $v => "backtick\n"
 for f in input; do cat $f; done => "oak\nelm\nfir\n"
 if [ -f input ]; then echo present; fi => "present\n"
-while true; do break; done => ! while 1
+while true; do break; done => ""
+x=0; while test $x -lt 3; do echo $x; x=$((x+1)); done => "0\n1\n2\n"
+while false; do echo no; done; echo $? => "0\n"
+until true; do echo no; done; echo $? => "0\n"
+x=1; while test -n "$x"; do x=; false; done; echo $? => "1\n"
+while echo tick; do break; done => "tick\n"
+until test -e input; do echo waiting; done; echo $? => "0\n"
 case a in a) echo yes;; esac => ! case 1
 f() { echo hi; }; f => ! function 1
 set -e => ! set 127

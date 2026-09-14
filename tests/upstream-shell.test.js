@@ -214,7 +214,7 @@ describe('upstream shell audit — explicit unsupported constructs', () => {
     ['custom IFS', 'IFS=:; x=red:blue; echo $x', 'IFS'],
     ['shell function declaration', 'show() { echo value; }; show', 'function'],
     ['arithmetic conditional', 'if (( 0 )); then echo lost; fi', '(('],
-    ['while loop', 'while false; do echo lost; done', 'while'],
+    ['select loop', 'select x in a b; do echo lost; done', 'select'],
     ['heredoc on another descriptor', 'cat 3<<HERE\nvalue\nHERE', '3<<'],
     ['read-write redirection', 'cat <>input', '<>'],
     ['dynamic descriptor target', 'fd=2; echo value >&$fd', 'redirect target'],
