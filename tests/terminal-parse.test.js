@@ -252,6 +252,14 @@ describe('parse() spells a value out only when expansion still decides it', () =
     ['a"b"$c', ['ab', { type: 'variable', name: 'c', multi: true }]],
     ['"$x"""', [{ type: 'variable', name: 'x', multi: false }, '']],
     ['"a $x"', ['a ', { type: 'variable', name: 'x', multi: false }]],
+    ['${x##p}', [{ type: 'variable', name: 'x', operator: '##', operand: 'p', multi: true }]],
+    ['${x/a/b}', [{ type: 'variable', name: 'x', operator: '/', operand: 'a/b', multi: true }]],
+    ['${x:1:2}', [{ type: 'variable', name: 'x', operator: ':', operand: '1:2', multi: true }]],
+    ['${x-}', [{ type: 'variable', name: 'x', operator: '-', operand: '', multi: true }]],
+    ['${10}', [{ type: 'variable', name: '10', multi: true }]],
+    ["$'a\\nb'", ['a\nb']],
+    ['a$((1))b', ['a', { type: 'arithmetic', source: '1' }, 'b']],
+    ['<(ls)', [{ type: 'process', op: '<', list: [{ type: 'command', argv: ['ls'] }] }]],
   ]) {
     it(`reads ${written} as the pieces expansion works on`, () => {
       assert.deepEqual(list(`echo ${written}`)[0].argv[1], parts(...pieces))
@@ -351,6 +359,22 @@ describe('parse() spells a value out only when expansion still decides it', () =
     // Quoting settles it as the text it spells, as it settles a pattern.
     assert.deepEqual(list('echo "<(ls)" \'<(ls)\'')[0].argv, ['echo', '<(ls)', '<(ls)'])
     assert.deepEqual(terminal().summarize('cat <(ls)'), [[['cat', { type: 'process', op: '<', summary: [[['ls']]] }]]])
+  })
+
+  // `>(` opens a process substitution wherever a word may start, and what
+  // stands before it joins it: bash prints `2/dev/fd/63` for `echo 2>(cat)`,
+  // which is the word `2` and the path, not a redirect of descriptor 2.
+  it('joins a process substitution to the word it was written against', () => {
+    const process = (op, nodes) => ({ type: 'process', op, list: nodes })
+    const ran = [{ type: 'command', argv: ['cat'] }]
+    assert.deepEqual(list('echo 2>(cat)')[0].argv[1], parts('2', process('>', ran)))
+    assert.deepEqual(list('echo 1>(cat)')[0].argv[1], parts('1', process('>', ran)))
+    assert.deepEqual(list('echo x>(cat)')[0].argv[1], parts('x', process('>', ran)))
+    assert.deepEqual(list('cat 2<(ls)')[0].argv[1], parts('2', process('<', [{ type: 'command', argv: ['ls'] }])))
+    // A space between them leaves two words, and a real descriptor redirect
+    // still reads as one.
+    assert.deepEqual(list('echo 2 >(cat)')[0].argv, ['echo', '2', process('>', ran)])
+    assert.deepEqual(list('cat 2> /tmp/err')[0].redirects, [{ fd: 2, op: '>', target: '/tmp/err' }])
   })
 
   // Bash expands `~alice` to that user's home directory, and this shell has
@@ -584,6 +608,104 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     assert.deepEqual(terminal().summarize('f() { cd dir; }; f'), [[['cd', 'dir']]])
   })
 
+  // A call carries its own assignments, and a row that holds a list has
+  // nowhere to put them: two calls that differ only there would read alike.
+  it('keeps what a call sets, or says it cannot', () => {
+    const set = { type: 'assignments', assignments: [{ name: 'X', value: '1' }] }
+    assert.deepEqual(terminal().summarize('f() { ls; }; X=1 f'), [[[set, 'ls']]])
+    assert.deepEqual(terminal().summarize('f() { ls; }; X=1 f > /tmp/o'), [[[set, 'ls'], ['>', '/tmp/o']]])
+    assert.deepEqual(terminal().summarize('f() { a; b; }; f'), [[{ type: 'braces', summary: [[['a']], [['b']]] }]])
+    const message = 'summarize: an assignment on a call of more than one command is not a simple chain'
+    assert.throws(() => terminal().summarize('f() { a; b; }; X=1 f'), { message })
+    assert.throws(() => terminal().summarize('f() { a; b; }; X=1 f > /tmp/o'), { message })
+    // A definition behind a gate may never happen, so nothing may stand for it.
+    for (const line of ['a && f() { ls; }', 'a || f() { ls; }']) {
+      assert.throws(() => terminal().summarize(line), { message: 'summarize: a function defined behind a gate is not a simple chain' }, line)
+    }
+  })
+
+  // Parentheses keep a command's directory, variables and exit to themselves,
+  // so a command that changes one of those keeps the brackets that hold it in.
+  it('drops brackets that keep nothing in, and keeps the rest', () => {
+    for (const name of ['ls', 'echo hi', 'true', 'wc -l a.txt']) {
+      assert.deepEqual(terminal().summarize(`(${name})`), [[name.split(' ')]], name)
+    }
+    for (const line of ['cd x', 'export X=1', 'unset X', 'eval x', 'read x', 'exit 1', 'source f']) {
+      assert.deepEqual(terminal().summarize(`(${line})`), [[{ type: 'parens', summary: [[line.split(' ')]] }]], line)
+    }
+    // Braces keep nothing in, so they come off wherever parentheses would not.
+    assert.deepEqual(terminal().summarize('{ cd x; }'), [[['cd', 'x']]])
+    // An assignment is one of the things parentheses keep.
+    assert.deepEqual(terminal().summarize('(X=1 ls)'), [[{
+      type: 'parens',
+      summary: [[[{ type: 'assignments', assignments: [{ name: 'X', value: '1' }] }, 'ls']]],
+    }]])
+  })
+
+  // Whatever feeds a command is the command that feeds it, and where `echo`
+  // would say something else than the text holds, `printf` says it exactly.
+  it('writes the text a command is fed as the command that writes it', () => {
+    assert.deepEqual(terminal().summarize("cat > /tmp/f <<'EOF'\nbody\nEOF"), [[['echo', 'body'], ['>', '/tmp/f']]])
+    assert.deepEqual(terminal().summarize("cat > /tmp/f <<'EOF'\n-dash\nEOF"), [[['printf', '%s', '-dash\n'], ['>', '/tmp/f']]])
+    assert.deepEqual(terminal().summarize("cat > /tmp/f <<'EOF'\na\nb\nEOF"), [[['echo', 'a\nb'], ['>', '/tmp/f']]])
+    assert.deepEqual(terminal().summarize('cat <<< plain'), [[['echo', 'plain']]])
+    assert.deepEqual(terminal().summarize('cat <<< -dash'), [[['printf', '%s', '-dash\n']]])
+    assert.deepEqual(terminal().summarize('cat <<< $x'), [[['printf', '%s\\n', { type: 'variable', name: 'x', multi: false }]]])
+    // A `cat` with nothing of its own passes what feeds it straight on.
+    assert.deepEqual(terminal().summarize('echo x | cat > /tmp/f'), [[['echo', 'x'], ['>', '/tmp/f']]])
+    assert.deepEqual(terminal().summarize('echo x | cat -n > /tmp/f'), [[['echo', 'x'], ['cat', '-n'], ['>', '/tmp/f']]])
+  })
+
+  // Every rewrite above is a claim that the line and the summary do the same
+  // thing, so run both and hold it to that: what a caller reads back has to
+  // leave the same output, status and directory behind as what they wrote.
+  it('runs the same as the line it rewrote', () => {
+    for (const [written, summarized] of [
+      ['wc -l < a.txt', 'cat a.txt | wc -l'],
+      ['cat < a.txt', 'cat a.txt'],
+      ['cat -n < a.txt', 'cat a.txt | cat -n'],
+      ["cat <<'EOF'\nbody\nEOF", 'echo body'],
+      ["cat <<'EOF'\n-dash\nEOF", "printf '%s' '-dash\n'"],
+      ["cat <<'EOF'\na\nb\nEOF", "echo 'a\nb'"],
+      ['cat <<< plain', 'echo plain'],
+      ['cat <<< -dash', "printf '%s' '-dash\n'"],
+      ['echo x | cat', 'echo x'],
+      ['echo x | cat > /tmp/f; cat /tmp/f', 'echo x > /tmp/f; cat /tmp/f'],
+      ['(ls)', 'ls'],
+      ['{ cd dir; }', 'cd dir'],
+      ['f() { wc -l a.txt; }; f', 'wc -l a.txt'],
+      ['f() { cat; }; echo fed | f', 'echo fed | cat'],
+      ['for i in a b; do echo $i; done', 'echo a; echo b'],
+    ]) {
+      const one = terminal().run(written)
+      const other = terminal().run(summarized)
+      assert.deepEqual(
+        [one.stdout, one.stderr, one.exitCode, one.cwd],
+        [other.stdout, other.stderr, other.exitCode, other.cwd],
+        written,
+      )
+    }
+  })
+
+  // A redirect is the tokens it was written with, and a descriptor it would
+  // have defaulted to is left off the way a caller would write it again.
+  it('writes a redirect back as the tokens it was written with', () => {
+    for (const [line, tokens] of [
+      ['ls > /tmp/a', ['>', '/tmp/a']],
+      ['ls 1> /tmp/a', ['>', '/tmp/a']],
+      ['ls >> /tmp/a', ['>>', '/tmp/a']],
+      ['ls 2> /tmp/a', ['2>', '/tmp/a']],
+      ['ls &> /tmp/a', ['&>', '/tmp/a']],
+      ['ls &>> /tmp/a', ['&>>', '/tmp/a']],
+      ['ls 2>&1', ['2>&1']],
+      ['ls >&2', ['>&2']],
+      ['ls 2>&-', ['2>&-']],
+      ['ls >&-', ['>&-']],
+    ]) {
+      assert.deepEqual(terminal().summarize(line), [[['ls'], tokens]], line)
+    }
+  })
+
   // A `while` asks before every turn, and `until` reads the answer the other
   // way round. Both are a list run more than once, so both are a row.
   it('summarizes a while loop as the list it repeats and the list it asks', () => {
@@ -769,6 +891,20 @@ describe('parse() reports a syntax error as run() would, and runs nothing', () =
     ['for 1 in a; do :; done', 'for: `1` is not a valid variable name'],
     ['echo a > ', 'redirect `>` requires a target'],
     ['} echo', 'syntax error near unexpected token `}`'],
+    // A block ends where its closer does, and bash rejects a word after one.
+    // A definition ends on its `}` like a group, and so rejects one too —
+    // `f() { ls; } ls` is a syntax error, not a definition with `ls` dropped.
+    ['f() { ls; } ls', 'unexpected token after `}`'],
+    ['f() { echo hi; } echo bye', 'unexpected token after `}`'],
+    ['{ ls; } ls', 'unexpected token after `}`'],
+    ['( ls ) ls', 'unexpected token after `)`'],
+    ['while false; do ls; done ls', 'unexpected token after `done`'],
+    ['until false; do ls; done ls', 'unexpected token after `done`'],
+    ['if true; then ls; fi ls', 'unexpected token after `fi`'],
+    ['ls ; ; ls', 'empty pipeline stage'],
+    ['a & & b', 'empty pipeline stage'],
+    ['(ls)(ls)', 'unexpected `(`'],
+    ['until a; do b; done; done', 'unexpected `done`'],
   ]) {
     it(`reports ${JSON.stringify(error)} for ${JSON.stringify(line)}`, () => {
       assert.deepEqual(verdict(line), { ok: false, incomplete: false, error })
@@ -788,6 +924,12 @@ describe('parse() separates input it could still be handed more of', () => {
     ['if true; then ls; else', 'if: missing `fi`'],
     ['for f in a', 'for: missing `do`'],
     ['for f in a; do echo x', 'for: missing `done`'],
+    ['while true', 'while: missing `do`'],
+    ['while true; do ls', 'while: missing `done`'],
+    ['until true', 'until: missing `do`'],
+    ['until true; do ls', 'until: missing `done`'],
+    ['f() {', 'unmatched `{`'],
+    ['f() { ls;', 'unmatched `{`'],
     ['ls &&', 'empty pipeline stage'],
     ['ls ||', 'empty pipeline stage'],
     ['ls |', 'empty pipeline stage'],
@@ -797,7 +939,7 @@ describe('parse() separates input it could still be handed more of', () => {
     })
 
     it(`finishes ${JSON.stringify(line)} once the rest arrives`, () => {
-      const finished = { '(echo a': ')', '{ echo a': '; }', '{ echo a;': ' }', 'if true': '; then ls; fi', 'if true; then ls': '; fi', 'if true; then ls; else': ' cat a.txt; fi', 'for f in a': '; do ls; done', 'for f in a; do echo x': '; done', 'ls &&': ' cat a.txt', 'ls ||': ' cat a.txt', 'ls |': ' wc -l' }
+      const finished = { '(echo a': ')', '{ echo a': '; }', '{ echo a;': ' }', 'if true': '; then ls; fi', 'if true; then ls': '; fi', 'if true; then ls; else': ' cat a.txt; fi', 'for f in a': '; do ls; done', 'for f in a; do echo x': '; done', 'ls &&': ' cat a.txt', 'ls ||': ' cat a.txt', 'ls |': ' wc -l', 'while true': '; do ls; done', 'while true; do ls': '; done', 'until true': '; do ls; done', 'until true; do ls': '; done', 'f() {': ' ls; }', 'f() { ls;': ' }' }
       assert.deepEqual(verdict(line + finished[line]), { ok: true, incomplete: false, error: null })
     })
   }

@@ -223,6 +223,27 @@ f() { echo a; }; while f; do break; done => "a\n"
 f() { false; }; until f; do echo body; break; done => "body\n"
 n=0; until [[ $n == 3 ]]; do n=$((n+1)); echo $n; done => "1\n2\n3\n"
 until false; do echo x; break; done => "x\n"
+f() { echo a; }; for i in 1 2; do f; done => "a\na\n"
+f() { echo hi; }; g() { f; }; h() { g; }; h => "hi\n"
+f() { echo a; }; g() { f; f; }; g | wc -l => "2\n"
+for i in a b; do for j in c d; do echo $i$j; break; done; done => "ac\nbc\n"
+for i in a b; do continue; echo no; done; echo after => "after\n"
+for i in a b; do :; done; echo "[$i]" => "[b]\n"
+for i in a; do echo $i; done; for i in b; do echo $i; done => "a\nb\n"
+for i in a b; do echo $i; done > /dev/null; echo after => "after\n"
+for f in input nosuch; do [[ -e $f ]] && echo "$f yes" || echo "$f no"; done => "input yes\nnosuch no\n"
+while true; do while true; do break 2; done; echo no; done; echo after => "after\n"
+while false; do echo x; done < input; echo after => "after\n"
+until true; do echo x; done | wc -l => "0\n"
+n=0; while [[ $n -lt 2 ]]; do n=$((n+1)); done; echo $n => "2\n"
+n=0; while [[ $n -lt 3 ]]; do n=$((n+1)); [[ $n == 2 ]] && continue; echo $n; done => "1\n3\n"
+echo a | { cat; cat; } => "a\n"
+f() { echo hi; } echo bye => % 2
+( ls ) ls => % 2
+{ ls; } ls => % 2
+while false; do ls; done ls => % 2
+until false; do ls; done ls => % 2
+echo 2>(cat) => ! >( 1
 f() { echo hi; }; f > /dev/null; echo after => "after\n"
 cat <(echo hi) => ! <( 1
 diff <(echo a) <(echo b) => ! <( 1

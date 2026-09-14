@@ -135,8 +135,9 @@ function buildSteps(p, end) {
       if (redir) stage.redirs.push(redir)
       continue
     }
-    // A completed block accepts only a boundary or a redirect.
-    if (stage.group) throw new Error(`unexpected token after \`${stage.isolate ? ')' : '}'}\``)
+    // A completed block accepts only a boundary or a redirect. A definition
+    // ends on its `}` like a group, and bash rejects a word after either.
+    if (stage.group || stage.define) throw new Error(`unexpected token after \`${stage.isolate ? ')' : '}'}\``)
     if (stage.loop) throw new Error('unexpected token after `done`')
     if (stage.conditional) throw new Error('unexpected token after `fi`')
     if (stage.test) throw new UnsupportedError('feature', '[[ syntax', 'unexpected token after `]]`')

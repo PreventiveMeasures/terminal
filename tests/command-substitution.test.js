@@ -101,7 +101,7 @@ describe('command substitution — state and status', () => {
     const r = terminal().run('for f in a b; do echo "$(break; echo "$f")"; done')
     assert.equal(r.stdout, 'a\nb\n')
     assert.equal(r.exitCode, 0)
-    assert.match(r.stderr, /break: only meaningful in a `for` loop/u)
+    assert.match(r.stderr, /break: only meaningful in a `for`, `while` or `until` loop/u)
     assert.deepEqual(r.unsupported, [])
   })
 })

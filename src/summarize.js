@@ -89,13 +89,15 @@ function chainOf(node, macros) {
 // brackets they were written with, which is the whole of the difference: one
 // keeps what it runs to itself, and the other does not.
 function rowOf(stage, macros) {
+  // `X=1 f` sets X for the call alone, and a row holding a list has nowhere to
+  // say so — dropping it would read as the same line as a call without it.
+  if (stage.assignments && stage.argv === undefined) throw refuse('an assignment on a call of more than one command')
   // What a subshell defines belongs to the subshell, so a name defined in one
   // is not a name the line around it can call.
   if (stage.type === 'subshell') return { type: 'parens', summary: summaryOf(stage.list, { defined: new Map(macros.defined), open: macros.open }) }
   if (stage.type === 'group') return { type: 'braces', summary: body(stage, macros) }
   if (stage.type === 'for') return { type: 'for', name: stage.name, words: stage.words.map((word) => literal(word, macros)), summary: summaryOf(stage.list, macros) }
   if (stage.type === 'while' || stage.type === 'until') return { type: stage.type, condition: summaryOf(stage.condition, macros), summary: summaryOf(stage.list, macros) }
-  if (stage.assignments && stage.argv === undefined) throw refuse('an assignment on a call of more than one command')
   const argv = stage.argv.map((word) => literal(word, macros))
   if (stage.assignments) argv.unshift(assignmentsOf(stage.assignments, macros))
   return argv

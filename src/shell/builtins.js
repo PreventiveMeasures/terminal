@@ -39,7 +39,7 @@ function loopControl(name) {
     const { arg, n } = controlNumber(args[0] ?? '1')
     if (n === null) return halt(err(`${name}: ${arg}: numeric argument required`, 128))
     if (n <= 0) return { ...err(`${name}: ${arg}: loop count out of range`), control: ctx.loopDepth ? { type: 'break', levels: ctx.loopDepth } : undefined }
-    if (ctx.loopDepth === 0) return err(`${name}: only meaningful in a \`for\` loop`, 0)
+    if (ctx.loopDepth === 0) return err(`${name}: only meaningful in a \`for\`, \`while\` or \`until\` loop`, 0)
     return { ...ok(), control: { type: name, levels: Number(n > BigInt(ctx.loopDepth) ? BigInt(ctx.loopDepth) : n) } }
   }
 }

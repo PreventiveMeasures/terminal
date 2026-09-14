@@ -513,7 +513,7 @@ describe('shell syntax — compound commands', () => {
     assert.equal(out('for f in a b; do (break); echo $f; done'), 'a\nb\n')
     const outside = term().run('break; echo next')
     assert.equal(outside.stdout, 'next\n')
-    assert.match(outside.stderr, /only meaningful in a `for` loop/u)
+    assert.match(outside.stderr, /only meaningful in a `for`, `while` or `until` loop/u)
     assert.deepEqual(gaps('for f in a; do break 2; done'), [])
   })
 
