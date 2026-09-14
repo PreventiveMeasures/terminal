@@ -324,3 +324,79 @@ describe('rg only refuses a named hidden path when it is also filtering', () => 
     assert.deepEqual(run('rg -uu oak .hidden sub', B).unsupported, [])
   })
 })
+
+describe('rg says so when a filter left it nothing to open', () => {
+  it('reports it when it chose the starting point itself', () => {
+    // Everything here is hidden, so the walk opens no file at all. ripgrep
+    // treats that as a mistake rather than a miss.
+    const result = run('rg oak', { '.hid/a.txt': 'oak\n' })
+    assert.equal(result.exitCode, 2)
+    assert.equal(result.stderr,
+      "rg: No files were searched, which means ripgrep probably applied a filter you didn't expect.\n" +
+      'Running with --debug will show why files are being skipped.\n')
+  })
+
+  for (const mode of ['-q', '-l', '-c', '-n']) {
+    it(`reports it under ${mode} too`, () => {
+      assert.equal(run(`rg ${mode} oak`, { '.hid/a.txt': 'oak\n' }).exitCode, 2)
+    })
+  }
+
+  it('is a plain miss once a starting point is named, even `.`', () => {
+    for (const command of ['rg oak .', 'rg oak sub', 'rg oak ./sub']) {
+      const result = run(command, { 'sub/.hid/a.txt': 'oak\n' })
+      assert.equal(result.exitCode, 1, command)
+      assert.equal(result.stderr, '', command)
+    }
+  })
+
+  it('says nothing when a file was opened and simply did not match', () => {
+    const result = run('rg oak', { 'v.txt': 'elm\n' })
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.stderr, '')
+  })
+
+  it('opens the hidden files with --hidden and finds them', () => {
+    assert.equal(run('rg --hidden oak', { '.hid/a.txt': 'oak\n' }).stdout, '.hid/a.txt:oak\n')
+  })
+})
+
+describe('rg refuses rather than quietly accepting a bad option value', () => {
+  const B = { 'a.txt': 'oak\nelm\n' }
+  for (const [command, flag] of [
+    ['rg -A abc oak a.txt', '-A'], ['rg -A -1 oak a.txt', '-A'], ['rg -A 1.5 oak a.txt', '-A'],
+    ['rg -B x oak a.txt', '-B'], ['rg --context=x oak a.txt', '--context'],
+  ]) {
+    it(command, () => {
+      // Ignoring the value would search with no context and look like success.
+      const result = run(command, B)
+      assert.equal(result.exitCode, 2)
+      assert.equal(result.stderr, `rg: error parsing flag ${flag}: value is not a valid number\n`)
+      assert.equal(result.unsupported.length, 1)
+    })
+  }
+})
+
+describe('every rg refusal reaches the diagnostic feed', () => {
+  const B = { 'a.txt': 'oak\n' }
+  // A refusal that only reached stderr would vanish under `2>/dev/null`.
+  for (const command of ['rg "[" a.txt', 'rg "(" a.txt', 'rg "a{2,1}" a.txt', String.raw`rg '\' a.txt`,
+    'rg -e', 'rg -A', 'rg -A abc oak a.txt', 'rg -t js oak', 'rg --sort path oak', 'rg']) {
+    it(command, () => {
+      const result = run(command, B)
+      assert.equal(result.exitCode, 2, command)
+      assert.equal(result.unsupported.length, 1, command)
+      assert.equal(result.unsupported[0].command, 'rg')
+      const hidden = run(`${command} 2>/dev/null`, B)
+      assert.equal(hidden.stderr, '')
+      assert.equal(hidden.unsupported.length, 1)
+    })
+  }
+
+  it('names the pattern rather than the engine underneath', () => {
+    // grep words this in terms of its own PCRE subset, which ripgrep never uses.
+    const result = run('rg "[" a.txt', B)
+    assert.match(result.stderr, /^rg: regex parse error in "\["/u)
+    assert.doesNotMatch(result.stderr, /PCRE/u)
+  })
+})

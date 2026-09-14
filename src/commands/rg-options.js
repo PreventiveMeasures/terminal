@@ -36,13 +36,14 @@ export function rgOptions(parsed) {
   }
   for (const { name, value } of parsed.order) {
     if (INERT.has(name)) continue
-    apply(state, CANONICAL.get(name) ?? name, value)
+    apply(state, CANONICAL.get(name) ?? name, value, shown(name))
   }
   // Repeats of one flag are last-one-wins, and -A and -B override -C whichever
   // order they appear in, so the two sides are resolved rather than replayed.
   const last = (flag) => state.context.findLast(([f]) => f === flag)?.[1]
-  state.after = Number(last('A') ?? last('C') ?? 0)
-  state.before = Number(last('B') ?? last('C') ?? 0)
+  const spelled = (flag) => state.context.findLast(([f]) => f === flag)?.[2] ?? '-' + flag
+  state.after = contextValue(last('A') ?? last('C'), last('A') === undefined ? spelled('C') : spelled('A'))
+  state.before = contextValue(last('B') ?? last('C'), last('B') === undefined ? spelled('C') : spelled('B'))
   // -u reduces filtering one step at a time: ignore files, then hidden entries,
   // then binary files. The third step needs ripgrep's binary reporting.
   if (state.unrestricted >= 2) state.hidden = true
@@ -50,7 +51,7 @@ export function rgOptions(parsed) {
   return state
 }
 
-function apply(state, flag, value) {
+function apply(state, flag, value, spelling) {
   switch (flag) {
     case 'i': state.ignoreCase = true; return
     case 's': state.ignoreCase = false; return
@@ -68,9 +69,17 @@ function apply(state, flag, value) {
     case 'e': state.patterns.push(value); return
     case 'hidden': state.hidden = true; return
     case 'u': state.unrestricted++; return
-    case 'A': case 'B': case 'C': state.context.push([flag, value]); return
+    case 'A': case 'B': case 'C': state.context.push([flag, value, spelling]); return
     default: throw gap(shown(flag), `${shown(flag)} is not supported`)
   }
+}
+
+// ripgrep takes a plain non-negative integer here and rejects everything else,
+// where ignoring the value would quietly search with no context at all.
+function contextValue(value, flag) {
+  if (value === undefined) return 0
+  if (!/^\d+$/u.test(value)) throw gap(`${flag} value`, `error parsing flag ${flag}: value is not a valid number`)
+  return Number(value)
 }
 
 export const shown = (name) => (name.length === 1 ? '-' : '--') + name

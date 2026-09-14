@@ -5,7 +5,7 @@
 
 import { basename, lookup, relativeTo, walkTree } from '../fs.js'
 import { parseArgs } from '../args.js'
-import { unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
+import { unsupported, unsupportedNote } from '../unsupported.js'
 import { ARGS, checkPatterns, patternArgs, rgOptions } from './rg-options.js'
 import { grep } from './grep.js'
 
@@ -15,19 +15,27 @@ const IGNORE_FILES = new Set(['.git', '.ignore', '.rgignore'])
 
 const gap = (detail, message) => unsupported('feature', 'rg', detail, `rg: ${message}`, 2)
 
+// A refusal always reaches the diagnostic feed. A plain Error carries no detail
+// of its own, so the message stands in for one.
+function labelled(e, message, kind) {
+  const note = unsupportedNote(e) ?? e.note
+  return note ? unsupported(note.kind, 'rg', note.detail, message, 2)
+    : unsupported(kind, 'rg', e.detail ?? message.replace(/^rg: /u, ''), message, 2)
+}
+
 export function rg(stdin, tokens, ctx) {
   let options, parsed
   try {
     parsed = parseArgs(tokens, ARGS)
     options = rgOptions(parsed)
-  } catch (e) { return unsupportedFrom(e, 'rg', e.message.startsWith('rg: ') ? e.message : `rg: ${e.message}`, 2) }
+  } catch (e) { return labelled(e, e.message.startsWith('rg: ') ? e.message : `rg: ${e.message}`, 'option') }
   const operands = [...parsed.positional]
   if (!options.patterns.length) {
     if (!operands.length) return gap('usage', 'a pattern is required')
     options.patterns.push(operands.shift())
   }
   try { checkPatterns(options.patterns, options.literal) }
-  catch (e) { return unsupportedFrom(e, 'rg', e.message, 2) }
+  catch (e) { return labelled(e, e.message, 'feature') }
   // With readable stdin and no path operand, ripgrep searches stdin rather than
   // the tree. A pipe or a `<` redirect counts as connected even when it carries
   // nothing, which is why this asks the shell rather than looking at content.
@@ -44,7 +52,28 @@ export function rg(stdin, tokens, ctx) {
   if (binary) return gap('named binary file', `${JSON.stringify(binary)} is binary, and reporting a binary match is not supported`)
   const marked = markedFile(operands, targets.roots, ctx)
   if (marked) return gap('byte-order mark', `${JSON.stringify(marked)} begins with a byte-order mark, which ripgrep strips before matching`)
+  // ripgrep treats a run that opened nothing as a mistake rather than a miss,
+  // since a filter it applied is the usual cause. Only when it chose the
+  // starting point itself: name one, even `.`, and an empty walk is just a miss.
+  const opened = targets.stdin || operands.length ? 1 : searchedCount(targets, options, ctx)
+  if (opened === 0) {
+    return { stdout: '', exitCode: 2, stderr: 'rg: No files were searched, which means ripgrep probably applied a filter you didn\'t expect.\nRunning with --debug will show why files are being skipped.\n' }
+  }
   return runGrep(stdin, options, operands, targets, ctx)
+}
+
+// What a walk would open: files discovered below the starting point, unless a
+// dot-prefixed component keeps them out.
+function searchedCount(targets, options, ctx) {
+  let count = 0
+  for (const root of targets.roots) {
+    for (const entry of walkTree(ctx.fs, root)) {
+      if (entry.kind !== 'file') continue
+      const below = relativeTo(root === '/' ? '/' : root, entry.path).split('/')
+      if (options.hidden || below.every((part) => !part.startsWith('.'))) count++
+    }
+  }
+  return count
 }
 
 // rg filters only what it discovers by walking; an operand named on the command
@@ -121,7 +150,7 @@ function runGrep(stdin, options, operands, targets, ctx) {
   const before = new Set(ctx.notes)
   const result = grep(stdin, argv, ctx)
   relabelNotes(ctx.notes, before, targets)
-  return relabel(countOnly(result, options), operands)
+  return relabel(countOnly(result, options), operands, options.patterns)
 }
 
 // grep -c reports every file it opened; ripgrep lists only the ones that matched.
@@ -136,12 +165,19 @@ const ERRNO = new Map([['No such file or directory', 2], ['Not a directory', 20]
 const osError = (text) => text.replaceAll(/^(rg: .*: )([A-Z][a-z].*)$/gmu,
   (line, head, reason) => (ERRNO.has(reason) ? `${head}${reason} (os error ${ERRNO.get(reason)})` : line))
 
+const PATTERN_ERROR = /^rg: (?:invalid pattern[^\n]*|trailing backslash)$/mu
+
 // grep names the operand it was given; rg prints the path it walked to.
-function relabel(result, operands) {
+function relabel(result, operands, patterns) {
   const strip = (text) => (operands.length ? text : text.replaceAll(/^\.\//gmu, ''))
   const out = { ...result, stdout: strip(result.stdout), stderr: osError(strip(result.stderr).replaceAll(/^grep: /gmu, 'rg: ')) }
   const note = unsupportedNote(result)
-  return note ? unsupported(note.kind, 'rg', note.detail, out.stderr.trimEnd() || note.message, result.exitCode) : out
+  if (note) return unsupported(note.kind, 'rg', note.detail, out.stderr.trimEnd() || note.message, result.exitCode)
+  if (PATTERN_ERROR.test(out.stderr)) {
+    return unsupported('feature', 'rg', 'regex parse error',
+      `rg: regex parse error in ${JSON.stringify(patterns.join(' '))}; the reason ripgrep gives is not reproduced here`, 2)
+  }
+  return out
 }
 
 // The excluded-entries note is grep's wording for a rule rg applies by default.
