@@ -401,7 +401,6 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
 
   for (const [line, message] of [
     ['{ ls; }', 'summarize: a brace group is not a simple chain'],
-    ['for f in a; do ls; done', 'summarize: `for` is not a simple chain'],
     ['if ls; then cat a.txt; fi', 'summarize: `if` is not a simple chain'],
     ['[[ -f a.txt ]]', 'summarize: `[[ … ]]` is not a simple chain'],
     ['! ls', 'summarize: `!` is not a simple chain'],
@@ -469,6 +468,25 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     assert.deepEqual(terminal().summarize('x=$(date) ls'), [[[{ type: 'assignments', assignments: [{ name: 'x', value: shell([[['date']]], false) }] }, 'ls']]])
     assert.deepEqual(terminal().summarize('ls $(cat f)/x'), [[['ls', parts(shell([[['cat', 'f']]], true), '/x')]]])
     assert.throws(() => terminal().summarize('echo `echo )`'), { message: 'unexpected `)`' })
+  })
+
+  // A `for` is a list of its own too, run once for each word after `in`.
+  it('summarizes a for loop as the list it repeats', () => {
+    assert.deepEqual(terminal().summarize('for d in a-*; do echo "$d"; done'), [[{
+      type: 'for',
+      name: 'd',
+      words: [pattern('a-*')],
+      summary: [[['echo', { type: 'variable', name: 'd', multi: false }]]],
+    }]])
+    assert.deepEqual(terminal().summarize('for f in {1..3}; do wc -l; done | sort'), [[
+      { type: 'for', name: 'f', words: ['1', '2', '3'], summary: [[['wc', '-l']]] },
+      ['sort'],
+    ]])
+    assert.deepEqual(terminal().summarize('for f in; do ls; done > /tmp/out'), [[
+      { type: 'for', name: 'f', words: [], summary: [[['ls']]] },
+      ['>', '/tmp/out'],
+    ]])
+    assert.throws(() => terminal().summarize('for f in a; do { ls; }; done'), { message: 'summarize: a brace group is not a simple chain' })
   })
 
   // `( … )` is a list of its own, and a summary of a list is a summary.

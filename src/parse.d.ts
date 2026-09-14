@@ -459,10 +459,12 @@ export interface TokenAssignment {
 /**
  * One command of a chain: each pipeline stage's `argv`, with the assignments
  * it carries in front, and each redirect as the tokens it was written with —
- * `['>', 'out']`, `['2>&1']`. Where a stage is a `( … )`, a
- * {@link ChainBraces} stands in place of that row.
+ * `['>', 'out']`, `['2>&1']`. Where a stage is a block, the row is the block.
  */
-export type Chain = Array<Token[] | ChainBraces>
+export type Chain = ChainRow[]
+
+/** One row of a {@link Chain}: a command's tokens, or the block that stands where one would. */
+export type ChainRow = Token[] | ChainBraces | ChainFor
 
 /**
  * A `( … )` a chain runs: the commands inside, summarized as a line of their
@@ -479,6 +481,26 @@ export type Chain = Array<Token[] | ChainBraces>
 export interface ChainBraces {
   type: 'braces'
   /** What it runs, summarized as a line of its own. */
+  summary: Summary
+}
+
+/**
+ * A `for NAME in WORD…; do … done` a chain runs: the list it repeats,
+ * summarized as a line of its own, and what it repeats that list over —
+ * `for d in a-*; do echo "$d"; done` is one row holding the name `d`, the
+ * pattern `a-*`, and a summary of the `echo`.
+ *
+ * `words` is empty for `for f in; do … done`, which runs nothing. As with
+ * {@link ChainBraces}, this is not the tree's `for`: `summary` is a
+ * {@link Summary} rather than a list of nodes, and the words are tokens.
+ */
+export interface ChainFor {
+  type: 'for'
+  /** The loop variable, which keeps its last value after the loop. */
+  name: string
+  /** The words after `in`, one turn of the loop each, with braces already expanded. */
+  words: WordToken[]
+  /** The loop body, summarized as a line of its own. */
   summary: Summary
 }
 
@@ -546,7 +568,7 @@ export function parse(line: string): ParseResult
  * `A=1 B=2` a command carries — each of which says what it reaches for as
  * plainly as a name says what it runs. Anything a summary
  * would have to lie about throws instead: a line that does not parse, a
- * brace group, `for`, `if` or `[[ … ]]`, a `!`, a
+ * brace group, `if` or `[[ … ]]`, a `!`, a
  * here-document whose delimiter leaves its body to expand, a stage that reads
  * its own input from inside a pipeline, and any word no line settles the text
  * of — `$(( … ))`, or the braces of an ambiguous redirect. {@link parse}

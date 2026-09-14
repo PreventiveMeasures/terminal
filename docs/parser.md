@@ -235,6 +235,15 @@ Parentheses holding one command that changes nothing the shell around them
 keeps are the command they hold — `(ls)` is `ls` — while `(cd dir)` keeps
 them, since stopping the `cd` from reaching the shell is all they are for.
 
+A `for` is a list of its own as well, run once for each word after `in`:
+
+```js
+summarize('for d in a-*; do echo "$d"; done')
+// [ [ { type: 'for', name: 'd',
+//        words: [{ type: 'pattern', pattern: 'a-*', multi: true }],
+//        summary: [[['echo', { type: 'variable', name: 'd', multi: false }]]] } ] ]
+```
+
 Anything else throws rather than be summarized into a lie: a line that does not
 parse, `while`, `case` and the other constructs this terminal refuses, a brace
 group, `for`, `if` or `[[ … ]]`, a `!`, a here-document whose delimiter leaves

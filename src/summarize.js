@@ -31,7 +31,11 @@ function summaryOf(nodes) {
   return summary
 }
 
-const BLOCKS = { group: 'a brace group', for: '`for`', if: '`if`', test: '`[[ … ]]`', pipeline: 'a pipeline of pipelines' }
+const BLOCKS = { group: 'a brace group', if: '`if`', test: '`[[ … ]]`', pipeline: 'a pipeline of pipelines' }
+
+// What a chain's rows can be: a command, and the two blocks that are a list of
+// commands and nothing a summary would have to leave out.
+const ROWS = new Set(['command', 'subshell', 'for'])
 
 function chainOf(node) {
   if (node.negate) throw refuse('`!`')
@@ -40,12 +44,12 @@ function chainOf(node) {
   let commands = 0
   for (const [index, written] of stages.entries()) {
     const stage = opened(written)
-    if (stage.type !== 'command' && stage.type !== 'subshell') throw refuse(BLOCKS[stage.type])
+    if (!ROWS.has(stage.type)) throw refuse(BLOCKS[stage.type])
     if (stage.type === 'command' && stage.argv.length === 0 && !stage.assignments) throw refuse('a command with no name')
     const redirects = stage.redirects ?? []
     const input = inputOf(redirects, index)
     if (input) { chain.push(inputStage(input)); commands++ }
-    const row = stage.type === 'subshell' ? { type: 'braces', summary: summaryOf(stage.list) } : rowOf(stage)
+    const row = rowOf(stage)
     // A `cat` with no file of its own hands its input straight on, so once
     // something is feeding the chain it says nothing: `echo x | cat > f` is
     // `echo x > f`, and its own redirects stay where they were.
@@ -57,7 +61,13 @@ function chainOf(node) {
   return chain
 }
 
+// A command is its words; the blocks that are a list of commands are that
+// list, summarized as a line of its own, with whatever the block says about
+// how it runs one — a `for` says which name it runs the list over, and what
+// it gives that name in turn.
 function rowOf(stage) {
+  if (stage.type === 'subshell') return { type: 'braces', summary: summaryOf(stage.list) }
+  if (stage.type === 'for') return { type: 'for', name: stage.name, words: stage.words.map(literal), summary: summaryOf(stage.list) }
   const argv = stage.argv.map(literal)
   if (stage.assignments) argv.unshift(assignmentsOf(stage.assignments))
   return argv

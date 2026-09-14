@@ -259,6 +259,8 @@ export type {
   Assignment,
   BracePart,
   ChainBraces,
+  ChainFor,
+  ChainRow,
   Branch,
   Chain,
   CloseRedirect,
@@ -369,7 +371,7 @@ export interface Terminal {
    * or the {@link AssignmentsToken} a command carries. It
    * throws rather than summarize what it cannot: a line
    * that does not parse (including a redirect this filesystem would refuse),
-   * a brace group, `for`, `if` or `[[ … ]]`, a `!`, a
+   * a brace group, `if` or `[[ … ]]`, a `!`, a
    * here-document whose delimiter leaves its body to expand, a stage reading
    * its own input from inside a pipeline, or a word a command has to run before
    * its text is known.
