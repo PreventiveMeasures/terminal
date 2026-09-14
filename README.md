@@ -22,7 +22,7 @@ const terminal = createTerminal({
 
 terminal.run('grep -rn oak src').stdout  // 'src/app.js:1:export const name = "oak"\n'
 terminal.complete('cat src/a')           // ['cat src/app.js']
-terminal.parse('wc -l src/app.js')       // { ok: true, units: [ [ … ] ], … }, running nothing
+terminal.parse('wc -l src/app.js')       // { ok: true, list: [ { type: 'command', argv: [ … ] } ], … }
 terminal.run('cd src; wc -l app.js')     // { stdout: '1 app.js\n', exitCode: 0, cwd: '/src', … }
 ```
 
@@ -50,28 +50,44 @@ terminal.run('shopt -s nullglob').unsupported
 ## Reading a line before running it
 
 `parse(line)` is the parser on its own: nothing runs, nothing changes — not the
-working directory, the variables, or the overlay — and you get back what the
-parser made of the input.
+working directory, the variables, or the overlay — and you get back the
+commands the line holds.
 
 ```js
 terminal.parse('sort input | uniq -c')
-// { ok: true, incomplete: false, error: null, unsupported: [], units: [ [ {
-//   gate: 'first', negate: false, bang: false, stages: [
-//     { words: [{ value: 'sort', mask: null }, { value: 'input', mask: null }], assigns: [], redirs: [] },
-//     { words: [{ value: 'uniq', mask: null }, { value: '-c', mask: null }], assigns: [], redirs: [] },
-//   ] } ] ] }
+// { ok: true, incomplete: false, error: null, unsupported: [], list: [
+//   { type: 'pipeline', stages: [
+//     { type: 'command', argv: ['sort', 'input'] },
+//     { type: 'command', argv: ['uniq', '-c'] },
+//   ] } ] }
 
 terminal.parse('for f in src/*.js; do').incomplete   // true — ask for another line
 terminal.parse('echo )').error                       // 'unexpected `)`'
 terminal.parse('while :; do echo x; done').unsupported[0].detail  // 'while'
 ```
 
-`units` is the tree this terminal's own engine runs: gated steps, pipeline
-stages, words with the quoting of each character, assignments, redirects, and
-the groups, loops and conditionals nested in them — enough to render the line,
-walk it, or execute it elsewhere. Bash parses one input unit and runs it before
-reading the next, which is why a line that fails partway still carries the
-units ahead of the error.
+`list` is the whole line: each command carries the `op` that joins it to the
+one before (`;`, `&&`, `||`, and a newline reads as `;`), its `argv`, and
+whatever else it has — `assigns`, `redirs`, a `negate` for `!`. Pipelines,
+subshells, `{ …; }` groups, `for` loops, `if` branches and `[[ … ]]` tests are
+nodes of their own, each named by `type`. A field that would only say "nothing
+here" is left out, and a line that fails partway still carries the commands
+ahead of the error.
+
+Values are plain text wherever the text is final, and a word node only where
+expansion still decides it — so reading arguments takes no knowledge of
+quoting:
+
+```js
+terminal.parse('grep -rn "$pattern" src/*.js').list[0].argv
+// [ 'grep', '-rn',
+//   { type: 'word', value: '${pattern}', mask: '2222222222' },
+//   { type: 'word', value: 'src/*.js' } ]
+```
+
+`'*'` is the string `*`, because quoting settled it; `*.js` is a word, because
+the filesystem has yet to. `mask` says which characters were quoted (`0` bare,
+`1` hard-quoted, `2` inside double quotes).
 
 ## The parser on its own
 
@@ -80,7 +96,7 @@ The parser is published separately, for a caller with no source tree to mount:
 ```js
 import { parse } from '@preventive/terminal/parse.js'
 
-parse('rg foo | wc -l').units[0][0].stages.map((stage) => stage.words[0].value)  // ['rg', 'wc']
+parse('rg foo | wc -l').list[0].stages.map((stage) => stage.argv[0])  // ['rg', 'wc']
 ```
 
 That entry point loads the parser and its lexers and nothing else — no
