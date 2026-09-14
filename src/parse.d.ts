@@ -2,199 +2,186 @@ import type { Unsupported } from './index.js'
 
 export type { Unsupported, UnsupportedKind } from './index.js'
 
-/**
- * How a step joins the one before it: `first` opens the list, `seq` follows a
- * `;` or a newline, `and` a `&&`, `or` a `||`.
- */
-export type Gate = 'first' | 'seq' | 'and' | 'or'
+/** How a command joins the one before it. Absent on the first of a list. */
+export type Operator = ';' | '&&' | '||'
 
 /**
- * A word before expansion: the text with its quotes removed, plus what the
- * quoting was.
- *
- * `mask` carries one character per UTF-16 unit of `value`: `0` bare, `1`
- * hard-quoted, `2` inside double quotes, where substitutions still happen. It
- * is `null` when every character is bare and nothing was quoted.
- *
- * An expansion keeps its own source inside `value`: a `$` or backtick whose
- * mask is not `1` opens one, and the rest of its source — `(…)`, `{…}`,
- * `((…))`, up to the closing backtick — follows it masked `1`, so a later pass
- * reads it as text rather than expanding it twice. `"$f"` is stored as
- * `${f}` when a quote follows it, so that quote removal cannot join the name
- * to what comes next.
+ * A word expansion has yet to settle: a `$` or backtick quoting has not
+ * disarmed, or a bare `~`, glob or brace. Anything else is already its final
+ * text and appears as a plain string, so `'*'` is `"*"` while `*.js` is one of
+ * these.
  */
 export interface Word {
-  /** The text, with quotes and escapes removed. */
+  type: 'word'
+  /** What was written, with quotes removed; an expansion keeps its own source, so `"$x"` reads as `${x}`. */
   value: string
-  /** Per-character quoting of `value`, or `null` when all of it is bare. */
-  mask: string | null
   /**
-   * Offsets where an empty quoted fragment (`""`, `''`) stood. Absent when
-   * there were none. They survive expansion: `$x""` keeps a final empty field.
+   * Which characters of `value` were quoted, one per UTF-16 unit: `0` bare,
+   * `1` hard-quoted, `2` inside double quotes, where substitutions still
+   * happen. Absent when none of it was quoted. An expansion's source carries
+   * `1` after its opening `$`, so a later pass reads it rather than expanding
+   * it twice.
    */
+  mask?: string
+  /** Offsets where an empty quoted fragment (`""`, `''`) stood, which expansion must not lose: `$x""` keeps a final empty field. */
   empty?: number[]
 }
 
-/** `NAME=value`, in front of a command or alone. The value is unexpanded. */
+/** Final text, or the word that still has to become it. */
+export type Value = string | Word
+
+/** `NAME=value`, in front of a command or on its own. */
 export interface Assignment {
   name: string
-  word: Word
+  value: Value
+}
+
+/** `>` `>>` `&>` `&>>` `<`: a file, by a path that may still expand. The `&>` forms send stderr along with stdout. */
+export interface FileRedirect {
+  fd: number
+  op: '>' | '>>' | '&>' | '&>>' | '<'
+  target: Value
 }
 
 /** `2>&1`: make `fd` a copy of `toFd`. */
 export interface DuplicateRedirect {
   fd: number
-  op: 'dup'
+  op: '>&'
   toFd: number
 }
 
 /** `2>&-`: close `fd`. */
 export interface CloseRedirect {
   fd: number
-  op: 'close'
-  toFd?: undefined
+  op: '>&-'
 }
 
-/**
- * `>` `>>` `&>` `&>>`: send `fd` to a file. Exactly one of `target` and `word`
- * is present — `target` when the text is already final, `word` when expansion
- * has to produce it (`>$out`, `>/dev/nu*`).
- */
-export interface WriteRedirect {
-  fd: number
-  op: 'to'
-  /** The path as typed, when no expansion can change it. */
-  target?: string
-  /** The unexpanded path, when one can. */
-  word?: Word
-  /** `&>`: stderr follows stdout to the same place. */
-  both: boolean
-  /** `>>`: append rather than truncate. */
-  append: boolean
-  /** The operator as written, for diagnostics: `>`, `2>>`, `&>`, … */
-  label: string
+/** `<<<`: the text goes to stdin, after expansion but without splitting. */
+export interface HereString {
+  fd: 0
+  op: '<<<'
+  text: Value
 }
 
-/**
- * `<<` and `<<-`: the body collected from the lines after the command.
- * `expand` is false for a quoted delimiter (`<<'EOF'`), whose body is literal.
- */
+/** `<<`: the body collected from the lines after the command. `expand` is false for a quoted delimiter (`<<'EOF'`), whose body is literal. */
 export interface HereDocument {
   fd: 0
-  op: 'text'
+  op: '<<'
   body: string
   expand: boolean
 }
 
-/** `<file` and `<<<here-string`, whose operand expands when the stage runs. */
-export interface InputRedirect {
-  fd: 0
-  op: 'read' | 'herestring'
-  word: Word
-}
-
 /** One redirect. They apply left to right, so `2>&1 >f` is not `>f 2>&1`. */
-export type Redirect = DuplicateRedirect | CloseRedirect | WriteRedirect | HereDocument | InputRedirect
+export type Redirect = FileRedirect | DuplicateRedirect | CloseRedirect | HereString | HereDocument
 
-/** An operand inside `[[ … ]]`, quoted like any other word. */
-export interface ConditionWord extends Word {
-  kind: 'word'
-  /** Whether any part of it was quoted, which keeps it from being an operator. */
-  quoted: boolean
+/** What every node may carry. */
+export interface NodeBase {
+  /** How this one joins the previous command; absent on the first, and on a pipeline's stages, which `|` already joins. */
+  op?: Operator
+  /** `!`: the status is inverted. Absent otherwise. */
+  negate?: true
+  /** Redirects, in source order. Absent when there are none. */
+  redirs?: Redirect[]
+  /** What bash warns about before running the command, such as a here-document the input ended before its delimiter. Absent when there is nothing to warn about. */
+  warnings?: string
 }
+
+/**
+ * A simple command: the name and its arguments, unexpanded. `argv` is empty
+ * for a command that is only assignments or redirects, and for the empty
+ * negated command a bare `!` writes.
+ */
+export interface Command extends NodeBase {
+  type: 'command'
+  argv: Value[]
+  /** `NAME=value` prefixes. Without `argv` they assign; with it they are the command's own. Absent when there are none. */
+  assigns?: Assignment[]
+}
+
+/** `a | b`: two or more stages. A pipeline of one is that command, not this. */
+export interface Pipeline extends NodeBase {
+  type: 'pipeline'
+  /** Stages left to right; the last one's status is the pipeline's. */
+  stages: Node[]
+}
+
+/** `( … )`: a list with its own working directory and variables. */
+export interface Subshell extends NodeBase {
+  type: 'subshell'
+  body: Node[]
+}
+
+/** `{ …; }`: a list sharing the enclosing shell's directory and variables. */
+export interface Group extends NodeBase {
+  type: 'group'
+  body: Node[]
+}
+
+/** `for NAME in WORD...; do LIST; done`. */
+export interface ForLoop extends NodeBase {
+  type: 'for'
+  /** The loop variable, which keeps its last value after the loop. */
+  name: string
+  /** The list after `in`; empty for `for f in; do …; done`. */
+  words: Value[]
+  body: Node[]
+}
+
+/** One `if`/`elif` arm: the list whose status decides, and what it guards. */
+export interface Branch {
+  condition: Node[]
+  body: Node[]
+}
+
+/** `if … then … elif … else … fi`. */
+export interface If extends NodeBase {
+  type: 'if'
+  /** The `if` arm first, then each `elif`, in order. */
+  branches: Branch[]
+  /** The `else` body. Absent when there is none. */
+  otherwise?: Node[]
+}
+
+/** `[[ … ]]`, which runs no command. */
+export interface Test extends NodeBase {
+  type: 'test'
+  expression: Condition
+}
+
+/** One command in a list. */
+export type Node = Command | Pipeline | Subshell | Group | ForLoop | If | Test
 
 /** `[[ a && b ]]`, `[[ a || b ]]`. */
 export interface ConditionJunction {
-  kind: 'and' | 'or'
+  type: 'and' | 'or'
   left: Condition
   right: Condition
 }
 
 /** `[[ ! a ]]`. */
 export interface ConditionNot {
-  kind: 'not'
+  type: 'not'
   expression: Condition
 }
 
 /** `[[ -f x ]]`, and a bare `[[ x ]]`, which is `-n`. */
 export interface ConditionUnary {
-  kind: 'unary'
+  type: 'unary'
   /** `-f`, `-z`, `-n`, … */
   op: string
-  word: ConditionWord
+  word: Value
 }
 
 /** `[[ x == y ]]`, `[[ a -lt b ]]`, `[[ f -nt g ]]`. */
 export interface ConditionBinary {
-  kind: 'binary'
+  type: 'binary'
   op: string
-  left: ConditionWord
-  right: ConditionWord
+  left: Value
+  right: Value
 }
 
 /** A `[[ … ]]` expression. `=~` is refused rather than parsed. */
 export type Condition = ConditionJunction | ConditionNot | ConditionUnary | ConditionBinary
-
-/** `for NAME in WORD...; do LIST; done`. */
-export interface Loop {
-  /** The loop variable, which keeps its last value after the loop. */
-  name: string
-  /** The list after `in`, unexpanded; empty for `for f in; do …; done`. */
-  words: Word[]
-  body: Step[]
-}
-
-/** One `if`/`elif` arm: the list whose status decides, and what it guards. */
-export interface Branch {
-  condition: Step[]
-  body: Step[]
-}
-
-/** `if … then … elif … else … fi`. */
-export interface Conditional {
-  /** The `if` arm first, then each `elif`, in order. */
-  branches: Branch[]
-  /** The `else` body, or `null` when there is none. */
-  otherwise: Step[] | null
-}
-
-/**
- * One stage of a pipeline: either a simple command — `words` and its
- * `assigns` — or one nested construct, never both. `redirs` belongs to
- * whichever it is.
- */
-export interface Stage {
-  /** The command and its arguments, unexpanded. Empty for a nested construct, and for a stage that is only assignments or redirects. */
-  words: Word[]
-  /** `NAME=value` prefixes; without `words` they assign, with `words` they are the command's own. */
-  assigns: Assignment[]
-  /** Redirects in source order. */
-  redirs: Redirect[]
-  /** `( … )` or `{ …; }`: the list inside it. */
-  group?: Step[]
-  /** True for `( … )`, which gets its own cwd and variables; false for `{ …; }`, which shares them. */
-  isolate?: boolean
-  /** `for … in …; do …; done`. */
-  loop?: Loop
-  /** `if … fi`. */
-  conditional?: Conditional
-  /** `[[ … ]]`, which runs no command. */
-  test?: Condition
-}
-
-/** One gated pipeline. */
-export interface Step {
-  /** How it joins the previous step. */
-  gate: Gate
-  /** Pipeline stages left to right; the last one's status is the pipeline's. */
-  stages: Stage[]
-  /** `!`: the status is inverted. */
-  negate: boolean
-  /** Whether a `!` was written at all — `! ! cmd` leaves `negate` false. */
-  bang: boolean
-  /** What bash warns about before running the unit, such as a here-document the input ended before its delimiter. Absent when there is nothing to warn about. */
-  warnings?: string
-}
 
 /** What the parser made of a line. */
 export interface ParseResult {
@@ -212,16 +199,14 @@ export interface ParseResult {
   /** The diagnostic that stopped the parse, or `null` when `ok`. */
   error: string | null
   /**
-   * The parsed line: input units in order, each a list of gated steps. Bash
-   * parses one unit and runs it before reading the next, so a line that fails
-   * partway still carries the units ahead of the error — the ones a terminal
-   * would have executed. A one-line command is one unit.
+   * The commands the line holds, in order, each carrying the `op` that joins
+   * it to the one before. Newlines separate commands exactly as `;` does, so a
+   * script is one list; a line that fails partway still carries the commands
+   * ahead of the error, which are the ones a terminal would have run.
    *
-   * This is the tree the terminal's own engine runs, so it is enough to
-   * render the line, walk it, or execute it yourself. It is a fresh parse on
-   * every call and belongs to the caller; nothing here is frozen or shared.
+   * A fresh tree on every call, and the caller's to keep or change.
    */
-  units: Step[][]
+  list: Node[]
   /**
    * Gaps this implementation has, that parsing itself reached: refused shell
    * constructs (`while`, `case`, `((`, `&`), unsupported `${…}` operators and
@@ -240,7 +225,7 @@ export interface ParseResult {
  * no variables, so it never reports that a command is missing and never
  * refuses a redirect — where a line may write is a property of a terminal, not
  * of the line. `createTerminal(…).parse(line)` answers the same way, except
- * that a write its filesystem would refuse is reported there as the gap `run()`
- * would report.
+ * that a write its filesystem would refuse is reported there as the gap
+ * `run()` would report.
  */
 export function parse(line: string): ParseResult

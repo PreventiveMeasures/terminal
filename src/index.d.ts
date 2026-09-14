@@ -258,24 +258,29 @@ export type {
   Assignment,
   Branch,
   CloseRedirect,
+  Command,
   Condition,
   ConditionBinary,
   ConditionJunction,
   ConditionNot,
   ConditionUnary,
-  ConditionWord,
-  Conditional,
   DuplicateRedirect,
-  Gate,
+  FileRedirect,
+  ForLoop,
+  Group,
   HereDocument,
-  InputRedirect,
-  Loop,
+  HereString,
+  If,
+  Node,
+  NodeBase,
+  Operator,
   ParseResult,
+  Pipeline,
   Redirect,
-  Stage,
-  Step,
+  Subshell,
+  Test,
+  Value,
   Word,
-  WriteRedirect,
 } from './parse.js'
 
 /** A virtual terminal instance with a mutable cwd carried across {@link Terminal.run} calls. */
@@ -319,8 +324,8 @@ export interface Terminal {
   complete(line: string): string[]
   /**
    * Read a command line without running any of it: whether it parses, whether
-   * it is merely unfinished, the diagnostic if it is neither, and the tree the
-   * line parsed into — enough to render it, walk it, or run it elsewhere.
+   * it is merely unfinished, the diagnostic if it is neither, and the commands
+   * it holds — enough to read its arguments, render it, or run it elsewhere.
    * Nothing is executed and nothing changes: not the working directory, the
    * variables, or the `/tmp/` overlay.
    *

@@ -107,6 +107,7 @@
     "src/notes.js",
     "src/numeric.js",
     "src/parse.d.ts",
+    "src/parse-tree.js",
     "src/parse.js",
     "src/regex-locale.js",
     "src/result.js",

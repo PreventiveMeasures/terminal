@@ -10,7 +10,7 @@ import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
 import { discardedNotes, err, missingPathNote, reason } from './util.js'
 import { complete } from './complete.js'
-import { inspect } from './parse.js'
+import { read } from './parse-tree.js'
 import { commandSubstitution } from './shell/capture.js'
 import { BindingMap, isolated, withState } from './shell/state.js'
 import { commandWriteError, createIoGuard, routeExternalOutput, runSteps } from './shell/run.js'
@@ -37,7 +37,7 @@ export function createTerminal(sources, opts = {}) {
     run: (line) => safeRun(line, ctx),
     cwd: () => ctx.cwd,
     complete: (line) => complete(line, ctx, registry),
-    parse: (line) => inspect(line, ctx.writable),
+    parse: (line) => read(line, ctx.writable),
   }
 }
 

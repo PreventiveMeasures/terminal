@@ -4,16 +4,17 @@ import { describe, it } from 'node:test'
 import { URL, fileURLToPath } from 'node:url'
 import { dirname, relative, resolve } from 'node:path'
 import { createTerminal } from '@preventive/terminal'
-import { parse } from '@preventive/terminal/parse.js'
+import * as entry from '@preventive/terminal/parse.js'
 
+const { parse } = entry
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 
 // Static imports only: what loading the entry point actually costs.
-function moduleGraph(entry) {
+function moduleGraph(entryPath) {
   const seen = new Set()
   const external = new Set()
-  const stack = [resolve(ROOT, entry)]
+  const stack = [resolve(ROOT, entryPath)]
   while (stack.length > 0) {
     const file = stack.pop()
     if (seen.has(file)) continue
@@ -29,7 +30,12 @@ function moduleGraph(entry) {
 describe('the parse entry point is published on its own', () => {
   it('is exported as @preventive/terminal/parse.js, with its own types', () => {
     assert.deepEqual(pkg.exports['./parse.js'], { types: './src/parse.d.ts', default: './src/parse.js' })
-    for (const file of ['src/parse.js', 'src/parse.d.ts']) assert.ok(pkg.files.includes(file), file)
+    for (const file of ['src/parse.js', 'src/parse.d.ts', 'src/parse-tree.js']) assert.ok(pkg.files.includes(file), file)
+  })
+
+  it('exports the one function its types declare', () => {
+    assert.deepEqual(Object.keys(entry), ['parse'])
+    assert.equal(typeof parse, 'function')
   })
 
   it('loads the parser and nothing that runs a command', () => {
@@ -40,37 +46,37 @@ describe('the parse entry point is published on its own', () => {
       assert.doesNotMatch(file, /^src\/shell\/(run|expand|state|io|output|capture|builtins|variables|arithmetic.*|conditional|parameter|parameter-pattern|parameter-transform|braces)\.js$/u, file)
     }
     // A budget, not a target: the parser, its lexers, and the leaves they need.
-    assert.ok(files.length <= 16, `${files.length} modules: ${files.join(', ')}`)
+    assert.ok(files.length <= 17, `${files.length} modules: ${files.join(', ')}`)
     assert.deepEqual(external, ['@exodus/bytes/utf8.js'])
     assert.ok(moduleGraph('src/index.js').files.length > 80, 'the whole terminal is much more than the parser')
   })
 })
 
 describe('the parse entry point reads a line with no terminal at all', () => {
-  it('parses a gated pipeline into the tree a terminal would run', () => {
-    const result = parse('x > 2.txt && e | head -20')
-    assert.deepEqual({ ok: result.ok, incomplete: result.incomplete, error: result.error, unsupported: result.unsupported }, { ok: true, incomplete: false, error: null, unsupported: [] })
-    assert.deepEqual(result.units, [[
-      {
-        gate: 'first',
-        negate: false,
-        bang: false,
-        stages: [{
-          words: [{ value: 'x', mask: null }],
-          assigns: [],
-          redirs: [{ fd: 1, op: 'to', target: '2.txt', both: false, append: false, label: '>' }],
-        }],
-      },
-      {
-        gate: 'and',
-        negate: false,
-        bang: false,
-        stages: [
-          { words: [{ value: 'e', mask: null }], assigns: [], redirs: [] },
-          { words: [{ value: 'head', mask: null }, { value: '-20', mask: null }], assigns: [], redirs: [] },
-        ],
-      },
-    ]])
+  it('reads a gated pipeline as commands, not as a low-level tree', () => {
+    assert.deepEqual(parse('(echo 1 2> a; foo; bar -opt) | head -20 > x; ls'), {
+      ok: true,
+      incomplete: false,
+      error: null,
+      unsupported: [],
+      list: [
+        {
+          type: 'pipeline',
+          stages: [
+            {
+              type: 'subshell',
+              body: [
+                { type: 'command', argv: ['echo', '1'], redirs: [{ fd: 2, op: '>', target: 'a' }] },
+                { type: 'command', op: ';', argv: ['foo'] },
+                { type: 'command', op: ';', argv: ['bar', '-opt'] },
+              ],
+            },
+            { type: 'command', argv: ['head', '-20'], redirs: [{ fd: 1, op: '>', target: 'x' }] },
+          ],
+        },
+        { type: 'command', op: ';', argv: ['ls'] },
+      ],
+    })
   })
 
   // Where a line may write belongs to a terminal's filesystem, not to the line.
@@ -86,7 +92,7 @@ describe('the parse entry point reads a line with no terminal at all', () => {
     const result = parse('rg foo | wc -l')
     assert.equal(result.ok, true)
     assert.deepEqual(result.unsupported, [])
-    assert.deepEqual(result.units[0][0].stages.map((stage) => stage.words[0].value), ['rg', 'wc'])
+    assert.deepEqual(result.list[0].stages.map((stage) => stage.argv[0]), ['rg', 'wc'])
     assert.equal(createTerminal({}).run('rg foo | wc -l').unsupported[0].kind, 'command')
   })
 
@@ -121,16 +127,15 @@ describe('the parse entry point reads a line with no terminal at all', () => {
     })
   })
 
-  it('keeps the units that parsed ahead of an error', () => {
+  it('keeps the commands that parsed ahead of an error', () => {
     const result = parse('ls\nfor f in a; do')
     assert.equal(result.ok, false)
-    assert.deepEqual(result.units.map((unit) => unit[0].stages[0].words[0].value), ['ls'])
+    assert.deepEqual(result.list, [{ type: 'command', argv: ['ls'] }])
   })
 
   it('hands back a fresh tree each call, frozen only where a run is', () => {
-    const first = parse('ls -a')
-    first.units[0][0].stages[0].words.push({ value: 'extra', mask: null })
-    assert.deepEqual(parse('ls -a').units[0][0].stages[0].words.map((w) => w.value), ['ls', '-a'])
+    parse('ls -a').list[0].argv.push('extra')
+    assert.deepEqual(parse('ls -a').list[0].argv, ['ls', '-a'])
     assert.ok(Object.isFrozen(parse('while :; do :; done').unsupported))
   })
 })
