@@ -65,6 +65,32 @@ describe('separate writable filesystem layer', () => {
     assert.throws(() => fs.readFile('/tmp/file'), /not valid UTF-8/u)
   })
 
+  it('queries byte sizes without registering reads or decoding overlay contents', () => {
+    const fs = writableFs(createFs({ text: '\uFEFFé😀\0', empty: '' }, '/repo'))
+    const handle = fs.openWritable('/', '/tmp/file')
+    handle.writeBytes(new Uint8Array([255, 128, 0]))
+    fs.observeIo({ read: () => assert.fail('metadata must not consume input'), write: () => assert.fail('metadata must not write') })
+    assert.equal(fs.fileSize('/repo/text'), 10)
+    assert.equal(fs.fileSize('/repo/empty'), 0)
+    assert.equal(fs.fileSize('/tmp/file'), 3)
+    for (const path of ['/', '/repo', '/tmp', '/repo/missing', '/tmp/missing']) assert.equal(fs.fileSize(path), undefined)
+  })
+
+  it('reports current inode sizes after replacement, truncation and removal', () => {
+    const fs = setup()
+    const old = fs.openWritable('/tmp', 'file', true)
+    old.write('abc')
+    fs.replaceWritable('/tmp', 'file', 'é', 'backup')
+    old.write('d')
+    assert.equal(fs.fileSize('/tmp/file'), 2)
+    assert.equal(fs.fileSize('/tmp/backup'), 4)
+    fs.openWritable('/tmp', 'file')
+    assert.equal(fs.fileSize('/tmp/file'), 0)
+    fs.removeWritable('/tmp', 'file')
+    assert.equal(fs.fileSize('/tmp/file'), undefined)
+    assert.equal(fs.fileSize('/tmp/backup'), 4)
+  })
+
   it('uses full normalized paths, even when a file is opened relative to cwd', () => {
     const fs = setup()
     const file = fs.openWritable('/tmp', './file')

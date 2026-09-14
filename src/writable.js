@@ -17,6 +17,7 @@ export function writableFs(base) {
   const fs = {
     observeIo: (value) => { observer = value },
     fileIdentity: (path) => files.get(path),
+    fileSize: (path) => files.get(path)?.bytes.length ?? base.fileSize(path),
     readIdentity: (inode) => { observer?.read(inode); return decodeUtf8(inode.bytes) },
     isFile: (path) => files.has(path) || base.isFile(path),
     isDir: (path) => path === '/tmp' || base.isDir(path),

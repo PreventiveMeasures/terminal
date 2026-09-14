@@ -114,8 +114,23 @@ expressions, `$(…)` and backticks, `$(( … ))`, and the `${…}` family.
 
 `ls` `cd` `cat` `grep` `egrep` `fgrep` `sed` `awk` `find` `head` `tail` `wc`
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
-`printf` `test` `cp` `rm` `pwd` `seq` `which` `basename` `dirname` — plus your
-own, via `opts.commands`.
+`printf` `test` `cp` `rm` `du` `stat` `realpath` `pwd` `seq` `which` `basename`
+`dirname` — plus your own, via `opts.commands`.
+
+`du -b` measures UTF-8 content bytes recursively, including hidden files;
+`du -bs src` reports a directory total. `--apparent-size` (also accepted as the
+BSD `-A`) supports block and human-readable units, and `--inodes` counts
+entries. Allocated disk sizes are unavailable, so plain `du` and `du -sh`
+report an unsupported diagnostic.
+
+`stat -c '%s %n' file` reports byte size and name; `%F` reports file type.
+`--printf` adds escape processing and controls line endings. Default `stat`
+output, directory byte sizes, and fields requiring ownership, permissions,
+timestamps or other absent metadata report an unsupported diagnostic.
+
+`realpath` supports GNU canonicalization modes (`-e`, `-m`, and the default),
+relative output (`--relative-to`, `--relative-base`), quiet errors (`-q`) and
+NUL terminators (`-z`). It resolves paths within the virtual filesystem.
 
 Behaviour is checked against the real tools: bash 5.2, GNU grep 3.11, GNU sed
 4.9 and gawk 5.2 in the C locale, alongside the BusyBox, GNU/Spencer regex and
