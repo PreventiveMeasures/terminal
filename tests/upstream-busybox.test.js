@@ -115,7 +115,7 @@ describe('upstream BusyBox audit — printf', () => {
     ['percent b stops reuse and the rest of the format', "printf '[%b]after' 'oak\\celm' pine", null, '[oak'],
     ['format repeats without shell expansion of values', "printf '%s\\n' oak '$PWD'", null, 'oak\n$PWD\n'],
     ['percent b expands every operand', "printf '%b' 'oak\\telm' 'fir\\\\pine\\n'", null, 'oak\telmfir\\pine\n'],
-    ['quoted integer operands select their first character', `printf '%d\\n' '"Q' "'R" "'Stail"`, null, '81\n82\n83\n'],
+    ['quoted integer operands select their first character', `printf '%d\\n' '"Q' "'R"`, null, '81\n82\n'],
     ['string operands preserve quote prefixes', `printf '%s\\n' '"Q' "'R" "'Stail"`, null, '"Q\n\'R\n\'Stail\n'],
     ['floating width and precision', "printf '|%15.8f|' 2.75", null, '|     2.75000000|'],
     ['floating star width and precision', "printf '|%*.*f|' 15 8 2.75", null, '|     2.75000000|'],
@@ -129,6 +129,16 @@ describe('upstream BusyBox audit — printf', () => {
     ['zero flag precedes star width', "printf '%0*d' 4 3", null, '0003'],
     ['multiple flags combine', "printf '%0 d' 7", null, ' 7'],
   ])
+
+  // A character constant is one character; GNU says what it passed over, and
+  // says it as a warning, so the run still succeeds.
+  it('warns about the characters after a quoted integer operand', () => {
+    assert.deepEqual(createTerminal(FILES).run(`printf '%d\\n' "'Stail"`), {
+      stdout: '83\n',
+      stderr: 'printf: warning: tail: character(s) following character constant have been ignored\n',
+      exitCode: 0, cwd: '/', notes: [], unsupported: [],
+    })
+  })
 
   it('Bash retains the converted numeric prefix on a malformed operand', () => {
     const r = createTerminal().run("printf '%d\\n' 4 57tail 8")

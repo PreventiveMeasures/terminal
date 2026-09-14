@@ -60,10 +60,14 @@ describe('printf missing and empty numeric operands', () => {
     })
   })
 
-  it('reports explicit empty numeric operands as ordinary conversion errors', () => {
+  // An operand with nothing in it is zero, as strtoimax makes it, and says
+  // nothing. An operand of blanks is a number GNU could not read.
+  it('reads an empty numeric operand as zero, and blanks as no number at all', () => {
     assert.deepEqual(createTerminal({}).run("printf '%d %f' '' ''"), {
-      stdout: '0 0.000000', stderr: 'printf: : invalid number\nprintf: : invalid number\n',
-      exitCode: 1, cwd: '/', notes: [], unsupported: [],
+      stdout: '0 0.000000', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
+    })
+    assert.deepEqual(createTerminal({}).run("printf '%d' '   '"), {
+      stdout: '0', stderr: "printf: '   ': expected a numeric value\n", exitCode: 1, cwd: '/', notes: [], unsupported: [],
     })
   })
 })

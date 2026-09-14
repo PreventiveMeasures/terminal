@@ -16,7 +16,7 @@ export function printf(_stdin, tokens, ctx) {
     return unsupported('option', 'printf', option, `printf: option ${option} is not supported`, 2)
   }
   const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG')
-  const state = { args: operands.slice(1), index: 0, chunks: [], size: 0, stderr: '', stop: false, byteLocale: locale === 'C' || locale === 'POSIX' }
+  const state = { args: operands.slice(1), index: 0, chunks: [], size: 0, stderr: '', failed: false, stop: false, byteLocale: locale === 'C' || locale === 'POSIX' }
   let result
   try {
     if (operands.some((s) => s.includes('\0'))) throw new UnsupportedError('feature', 'NUL in argument', 'NUL bytes in command arguments are not supported')
@@ -37,7 +37,8 @@ export function printf(_stdin, tokens, ctx) {
     result = failed
   }
   result.stderr = state.stderr + result.stderr
-  if (state.stderr && result.exitCode === 0) result.exitCode = 1
+  // A warning about what was ignored is not a failure; everything else is.
+  if (state.failed && result.exitCode === 0) result.exitCode = 1
   return result
 }
 

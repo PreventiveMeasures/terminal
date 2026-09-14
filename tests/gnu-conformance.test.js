@@ -422,3 +422,62 @@ describe('GNU conformance — what a tool says it could not read on the command 
     assert.match(createTerminal(files).run('seq').stderr, /^usage: seq /u)
   })
 })
+
+describe('GNU conformance — printf reads its operands the way GNU does', () => {
+  // Every diagnostic named the operand bare where GNU names it the way it
+  // would have to be written to be handed back — single-quoted, with a quote
+  // or a backslash spelled out — and said `invalid number` where GNU says
+  // `expected a numeric value`. An operand with nothing in it is zero to
+  // strtoimax and was an error here; a binary literal is a number to it and
+  // was not; and what follows a character constant is a warning GNU gives and
+  // this passed over in silence. Recorded from coreutils 9.4 in the C locale.
+  const OPERANDS = [
+    ["printf '%d' x", '0', "printf: 'x': expected a numeric value\n", 1],
+    ["printf '%d' 3.7", '3', "printf: '3.7': value not completely converted\n", 1],
+    ["printf '%d' ''", '0', '', 0],
+    ["printf '%f' ''", '0.000000', '', 0],
+    ["printf '%d' '   '", '0', "printf: '   ': expected a numeric value\n", 1],
+    ["printf '%d' 0b1", '1', '', 0],
+    ["printf '%d' 0B11", '3', '', 0],
+    ["printf '%d' 0b", '0', "printf: '0b': value not completely converted\n", 1],
+    ["printf '%d' 0b12", '1', "printf: '0b12': value not completely converted\n", 1],
+    // A binary literal is an integer to strtoimax and nothing to strtod.
+    ["printf '%f' 0b1", '0.000000', "printf: '0b1': value not completely converted\n", 1],
+    ["printf '%d' 99999999999999999999999", '9223372036854775807', "printf: '99999999999999999999999': Numerical result out of range\n", 1],
+    ["printf '%d' \"'ab\"", '97', 'printf: warning: b: character(s) following character constant have been ignored\n', 0],
+    ["printf '%d' \"'\"", '0', "printf: '\\'': expected a numeric value\n", 1],
+    ["printf '%d' '\"'", '0', 'printf: \'"\': expected a numeric value\n', 1],
+    ["printf '%d' \"a'b\"", '0', "printf: 'a\\'b': expected a numeric value\n", 1],
+  ]
+  for (const [command, stdout, stderr, exitCode] of OPERANDS) {
+    it(JSON.stringify(command), () => {
+      assert.deepEqual(createTerminal({}).run(command), { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
+    })
+  }
+
+  // `\x` takes up to two hexadecimal digits, `\u` exactly four and `\U`
+  // exactly eight. Short of that GNU writes nothing for the escape and stops
+  // where it stands, keeping what it had already written — this wrote the
+  // text back out and carried on.
+  const ESCAPES = [
+    ['a\\x41b', 'aAb', '', 0],
+    ['a\\x4g', 'a\u0004g', '', 0],
+    ['a\\u0041b', 'aAb', '', 0],
+    ['a\\U00000041b', 'aAb', '', 0],
+    ['a\\z', 'a\\z', '', 0],
+    ['a\\', 'a\\', '', 0],
+    ['a\\xg', 'a', 'printf: missing hexadecimal number in escape\n', 1],
+    ['a\\x', 'a', 'printf: missing hexadecimal number in escape\n', 1],
+    ['a\\ug', 'a', 'printf: missing hexadecimal number in escape\n', 1],
+    ['a\\u12', 'a', 'printf: missing hexadecimal number in escape\n', 1],
+    ['a\\U0000', 'a', 'printf: missing hexadecimal number in escape\n', 1],
+    ['a\\xgZZZ', 'a', 'printf: missing hexadecimal number in escape\n', 1],
+    ['b\\u0041\\ugX', 'bA', 'printf: missing hexadecimal number in escape\n', 1],
+  ]
+  for (const [format, stdout, stderr, exitCode] of ESCAPES) {
+    it(`printf ${JSON.stringify(format)}`, () => {
+      const r = createTerminal({}).run(`printf ${JSON.stringify(format)}`)
+      assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout, stderr, exitCode })
+    })
+  }
+})

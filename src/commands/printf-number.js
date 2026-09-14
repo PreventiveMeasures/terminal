@@ -1,24 +1,55 @@
 import { formatNumeric, padField } from '../awk/format.js'
 import { UnsupportedError } from '../unsupported.js'
+import { decodeUtf8 } from '../bytes.js'
 import { encodeUtf8Loose } from '../util.js'
 import { INT64_MAX, INT64_MIN, UINT64_MAX } from '../numeric.js'
 
-const INTEGER = /^[+-]?(?:0[xX][\da-fA-F]+|0[0-7]*|[1-9]\d*)/u
+// strtoimax reads a binary literal as well as the hexadecimal and octal ones,
+// and only for an integer: `%f` reads `0b1` as `0` and the rest left over.
+const INTEGER = /^[+-]?(?:0[bB][01]+|0[xX][\da-fA-F]+|0[0-7]*|[1-9]\d*)/u
 const FLOAT = /^[+-]?(?:0[xX](?:[\da-fA-F]+(?:\.[\da-fA-F]*)?|\.[\da-fA-F]+)(?:[pP][+-]?\d+)?|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf(?:inity)?|nan(?:\([\w]*\))?)/iu
 
+// A quote with nothing after it is no character constant, so it is read as
+// the number it is not. What follows the character is ignored, and said to be.
 function charConstant(arg, state) {
   if (arg?.[0] !== "'" && arg?.[0] !== '"') return null
-  return state.byteLocale ? encodeUtf8Loose(arg.slice(1))[0] ?? 0 : arg.codePointAt(1) ?? 0
+  const body = arg.slice(1)
+  if (body === '') return null
+  const bytes = encodeUtf8Loose(body)
+  const width = state.byteLocale ? 1 : encodeUtf8Loose(String.fromCodePoint(body.codePointAt(0))).length
+  if (bytes.length > width) {
+    state.stderr += `printf: warning: ${decodeUtf8(bytes.slice(width))}: character(s) following character constant have been ignored\n`
+  }
+  return state.byteLocale ? bytes[0] : body.codePointAt(0)
 }
 
+// An operand with nothing in it is zero, which is what strtoimax makes of it.
 function numberPrefix(arg, pattern, state) {
-  if (arg === undefined) return '0'
+  if (arg === undefined || arg === '') return '0'
   const text = arg.replace(/^[ \t\n\r\f\v]+/u, '')
   const parsed = pattern.exec(text)?.[0] ?? ''
   if (parsed.length !== text.length || parsed === '') {
-    state.stderr += `printf: ${arg}: ${parsed ? 'value not completely converted' : 'invalid number'}\n`
+    state.stderr += `printf: ${quoted(arg, state)}: ${parsed ? 'value not completely converted' : 'expected a numeric value'}\n`
+    state.failed = true
   }
   return parsed || '0'
+}
+
+const ESCAPES = { '\u0007': '\\a', '\b': '\\b', '\t': '\\t', '\n': '\\n', '\v': '\\v', '\f': '\\f', '\r': '\\r', '\\': '\\\\', "'": "\\'" }
+const octal = (byte) => '\\' + byte.toString(8).padStart(3, '0')
+
+// GNU names an operand it could not read the way it would have to be written
+// to be handed back: single-quoted, with what the quotes cannot carry spelled
+// out. A byte locale has no character above 127 to print, so those are octal.
+function quoted(text, state) {
+  let out = ''
+  for (const char of text) {
+    if (ESCAPES[char] !== undefined) { out += ESCAPES[char]; continue }
+    const code = char.codePointAt(0)
+    if (code < 0x20 || code === 0x7f) { out += octal(code); continue }
+    out += code > 0x7f && state.byteLocale ? encodeUtf8Loose(char).map(octal).join('') : char
+  }
+  return `'${out}'`
 }
 
 export function printfInteger(arg, unsigned, state) {
@@ -30,7 +61,8 @@ export function printfInteger(arg, unsigned, state) {
   const magnitude = BigInt(/^0[0-7]+$/u.test(digits) ? '0o' + digits : digits)
   const value = negative ? -magnitude : magnitude
   if (unsigned ? magnitude > UINT64_MAX : value < INT64_MIN || value > INT64_MAX) {
-    state.stderr += `printf: ${arg}: numerical result out of range\n`
+    state.stderr += `printf: ${quoted(arg, state)}: Numerical result out of range\n`
+    state.failed = true
     return unsigned ? UINT64_MAX : negative ? INT64_MIN : INT64_MAX
   }
   return unsigned ? BigInt.asUintN(64, value) : value

@@ -21,19 +21,24 @@ export function printfEscape(text, at, argument, state) {
   const digits = c === 'x' ? 2 : c === 'u' ? 4 : c === 'U' ? 8 : 0
   if (digits) {
     while (end < at + 2 + digits && /[\da-fA-F]/u.test(text[end] ?? '')) end++
-    if (end === at + 2) {
-      state.stderr += `printf: missing hexadecimal digit for \\${c}\n`
-    } else {
-      const code = parseInt(text.slice(at + 2, end), 16)
-      if (c === 'x') return { bytes: [code], end }
-      if (!isUnicodeScalar(code)) {
-        throw new UnsupportedError('feature', 'Unicode escape', 'escapes outside Unicode scalar values are not supported')
-      }
-      if (state.byteLocale && code > 127) {
-        throw new UnsupportedError('feature', 'Unicode escape in C locale', 'non-ASCII Unicode escapes in the C locale are not supported')
-      }
-      return { bytes: encodeUtf8Loose(String.fromCodePoint(code)), end }
+    // `\x` takes up to two digits, `\u` and `\U` exactly their count. Short of
+    // that GNU writes nothing for the escape and stops there, keeping what it
+    // had already written.
+    if (end === at + 2 || (c !== 'x' && end !== at + 2 + digits)) {
+      state.stderr += 'printf: missing hexadecimal number in escape\n'
+      state.failed = true
+      state.stop = true
+      return { bytes: [], end: text.length, stop: true }
     }
+    const code = parseInt(text.slice(at + 2, end), 16)
+    if (c === 'x') return { bytes: [code], end }
+    if (!isUnicodeScalar(code)) {
+      throw new UnsupportedError('feature', 'Unicode escape', 'escapes outside Unicode scalar values are not supported')
+    }
+    if (state.byteLocale && code > 127) {
+      throw new UnsupportedError('feature', 'Unicode escape in C locale', 'non-ASCII Unicode escapes in the C locale are not supported')
+    }
+    return { bytes: encodeUtf8Loose(String.fromCodePoint(code)), end }
   }
   end = at + 1 + stepAt(text, at + 1)
   return { bytes: encodeUtf8Loose(text.slice(at, end)), end }
