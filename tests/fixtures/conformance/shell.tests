@@ -80,6 +80,8 @@ echo $(( 6 & 3 )) => "2\n"
 echo $(( 6 | 3 )) => "7\n"
 echo $(( 6 ^ 3 )) => "5\n"
 echo $((1+2))$((3+4)) => "37\n"
+echo $(( -7 / 2 )) => "-3\n"
+x=2; echo $(( x * x )) => "4\n"
 "echo \"$(( 1 + 1 ))\"" => "2\n"
 
 # conditionals
@@ -238,6 +240,19 @@ until true; do echo x; done | wc -l => "0\n"
 n=0; while [[ $n -lt 2 ]]; do n=$((n+1)); done; echo $n => "2\n"
 n=0; while [[ $n -lt 3 ]]; do n=$((n+1)); [[ $n == 2 ]] && continue; echo $n; done => "1\n3\n"
 echo a | { cat; cat; } => "a\n"
+for f in *.txt; do echo $f; done => "*.txt\n"
+for f in input; do wc -l < $f; done => "3\n"
+for f in 'a b' c; do echo "[$f]"; done => "[a b]\n[c]\n"
+for i in $(echo a b); do echo $i; done => "a\nb\n"
+for i in "$(echo a b)"; do echo "[$i]"; done => "[a b]\n"
+while [[ -n $x ]]; do echo no; done; echo after => "after\n"
+x=abc; while [[ $x == a* ]]; do echo yes; x=; done => "yes\n"
+x=abc; [[ $x == "a*" ]] && echo yes || echo no => "no\n"
+f() { echo 'single'; }; f => "single\n"
+f() { printf '%s|%s\n' a b; }; f => "a|b\n"
+f() { echo a; }; echo "$(f)" => "a\n"
+f() { echo a; echo b; }; echo "$(f)" => "a\nb\n"
+f() { cat input; }; f | grep -c . => "3\n"
 f() { echo hi; } echo bye => % 2
 ( ls ) ls => % 2
 { ls; } ls => % 2

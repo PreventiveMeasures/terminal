@@ -32,6 +32,30 @@ function commandNames(nodes) {
   return out
 }
 
+// The line a summary describes, written back out: a caller reading one is
+// being told what to run, so the tokens have to go back together as a line
+// that runs. Rows join with `|`, a redirect row attaches to the row before
+// it, and a token that is not a plain word means this one cannot be written
+// back — the summary is still right, it just holds more than text.
+const REDIRECT = /^\d*(?:>>?|<|>&\d*|>&-|&>>?)$/u
+const shellQuote = (t) => (/^[\w.,:/=@%+-]+$/u.test(t) ? t : `'${t.replaceAll("'", "'\\''")}'`)
+
+function writtenBack(summary) {
+  const parts = []
+  for (const entry of summary) {
+    if (typeof entry === 'string') { parts.push(entry); continue }
+    const rows = []
+    for (const row of entry) {
+      if (!Array.isArray(row) || row.some((token) => typeof token !== 'string')) return null
+      if (!REDIRECT.test(row[0])) { rows.push(row.map(shellQuote).join(' ')); continue }
+      if (rows.length === 0) return null
+      rows[rows.length - 1] += ' ' + [row[0], ...row.slice(1).map(shellQuote)].join(' ')
+    }
+    parts.push(rows.join(' | '))
+  }
+  return parts.map((part, i) => (i === 0 || part === '&&' || part === '||' || parts[i - 1] === '&&' || parts[i - 1] === '||' ? part : '; ' + part)).join(' ').replaceAll(' ; ', '; ')
+}
+
 const named = (line, opts) => commandNames(list(line, opts))
 const parts = (...pieces) => pieces.length === 1 ? pieces[0] : { type: 'parts', parts: pieces }
 const pattern = (source, multi = true) => ({ type: 'pattern', pattern: source, multi })
@@ -1037,11 +1061,95 @@ describe('parse() changes nothing', () => {
     t.run('cd dir')
     assert.deepEqual(t.parse('for f in a; do cat "$f"; done'), first)
   })
+
+  // A definition read is not a definition made: reading a line that would
+  // name a body leaves the shell with no name it did not already have.
+  it('defines nothing by reading a definition', () => {
+    const t = terminal()
+    t.parse('bench() { ls; }; bench')
+    t.summarize('other() { ls; }; other')
+    assert.deepEqual(t.complete('be'), [])
+    assert.deepEqual(t.complete('oth'), [])
+    for (const name of ['bench', 'other']) {
+      const r = t.run(name)
+      assert.equal(r.exitCode, 127, name)
+      assert.deepEqual(r.unsupported.map((gap) => gap.detail), [name], name)
+    }
+  })
+
+  // The summary of a line is read the same way the tree is, so it changes as
+  // little: a loop it summarizes runs no turn, and a `cd` moves nothing.
+  it('runs none of a line it summarizes either', () => {
+    const t = terminal()
+    t.run('value=kept')
+    assert.deepEqual(t.summarize('cd dir; value=changed; rm a.txt'), [
+      [['cd', 'dir']],
+      [[{ type: 'assignments', assignments: [{ name: 'value', value: 'changed' }] }]],
+      [['rm', 'a.txt']],
+    ])
+    t.summarize('while true; do rm a.txt; done')
+    t.summarize('for f in a.txt; do rm "$f"; done')
+    assert.equal(t.cwd(), '/src')
+    assert.equal(t.run('printf "%s" "$value"').stdout, 'kept')
+    assert.equal(t.run('test -e a.txt').exitCode, 0)
+  })
 })
 
 // Every one of these runs over the real trees with an empty `unsupported`
 // list, so a line the parser could not read, or a command whose name reading
 // the tree could not settle, would be this falling short of running it.
+describe('summarize() says what the line it read would do', () => {
+  // A summary is a claim: run what it describes and the line it describes,
+  // and the two leave the same output, status and directory behind. Every
+  // corpus command that reads back as plain tokens is held to that.
+  it('runs each corpus command the way its summary says', () => {
+    let checked = 0
+    for (const { command } of CORPUS) {
+      let summary
+      try { summary = terminal().summarize(command) } catch { continue }
+      const rebuilt = writtenBack(summary)
+      if (rebuilt === null) continue
+      checked++
+      const written = terminal().run(command)
+      const said = terminal().run(rebuilt)
+      assert.deepEqual(
+        [said.stdout, said.exitCode, said.cwd],
+        [written.stdout, written.exitCode, written.cwd],
+        `${command}\n  \u2192 ${rebuilt}`,
+      )
+    }
+    assert.ok(checked >= 40, `only ${checked} of ${CORPUS.length} corpus commands read back as plain tokens`)
+  })
+
+  // The corpus is mostly pipelines, so hold the gates, the sequences and the
+  // redirects to the same claim on lines written for them.
+  for (const [command, expected] of [
+    ['ls && cat a.txt', 'ls && cat a.txt'],
+    ['ls || cat a.txt', 'ls || cat a.txt'],
+    ['ls; cat a.txt', 'ls; cat a.txt'],
+    ['false && ls || cat a.txt', 'false && ls || cat a.txt'],
+    ['wc -l < a.txt', 'cat a.txt | wc -l'],
+    ['wc -l < a.txt > /tmp/out', 'cat a.txt | wc -l > /tmp/out'],
+    ['cat a.txt 2> /tmp/err | tr a-z A-Z >> /tmp/out', 'cat a.txt 2> /tmp/err | tr a-z A-Z >> /tmp/out'],
+    ['ls 2>&1 | grep x', 'ls 2>&1 | grep x'],
+    ['echo x | cat > /tmp/f', 'echo x > /tmp/f'],
+    ["cat <<'EOF'\nbody\nEOF", 'echo body'],
+    ['cat <<< here', 'echo here'],
+    ['(ls) && { cat a.txt; }', 'ls && cat a.txt'],
+    ['f() { wc -l a.txt; }; f && ls', 'wc -l a.txt && ls'],
+    ["echo 'a b' | cat", "echo 'a b'"],
+    ["echo 'a b' | cat -n", "echo 'a b' | cat -n"],
+  ]) {
+    it(`writes ${JSON.stringify(command)} back as the line it runs`, () => {
+      const rebuilt = writtenBack(terminal().summarize(command))
+      assert.equal(rebuilt, expected)
+      const written = terminal().run(command)
+      const said = terminal().run(rebuilt)
+      assert.deepEqual([said.stdout, said.stderr, said.exitCode, said.cwd], [written.stdout, written.stderr, written.exitCode, written.cwd])
+    })
+  }
+})
+
 describe('parse() settles every command in the source-analysis corpus', () => {
   for (const { id, purpose, command } of CORPUS) {
     it(`${id}. ${purpose}`, () => {
