@@ -111,6 +111,31 @@ describe('verifyChangeSet is the guarantee: a wrong change set is refused', () =
   }
 })
 
+// GNU slides each run of changes along equal lines (analyze.c
+// shift_boundaries), so the same edit is printed where GNU prints it: a
+// deletion or insertion sits as late as it can, joins a run it meets, and
+// lines up with a run in the other file when it can. These are the cases
+// the raw search places differently; the strings are what GNU diff 3.10 prints.
+describe('a run of changes sits where GNU puts it', () => {
+  for (const [a, b, expected] of [
+    ['b\nc\n', 'c\nc\nb\nb\n', '1d0\n< b\n2a2,4\n> c\n> b\n> b\n'],
+    ['b\nb\nc\n', 'b\nc\nc\na\n', '2d1\n< b\n3a3,4\n> c\n> a\n'],
+    ['b\nb\nb\na\na\na\n', 'a\nb\n', '1,5d0\n< b\n< b\n< b\n< a\n< a\n6a2\n> b\n'],
+    ['b\nb\na\n', 'a\nb\na\na\na\n', '0a1\n> a\n2c3,4\n< b\n---\n> a\n> a\n'],
+    ['c\na\nc\n', 'a\na\nb\nc\nc\nc\n', '1d0\n< c\n2a2,5\n> a\n> b\n> c\n> c\n'],
+    ['b\na\na\na\n', 'c\nb\na\nb\na\n', '0a1\n> c\n3c4\n< a\n---\n> b\n'],
+    ['int a;\n\nint b;\n\nint c;\n', 'int a;\n\nint b;\n\nint new;\n\nint c;\n', '4a5,6\n> int new;\n> \n'],
+    ['}\n\nfoo\n}\n\nbar\n}\n', '}\n\nfoo\n}\n\nnew\n}\n\nbar\n}\n', '5a6,8\n> new\n> }\n> \n'],
+  ]) {
+    it(JSON.stringify([a, b]), () => {
+      const x = splitRecords(a), y = splitRecords(b)
+      const blocks = diffLines(x, y)
+      assert.equal(formatNormal(x, y, blocks), expected)
+      assert.deepEqual(replay(x, y, blocks), y)
+    })
+  }
+})
+
 describe('rendering a change set is GNU rendering, for every style', () => {
   const a = splitRecords('a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n'), b = splitRecords('a\nb\nX\nd\ne\nf\ng\nh\nY\nj\n')
   const blocks = diffLines(a, b)

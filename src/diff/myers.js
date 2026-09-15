@@ -27,6 +27,8 @@ export function diffLines(a, b, { key = null, minimal = false } = {}) {
   const changedA = new Uint8Array(A.length)
   const changedB = new Uint8Array(B.length)
   compareSequences(A, B, changedA, changedB, minimal)
+  shiftBoundaries(A, changedA, changedB)
+  shiftBoundaries(B, changedB, changedA)
   const blocks = collectBlocks(changedA, changedB)
   verifyChangeSet(a, b, blocks, key)
   return blocks
@@ -151,6 +153,56 @@ function splitAtFurthest(search, bounds, part) {
     part.xmid = fxbest; part.ymid = fxybest - fxbest; part.loMinimal = true; part.hiMinimal = false
   } else {
     part.xmid = bxbest; part.ymid = bxybest - bxbest; part.loMinimal = false; part.hiMinimal = true
+  }
+}
+
+// GNU analyze.c shift_boundaries: a run of changed lines bordered by equal
+// lines can sit anywhere along them and mean the same edit. GNU slides each
+// run as far forward as it goes, merging with a run it meets, then back to
+// where it lines up with a run in the other file; ties break the way GNU
+// breaks them, and a blank line joins the end of an insertion, not its
+// front. The change set stays the same size, and is verified afterwards
+// like any other. `changed` is indexed by line; a read past either end is
+// undefined, which is false, the sentinel GNU allocates.
+function shiftBoundaries(equivs, changed, otherChanged) {
+  const iEnd = changed.length
+  let i = 0, j = 0
+  for (;;) {
+    // The next run of changes, and the corresponding point in the other file.
+    while (i < iEnd && !changed[i]) {
+      while (otherChanged[j++]) continue
+      i++
+    }
+    if (i === iEnd) break
+    let start = i
+    while (changed[++i]) continue
+    while (otherChanged[j]) j++
+    let corresponding, runLength
+    do {
+      runLength = i - start
+      // Back, while the line before the run equals its last line.
+      while (start && equivs[start - 1] === equivs[i - 1]) {
+        changed[--start] = 1
+        changed[--i] = 0
+        while (changed[start - 1]) start--
+        while (otherChanged[--j]) continue
+      }
+      // Where the run last corresponded to a run in the other file.
+      corresponding = otherChanged[j - 1] ? i : iEnd
+      // Forward, while the first line of the run equals the line after it.
+      while (i !== iEnd && equivs[start] === equivs[i]) {
+        changed[start++] = 0
+        changed[i++] = 1
+        while (changed[i]) i++
+        while (otherChanged[++j]) corresponding = i
+      }
+    } while (runLength !== i - start)
+    // Back to a run in the other file, when there is one to line up with.
+    while (corresponding < i) {
+      changed[--start] = 1
+      changed[--i] = 0
+      while (otherChanged[--j]) continue
+    }
   }
 }
 
