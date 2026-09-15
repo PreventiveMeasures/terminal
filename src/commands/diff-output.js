@@ -41,8 +41,8 @@ function diffBody(opts, contents) {
 }
 
 // -p: the last line before the hunk that looks like the start of a
-// function, as GNU's default `^[[:alpha:]$_]` sees it, cut to 40 bytes with
-// trailing blanks dropped (context.c find_function, print_context_function).
+// function, as GNU's default `^[[:alpha:]$_]` sees it, cut to 40 bytes
+// with trailing blanks dropped.
 const FUNCTION_START = /^[A-Za-z$_]/u
 
 function functionLine(lines, before) {
