@@ -205,9 +205,17 @@ describe('no JS execution — source', () => {
     }
   })
 
-  it('limits runtime dependencies to the byte codecs', () => {
+  it('limits runtime dependencies to the byte codecs and the diff library', () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8'))
-    assert.deepEqual(Object.keys(pkg.dependencies ?? {}).sort(), ['@exodus/bytes'])
+    const dependencies = Object.keys(pkg.dependencies ?? {}).sort()
+    assert.deepEqual(dependencies, ['@exodus/bytes', '@preventive/diff'])
+    // And neither brings anything else in, so the whole runtime is this
+    // package, those two, and node: builtins — nothing arrives unnoticed
+    // underneath a dependency that was itself a deliberate act.
+    for (const name of dependencies) {
+      const dep = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'node_modules', name, 'package.json'), 'utf8'))
+      assert.deepEqual(Object.keys(dep.dependencies ?? {}), [], name)
+    }
   })
 })
 

@@ -11,6 +11,9 @@ importers:
       '@exodus/bytes':
         specifier: ^1.15.1
         version: 1.15.1
+      '@preventive/diff':
+        specifier: ^1.0.0
+        version: 1.0.0
     devDependencies:
       oxlint:
         specifier: ^1.63.0
@@ -149,6 +152,10 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@preventive/diff@1.0.0':
+    resolution: {integrity: sha512-voZPhZLUkbM1R8N4TxZ1LjHYmAoy8/4cohXYq5gL5DXYag3MQ/XehTSGa+871V6ffsNptixV9iURVtqqMHLOHg==}
+    engines: {node: '>=24.14.0'}
+
   oxlint@1.64.0:
     resolution: {integrity: sha512-Star3SNpWPeWFPw7kRXIhXUSn6fdiAl25q15CQzH/9WaOtG6e9CWTc25vNZOCr4PE1yEP1GtKJKIKglhj3OmEQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -219,6 +226,8 @@ snapshots:
 
   '@oxlint/binding-win32-x64-msvc@1.64.0':
     optional: true
+
+  '@preventive/diff@1.0.0': {}
 
   oxlint@1.64.0:
     optionalDependencies:

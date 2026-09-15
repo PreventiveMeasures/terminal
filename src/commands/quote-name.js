@@ -1,4 +1,4 @@
-import { encodeUtf8 } from '../util.js'
+import { encodeUtf8, encodeUtf8Loose } from '../util.js'
 import { UnsupportedError } from '../unsupported.js'
 
 const QUOTE_ESCAPES = new Map([['\0', '0'], ['\u0007', 'a'], ['\b', 'b'], ['\f', 'f'], ['\n', 'n'], ['\r', 'r'], ['\t', 't'], ['\v', 'v']])
@@ -41,4 +41,28 @@ const SHELL_SAFE = /^[#%+,\-./0-9@A-Z\]_a-z{}~]+$/u
 export function quoteShell(name, ctx) {
   if (SHELL_SAFE.test(name) && !'#~'.includes(name[0])) return name
   return quoteName(name, ctx)
+}
+
+// GNU quotearg's C style, which diff's headers name files in: a name with
+// nothing awkward in it is printed bare; one with a space, a quote, a
+// backslash or a control character is double-quoted with C escapes, and in
+// a byte locale every byte past ASCII is an octal escape too.
+const HEADER_ESCAPES = new Map([['', 'a'], ['\b', 'b'], ['\f', 'f'], ['\n', 'n'], ['\r', 'r'], ['\t', 't'], ['\v', 'v'], ['"', '"'], ['\\', '\\']])
+
+export function quoteHeaderName(name, ctx) {
+  const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG') || ''
+  const byteLocale = locale === 'C' || locale === 'POSIX'
+  let out = ''
+  let needed = false
+  for (const char of name) {
+    const code = char.codePointAt(0)
+    const named = HEADER_ESCAPES.get(char)
+    if (named !== undefined) { out += '\\' + named; needed = true }
+    else if (char === ' ') { out += char; needed = true }
+    else if (code < 32 || code === 127 || (code > 127 && (byteLocale || /[\p{C}\p{Zl}\p{Zp}]/u.test(char)))) {
+      for (const byte of encodeUtf8Loose(char)) out += '\\' + byte.toString(8).padStart(3, '0')
+      needed = true
+    } else out += char
+  }
+  return needed ? `"${out}"` : name
 }

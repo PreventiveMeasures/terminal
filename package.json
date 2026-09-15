@@ -113,11 +113,6 @@
     "src/commands/xargs.js",
     "src/complete.js",
     "src/custom.js",
-    "src/diff/compare.js",
-    "src/diff/format.js",
-    "src/diff/hunks.js",
-    "src/diff/myers.js",
-    "src/diff/quote.js",
     "src/fs.js",
     "src/glob.js",
     "src/index.d.ts",
@@ -173,7 +168,8 @@
     "test:slow": "AWK_SLOW_TESTS=1 node --test --test-isolation=none ./tests/*.test.js"
   },
   "dependencies": {
-    "@exodus/bytes": "^1.15.1"
+    "@exodus/bytes": "^1.15.1",
+    "@preventive/diff": "^1.0.0"
   },
   "devDependencies": {
     "oxlint": "^1.63.0"

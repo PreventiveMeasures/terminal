@@ -1,17 +1,15 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { parse } from './conformance.test.js'
 import { TREES } from './fixtures/conformance/trees.js'
-import { splitRecords } from '../src/diff/compare.js'
-import { formatContext, formatUnified } from '../src/diff/format.js'
-import { verifyChangeSet } from '../src/diff/myers.js'
-import { createScanner, nextHunk } from '../src/commands/patch-parse.js'
 
 // What the corpus cannot say: that the diagnostic feed carries every
-// refusal, that the format is GNU's for GNU's own change set, and that a
-// change set which reaches the formatter has passed the replay check.
+// refusal, and that the shell around diff -- redirection, standard input,
+// exit status, xargs and find -- carries it the way it carries any command.
+//
+// That GNU's change set renders to GNU's bytes is @preventive/diff's own
+// claim, checked there against these very recordings; the corpus in
+// fixtures/conformance/diff.tests is what checks the command end to end.
 
 const run = (line, files = TREES.pair, opts = {}) => createTerminal(files, opts).run(line)
 
@@ -72,54 +70,4 @@ describe('diff through the shell', () => {
     assert.equal(t.run('LC_ALL=C diff -u ünï a1 | head -1').stdout, '--- "\\303\\274n\\303\\257"\n')
     assert.equal(t.run("diff -u 'sp ace' a1 2>&1 | head -1", TREES.pair).stdout, 'diff: sp ace: No such file or directory\n')
   })
-})
-
-// A unified diff read back into the change set it prints: each hunk's runs
-// of - and + at the same point are one block, positioned by the header.
-function changeSetOf(text) {
-  const scanner = createScanner(text)
-  scanner.pos = scanner.lines.findIndex((line) => line.startsWith('@@ '))
-  const blocks = []
-  for (let hunk = nextHunk(scanner, 'unified'); hunk; hunk = nextHunk(scanner, 'unified')) {
-    let a = hunk.oldStart - 1, b = hunk.newStart - 1
-    let ni = 0, oi = 0
-    while (oi < hunk.oldLines.length || ni < hunk.newLines.length) {
-      if (hunk.oldLines[oi]?.tag === ' ' && hunk.newLines[ni]?.tag === ' ') { oi++; ni++; a++; b++; continue }
-      const block = { a0: a, a1: a, b0: b, b1: b }
-      while (hunk.oldLines[oi]?.tag === '-') { oi++; block.a1++ }
-      while (hunk.newLines[ni]?.tag === '+') { ni++; block.b1++ }
-      blocks.push(block)
-      a = block.a1
-      b = block.b1
-    }
-  }
-  return blocks
-}
-
-describe('given GNU\'s own change set, the rendering is GNU\'s, byte for byte', () => {
-  // Every `diff -u` and `diff -c` case the corpus recorded from GNU diff
-  // whose operands are two plain files: the recorded unified output says
-  // which change set GNU chose; rendering that change set here has to
-  // reproduce the recording exactly, in both styles.
-  const corpus = parse(readFileSync(import.meta.dirname + '/fixtures/conformance/diff.tests', 'utf8'), 'diff.tests')
-  const unified = new Map()
-  for (const entry of corpus) {
-    const m = /^diff -u (\S+) (\S+)$/u.exec(entry.command)
-    if (m && entry.stdout !== undefined && TREES[entry.tree][m[1]] !== undefined && TREES[entry.tree][m[2]] !== undefined) unified.set(entry.command, { ...entry, names: [m[1], m[2]] })
-  }
-  assert.ok(unified.size >= 10, 'the corpus should hold a fair number of plain unified cases')
-  for (const [command, entry] of unified) {
-    it(command, () => {
-      const files = TREES[entry.tree]
-      const a = splitRecords(files[entry.names[0]]), b = splitRecords(files[entry.names[1]])
-      const blocks = changeSetOf(entry.stdout)
-      verifyChangeSet(a, b, blocks)
-      const header = entry.stdout.split('\n').slice(0, 2).join('\n') + '\n'
-      assert.equal(formatUnified(a, b, blocks, { context: 3, header, fn: null }), entry.stdout)
-      const contextCase = corpus.find((other) => other.command === command.replace('-u', '-c'))
-      if (contextCase?.stdout === undefined) return
-      const contextHeader = contextCase.stdout.split('\n').slice(0, 2).join('\n') + '\n'
-      assert.equal(formatContext(a, b, blocks, { context: 3, header: contextHeader, fn: null }), contextCase.stdout)
-    })
-  }
 })

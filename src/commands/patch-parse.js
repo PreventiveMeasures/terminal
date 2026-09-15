@@ -1,5 +1,5 @@
 import { UnsupportedError } from '../unsupported.js'
-import { splitRecords } from '../diff/compare.js'
+import { lineRecords } from '../util.js'
 import { parseContextHunk, parseNormalHunk, parseUnifiedHunk } from './patch-hunks.js'
 
 // Reading a patch the way GNU patch's pch.c does: scan forward for the
@@ -17,7 +17,7 @@ export class PatchFatal extends Error {
 const refuse = (detail, message) => { throw new UnsupportedError('feature', detail, message) }
 
 export function createScanner(text) {
-  const lines = splitRecords(text)
+  const lines = lineRecords(text)
   // A last line without its newline still reads as a line.
   if (lines.length && !lines.at(-1).endsWith('\n')) lines[lines.length - 1] += '\n'
   return { lines, pos: 0, base: 0, empty: text === '' }
