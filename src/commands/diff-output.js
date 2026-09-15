@@ -14,27 +14,30 @@ import { quoteHeaderName } from './quote-name.js'
 const EPOCH = ['\t1970-01-01 00:00:00.000000000 +0000', '\tThu Jan  1 00:00:00 1970']
 
 // The `diff -r …` line names the pair the way the command line would, and
-// the header labels are --label if given, else the quoted names.
+// the header labels are --label if given, else the quoted names. Empty when
+// the two compare the same, as the library's own result is: a header with
+// nothing under it is not a diff, and the caller reads the empty string as
+// the answer that they match.
 export function renderDiff(state, contents, names, missing, inDirectory) {
   const { ctx, opts } = state
+  const body = diffBody(opts, contents)
+  if (body === '') return ''
   const headerName = (i) => opts.labels[i] ?? quoteHeaderName(names[i], ctx) + (missing[i] ? EPOCH[opts.style === 'context' ? 1 : 0] : '')
   const shown = (i) => opts.labels[i] ?? quoteHeaderName(names[i], ctx)
   const lead = inDirectory ? `diff${opts.switches} ${shown(0)} ${shown(1)}\n` : ''
-  return lead + formatDiff(opts, contents, headerName)
+  if (opts.style === 'unified') return `${lead}--- ${headerName(0)}\n+++ ${headerName(1)}\n${body}`
+  if (opts.style === 'context') return `${lead}*** ${headerName(0)}\n--- ${headerName(1)}\n${body}`
+  return lead + body
 }
 
-function formatDiff(opts, contents, headerName) {
-  const format = opts.style ?? 'normal'
+function diffBody(opts, contents) {
   // -p names each hunk after the function it starts inside. That heuristic
   // is diff's, not the library's: the formatters take a callback and ask.
   const lines = opts.showFunction ? lineRecords(contents[0]) : null
-  const label = lines ? (index) => functionLine(lines, index) : null
-  const body = diffText(contents[0], contents[1], {
-    format, context: opts.context, label, minimal: opts.minimal, ignoreCase: opts.ignoreCase, whitespace: opts.whitespace,
+  return diffText(contents[0], contents[1], {
+    format: opts.style ?? 'normal', context: opts.context, label: lines ? (index) => functionLine(lines, index) : null,
+    minimal: opts.minimal, ignoreCase: opts.ignoreCase, whitespace: opts.whitespace,
   })
-  if (format === 'unified') return `--- ${headerName(0)}\n+++ ${headerName(1)}\n` + body
-  if (format === 'context') return `*** ${headerName(0)}\n--- ${headerName(1)}\n` + body
-  return body
 }
 
 // -p: the last line before the hunk that looks like the start of a

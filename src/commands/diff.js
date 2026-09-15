@@ -83,10 +83,13 @@ export function compareFiles(state, nameA, nameB, inDirectory) {
     if (contents[0] === contents[1]) return sameReport(state, nameA, nameB)
     return report(state, `${opts.brief ? 'Files' : 'Binary files'} ${label(0)} and ${label(1)} differ\n`, 1)
   }
-  // -q asks only whether they differ, which the library answers without a
-  // search; the same answer is what tells two identical files apart here.
-  if (diffText(contents[0], contents[1], { format: 'brief', ignoreCase: opts.ignoreCase, whitespace: opts.whitespace }) === '') return sameReport(state, nameA, nameB)
-  if (opts.brief) return report(state, `Files ${label(0)} and ${label(1)} differ\n`, 1)
+  // -q asks whether they differ at all, which the library answers by one
+  // pass that stops at the first line that differs, where a diff would go on
+  // to find the shortest way to describe them all.
+  if (opts.brief) {
+    if (diffText(contents[0], contents[1], { format: 'brief', ignoreCase: opts.ignoreCase, whitespace: opts.whitespace }) === '') return sameReport(state, nameA, nameB)
+    return report(state, `Files ${label(0)} and ${label(1)} differ\n`, 1)
+  }
   let text
   try { text = renderDiff(state, contents, [nameA, nameB], missing, inDirectory) } catch (e) {
     if (!(e instanceof DiffError) && !(e instanceof FormatError)) throw e
@@ -96,6 +99,9 @@ export function compareFiles(state, nameA, nameB, inDirectory) {
     state.status = 2
     return
   }
+  // Nothing to print is the answer that they match; asking twice would mean
+  // searching twice, since that search is the only thing that can say so.
+  if (text === '') return sameReport(state, nameA, nameB)
   report(state, text, 1)
 }
 
