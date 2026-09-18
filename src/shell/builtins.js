@@ -2,6 +2,7 @@
 // these internal fields before exposing results. Registered overrides win.
 
 import { err, ok } from '../util.js'
+import { ONLY_C_UTF8 } from '../locale.js'
 import { unsupported } from '../unsupported.js'
 import { NAME_RE } from './lex.js'
 import { INT64_MAX, INT64_MIN } from '../numeric.js'
@@ -72,6 +73,8 @@ function unset(_stdin, tokens, ctx) {
   for (const t of operands) {
     if (!terminated && t.startsWith('-')) return unsupported('option', 'unset', t, `unset: option \`${t}\` is not supported`)
     if (t.includes('[')) return unsupported('feature', 'unset', 'array subscript', 'unset: array subscripts are not supported')
+    // Unsetting LANG would hand the character set to the C locale.
+    if (t === 'LANG') return unsupported('feature', 'unset', 'LANG', `unset: LANG: ${ONLY_C_UTF8}`)
     ctx.vars.delete(t)
   }
   return ok()

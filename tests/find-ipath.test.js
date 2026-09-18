@@ -71,7 +71,6 @@ describe('find -ipath case-insensitive full paths', () => {
 describe('find -ipath unavailable glob semantics stay diagnostic', () => {
   for (const [command, files, detail] of [
     ['find . -ipath "*.ts"', { 'café/Alpha.TS': '' }, 'non-ASCII glob matching'],
-    ['LC_ALL=C find . -ipath "*.ts"', { 'café/Alpha.TS': '' }, 'non-ASCII glob matching'],
     ['find . -ipath "*CAFÉ*"', { 'ascii/Alpha.TS': '' }, 'non-ASCII glob matching'],
     ["find APP -ipath '*[[=a=]]*'", FILES, 'glob collating or equivalence class'],
     ["find APP -ipath '*[[.a.]]*'", FILES, 'glob collating or equivalence class'],

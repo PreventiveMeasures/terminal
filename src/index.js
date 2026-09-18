@@ -16,7 +16,7 @@ import { BindingMap, isolated, withState } from './shell/state.js'
 import { commandWriteError, createIoGuard, routeExternalOutput, runSteps } from './shell/run.js'
 
 export function createTerminal(sources, opts = {}) {
-  const { fs, cwd, home, mount, writable } = mountSources(sources, opts)
+  const { fs, cwd, home, mount, writable, locale } = mountSources(sources, opts)
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
   // The I/O guard watches one filesystem's reads and writes, and the writable
   // overlay it observes holds a single observer, so the guard belongs to the
@@ -24,7 +24,7 @@ export function createTerminal(sources, opts = {}) {
   // The tree has no clock of its own, so the moment it was made stands in:
   // `ls -l` dates every entry to it, and a fork, being the same tree, keeps it.
   const shared = { fs, io: createIoGuard(fs), mount, writable, registry, createdAt: Date.now() }
-  return terminal(context(shared, { cwd, home, user: opts.user ?? 'user', ...freshSession() }), 'createTerminal')
+  return terminal(context(shared, { cwd, home, user: opts.user ?? 'user', locale, ...freshSession() }), 'createTerminal')
 }
 
 // The shell state a terminal starts with when it starts with none of anyone's:
@@ -48,9 +48,9 @@ const copiedSession = (parent) => ({ vars: new BindingMap(parent.vars), function
 // business carrying the variables, the functions and the $HOME assignment of
 // the session it left. Where it stands is its own setting either way.
 function fork(parent, opts = {}) {
-  const { cwd, home, user, inherit } = forkSettings(parent, opts)
+  const { cwd, home, user, locale, inherit } = forkSettings(parent, opts)
   const session = inherit ? copiedSession(parent) : freshSession()
-  return terminal(context(parent, { cwd, home, user, ...session }), 'fork')
+  return terminal(context(parent, { cwd, home, user, locale, ...session }), 'fork')
 }
 
 // Stdin position, open descriptors and the two diagnostic feeds belong to

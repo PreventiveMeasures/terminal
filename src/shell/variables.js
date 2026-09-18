@@ -34,6 +34,7 @@ function parameterValue(name, ctx) {
   if (name === 'PWD') return { value: ctx.cwd, set: true }
   if (name === 'HOME') return { value: ctx.home, set: true }
   if (name === 'USER' || name === 'LOGNAME') return { value: ctx.user, set: true }
+  if (name === 'LANG') return { value: ctx.locale, set: true }
   return null
 }
 

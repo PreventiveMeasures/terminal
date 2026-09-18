@@ -64,10 +64,12 @@ describe('diff through the shell', () => {
     assert.deepEqual(run('diff -rs d1 d1; echo $?', TREES.dirs).stdout, '0\n')
     assert.deepEqual(run('diff -rs d1/sub ./d1/sub; echo $?', TREES.dirs).stdout, '0\n')
   })
-  it('quotes a name in a header only when it needs it, by the locale', () => {
+  it('quotes a name in a header only when it needs it', () => {
     const t = createTerminal({ 'ünï': 'v\n', a1: 'a\n' })
     assert.equal(t.run('diff -u ünï a1 | head -1').stdout, '--- ünï\n')
-    assert.equal(t.run('LC_ALL=C diff -u ünï a1 | head -1').stdout, '--- "\\303\\274n\\303\\257"\n')
+    // The C locale, where the name would be octal, is refused before diff runs.
+    const refused = t.run('LC_ALL=C diff -u ünï a1 | head -1')
+    assert.deepEqual([refused.stdout, refused.unsupported.map((u) => u.detail)], ['', ['LC_ALL']])
     assert.equal(t.run("diff -u 'sp ace' a1 2>&1 | head -1", TREES.pair).stdout, 'diff: sp ace: No such file or directory\n')
   })
 })

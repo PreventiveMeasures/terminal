@@ -1,4 +1,5 @@
 import { createFs, resolve } from './fs.js'
+import { localeOption } from './locale.js'
 import { writableFs } from './writable.js'
 
 // Session settings a fork sets anew. Everything else it is over — the sources,
@@ -21,7 +22,7 @@ export function mountSources(sources, opts) {
     throw new Error("createTerminal: mount must not be /, /tmp, or inside /tmp when writable is '/tmp/'")
   }
   const base = createFs(sources, mount)
-  return { fs: writable ? writableFs(base) : base, cwd, home, mount, writable }
+  return { fs: writable ? writableFs(base) : base, cwd, home, mount, writable, locale: localeOption(opts) }
 }
 
 // A fork starts where its parent stands, so its settings fall back to the
@@ -49,6 +50,8 @@ export function forkSettings(ctx, opts) {
     cwd: optionPath(opts, 'cwd', ctx.cwd, 'fork', ctx.cwd),
     home: optionPath(opts, 'home', ctx.home, 'fork', ctx.cwd),
     user: opts.user ?? ctx.user,
+    // The locale is the environment's: a fork keeps it whatever else it drops.
+    locale: ctx.locale,
     inherit: opts.inherit ?? true,
   }
 }

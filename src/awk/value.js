@@ -79,9 +79,7 @@ export function toStr(v, m) {
   throw arrayInScalar()
 }
 
-export function byteLocale(ctx) {
-  return ['C', 'POSIX'].includes(ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG'))
-}
+export { byteLocale } from '../locale.js'
 
 export function checkText(m, text) {
   if (m.byteLocale && /[\u0080-\u{10FFFF}]/u.test(text)) throw new AwkError('non-ASCII AWK text in a byte locale is not supported', null, 'byte locale text')

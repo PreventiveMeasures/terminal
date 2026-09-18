@@ -29,8 +29,6 @@ export function sed(stdin, tokens, ctx) {
 function compileProgram({ order, positional }, stdin, ctx, openWrite) {
   const commands = []
   const textState = { openWrite }
-  const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG') || ''
-  const byteLocale = locale === 'C' || locale === 'POSIX'
   let extended = false, scripted = false
   // GNU compiles each expression as its option is encountered. A later -E
   // affects later expressions. Text continuations can span -e/-f sources.
@@ -47,9 +45,9 @@ function compileProgram({ order, positional }, stdin, ctx, openWrite) {
       script = r.inputs[0].content
       if (r.inputs[0].shared) stdin = ''
     }
-    for (const command of parseSedScript(script, extended, byteLocale, textState)) commands.push(command)
+    for (const command of parseSedScript(script, extended, ctx.locale, textState)) commands.push(command)
   }
   if (scripted) return { commands: finishSedProgram(commands, textState), files: positional, stdin }
   if (positional.length === 0) return null
-  return { commands: finishSedProgram(parseSedScript(positional[0], extended, byteLocale, textState), textState), files: positional.slice(1), stdin }
+  return { commands: finishSedProgram(parseSedScript(positional[0], extended, ctx.locale, textState), textState), files: positional.slice(1), stdin }
 }

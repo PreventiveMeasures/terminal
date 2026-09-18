@@ -185,6 +185,13 @@ unsupported diagnostic over non-ASCII input, as do case folding, `-w`, `\b`,
 `\w` and the named classes past space and blank: their C.UTF-8 tables are not
 modelled yet.
 
+The locale is C.UTF-8 and nothing else: `$LANG` answers it, and a `LANG`,
+`LC_ALL` or `LC_CTYPE` set to any other value, or a `LANG` unset, is refused,
+since every command would read text differently there and none of that is
+implemented. The other `LC_` categories also take `C` and `POSIX`, which
+read the same as C.UTF-8 in them. `createTerminal` takes `locale: 'C.UTF-8'`
+and nothing else.
+
 `stat -c '%s %n' file` reports byte size and name; `%F` reports file type.
 `--printf` adds escape processing and controls line endings. Default `stat`
 output, directory byte sizes, and fields requiring ownership, permissions,

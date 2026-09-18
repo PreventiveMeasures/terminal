@@ -1,4 +1,5 @@
 // Script syntax is checked before reading input data.
+import { LOCALE, isByteLocale } from '../locale.js'
 import { finishSedText, readSedText, readTransliteration, resumeSedText } from './sed-text.js'
 import { scriptGap } from './sed-common.js'
 import { checkRegexText, compilePattern, delimited, delimiter, readWriteFile, resolvePattern, substitution } from './sed-regex.js'
@@ -6,8 +7,8 @@ import { checkRegexText, compilePattern, delimited, delimiter, readWriteFile, re
 export { SED_SUBSET } from './sed-common.js'
 export { substituteLine } from './sed-regex.js'
 
-export function parseSedScript(script, extended = false, byteLocale = false, textState = null) {
-  const p = { script, i: 0, extended, byteLocale, textState: textState ?? {}, openWrite: textState?.openWrite }
+export function parseSedScript(script, extended = false, locale = LOCALE, textState = null) {
+  const p = { script, i: 0, extended, locale, byteLocale: isByteLocale(locale), textState: textState ?? {}, openWrite: textState?.openWrite }
   const commands = []
   resumeSedText(p)
   while (p.i < script.length) {
@@ -138,7 +139,7 @@ function parseAddress(p, relative = false) {
       if (flag === 'M') scriptGap('address regex flags')
       ignoreCase = true; p.i++
     }
-    result = { type: 'regex', ...compilePattern(pattern, p.extended, true, ignoreCase) }
+    result = { type: 'regex', ...compilePattern(pattern, p.extended, true, ignoreCase, p.locale) }
   }
   while (/[ \t]/u.test(p.script[p.i] ?? '')) p.i++
   return result

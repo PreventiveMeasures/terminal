@@ -21,7 +21,7 @@ function check(command, expected, exitCode = 0) {
 function gap(command, detail) {
   const r = createTerminal(FILES).run(command)
   assert.notEqual(r.exitCode, 0, command)
-  assert.match(r.stderr, /not supported|cannot|read-only|require|too|limit|nesting|unknown option/u, command)
+  assert.match(r.stderr, /not supported|cannot|read-only|require|too|limit|nesting|unknown option|only the C\.UTF-8/u, command)
   assert.ok(r.unsupported.some((note) => note.detail === detail), JSON.stringify(r))
   // A downstream success must not hide the diagnostic from the caller.
   const hidden = createTerminal(FILES).run(`${command} 2>/dev/null | cat`)

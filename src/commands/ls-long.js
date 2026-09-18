@@ -25,7 +25,7 @@ export function longFormat(ctx, human) {
   for (const name of ['LS_BLOCK_SIZE', 'BLOCK_SIZE', 'BLOCKSIZE']) {
     if (ctx.vars.has(name)) throw new UnsupportedError('feature', 'block size environment', `${name} is not supported in a long listing`)
   }
-  const scale = human ? humanScale(ctx) : null
+  const scale = human ? humanScale() : null
   const user = ctx.user ?? 'user'
   const mtime = ctx.createdAt, now = Date.now()
   const recent = mtime <= now && now - mtime < HALF_YEAR

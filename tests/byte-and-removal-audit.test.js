@@ -134,9 +134,11 @@ describe('rm quotes complete filenames in success and error output', () => {
       assert.deepEqual(t.run(`rm ${path}`), mounted('', 1, `rm: cannot remove ${shown}: No such file or directory\n`))
     })
   }
-  it('uses byte escapes for Unicode under the C locale', () => {
+  it('refuses the C locale rather than quote in bytes, and leaves the file', () => {
     const t = writable()
-    assert.deepEqual(t.run("echo data >/tmp/é; LC_ALL=C rm -v /tmp/é"), mounted("removed '/tmp/'$'\\303\\251'\n"))
+    const r = t.run("echo data >/tmp/é; LC_ALL=C rm -v /tmp/é")
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.unsupported.map((u) => u.detail)], ['', 'error: LC_ALL: only the C.UTF-8 locale is supported\n', 1, ['LC_ALL']])
+    assert.deepEqual(t.run('cat /tmp/é'), mounted('data\n'))
   })
   it('diagnoses nonprinting Unicode quoting before deleting a verbose operand', () => {
     const t = writable()

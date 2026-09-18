@@ -1,22 +1,22 @@
 import { encodeUtf8, encodeUtf8Loose } from '../util.js'
 import { UnsupportedError } from '../unsupported.js'
+import { byteLocale } from '../locale.js'
 
 const QUOTE_ESCAPES = new Map([['\0', '0'], ['\u0007', 'a'], ['\b', 'b'], ['\f', 'f'], ['\n', 'n'], ['\r', 'r'], ['\t', 't'], ['\v', 'v']])
 
 // GNU quoteaf keeps printable names shell-quoted and groups nonprinting
 // bytes in adjacent ANSI-C quoted spans, so one filename stays one log entry.
 export function quoteName(name, ctx) {
-  const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG') || ''
-  const byteLocale = locale === 'C' || locale === 'POSIX'
-  const units = byteLocale ? Array.from(encodeUtf8(name), (byte) => String.fromCodePoint(byte)) : [...name]
-  if (!byteLocale && units.some((char) => char.codePointAt(0) > 127 && /[\p{C}\p{Zl}\p{Zp}]/u.test(char))) {
+  const bytes = byteLocale(ctx)
+  const units = bytes ? Array.from(encodeUtf8(name), (byte) => String.fromCodePoint(byte)) : [...name]
+  if (!bytes && units.some((char) => char.codePointAt(0) > 127 && /[\p{C}\p{Zl}\p{Zp}]/u.test(char))) {
     throw new UnsupportedError('feature', 'filename quoting', 'quoting nonprinting Unicode filenames is not supported')
   }
-  if (name.includes("'") && units.every((char) => /[-a-zA-Z0-9 %+,./:_\]']/u.test(char) || !byteLocale && char.codePointAt(0) > 127)) return '"' + name + '"'
+  if (name.includes("'") && units.every((char) => /[-a-zA-Z0-9 %+,./:_\]']/u.test(char) || !bytes && char.codePointAt(0) > 127)) return '"' + name + '"'
   let escaped = false, out = "'"
   for (const char of units) {
     const code = char.codePointAt(0)
-    const escape = QUOTE_ESCAPES.get(char) ?? (code < 32 || code === 127 || byteLocale && code > 127 ? code.toString(8).padStart(3, '0') : null)
+    const escape = QUOTE_ESCAPES.get(char) ?? (code < 32 || code === 127 || bytes && code > 127 ? code.toString(8).padStart(3, '0') : null)
     if (escape !== null) {
       if (!escaped) out += "'$'"
       escaped = true
@@ -50,8 +50,7 @@ export function quoteShell(name, ctx) {
 const HEADER_ESCAPES = new Map([['', 'a'], ['\b', 'b'], ['\f', 'f'], ['\n', 'n'], ['\r', 'r'], ['\t', 't'], ['\v', 'v'], ['"', '"'], ['\\', '\\']])
 
 export function quoteHeaderName(name, ctx) {
-  const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG') || ''
-  const byteLocale = locale === 'C' || locale === 'POSIX'
+  const bytes = byteLocale(ctx)
   let out = ''
   let needed = false
   for (const char of name) {
@@ -59,7 +58,7 @@ export function quoteHeaderName(name, ctx) {
     const named = HEADER_ESCAPES.get(char)
     if (named !== undefined) { out += '\\' + named; needed = true }
     else if (char === ' ') { out += char; needed = true }
-    else if (code < 32 || code === 127 || (code > 127 && (byteLocale || /[\p{C}\p{Zl}\p{Zp}]/u.test(char)))) {
+    else if (code < 32 || code === 127 || (code > 127 && (bytes || /[\p{C}\p{Zl}\p{Zp}]/u.test(char)))) {
       for (const byte of encodeUtf8Loose(char)) out += '\\' + byte.toString(8).padStart(3, '0')
       needed = true
     } else out += char
