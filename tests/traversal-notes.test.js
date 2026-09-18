@@ -118,31 +118,35 @@ describe('tree depth omission notes', () => {
 })
 
 describe('find depth omission notes', () => {
+  // Every name below is one `find` itself prints for the same command: the note
+  // reads beside the output, so it spells a directory the way the start it was
+  // reached through spells it. A start named three ways is three entries.
   for (const [command, paths] of [
-    ['find . -maxdepth 0', ['/']],
-    ['find . -maxdepth 1', ['/.hidden', '/a', '/b', '/c']],
-    ['find . -maxdepth 2', ['/.hidden/inner', '/a/one']],
+    ['find . -maxdepth 0', ['.']],
+    ['find . -maxdepth 1', ['./.hidden', './a', './b', './c']],
+    ['find . -maxdepth 2', ['./.hidden/inner', './a/one']],
     ['find . -maxdepth 99', []],
     ['find .', []],
     ['find root -maxdepth 0', []],
-    ['find a -maxdepth 1', ['/a/one']],
-    ['find a ./a /a/ -maxdepth 1', ['/a/one']],
-    ['find . -maxdepth 1 -name absent', ['/.hidden', '/a', '/b', '/c']],
-    ['find . -maxdepth 1 -type f', ['/.hidden', '/a', '/b', '/c']],
-    ['find . -maxdepth 1 -mindepth 3', ['/.hidden', '/a', '/b', '/c']],
-    ['find . -maxdepth 0 -mindepth 1 -prune', ['/']],
+    ['find a -maxdepth 1', ['a/one']],
+    ['find a ./a /a/ -maxdepth 1', ['./a/one', '/a/one', 'a/one']],
+    ['find . -maxdepth 1 -name absent', ['./.hidden', './a', './b', './c']],
+    ['find . -maxdepth 1 -type f', ['./.hidden', './a', './b', './c']],
+    ['find . -maxdepth 1 -mindepth 3', ['./.hidden', './a', './b', './c']],
+    ['find . -maxdepth 0 -mindepth 1 -prune', ['.']],
     ['find . -maxdepth 0 -prune', []],
     ['find . -maxdepth 1 -prune', []],
-    ['find . -maxdepth 1 -name a -prune -o -print', ['/.hidden', '/b', '/c']],
-    ['find . -maxdepth 2 -name a -prune -o -print', ['/.hidden/inner']],
+    ['find . -maxdepth 1 -name a -prune -o -print', ['./.hidden', './b', './c']],
+    ['find . -maxdepth 2 -name a -prune -o -print', ['./.hidden/inner']],
     ['find . -maxdepth 1 ! -prune -o -print', []],
-    ['find . -maxdepth 1 -name absent -prune -o -print', ['/.hidden', '/a', '/b', '/c']],
+    ['find . -maxdepth 1 -name absent -prune -o -print', ['./.hidden', './a', './b', './c']],
   ]) {
     it(command + ' reports only depth-pruned directories', () => check(command, paths))
   }
 
   it('preserves normal printed paths', () => {
-    const result = check('find . -maxdepth 1', ['/.hidden', '/a', '/b', '/c'])
+    const result = check('find . -maxdepth 1', ['./.hidden', './a', './b', './c'])
+    // Each noted name is a line of this very output.
     assert.equal(result.stdout, '.\n./.hidden\n./a\n./b\n./c\n./root\n')
   })
 
@@ -157,14 +161,14 @@ describe('find depth omission notes', () => {
     assert.equal(result.stderr, 'find: \'missing\': No such file or directory\n')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.unsupported, [])
-    assert.deepEqual(result.notes, [note('find', ['/a', '/c'])])
+    assert.deepEqual(result.notes, [note('find', ['a', 'c'])])
   })
 
   it('retains an omission when an executed command reports unsupported', () => {
     const result = createTerminal(FILES).run('find a -maxdepth 0 -exec unknown {} \\; 2>/dev/null | true')
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)
-    assert.deepEqual(result.notes, [note('find', ['/a'])])
+    assert.deepEqual(result.notes, [note('find', ['a'])])
     assert.ok(result.unsupported.some(({ command }) => command === 'unknown'))
   })
 
@@ -174,7 +178,7 @@ describe('find depth omission notes', () => {
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.unsupported, [])
-    assert.deepEqual(result.notes, [note('find', ['/a'])])
+    assert.deepEqual(result.notes, [note('find', ['a'])])
   })
 
   it('checks frontier contents after per-entry actions remove or create files', () => {
@@ -197,24 +201,27 @@ describe('find depth omission notes', () => {
 })
 
 describe('depth notes retain full paths, bounded details, and shell channel semantics', () => {
-  for (const command of ['tree -L1', 'find . -maxdepth 1']) {
+  // `tree` prints bare names under a heading, so an omitted directory has no
+  // spelling of its own there and keeps the absolute one; `find . …` prints
+  // every path from `.`, and its note follows.
+  for (const [command, named] of [['tree -L1', (paths) => paths], ['find . -maxdepth 1', (paths) => paths.map((path) => '.' + path)]]) {
     for (const count of [9, 10]) {
       it(command + ' lists full paths only for ' + count + ' < 10 directories', () => {
         const paths = Array.from({ length: count }, (_, i) => '/dir' + i)
         const files = Object.fromEntries(paths.map((path) => [path + '/child/file', '']))
-        check(command, paths, files)
+        check(command, named(paths), files)
       })
     }
 
     it(command + ' quotes unusual path names', () => {
       const files = { 'dir "quoted"/file': '', 'dir with spaces/file': '' }
-      check(command, ['/dir "quoted"', '/dir with spaces'], files)
+      check(command, named(['/dir "quoted"', '/dir with spaces']), files)
     })
 
     it(command + ' emits normalized mounted paths', () => {
       const terminal = createTerminal({ 'src/dir/file': '' }, { mount: '/workspace', cwd: '/workspace/src' })
       const result = terminal.run(command + ' 2>/dev/null')
-      assert.deepEqual(result.notes, [note(command.split(' ')[0], ['/workspace/src/dir'])])
+      assert.deepEqual(result.notes, [note(command.split(' ')[0], command.startsWith('find') ? ['./dir'] : ['/workspace/src/dir'])])
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
     })
@@ -236,7 +243,7 @@ describe('depth notes retain full paths, bounded details, and shell channel sema
   ]) {
     it(command + ' retains the note independently of output routing', () => {
       const result = createTerminal(FILES).run(command)
-      assert.deepEqual(result.notes, [note(command.includes('tree') ? 'tree' : 'find', ['/a/one'])])
+      assert.deepEqual(result.notes, [note(command.includes('tree') ? 'tree' : 'find', command.includes('tree') ? ['/a/one'] : ['a/one'])])
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
       assert.deepEqual(result.unsupported, [])
@@ -265,7 +272,7 @@ describe('frontier inspection is bounded', () => {
       const result = command('', tokens, ctx)
       assert.equal(result.exitCode, 0)
       assert.ok(listed.includes('/frontier'))
-      assert.deepEqual([...ctx.notes], [note(command.name, ['/frontier'])])
+      assert.deepEqual([...ctx.notes], [note(command.name, [command === find ? './frontier' : '/frontier'])])
     })
   }
 })

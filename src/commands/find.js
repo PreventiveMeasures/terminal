@@ -28,13 +28,17 @@ export function find(stdin, tokens, ctx) {
       // walkTree consults pruning after evaluating the current entry.
       const pruned = new Set()
       for (const entry of walkTree(ctx.fs, startAbs, maxDepth, (path) => !pruned.has(path))) {
+        const display = toDisplayPath(start, startAbs, entry.path)
         if (entry.depth >= minDepth) {
-          const display = toDisplayPath(start, startAbs, entry.path)
           runPredicates(groups, { kind: entry.kind, path: display, abs: entry.path, prune: pruned }, ctx, result)
         }
         if (entry.kind !== 'dir' || entry.depth !== maxDepth || pruned.has(entry.path)) continue
         const { dirs, files } = ctx.fs.listDir(entry.path)
-        if (dirs.length || files.length) omitted.add(entry.path)
+        // Named the way the walk that stopped there would have printed it: a
+        // caller reading the note is reading it beside `find`'s own output, and
+        // an absolute path is not a name they wrote. Two starts reaching one
+        // directory report it twice, under each spelling, as find prints it twice.
+        if (dirs.length || files.length) omitted.add(display)
       }
     }
     // Do not dispatch empty batches. Any failed batch makes find exit 1.
