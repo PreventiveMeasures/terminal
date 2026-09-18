@@ -113,11 +113,6 @@ const COMMAND_GAPS = [
   [String.raw`awk 'BEGIN {print toupper("ß")}'`, 'Unicode case mapping'],
   [String.raw`awk 'BEGIN {print tolower("İ")}'`, 'Unicode case mapping'],
   [String.raw`awk 'BEGIN {IGNORECASE=1; print index("İ","i")}'`, 'Unicode case mapping'],
-  [String.raw`LC_ALL=C awk '{print length}' u`, 'byte locale text'],
-  [String.raw`LC_CTYPE=POSIX awk 'BEGIN {print length("😀")}'`, 'byte locale text'],
-  [String.raw`LANG=C awk 'BEGIN {printf "%c",233}'`, 'byte locale text'],
-  [String.raw`LC_ALL=C awk 'BEGIN {getline x < "u"; print length(x)}'`, 'byte locale text'],
-  [String.raw`LC_ALL=C awk -v x='\303\251' 'BEGIN {print length(x)}'`, 'byte locale text'],
   [String.raw`awk 'BEGIN {print "a" ~ /a{1001}/}'`, 'regex interval limit'],
   [String.raw`awk 'BEGIN {r="a{1001}";print "a" ~ r}'`, 'regex interval limit'],
   [String.raw`awk 'BEGIN {print match("",/(a{1000}){1000}/)}'`, 'regex state limit'],
@@ -192,7 +187,6 @@ describe('diagnostic completeness — runtime and parser limitations', () => {
       'false && find . -mtime 1',
       'true || awk \'BEGIN {printf "%a", 1}\'',
       String.raw`awk 'BEGIN {if (0) printf "%a", 1; print "ok"}'`,
-      String.raw`LC_ALL=C awk 'BEGINFILE {nextfile}' u`,
     ]) assert.deepEqual(run(command).unsupported, [], command)
   })
   it('does not misclassify ordinary errors as implementation limits', () => {

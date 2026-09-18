@@ -1,4 +1,5 @@
 import { UnsupportedError } from '../unsupported.js'
+import { checkLocaleAssignment } from '../locale.js'
 
 export const UNMODELED_VARIABLES = new Set(['CDPATH', 'GLOBIGNORE', 'GLOBSORT', 'BASH_COMPAT', 'POSIXLY_CORRECT', 'PATH', 'RANDOM', 'SRANDOM', 'SECONDS', 'EPOCHSECONDS', 'EPOCHREALTIME', 'BASHOPTS', 'SHELLOPTS', 'OPTIND'])
 
@@ -14,9 +15,10 @@ export class BindingMap extends Map {
     if (this.expansionTargets?.has(name)) {
       throw new UnsupportedError('feature', 'temporary assignment side effects', 'modifying a temporary assignment target while expanding assignment values is not supported')
     }
-    if (UNMODELED_VARIABLES.has(name) || (name === 'TZ' && !['UTC', 'UTC0', ''].includes(value)) || ((name === 'LANG' || name.startsWith('LC_')) && !['C', 'POSIX', ''].includes(value))) {
+    if (UNMODELED_VARIABLES.has(name) || (name === 'TZ' && !['UTC', 'UTC0', ''].includes(value))) {
       throw new UnsupportedError('feature', name, `shell variable ${name} is not supported with this value`)
     }
+    if (name === 'LANG' || name.startsWith('LC_')) checkLocaleAssignment(name, value)
     this.bound?.add(name)
     this.unsetNames?.delete(name)
     return super.set(name, value)

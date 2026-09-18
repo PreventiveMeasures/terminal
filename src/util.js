@@ -10,6 +10,7 @@ import { lookupWithNote } from './notes.js'
 export { encodeUtf8, encodeUtf8Loose, decodeUtf8 } from './bytes.js'
 export { err, ok, usage } from './result.js'
 export { discardedNotes, missingPathNote } from './notes.js'
+export { byteLocale } from './locale.js'
 
 // Empty input has no lines; a trailing newline terminates the preceding line.
 export function splitLines(s, delimiter = '\n') {

@@ -22,6 +22,12 @@ export function probeParameter(name, ctx) {
 const unknown = (name) => UNMODELED_VARIABLES.has(name) || SHELL_STATE.has(name)
 const refused = (name) => new UnsupportedError('feature', `$${name}`, `shell parameter ${name} is not supported`)
 
+// What `$name` would expand to: the value `export name+=…` appends to, from
+// the same bindings and the same shell-supplied answers as the expansion, so
+// a name answered without ever being assigned — HOME, USER, LANG — appends to
+// what it says rather than to nothing. An unset name appends to nothing.
+export const boundValue = (name, ctx) => parameterValue(name, ctx)?.value ?? ''
+
 function parameterValue(name, ctx) {
   if (name === '?') return { value: String(ctx.lastExit), set: true }
   if (name === '#') return { value: '0', set: true }
@@ -34,6 +40,7 @@ function parameterValue(name, ctx) {
   if (name === 'PWD') return { value: ctx.cwd, set: true }
   if (name === 'HOME') return { value: ctx.home, set: true }
   if (name === 'USER' || name === 'LOGNAME') return { value: ctx.user, set: true }
+  if (name === 'LANG') return { value: ctx.locale, set: true }
   return null
 }
 

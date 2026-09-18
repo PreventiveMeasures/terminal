@@ -329,15 +329,15 @@ describe('realpath quotes an operand only where a shell would need it', () => {
     ["a'b", '"a\'b"'],
   ]) {
     it(JSON.stringify(name), () => {
-      const r = terminal().run(`LC_ALL=C realpath -e -- '${name.replaceAll("'", "'\\''")}'`)
+      const r = terminal().run(`realpath -e -- '${name.replaceAll("'", "'\\''")}'`)
       assert.equal(r.stderr, `realpath: ${shown}: No such file or directory\n`)
       assert.equal(r.exitCode, 1)
       assert.deepEqual(r.unsupported, [])
     })
   }
 
-  it('escapes nonprinting bytes under the C locale', () => {
+  it('refuses the C locale rather than escape a name in bytes', () => {
     const r = terminal().run("LC_ALL=C realpath -e -- 'a\u00E9b'")
-    assert.equal(r.stderr, "realpath: 'a'$'\\303\\251''b': No such file or directory\n")
+    assert.deepEqual([r.stderr, r.exitCode, r.unsupported.map((u) => u.detail)], ['error: LC_ALL: only the C.UTF-8 locale is supported\n', 1, ['LC_ALL']])
   })
 })

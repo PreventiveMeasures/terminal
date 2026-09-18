@@ -5,7 +5,7 @@ import { echo } from './echo.js'
 import { printf } from './printf.js'
 import { parseArgs } from '../args.js'
 import { formatWc } from './wc-format.js'
-import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines } from '../util.js'
+import { byteLocale, consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines } from '../util.js'
 import { awk } from '../awk/index.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
@@ -186,8 +186,7 @@ function pickWcFlags(flags) {
 
 // Character counts use code points in UTF-8 mode and bytes in an explicit C locale.
 function wcCounts(content, ctx, which, needsWidth) {
-  const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG')
-  const cLocale = locale === 'C' || locale === 'POSIX'
+  const cLocale = byteLocale(ctx)
   const bytes = which.c || needsWidth || (which.m && cLocale) ? encodeUtf8Loose(content).length : 0
   return {
     l: which.l ? (content.match(/\n/gu) ?? []).length : 0,

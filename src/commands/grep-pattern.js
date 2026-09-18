@@ -5,6 +5,7 @@ import { AwkRegex } from '../awk/regex.js'
 import { parseEre } from '../awk/re-parse.js'
 import { breToEs, validateBackreferences } from '../bre.js'
 import { asciiCompatible, hasUnicodeSpace } from '../regex-locale.js'
+import { LOCALE } from '../locale.js'
 import { pcreSource } from './grep-pcre.js'
 
 // POSIX named classes are shared with the glob translator. Collating
@@ -301,11 +302,18 @@ function gnuSyntaxGap(source, flags) {
   try { parseEre(grepSource(source, true)); return true } catch (e) { return Boolean(e.gap) }
 }
 
-export function inputGap(inputs, res, invert, forceText = false) {
+export function inputGap(inputs, res, invert, forceText = false, locale = LOCALE) {
   if (inputs.length === 0) return null
   // A literal absent from a binary file is still safely a non-match.
   // Regex anchors and classes can see NUL boundaries differently in GNU.
   if (!forceText && inputs.some((inp) => inp.content.includes('\0') && (invert || res.some((re) => !re.binaryLiteral || re.test(inp.content))))) return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
+  // The matcher reads a character at a time, which is C.UTF-8's reading and
+  // no other locale's: anywhere else, a pattern the locale could change is
+  // refused over non-ASCII text before any of it is read.
+  const nonAscii = /[\u0080-\u{10FFFF}]/u
+  if (locale !== LOCALE && res.some((re) => re.localeSensitive) && (res.some((re) => re.unicodePattern) || inputs.some((inp) => nonAscii.test(inp.content)))) {
+    return unsupported('feature', 'grep', 'locale', `grep: matching non-ASCII text in the ${locale} locale is not supported`, 2)
+  }
   const localePatterns = res.filter((re) => re.localeSensitive && (!re.asciiCompatible || re.spaceClass))
   if (localePatterns.length === 0) return null
   const unicode = localePatterns.some((re) => !re.unicodePattern) && inputs.some((inp) => /[\u0080-\u{10FFFF}]/u.test(inp.content))

@@ -2,8 +2,10 @@
 // these internal fields before exposing results. Registered overrides win.
 
 import { err, ok } from '../util.js'
+import { ONLY_C_UTF8 } from '../locale.js'
 import { unsupported } from '../unsupported.js'
 import { NAME_RE } from './lex.js'
+import { boundValue } from './variables.js'
 import { INT64_MAX, INT64_MIN } from '../numeric.js'
 
 // Bash accepts signed 64-bit control counts. Exit status wraps modulo 256;
@@ -58,7 +60,7 @@ function exportCmd(_stdin, tokens, ctx) {
     const name = eq === -1 ? t : t.slice(0, append ? eq - 1 : eq)
     if (!terminated && t.startsWith('-')) return unsupported('option', 'export', t, `export: option \`${t}\` is not supported`)
     if (!NAME_RE.test(name)) { stderr += `export: \`${name}': not a valid identifier\n`; continue }
-    if (eq !== -1) ctx.vars.set(name, (append ? ctx.vars.get(name) ?? '' : '') + t.slice(eq + 1))
+    if (eq !== -1) ctx.vars.set(name, (append ? boundValue(name, ctx) : '') + t.slice(eq + 1))
     else if (ctx.vars.has(name)) ctx.vars.set(name, ctx.vars.get(name))
   }
   return { stdout: '', stderr, exitCode: stderr ? 1 : 0 }
@@ -72,6 +74,8 @@ function unset(_stdin, tokens, ctx) {
   for (const t of operands) {
     if (!terminated && t.startsWith('-')) return unsupported('option', 'unset', t, `unset: option \`${t}\` is not supported`)
     if (t.includes('[')) return unsupported('feature', 'unset', 'array subscript', 'unset: array subscripts are not supported')
+    // Unsetting LANG would hand the character set to the C locale.
+    if (t === 'LANG') return unsupported('feature', 'unset', 'LANG', `unset: LANG: ${ONLY_C_UTF8}`)
     ctx.vars.delete(t)
   }
   return ok()

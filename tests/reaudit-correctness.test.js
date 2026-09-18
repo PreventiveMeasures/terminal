@@ -20,7 +20,6 @@ const SUPPORTED = [
   [String.raw`awk 'BEGIN {print ("😀" > ""), ("" < "😀"), ("é" == "é")}'`, '1 1 1\n'],
   [String.raw`awk 'BEGIN {print toupper("é"), tolower("É")}'`, 'É é\n'],
   [String.raw`awk 'BEGIN {print "a" ~ /[[.a.]]/, "a" ~ /[[=a=]]/}'`, '1 1\n'],
-  [String.raw`LC_ALL=C awk '{print length, NF}' f`, '3 2\n3 2\n3 2\n3 2\n'],
   ['find . -type f,d | sort', '.\n./f\n./src\n./src/a.js\n./u\n'],
   ['find . ! -type f,d | sort', ''],
   ['sort -k2,1 f', 'a 1\na 1\nb 2\nx 0\n'],

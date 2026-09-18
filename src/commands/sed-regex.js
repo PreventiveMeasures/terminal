@@ -4,6 +4,7 @@ import { ereClasses, grepSource, validateRegex } from './grep-pattern.js'
 import { asciiCompatible, hasUnicodeSpace } from '../regex-locale.js'
 import { scriptGap } from './sed-common.js'
 import { UnsupportedError } from '../unsupported.js'
+import { LOCALE } from '../locale.js'
 
 const controls = { n: '\n', t: '\t', r: '\r', a: '\u0007', f: '\f', v: '\v' }
 
@@ -59,7 +60,7 @@ export function substitution(p) {
   const flags = substitutionFlags(p)
   if (pattern === '' && (flags.ignoreCase || flags.multiline)) throw new Error('cannot specify modifiers on empty regexp')
   if (flags.multiline) unsupportedFlag(flags.multiline)
-  const compiled = compilePattern(pattern, p.extended, false, flags.ignoreCase)
+  const compiled = compilePattern(pattern, p.extended, false, flags.ignoreCase, p.locale)
   for (const part of parts) {
     if (typeof part === 'number' && part > compiled.re?.groupCount) throw new Error(`invalid reference \\${part} in replacement`)
   }
@@ -110,7 +111,7 @@ export function readWriteFile(p) {
   return p.openWrite ? { writer: p.openWrite(filename) } : { writeName: filename }
 }
 
-export function compilePattern(pattern, extended, noSub = false, ignoreCase = false) {
+export function compilePattern(pattern, extended, noSub = false, ignoreCase = false, locale = LOCALE) {
   if (!pattern) {
     if (ignoreCase) throw new Error('cannot specify modifiers on empty regexp')
     return { re: null }
@@ -128,7 +129,7 @@ export function compilePattern(pattern, extended, noSub = false, ignoreCase = fa
     if (/[1-9]/u.test(escape)) scriptGap('regex backreferences')
   }
   const re = new AwkRegex(grepSource(translated.source, true), ignoreCase)
-  return { re, noSub, compatible: !ignoreCase && asciiCompatible(re.src, pattern), spaceClass: /\[:(?:space|blank):\]|\\[sS]/u.test(pattern) }
+  return { re, noSub, locale, compatible: !ignoreCase && asciiCompatible(re.src, pattern), spaceClass: /\[:(?:space|blank):\]|\\[sS]/u.test(pattern) }
 }
 
 // GNU sed's POSIX modes are stricter than grep and AWK: ERE rejects stray
@@ -184,7 +185,11 @@ function replacementParts(text) {
 }
 
 export function checkRegexText(text, command) {
-  if (/[\u0080-\u{10FFFF}]/u.test(text + command.re.src) && (!command.compatible || (command.spaceClass && hasUnicodeSpace(text)))) scriptGap('non-ASCII regex semantics')
+  if (!/[\u0080-\u{10FFFF}]/u.test(text + command.re.src)) return
+  // The matcher reads a character at a time, which is C.UTF-8's reading and
+  // no other locale's.
+  if (command.locale !== LOCALE) throw new UnsupportedError('feature', 'locale', `matching non-ASCII text in the ${command.locale} locale is not supported`)
+  if (!command.compatible || (command.spaceClass && hasUnicodeSpace(text))) scriptGap('non-ASCII regex semantics')
 }
 
 export function resolvePattern(command, state, neededGroups = null) {

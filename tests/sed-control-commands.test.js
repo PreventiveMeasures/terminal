@@ -159,10 +159,7 @@ describe('sed y transliterates once per input character', () => {
     ['transliteration follows inverted addresses', sed('1!y/ab/AB/', 'letters'), 'abba\nABc-xyz\n'],
     ['transliteration composes with substitutions and print', sed('s/one/abba/;y/ab/AB/;p', 'input', '-n'), 'ABBA\ntwo\nthree\nfour\n'],
     ['Unicode characters can change UTF-8 width', sed('y/é😀/😀X/', 'unicode'), '😀X😀\n'],
-    ['C locale transliteration can preserve valid UTF-8 byte sequences', 'LC_ALL=C ' + sed('y/é/ö/', 'unicode'), 'ö😀ö\n'],
-    ['C locale translates both bytes of a Unicode character independently', 'LC_ALL=C ' + sed('y/é/xx/', 'unicode'), 'xx😀xx\n'],
     ['duplicate source characters use the first mapping in Unicode mode', sed('y/aa/XY/', 'letters'), 'XbbX\nXbc-xyz\n'],
-    ['duplicate source characters use the last mapping in C locale', 'LC_ALL=C ' + sed('y/aa/XY/', 'letters'), 'YbbY\nYbc-xyz\n'],
     ['escaped delimiter denotes a literal character', sed(String.raw`y|a\||A!|`, 'pipe'), 'A!b\n'],
     ['an escaped letter delimiter is not decoded as a control escape', sed(String.raw`yn\nnxn`, 'input'), 'oxe\ntwo\nthree\nfour\n'],
     ['escaped backslash denotes a literal backslash', sed(String.raw`y/\\/X/`, 'backslash'), 'aXb\n'],
@@ -187,12 +184,9 @@ describe('sed control command syntax errors are ordinary failures', () => {
     })
   }
 
-  it('C locale rejects transliteration lists with different byte lengths', () => {
+  it('refuses the C locale rather than transliterate bytes', () => {
     const result = createTerminal(FILES).run('LC_ALL=C ' + sed('y/a/Φ/', 'left'))
-    assert.equal(result.stdout, '')
-    assert.notEqual(result.exitCode, 0)
-    assert.notEqual(result.stderr, '')
-    assert.deepEqual(result.unsupported, [])
+    assert.deepEqual([result.stdout, result.exitCode, result.unsupported.map((entry) => entry.detail)], ['', 1, ['LC_ALL']])
   })
 })
 
@@ -203,8 +197,6 @@ describe('sed control commands retain unsupported diagnostics', () => {
     [sed('1!{F;}'), 'script'],
     [sed('q;F'), 'script'],
     [sed(String.raw`y/\xFF/X/`, 'left'), 'partial UTF-8 byte sequence'],
-    ['LC_ALL=C ' + sed(String.raw`y/a/\xFF/`, 'left'), 'partial UTF-8 byte sequence'],
-    ['LC_ALL=C ' + sed(String.raw`y/\xC3/X/`, 'unicode'), 'partial UTF-8 byte sequence'],
   ]) {
     it(command, () => {
       const direct = createTerminal(FILES).run(command)
@@ -226,11 +218,4 @@ describe('sed control commands retain unsupported diagnostics', () => {
     assert.deepEqual(result.unsupported.map((entry) => entry.detail), ['script'])
   })
 
-  it('a runtime transliteration gap leaves unread records available', () => {
-    const result = createTerminal(FILES).run(String.raw`printf 'a\nb\n' | { LC_ALL=C sed -n 'y/a/\xFF/' 2>/dev/null; cat; }`)
-    assert.equal(result.stdout, 'b\n')
-    assert.equal(result.stderr, '')
-    assert.equal(result.exitCode, 0)
-    assert.deepEqual(result.unsupported.map((entry) => entry.detail), ['partial UTF-8 byte sequence'])
-  })
 })

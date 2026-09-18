@@ -47,11 +47,14 @@ export function duOptions(tokens, ctx) {
   return options
 }
 
-// `-h` rounds up to one decimal in the C locale; another numeric locale would
-// write the decimal point differently, so it is refused rather than guessed.
+// `-h` rounds up to one decimal, written with the numeric locale's decimal
+// point: `.` in C, POSIX and C.UTF-8, the ones a session can be in today. Any
+// other would write it differently, so this keeps checking the category
+// against the locale — LC_ALL, LC_NUMERIC, then the environment's — rather
+// than trusting that the assignment guard never lets another through.
 export function humanScale(ctx, base = 1024n) {
-  const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_NUMERIC') || ctx.vars.get('LANG') || 'C'
-  if (!/^(?:C|POSIX|C\.(?:UTF-?8))$/iu.test(locale)) throw new UnsupportedError('feature', 'numeric locale', 'human-readable sizes in this numeric locale are not supported')
+  const numeric = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_NUMERIC') || ctx.locale
+  if (!/^(?:C|POSIX|C\.UTF-?8)$/iu.test(numeric)) throw new UnsupportedError('feature', 'numeric locale', 'human-readable sizes in this numeric locale are not supported')
   return { base, unit: 1n }
 }
 

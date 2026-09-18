@@ -34,7 +34,6 @@ describe('text processing preserves record and byte semantics', () => {
     check('wc -l input', input, '2 input\n')
     check('wc -m input', input, '5 input\n')
     check('wc -c input', input, '11 input\n')
-    check('LC_ALL=C wc -m input', input, '11 input\n')
     check('wc -lm input input', input, ' 2  5 input\n 2  5 input\n 4 10 total\n')
     check('wc -lc input input', input, ' 2 11 input\n 2 11 input\n 4 22 total\n')
   })

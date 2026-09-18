@@ -136,7 +136,7 @@ describe('grep -P diagnoses PCRE features with different semantics', () => {
 
   for (const [pattern, content] of [[String.raw`\s`, '\uFEFF\n'], [String.raw`\D`, 'é\n'], [String.raw`\w`, 'é\n']]) {
     it(`retains Unicode semantic diagnostics for ${pattern}`, () => {
-      const result = createTerminal({ text: content }).run(`LC_ALL=C grep -Po '${pattern}' text 2>/dev/null | cat`)
+      const result = createTerminal({ text: content }).run(`grep -Po '${pattern}' text 2>/dev/null | cat`)
       assert.deepEqual(result.unsupported.map((entry) => entry.detail), ['non-ASCII regex semantics'])
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)

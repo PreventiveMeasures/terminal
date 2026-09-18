@@ -67,7 +67,7 @@ function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
   let inputs = r.inputs
   if (filters.name.length > 0) inputs = inputs.filter((inp) => includedInput(inp, filters))
   if (counts.max !== 0) inputs = inputs.map((inp) => textInput(inp, filters, re.res, flags.has('v')))
-  const gap = counts.max === 0 ? null : inputGap(inputs, re.res, flags.has('v'), filters.forceText)
+  const gap = counts.max === 0 ? null : inputGap(inputs, re.res, flags.has('v'), filters.forceText, ctx.locale)
   if (gap) return gap
   const showName = pickShowName(flags, rest.length)
   const invert = flags.has('v')
@@ -98,7 +98,7 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
     for (const input of r.inputs) {
       if (!includedInput(input, filters)) continue
       const inp = textInput(input, filters, res, invert)
-      const gap = inputGap([inp], res, invert, filters.forceText)
+      const gap = inputGap([inp], res, invert, filters.forceText, ctx.locale)
       if (gap) { gap.stderr = stderr + gap.stderr; return gap }
       if (countMatches(inp.content, res, invert, 1) > 0) return { stdout: '', stderr, exitCode: 0 }
     }

@@ -23,6 +23,8 @@ describe('broad audit — ordered shell output and control flow', () => {
     ['for x in a b; do for y in c d; do echo $x$y; break 2; done; echo wrong; done; echo done', 'ac\ndone\n'],
     ['for x in a b; do for y in c d; do echo $x$y; continue +2; done; echo wrong; done', 'ac\nbc\n'],
     ['x=a; export x+=b y=c; echo $x $y', 'ab c\n'],
+    // A name the shell answers without a binding appends to what it answers.
+    ['export HOME+=/x USER+=y; echo $HOME $USER', '//x usery\n'],
     ['x=a; y=b; unset x bad-name y; echo "${x}" "${y}"', ' \n'],
     ['unset -- -name; echo done', 'done\n'],
   ]) it(command, () => check(command, out))
@@ -130,10 +132,9 @@ describe('broad audit — fields, names and traversal', () => {
     assert.notEqual(createTerminal(FILES).run('find . ! !').exitCode, 0)
     assert.notEqual(createTerminal(FILES).run('find . -- -maxdepth 0').exitCode, 0)
   })
-  it('counts words with GNU Unicode separators and honors explicit C locale', () => {
+  it('counts words with GNU Unicode separators', () => {
     check('wc -w f', '2 f\n', { f: 'a\u2060b\n' })
     check('wc -w f', '1 f\n', { f: 'a\uFEFFb\n' })
-    check('LC_ALL=C wc -wm f', '1 6 f\n', { f: 'a\u2060b\n' })
   })
   it('uses newline/NUL delimiters and blank-separated cut lists', () => {
     check("cut -d '\n' -f2 f", 'b\n', { f: 'a\nb\n' })

@@ -1,3 +1,4 @@
+import { byteLocale } from '../locale.js'
 import { UnsupportedError, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { decodeUtf8, encodeUtf8Loose, ok, usage } from '../util.js'
 import { printfBytes, printfEscape } from './printf-escape.js'
@@ -15,8 +16,7 @@ export function printf(_stdin, tokens, ctx) {
     const option = tokens[0].startsWith('-v') ? '-v' : tokens[0]
     return unsupported('option', 'printf', option, `printf: option ${option} is not supported`, 2)
   }
-  const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_CTYPE') || ctx.vars.get('LANG')
-  const state = { args: operands.slice(1), index: 0, chunks: [], size: 0, stderr: '', failed: false, stop: false, byteLocale: locale === 'C' || locale === 'POSIX' }
+  const state = { args: operands.slice(1), index: 0, chunks: [], size: 0, stderr: '', failed: false, stop: false, byteLocale: byteLocale(ctx) }
   let result
   try {
     if (operands.some((s) => s.includes('\0'))) throw new UnsupportedError('feature', 'NUL in argument', 'NUL bytes in command arguments are not supported')
