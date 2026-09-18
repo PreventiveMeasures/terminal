@@ -132,6 +132,20 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
     check(t, 'cat /tmp/out', '')
   })
 
+  it('leaves a copy that refuses before it writes to say so itself', () => {
+    const t = terminal()
+    check(t, 'printf old >/tmp/out')
+    // The name normalizes onto the descriptor's file, but `missing` is not
+    // there, so nothing is opened and the failure is the whole answer. GNU
+    // prints the line before it tries, and the line lands in `out`.
+    check(t, 'cp -v a /tmp/missing/../out >/tmp/out', '', "cp: cannot create regular file '/tmp/missing/../out': No such file or directory\n", 1)
+    check(t, 'cat /tmp/out', "'a' -> '/tmp/missing/../out'\n")
+    // The same file under both names refuses before the line, so GNU leaves
+    // the redirect's truncation standing.
+    check(t, 'cp -v /tmp/out /tmp/out >/tmp/out', '', "cp: '/tmp/out' and '/tmp/out' are the same file\n", 1)
+    check(t, 'cat /tmp/out', '')
+  })
+
   it('quotes unusual filenames consistently with other file commands', () => {
     const name = 'a\nspace \'quote'
     const t = createTerminal({ [name]: 'content' }, { mount: '/repo', cwd: '/repo', writable: '/tmp/' })

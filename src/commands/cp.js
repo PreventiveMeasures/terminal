@@ -246,7 +246,7 @@ function outputOverlaps(copies, ctx, { recursive, noClobber }) {
     const found = lookup(ctx.cwd, source, ctx.fs)
     if (found.error) return false
     const into = resolve(ctx.cwd, destination)
-    if (!ctx.fs.isDir(found.path)) return !skipped(into) && (holds(found.path) || holds(into))
+    if (!ctx.fs.isDir(found.path)) return copiesFile(found.path, destination, ctx, noClobber) && (holds(found.path) || holds(into))
     if (!recursive) return false
     // Every file below the source is read, and written to the name it keeps
     // below the destination.
@@ -257,6 +257,18 @@ function outputOverlaps(copies, ctx, { recursive, noClobber }) {
     }
     return false
   })
+}
+
+// A copy that refuses before it writes has opened neither name, so nothing it
+// says can meet anything it does: the diagnostic and the verbose line that goes
+// with it are GNU's own, whatever the descriptor happens to point at. These are
+// the refusals `copyFile` reaches before the write, in its order.
+function copiesFile(source, destination, ctx, noClobber) {
+  const dest = lookup(ctx.cwd, destination, ctx.fs)
+  if (dest.error && dest.error !== 'No such file or directory') return false
+  if (noClobber && dest.path !== null) return false
+  if (sameFile(source, dest.path, ctx.fs) || ctx.fs.isDir(dest.path)) return false
+  return !creationError(ctx.cwd, destination, ctx.fs, dest)
 }
 
 function isSpecialFile(name, cwd) {
