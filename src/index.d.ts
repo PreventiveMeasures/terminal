@@ -147,6 +147,46 @@ export interface CreateTerminalOptions {
 }
 
 /**
+ * Options for {@link Terminal.fork}. What the terminal is *over* — the source
+ * tree, the mount, the `/tmp/` overlay, the wired commands — belongs to the
+ * parent and cannot be given another value here; an option this leaves out is
+ * rejected rather than ignored, since `fork({ writable: false })` would
+ * otherwise read as an isolation a fork does not provide.
+ */
+export interface ForkOptions {
+  /**
+   * Working directory the fork starts in. Defaults to where the parent stands
+   * at the moment of the call; a relative path resolves from there, as a `cd`
+   * would. Must name an existing directory.
+   */
+  cwd?: string
+  /**
+   * Home path used by `~`, `$HOME`, and argumentless `cd`. Defaults to the
+   * parent's; a relative path resolves from the parent's working directory. A
+   * `HOME` assignment inherited from the parent stands in front of it, exactly
+   * as an assignment stands in front of {@link CreateTerminalOptions.home} —
+   * which is the reason to pass `inherit: false` along with it.
+   */
+  home?: string
+  /** User name reported by `whoami`. Defaults to the parent's. */
+  user?: string
+  /**
+   * Whether to hand the fork the parent's shell state: its variables — the
+   * names it knows to be unset included — its functions, and `$?`. `true` by
+   * default, which is what makes this a fork.
+   *
+   * `false` starts that state empty, where a newly created terminal starts,
+   * leaving the filesystem, the `/tmp/` overlay and the wired commands as the
+   * only things shared. It is the companion to {@link ForkOptions.home} and
+   * {@link ForkOptions.user}: a session under another name has no business
+   * carrying the variables, the functions and the `HOME` assignment of the one
+   * it came from. Where the fork stands is {@link ForkOptions.cwd}'s business
+   * either way, inherited or not.
+   */
+  inherit?: boolean
+}
+
+/**
  * What kind of gap an {@link Unsupported} entry reports.
  *
  * - `command` — the name is not a registered command.
@@ -347,6 +387,33 @@ export interface Terminal {
    * completing the prefix would require evaluating an expansion.
    */
   complete(line: string): string[]
+  /**
+   * Fork this terminal: a second terminal over the same filesystem, carrying a
+   * copy of this one's session state — the working directory, the variables,
+   * the shell functions, and `$?` as they are at the moment of the call.
+   *
+   * It is the process fork rather than a second {@link createTerminal}: the
+   * source tree, the mount, the `/tmp/` overlay, and the wired commands are
+   * this terminal's own, not copies. Afterwards the two run independently —
+   * neither one's `cd`, assignment, `unset`, or function definition is visible
+   * to the other, in either direction — and what they write in `/tmp/` is the
+   * one thing that passes between them, as it does between two processes
+   * sharing a disk. With no writable overlay they share nothing but the
+   * read-only sources.
+   *
+   * Each terminal's {@link RunResult} is its own: `unsupported` and `notes`
+   * report the line that terminal ran, and nothing else.
+   *
+   * {@link ForkOptions.inherit} set to `false` withholds that copy — no
+   * variables, no functions, no `$?` — for a fork that shares the filesystem
+   * and nothing of the session.
+   *
+   * @throws if `opts` is not an object, carries an option a fork cannot honor,
+   * or sets `inherit` to anything but a boolean.
+   * @throws if `opts.cwd` or `opts.home` is not a string or contains a NUL.
+   * @throws if `opts.cwd` does not resolve to an existing directory.
+   */
+  fork(opts?: ForkOptions): Terminal
   /**
    * Read a command line without running any of it: whether it parses, whether
    * it is merely unfinished, the diagnostic if it is neither, and the commands

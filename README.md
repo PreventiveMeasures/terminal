@@ -64,6 +64,51 @@ terminal.run('sort input > /tmp/out; cat /tmp/out').stdout  // 'a\nb\n'
 terminal.run('echo x > out').exitCode                       // 1, and `>` refuses on the feed
 ```
 
+## Forking
+
+`fork()` gives you a second terminal over the same filesystem, carrying a copy
+of this one's session: its working directory, variables, functions and `$?` as
+they are at the moment of the call. It is the process fork rather than a second
+`createTerminal` — the sources, the mount, the `/tmp/` overlay and the wired
+commands are the parent's own, not copies of them.
+
+```js
+const terminal = createTerminal({ 'src/app.js': 'x\n' }, { mount: '/repo', writable: '/tmp/' })
+terminal.run('cd src; TAG=v2')
+
+const worker = terminal.fork()           // starts in /repo/src, with TAG set
+worker.run('cd /repo; TAG=v3; echo $TAG > /tmp/tag')
+
+terminal.run('pwd; echo $TAG').stdout    // '/repo/src\nv2\n' — the parent did not move
+terminal.run('cat /tmp/tag').stdout      // 'v3\n' — /tmp/ is the one thing they share
+```
+
+Afterwards the two run independently: neither one's `cd`, assignment, `unset`
+or function definition is visible to the other, in either direction, and each
+`run()` reports the `unsupported` and `notes` of its own line. What they write
+in `/tmp/` is all that passes between them, as it does between two processes
+sharing a disk — without a writable overlay they share nothing but the
+read-only sources.
+
+`fork({ cwd, home, user })` sets those session options anew, and a relative
+`cwd` resolves from where the parent stands, as a `cd` would. Anything a fork
+cannot honor — `writable` and `commands` among them — is refused rather than
+quietly dropped.
+
+`fork({ inherit: false })` withholds the copy: no variables, no functions, no
+`$?`, leaving the filesystem, the `/tmp/` overlay and the wired commands as the
+only things shared. It is what a new home or user asks for — a session under
+another name carrying the last one's variables, and its `HOME` assignment in
+front of the home you just set, is the odd shape, not the useful one.
+
+```js
+const other = terminal.fork({ inherit: false, home: '/home/ada', user: 'ada' })
+
+other.run('echo ~; whoami').stdout  // '/home/ada\nada\n' — the home it was given
+other.run('echo $TAG').unsupported  // [{ …, detail: '$TAG' }] — nothing of the parent's is set
+other.cwd()                         // '/repo/src' — where it stands is `cwd`'s business, not `inherit`'s
+```
+
 ## What it runs
 
 Pipelines, `&&`/`||`/`;`/`!`, subshells and groups, `if`, `for … in`,
