@@ -131,7 +131,7 @@ describe('notes survive nested shell execution and output routing', () => {
   })
 
   it('does not invent an omission note when ls fails before enumerating', () => {
-    const result = createTerminal(HIDDEN).run('ls -l')
+    const result = createTerminal(HIDDEN).run('ls -S')
     assert.equal(result.stdout, '')
     assert.notEqual(result.exitCode, 0)
     assert.ok(result.unsupported.length > 0)

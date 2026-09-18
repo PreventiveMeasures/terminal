@@ -124,14 +124,14 @@ describe('ls -d lists operands themselves', () => {
     assert.deepEqual(result.unsupported, [])
   })
 
-  for (const line of ['ls -ld a', 'ls -dl .', 'ls -ld */']) {
-    it(`${line} reports unavailable metadata through redirects and pipes`, () => {
-      const result = createTerminal(TREE).run(`${line} 2>/dev/null | cat`)
-      assert.equal(result.stdout, '')
-      assert.equal(result.stderr, '')
-      assert.equal(result.exitCode, 0)
-      assert.deepEqual(result.unsupported.map((entry) => entry.detail), ['-l metadata'])
-      assert.equal(result.unsupported[0].command, 'ls')
+  // -l keeps -d to the operands: one long row each, no total, no descent.
+  for (const [line, names] of [['ls -ld a', ['a']], ['ls -dl .', ['.']], ['ls -ld */', ['a/', 'b/']]]) {
+    it(`${line} lists the operands themselves in long form`, () => {
+      const result = createTerminal(TREE).run(line)
+      const rows = result.stdout.split('\n').slice(0, -1)
+      assert.deepEqual(rows.map((row) => row.slice(row.lastIndexOf(' ') + 1)), names)
+      for (const row of rows) assert.match(row, /^drwx------ \d+ user user 4096 [A-Z][a-z]{2} [ \d]\d \d\d:\d\d /u)
+      assert.deepEqual([result.stderr, result.exitCode, result.unsupported], ['', 0, []])
     })
   }
 })

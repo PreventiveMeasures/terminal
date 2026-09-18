@@ -26,7 +26,7 @@ export const FILESYSTEM_WORKFLOWS = [
   gap('Process one filename line per invocation', 'cat data/paths.txt | xargs -L1 wc -l', 'xargs', '-L'),
   gap('Bound the size of command argument batches', 'cat data/paths.txt | xargs -s1024 wc -l', 'xargs', '-s'),
 
-  gap('Inspect source ownership and permissions', 'ls -l src', 'ls', '-l metadata', 'feature'),
+  gap('List sources newest first', 'ls -lt src', 'ls', '-t'),
   gap('List the largest source files first', 'ls -S src', 'ls', '-S'),
   gap('Request stable timestamps in a detailed listing', 'ls --time-style=long-iso -l src', 'ls', '--time-style'),
   gap('Disable terminal color in a listing', 'ls --color=never src', 'ls', '--color'),

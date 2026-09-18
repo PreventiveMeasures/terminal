@@ -134,7 +134,7 @@ export interface CreateTerminalOptions {
   writable?: '/tmp/' | false | undefined
   /** Initial working directory. Normalized to an absolute path; defaults to the mount. */
   cwd?: string
-  /** User name reported by `whoami`. Defaults to `'user'`. */
+  /** User name reported by `whoami`, and the owner `ls -l` shows for every entry. Defaults to `'user'`. */
   user?: string
   /**
    * Commands to add to the built-in set — the wiring point for anything this
@@ -259,6 +259,7 @@ export interface RunResult {
    * and nested shell commands cannot suppress them.
    *
    * Notes cover hidden entries omitted by `ls`, `tree` or pathname globs,
+   * the defaults `ls -l` fills in for permissions, ownership and times,
    * unmatched globs passed literally, input shortened by `head`/`tail`,
    * depth-limited traversal, grep binary/filter exclusions, and NUL bytes
    * discarded by command substitution. Omission lists include absolute paths

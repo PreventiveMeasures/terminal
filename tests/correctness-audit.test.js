@@ -127,7 +127,9 @@ describe('correctness audit — text, filenames and traversal', () => {
     check('ls -F src', 'f\ng\nsub/\n')
     check('ls -d src a', 'a\nsrc\n')
     check('ls -r src', 'sub\ng\nf\n')
-    gap('ls -l src', '-l metadata')
+    // -l is a model of what the filesystem does not keep; ls-long.test.js pins it.
+    const stamp = String.raw`[A-Z][a-z]{2} [ \d]\d \d\d:\d\d`
+    assert.match(createTerminal(FILES).run('ls -l src').stdout, new RegExp(String.raw`^total 12\n-rw------- 1 user user    2 ${stamp} f\n-rw------- 1 user user    2 ${stamp} g\ndrwx------ 2 user user 4096 ${stamp} sub\n$`, 'u'))
   })
   it('find walks each subtree before moving to a sibling', () => {
     const r = createTerminal({'a/b/c': '', 'a/d': ''}).run('find a')

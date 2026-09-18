@@ -1,7 +1,7 @@
 // Commands that navigate or query the virtual filesystem.
 
 import { compareNames, resolve } from '../fs.js'
-import { unsupported } from '../unsupported.js'
+import { longFormat } from './ls-long.js'
 import { tree } from './tree.js'
 import { find } from './find.js'
 import { homeOf } from '../shell/expand.js'
@@ -36,45 +36,53 @@ function cd(_stdin, tokens, ctx) {
   return ok(printed)
 }
 
-// Non-TTY ls: one name per line, lexical order, classification only
-// with -F. Metadata cannot be fabricated by a path-to-content filesystem.
+// Non-TTY ls: one name per line, lexical order, classification only with
+// -F. A long listing is the model in ls-long.js, since a path-to-content
+// filesystem has no metadata of its own to print.
 function ls(_stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['1', 'l', 'a', 'A', 'R', 'd', 'r', 'F'] })
-  if (flags.has('l')) return unsupported('feature', 'ls', '-l metadata', 'ls: long listings require permissions, ownership and timestamps absent from this virtual filesystem')
+  const { flags, positional } = parseArgs(tokens, { short: ['1', 'l', 'a', 'A', 'R', 'd', 'r', 'F', 'h'] })
+  const long = flags.has('l') ? longFormat(ctx, flags.has('h')) : null
   const targets = (positional.length ? positional : ['.']).toSorted(compareNames)
   if (flags.has('r')) targets.reverse()
   const dirs = [], errors = [], files = []
   const hidden = hiddenEntryNotes()
+  const all = flags.has('a') || flags.has('A')
   const display = (name, abs) => flags.has('F') && ctx.fs.isDir(abs) && !name.endsWith('/') ? name + '/' : name
+  // A file operand and a directory entry are the same row: what it was
+  // called, what to print for it, where it is and whether it is a directory.
+  const entry = (raw, abs, dir) => ({ raw, abs, dir, name: display(raw, abs) })
+  const render = (entries, listing) => long ? long.lines(entries, listing) : entries.map((e) => e.name)
   for (const target of targets) {
     const { path: abs, error } = lookupWithNote(ctx, 'ls', target)
     if (error) errors.push(`ls: cannot access '${target}': ${error}`)
-    else if (flags.has('d') || ctx.fs.isFile(abs)) files.push(display(target, abs))
+    else if (flags.has('d') || ctx.fs.isFile(abs)) files.push(entry(target, abs, ctx.fs.isDir(abs)))
     else dirs.push(target)
   }
-  const blocks = files.length ? [files.join('\n')] : []
+  const blocks = files.length ? [render(files, false).join('\n')] : []
   for (const target of dirs) {
     const stack = [target]
     while (stack.length) {
       const path = stack.pop()
       const abs = resolve(ctx.cwd, path)
-      const entries = ctx.fs.listDir(abs)
-      if (!flags.has('a') && !flags.has('A')) hidden.collect(abs, [...entries.dirs, ...entries.files])
-      const names = [...entries.dirs, ...entries.files].filter((n) => flags.has('a') || flags.has('A') || !n.startsWith('.'))
-      if (flags.has('a')) names.push('.', '..')
-      names.sort(compareNames)
-      if (flags.has('r')) names.reverse()
-      const rows = names.map((n) => display(n, resolve(abs, n)))
+      const listed = ctx.fs.listDir(abs)
+      if (!all) hidden.collect(abs, [...listed.dirs, ...listed.files])
+      const shown = (names, dir) => names.filter((name) => all || !name.startsWith('.')).map((name) => entry(name, resolve(abs, name), dir))
+      const entries = [...shown(listed.dirs, true), ...shown(listed.files, false)]
+      if (flags.has('a')) entries.push(entry('.', abs, true), entry('..', resolve(abs, '..'), true))
+      entries.sort((a, b) => compareNames(a.raw, b.raw))
+      if (flags.has('r')) entries.reverse()
+      const rows = render(entries, true)
       if (targets.length > 1 || flags.has('R')) rows.unshift(path + ':')
       if (rows.length) blocks.push(rows.join('\n'))
       if (!flags.has('R')) continue
-      for (const name of names.toReversed()) {
-        if (name === '.' || name === '..' || !ctx.fs.isDir(resolve(abs, name))) continue
-        stack.push(path.endsWith('/') ? path + name : path + '/' + name)
+      for (const e of entries.toReversed()) {
+        if (e.raw === '.' || e.raw === '..' || !ctx.fs.isDir(e.abs)) continue
+        stack.push(path.endsWith('/') ? path + e.raw : path + '/' + e.raw)
       }
     }
   }
   hidden.emit(ctx.notes, 'ls', 'Hidden entries are included with -a.')
+  long?.note()
   return { stdout: blocks.length ? blocks.join('\n\n') + '\n' : '', stderr: errors.length ? errors.join('\n') + '\n' : '', exitCode: errors.length ? 2 : 0 }
 }
 
