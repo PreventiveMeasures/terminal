@@ -10,10 +10,20 @@ const SOURCES = {
 }
 const OPTIONS = { mount: '/repo', cwd: '/repo/sub' }
 
-function note(command, path, alternatives, cwd = '/repo/sub', kind = 'file', differ = false) {
+// The same sentence ends both notes, so both tests build it the same way.
+function location(alternatives, kind, differ) {
   const paths = alternatives.map((name) => JSON.stringify(name))
-  const location = paths.length === 1 ? `A ${kind} exists at ${paths[0]}` : `Both of ${paths.join(' and ')} exist${differ ? ', and they differ in contents' : ''}`
-  return `${command}: relative path ${JSON.stringify(path)} was not found from cwd ${JSON.stringify(cwd)}. ${location}.`
+  if (paths.length === 1) return `A ${kind} exists at ${paths[0]}`
+  const listed = `${paths.slice(0, -1).join(', ')} and ${paths.at(-1)}`
+  return `${paths.length === 2 ? 'Both' : 'All'} of ${listed} exist${differ ? ', and they differ in contents' : ''}`
+}
+
+function note(command, path, alternatives, cwd = '/repo/sub', kind = 'file', differ = false) {
+  return `${command}: relative path ${JSON.stringify(path)} was not found from cwd ${JSON.stringify(cwd)}. ${location(alternatives, kind, differ)}.`
+}
+
+function rooted(command, path, alternatives, kind = 'file', differ = false) {
+  return `${command}: absolute path ${JSON.stringify(path)} was not found. ${location(alternatives, kind, differ)}.`
 }
 
 const cases = [
@@ -122,6 +132,17 @@ describe('cwd alternatives use real filesystem lookups', () => {
     assert.deepEqual(result.notes, [note('cat', 'tmp/file', ['/repo/tmp/file', '/tmp/file'], undefined, 'file', true)])
   })
 
+  it('finds home-relative paths when the home is set apart from the mount', () => {
+    const result = createTerminal(SOURCES, { ...OPTIONS, cwd: '/repo', home: '/repo/dir' }).run('cat keep')
+    assert.deepEqual(result.notes, [note('cat', 'keep', ['/repo/dir/keep'], '/repo')])
+  })
+
+  it('names all three roots where each of them answers', () => {
+    const sources = { 'repo/inner': '', 'dir/repo/deep': '', 'sub/keep': '' }
+    const result = createTerminal(sources, { mount: '/repo', cwd: '/repo/sub', home: '/repo/dir' }).run('ls repo')
+    assert.deepEqual(result.notes, [note('ls', 'repo', ['/repo', '/repo/dir/repo', '/repo/repo'], undefined, 'dir')])
+  })
+
   it('checks intermediate components before simplifying dot-dot', () => {
     const result = createTerminal(SOURCES, OPTIONS).run('cat file/../src/file')
     assert.equal(result.exitCode, 1)
@@ -148,10 +169,118 @@ describe('cwd alternatives use real filesystem lookups', () => {
   })
 })
 
+const rootedCases = [
+  ['cat /file', 'cat', '/file', 1, 'cat: /file: No such file or directory\n'],
+  ['head /file', 'head', '/file', 1, "head: cannot open '/file' for reading: No such file or directory\n"],
+  ['wc /file', 'wc', '/file', 1, 'wc: /file: No such file or directory\n'],
+  ['tac /file', 'tac', '/file', 1, "tac: failed to open '/file' for reading: No such file or directory\n"],
+  ['sort /file', 'sort', '/file', 2, 'sort: cannot read: /file: No such file or directory\n'],
+  ['ls /dir', 'ls', '/dir', 2, "ls: cannot access '/dir': No such file or directory\n"],
+  ['find /dir', 'find', '/dir', 1, "find: '/dir': No such file or directory\n"],
+  ['cd /dir', 'cd', '/dir', 1, 'cd: /dir: No such file or directory\n'],
+  ['grep x /file', 'grep', '/file', 2, 'grep: /file: No such file or directory\n'],
+  ['grep -r x /dir', 'grep', '/dir', 2, 'grep: /dir: No such file or directory\n'],
+  ["sed 's/x/y/' /file", 'sed', '/file', 2, "sed: can't read /file: No such file or directory\n"],
+  ["awk '{print}' /file", 'awk', '/file', 2, 'awk: /file: No such file or directory\n'],
+  ['awk -f /file', 'awk', '/file', 2, 'awk: cannot open program file `/file`: No such file or directory\n'],
+  ['cp /file /tmp/file', 'cp', '/file', 1, "cp: cannot stat '/file': No such file or directory\n"],
+  ['rm /file', 'rm', '/file', 1, "rm: cannot remove '/file': No such file or directory\n"],
+  ['cat </file', 'shell', '/file', 1, 'error: /file: No such file or directory\n'],
+]
+
+describe('root notes accompany an absolute path another root answers for', () => {
+  for (const [line, command, path, exitCode, stderr] of rootedCases) {
+    it(line + ' preserves the failure and points under the mount', () => {
+      const result = createTerminal(SOURCES, OPTIONS).run(line)
+      assert.equal(result.exitCode, exitCode)
+      assert.equal(result.stderr, stderr)
+      assert.deepEqual(result.unsupported, [])
+      assert.deepEqual(result.notes, [rooted(command, path, ['/repo' + path], path === '/dir' ? 'dir' : 'file')])
+    })
+  }
+
+  it('names no cwd, and reads the same from every cwd', () => {
+    for (const cwd of ['/repo/sub', '/repo', '/']) {
+      const result = createTerminal(SOURCES, { ...OPTIONS, cwd }).run('cat /src/file')
+      assert.deepEqual(result.notes, [rooted('cat', '/src/file', ['/repo/src/file'])], cwd)
+      assert.ok(!result.notes[0].includes('cwd'), result.notes[0])
+    }
+  })
+
+  it('names the home when the home is where the path is', () => {
+    const result = createTerminal(SOURCES, { ...OPTIONS, home: '/repo/dir' }).run('cat /keep')
+    assert.deepEqual(result.notes, [rooted('cat', '/keep', ['/repo/dir/keep'])])
+  })
+
+  it('names the mount and the home when both answer, and says they differ', () => {
+    const sources = { ...SOURCES, 'home/file': 'home\n' }
+    const result = createTerminal(sources, { ...OPTIONS, home: '/repo/home' }).run('cat /file')
+    assert.deepEqual(result.notes, [rooted('cat', '/file', ['/repo/file', '/repo/home/file'], 'file', true)])
+  })
+
+  it('names a home that repeats the mount once', () => {
+    for (const home of [undefined, '/repo', '/workspace/../repo/']) {
+      const result = createTerminal(SOURCES, { ...OPTIONS, home }).run('cat /file')
+      assert.deepEqual(result.notes, [rooted('cat', '/file', ['/repo/file'])], String(home))
+    }
+  })
+
+  it('takes the path from every leading slash', () => {
+    const result = createTerminal(SOURCES, OPTIONS).run('cat ///src//file')
+    assert.deepEqual(result.notes, [rooted('cat', '///src//file', ['/repo/src/file'])])
+  })
+
+  it('checks components, trailing slashes and absent paths as a relative lookup does', () => {
+    for (const line of ['cat /file/../src/file', 'cat /file/', 'cat /absent', 'cat /repo/absent']) {
+      const result = createTerminal(SOURCES, OPTIONS).run(line)
+      assert.notEqual(result.exitCode, 0, line)
+      assert.deepEqual(result.notes, [], line)
+    }
+  })
+
+  it('has nothing to add when the only root is the one that failed', () => {
+    const result = createTerminal(SOURCES, { cwd: '/sub' }).run('cat /absent')
+    assert.notEqual(result.exitCode, 0)
+    assert.deepEqual(result.notes, [])
+  })
+
+  it('points at the mounted tmp rather than leaving the overlay unexplained', () => {
+    const terminal = createTerminal({ ...SOURCES, 'tmp/file': 'mounted\n' }, { ...OPTIONS, writable: '/tmp/' })
+    const result = terminal.run('cat /tmp/file')
+    assert.equal(result.stderr, 'cat: /tmp/file: No such file or directory\n')
+    assert.deepEqual(result.notes, [rooted('cat', '/tmp/file', ['/repo/tmp/file'])])
+  })
+
+  it('deduplicates repeats within a run while keeping each command and path', () => {
+    const result = createTerminal(SOURCES, OPTIONS).run('cat /file /file; cat /file; ls /file; cat /src/file')
+    assert.deepEqual(result.notes, [
+      rooted('cat', '/file', ['/repo/file']),
+      rooted('ls', '/file', ['/repo/file']),
+      rooted('cat', '/src/file', ['/repo/src/file']),
+    ])
+  })
+
+  it('survives a redirect that hides the failure, as a relative note does', () => {
+    const result = createTerminal(SOURCES, OPTIONS).run('cat /file 2>/dev/null | true')
+    assert.equal(result.stderr, '')
+    assert.equal(result.exitCode, 0)
+    assert.deepEqual(result.notes, [rooted('cat', '/file', ['/repo/file'])])
+  })
+
+  it('reaches a wired command through the same lookup', () => {
+    const terminal = createTerminal(SOURCES, { ...OPTIONS, home: '/repo/dir', commands: {
+      read: (io) => { const r = io.readInputs(io.args); return { stderr: r.stderr, exitCode: r.failed ? 1 : 0 } },
+    } })
+    const result = terminal.run('read /keep')
+    assert.equal(result.stderr, 'read: /keep: No such file or directory\n')
+    assert.deepEqual(result.notes, [rooted('read', '/keep', ['/repo/dir/keep'])])
+  })
+})
+
 describe('cwd notes do not describe probes, successful operations or different failures', () => {
   for (const line of [
     'test -f file', '[ -e file ]', '[[ -f file ]]', 'rm -f file',
-    'cat absent', 'cat /file', 'cat keep/../file', "cat ''", 'echo file',
+    'cat absent', 'cat /absent', 'cat keep/../file', "cat ''", 'echo file',
     'cp keep file', 'printf x >file', 'unknown', 'false && cat file', 'true || cat file',
     'grep -m0 x file', 'grep -q local keep file', "sed 'q' keep file", "awk 'BEGIN {exit}' file",
     "awk '{exit}' keep file", 'basename file', 'dirname file', './file',

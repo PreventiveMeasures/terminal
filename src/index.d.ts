@@ -278,11 +278,15 @@ export interface RunResult {
    * the paths it applied to. Not when the message reached stderr anyway, and
    * not when another note already accounts for that path.
    *
-   * Failed relative file lookups also note verified alternatives at `/` or
-   * the mount point when the current directory caused the missing path.
-   * A single alternative is identified as a file or dir. Two alternatives
-   * are listed together, with content differences noted when both are files;
-   * directory contents are not compared.
+   * A failed file lookup also notes verified alternatives under the session's
+   * other roots: `/`, the mount, and the home. A relative path was looked up
+   * from the current directory and an absolute one from `/`, so the note asks
+   * whichever roots are left whether the same path names something there —
+   * which is what answers a `cat /src/app.js` over a tree mounted at `/repo`.
+   * Roots that coincide, and roots that lead to the same file, are reported
+   * once. A single alternative is identified as a file or dir; several are
+   * listed together, with content differences noted when every one of them is
+   * a file; directory contents are not compared.
    * These hints preserve the original error and do not accompany silent
    * existence probes. Notes never enable features or change command results.
    */

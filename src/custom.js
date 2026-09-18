@@ -95,7 +95,7 @@ function invoke(name, run, stdin, tokens, ctx) {
   // have read it: the next command in a group starts at its end.
   consumeStdin(ctx)
   // Retained I/O views report notes to the run performing the operation.
-  const scope = { cwd: ctx.cwd, fs: ctx.fs, mount: ctx.mount, get notes() { return ctx.notes }, command: name, stdinFile: ctx.stdinFile, stdinOrigin: ctx.stdinOrigin }
+  const scope = { cwd: ctx.cwd, fs: ctx.fs, mount: ctx.mount, home: ctx.home, get notes() { return ctx.notes }, command: name, stdinFile: ctx.stdinFile, stdinOrigin: ctx.stdinOrigin }
   const io = {
     name,
     args: tokens,
