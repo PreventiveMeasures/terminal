@@ -14,14 +14,16 @@ export function compareDirs(state, dirA, dirB) {
     const pathA = joinName(dirA, name), pathB = joinName(dirB, name)
     const kindA = inA ? entryKind(ctx, pathA) : null, kindB = inB ? entryKind(ctx, pathB) : null
     if (inA && inB) { comparePair(state, [pathA, pathB], [kindA, kindB]); continue }
-    if (opts.newFile) compareStandIn(state, [pathA, pathB], kindA ?? kindB)
+    if (opts.newFile) compareStandIn(state, [pathA, pathB], kindA ?? kindB, [inA, inB])
     else report(state, `Only in ${inA ? dirA : dirB}: ${name}\n`, 1)
   }
 }
 
-// A name in one directory only, with -N: the other side stands in empty.
-function compareStandIn(state, [pathA, pathB], kind) {
-  if (kind === 'file') compareFiles(state, pathA, pathB, true)
+// A name in one directory only, with -N: the other side stands in empty. Which
+// side that is goes with it, since a name the listing did have is one this
+// still answers for — a link leading nowhere among them.
+function compareStandIn(state, [pathA, pathB], kind, listed) {
+  if (kind === 'file') compareFiles(state, pathA, pathB, true, listed)
   else if (state.opts.recursive) enterDirs(state, [pathA, pathB], [kind, kind])
   else report(state, `Common subdirectories: ${pathA} and ${pathB}\n`)
 }
@@ -31,7 +33,7 @@ function comparePair(state, [pathA, pathB], [kindA, kindB]) {
   if (isDir(kindA) && isDir(kindB)) {
     if (opts.recursive) enterDirs(state, [pathA, pathB], [kindA, kindB])
     else report(state, `Common subdirectories: ${pathA} and ${pathB}\n`)
-  } else if (kindA === kindB) compareFiles(state, pathA, pathB, true)
+  } else if (kindA === kindB) compareFiles(state, pathA, pathB, true, [true, true])
   else {
     const shown = (i, path) => opts.labels[i] ?? path
     report(state, `File ${shown(0, pathA)} is a ${TYPE[kindA]} while file ${shown(1, pathB)} is a ${TYPE[kindB]}\n`, 1)

@@ -63,14 +63,20 @@ export function report(state, text, status = 0, stderr = false) {
 // Two file operands, `inDirectory` when a directory walk paired them. A
 // missing file is an error unless -N stands in an empty file for it, and
 // then only inside a directory or beside a file that does exist.
-export function compareFiles(state, nameA, nameB, inDirectory) {
+// `listed` is what a directory comparison knows and an operand does not: which
+// side the listing held. `-N` stands in for a name a directory does not have,
+// and never for one it has and cannot read — a link leading nowhere is there,
+// and GNU says so rather than diffing it as the empty file it is not. Two
+// operands have no listing behind them, so ENOENT is absence there, and `-N`
+// covers it unless it is all either of them is.
+export function compareFiles(state, nameA, nameB, inDirectory, listed = null) {
   const { opts } = state
   const sides = [nameA, nameB].map((name) => readOperand(state, name))
   const missing = sides.map((side) => side.content === null)
   const covered = opts.newFile && !(missing[0] && missing[1])
   let failed = false
   for (let i = 0; i < 2; i++) {
-    if (!missing[i] || covered) continue
+    if (!missing[i] || (listed ? !listed[i] : covered)) continue
     report(state, `diff: ${[nameA, nameB][i]}: No such file or directory\n`, 2, true)
     failed = true
   }

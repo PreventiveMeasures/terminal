@@ -352,6 +352,16 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     })
   })
 
+  it('cp answers for the destination before it looks at the tree for links', () => {
+    const sources = { 'a/file': 'x\n', 'a/link': { type: 'link', target: 'file' }, afile: 'f\n' }
+    const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    // A copy the destination turns away never reaches the tree, so what it
+    // holds is not what the refusal is about.
+    check(t, 'cp -r a a', '', { stderr: "cp: cannot copy a directory, 'a', into itself, 'a/a'\n", exitCode: 1, cwd: '/repo' })
+    check(t, 'cp -r a afile', '', { stderr: "cp: cannot overwrite non-directory 'afile' with directory 'a'\n", exitCode: 1, cwd: '/repo' })
+    check(t, 'cp -r a /tmp/nodir/deep', '', { stderr: "cp: cannot create directory '/tmp/nodir/deep': No such file or directory\n", exitCode: 1, cwd: '/repo' })
+  })
+
   it('cp refuses a link a recursive copy meets, before that copy writes anything', () => {
     const sources = { 'a/file': 'x\n', 'a/link': { type: 'link', target: 'file' }, 'a/sub/deep': 'y\n', 'plain/f': 'z\n' }
     const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
@@ -374,6 +384,33 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
       'Common subdirectories: a/over and b/over', '',
     ].join('\n'), { exitCode: 1 })
     gap(t, 'diff -r a b', 'symbolic link to a directory', 'diff: comparing what a symbolic link to a directory holds is not supported: a/over\n')
+  })
+
+  it('diff answers for a link leading nowhere rather than standing in for it under -N', () => {
+    const sources = {
+      'a/keep': 'same\n', 'b/keep': 'same\n', 'b/only': 'real\n', 'b/pair': 'realfile\n',
+      'a/both': { type: 'link', target: 'nowhere' }, 'b/both': { type: 'link', target: 'nowhere' },
+      'a/pair': { type: 'link', target: 'nowhere' }, 'a/alone': { type: 'link', target: 'nowhere' },
+    }
+    const t = terminal(sources)
+    // `-N` stands in for a name the directory does not have; a name it has and
+    // cannot read is answered for, whatever is across from it.
+    check(t, 'diff -rN a b', 'diff -rN a/only b/only\n0a1\n> real\n', {
+      stderr: [
+        'diff: a/alone: No such file or directory',
+        'diff: a/both: No such file or directory',
+        'diff: b/both: No such file or directory',
+        'diff: a/pair: No such file or directory',
+        '',
+      ].join('\n'),
+      exitCode: 2,
+    })
+    // Two operands have no listing behind them, so `-N` covers the one that
+    // cannot be read — unless it is all either of them is.
+    check(t, 'diff -N a/pair b/pair', '0a1\n> realfile\n', { exitCode: 1 })
+    check(t, 'diff -N a/alone b/nothere', '', {
+      stderr: 'diff: a/alone: No such file or directory\ndiff: b/nothere: No such file or directory\n', exitCode: 2,
+    })
   })
 
   it('diff compares what two links point at', () => {

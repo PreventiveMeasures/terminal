@@ -27,13 +27,6 @@ export function cp(_stdin, tokens, ctx) {
     noClobber, force: flags.has('f') || flags.has('force'), verbose, recursive,
     outputOverlap: verbose && outputOverlaps(copies, ctx, { recursive, noClobber }),
   }
-  // A recursive copy follows no link in the source — `-r` keeps each one as
-  // the link it is, and only `-L` would read through it — and nothing here can
-  // make a link, since the overlay holds files and directories alone. So a
-  // link a recursive copy meets is refused rather than written as the file it
-  // points at: refused here, before the copy that would find it halfway has
-  // made anything.
-  if (recursive) for (const [source] of copies) refuseLinkedCopy(source, ctx)
   for (const [source, destination] of copies) {
     // Each copy finishes before the next operand is opened. Ancestor scopes
     // (such as xargs reading its arguments) still guard their own input.
@@ -73,6 +66,10 @@ function copyOperands({ positional, flags, order }, ctx) {
   return { target, directory, sources: explicit === undefined ? positional.slice(0, -1) : positional }
 }
 
+// A recursive copy follows no link in the source — `-r` keeps each one as the
+// link it is, and only `-L` would read through it — and nothing here can make a
+// link, since the overlay holds files and directories alone. So a link such a
+// copy meets is refused rather than written as the file it points at.
 function refuseLinkedCopy(source, ctx) {
   const root = lookup(ctx.cwd, source, ctx.fs, { follow: false }).path
   if (root === null) return
@@ -194,6 +191,11 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
     if (state.sources.has(absolute)) return report(state, `cp: warning: source directory ${shownSource} specified more than once\n`, false, true)
     state.sources.add(absolute)
   }
+  // Every link below this operand is refused, and refused here: after the
+  // destination has answered for itself, since a copy it turns away never
+  // reaches the tree, and before anything is made, since a refusal found
+  // halfway would leave a copy neither GNU's nor asked for.
+  if (operand) refuseLinkedCopy(source, ctx)
   const { dirs, files, links } = ctx.fs.listDir(absolute)
   if (dest.path === null && !makeDirectory(source, destination, named, state)) return
   const from = source.replace(/\/+$/u, ''), into = destination.replace(/\/+$/u, '')

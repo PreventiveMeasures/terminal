@@ -29,7 +29,7 @@ export interface CommandFs {
   readFile(path: string): string | undefined
   /** Immediate children of directory `path`, each list sorted (copies — mutating them cannot affect the tree). Links are listed apart from the files they may lead to. Throws `<path>: Not a directory` / `No such file or directory` otherwise. */
   listDir(path: string): { dirs: string[]; files: string[]; links: string[] }
-  /** Every file path at or under `path`, absolute. A walk stops at a link rather than crossing it, and names none of them. Empty if `path` does not exist. */
+  /** Every file path at or under `path`, absolute. `path` resolves as it does everywhere else here, so a link naming a directory walks the directory it names; a link the walk then reaches is neither crossed nor named. Empty if `path` does not exist. */
   walkFiles(path: string): string[]
 }
 
