@@ -307,8 +307,11 @@ describe('no JS execution — runtime', () => {
     // `$NAME` / `${NAME}` are variable references, and the only bindings
     // this shell has are its own (`for` variables, assignments, and the
     // few names it answers itself) — there is no environment behind them.
-    assert.equal(t.run('echo ${PATH}').stdout, '\n')
-    assert.equal(t.run('for x in a; do echo $SHELL; done').stdout, '\n')
+    // A name bash would have answered from its own process is refused outright.
+    for (const line of ['echo ${PATH}', 'for x in a; do echo $SHELL; done']) {
+      const r = t.run(line)
+      assert.deepEqual([r.stdout, r.exitCode, r.unsupported[0].kind], ['', 1, 'feature'], line)
+    }
     assert.equal(t.run('echo $HOME').stdout, '/\n')
     // `&` would be the other way to hand work to a real process.
     assert.match(t.run('cat a.js & id').stderr, /background processes/u)

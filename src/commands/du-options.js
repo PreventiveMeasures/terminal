@@ -43,11 +43,16 @@ export function duOptions(tokens, ctx) {
     }
   }
   if (flags.has('inodes')) options.scale = { ...options.scale, unit: 1n, suffix: options.scale.suffix?.endsWith('B') ? 'B' : '' }
-  if (options.scale.base) {
-    const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_NUMERIC') || ctx.vars.get('LANG') || 'C'
-    if (!/^(?:C|POSIX|C\.(?:UTF-?8))$/iu.test(locale)) throw new UnsupportedError('feature', 'numeric locale', 'human-readable sizes in this numeric locale are not supported')
-  }
+  if (options.scale.base) humanScale(ctx, options.scale.base)
   return options
+}
+
+// `-h` rounds up to one decimal in the C locale; another numeric locale would
+// write the decimal point differently, so it is refused rather than guessed.
+export function humanScale(ctx, base = 1024n) {
+  const locale = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_NUMERIC') || ctx.vars.get('LANG') || 'C'
+  if (!/^(?:C|POSIX|C\.(?:UTF-?8))$/iu.test(locale)) throw new UnsupportedError('feature', 'numeric locale', 'human-readable sizes in this numeric locale are not supported')
+  return { base, unit: 1n }
 }
 
 function depthOption(value) {

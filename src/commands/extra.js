@@ -302,7 +302,7 @@ const DAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
-function formatDate(d, fmt, utc) {
+export function formatDate(d, fmt, utc) {
   const getter = 'get' + (utc ? 'UTC' : '')
   const [year, month, day, hour, minute, second, weekday] = ['FullYear', 'Month', 'Date', 'Hours', 'Minutes', 'Seconds', 'Day'].map((field) => d[getter + field]())
   const pad = (n, c = '0') => String(n).padStart(2, c)

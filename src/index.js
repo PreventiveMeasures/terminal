@@ -21,7 +21,9 @@ export function createTerminal(sources, opts = {}) {
   // The I/O guard watches one filesystem's reads and writes, and the writable
   // overlay it observes holds a single observer, so the guard belongs to the
   // filesystem rather than to a terminal: a fork over the same tree shares it.
-  const shared = { fs, io: createIoGuard(fs), mount, writable, registry }
+  // The tree has no clock of its own, so the moment it was made stands in:
+  // `ls -l` dates every entry to it, and a fork, being the same tree, keeps it.
+  const shared = { fs, io: createIoGuard(fs), mount, writable, registry, createdAt: Date.now() }
   return terminal(context(shared, { cwd, home, user: opts.user ?? 'user', ...freshSession() }), 'createTerminal')
 }
 
@@ -55,9 +57,9 @@ function fork(parent, opts = {}) {
 // whoever is running a line, so every terminal starts with a set of its own.
 // stdinLeft tracks consumption within a command list; stdinOrigin allows
 // /dev/stdin to reopen a redirected file independently of that offset.
-function context({ fs, io, mount, writable, registry }, session) {
+function context({ fs, io, mount, writable, registry, createdAt }, session) {
   const ctx = {
-    fs, io, mount, writable, registry, ...session, calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
+    fs, io, mount, writable, registry, createdAt, ...session, calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
     loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '',
     unsupported: createUnsupportedFeed(), notes: new Set(),
   }

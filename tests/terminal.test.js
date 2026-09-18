@@ -164,11 +164,10 @@ describe('createTerminal — basics', () => {
     assert.equal(r.stdout, 'README.md\n')
   })
 
-  it('ls -l reports unavailable metadata on both channels', () => {
+  it('ls -l lists every entry as the session user’s own, dated to the terminal’s creation', () => {
     const r = createTerminal(SOURCES).run('ls -lR src')
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /metadata|permissions/u)
-    assert.equal(r.unsupported[0].detail, '-l metadata')
+    assert.deepEqual([r.exitCode, r.stderr, r.unsupported], [0, '', []])
+    assert.match(r.stdout, /^src:\ntotal \d+\n(?:(?:-rw-------|drwx------) \d+ user user +\d+ [A-Z][a-z]{2} [ \d]\d \d\d:\d\d \S+\n)+/u)
   })
 })
 
