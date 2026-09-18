@@ -25,6 +25,8 @@ export interface CommandFs {
   isLink(path: string): boolean
   /** The path a symbolic link holds, unresolved, or `undefined` if `path` is not one. */
   readLink(path: string): string | undefined
+  /** Contents of `path`, or `undefined` if it is not a file. */
+  readFile(path: string): string | undefined
   /** Immediate children of directory `path`, each list sorted (copies — mutating them cannot affect the tree). Links are listed apart from the files they may lead to. Throws `<path>: Not a directory` / `No such file or directory` otherwise. */
   listDir(path: string): { dirs: string[]; files: string[]; links: string[] }
   /** Every file path at or under `path`, absolute. A walk stops at a link rather than crossing it, and names none of them. Empty if `path` does not exist. */

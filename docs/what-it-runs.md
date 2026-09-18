@@ -127,7 +127,11 @@ scripts and git binary patches are refused the same way.
 
 `realpath` supports GNU canonicalization modes (`-e`, `-m`, and the default),
 relative output (`--relative-to`, `--relative-base`), quiet errors (`-q`) and
-NUL terminators (`-z`). It resolves paths within the virtual filesystem.
+NUL terminators (`-z`). It resolves paths within the virtual filesystem, each
+of the three ways GNU offers: `-P`, the default, expands every link it walks
+through, `..` taken from what the link leads to; `-L` takes `..` from the name
+as written, cancelling the component before it; and `-s` expands no link at
+all, asking the filesystem only whether what the name leads to is there.
 
 Behaviour is checked against the real tools: bash 5.2, GNU grep 3.11, GNU sed
 4.9, gawk 5.2, ripgrep 14.1, GNU diff 3.10 and GNU patch 2.7.6 in the C

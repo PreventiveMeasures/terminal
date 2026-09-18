@@ -381,11 +381,41 @@ describe('what a link cannot change', () => {
     check(t, 'realpath --relative-to=. pkg/index.js', 'node_modules/pkg/index.js\n')
   })
 
+  it('realpath takes `..` from the name as written under -L, and from what a link leads to under -P', () => {
+    const t = terminal({ 'd/f': 'f\n', 'x/y/z': 'z\n', 'sub/l': { type: 'link', target: '../x/y' }, l: { type: 'link', target: 'd' } })
+    // `-P`, the default, expands the link and takes `..` from where it leads.
+    check(t, 'realpath sub/l/../z', '/x/z\n')
+    check(t, 'realpath -P sub/l/../z', '/x/z\n')
+    // `-L` cancels the component before a `..` — link or not — and resolves
+    // what is left, so the link is never expanded at all.
+    check(t, 'realpath -L sub/l/../z', '/sub/z\n')
+    check(t, 'realpath -L l/f', '/d/f\n')
+    // What a `..` passes over is still checked where the walk would check it.
+    check(t, 'realpath -L nope/../l/f', '', { stderr: 'realpath: nope/../l/f: No such file or directory\n', exitCode: 1 })
+    check(t, 'realpath -Lm nope/../l/f', '/d/f\n')
+    // The last of `-L`, `-P` and `-s` on the line is the one that answers.
+    check(t, 'realpath -sL l/f', '/d/f\n')
+    check(t, 'realpath -Ls l/f', '/l/f\n')
+  })
+
+  it('realpath expands no link under -s, in the existence mode as well as the default', () => {
+    const t = terminal({ 'd/f': 'f\n', l: { type: 'link', target: 'd' } })
+    check(t, 'realpath -s l/f', '/l/f\n')
+    check(t, 'realpath -s -e l/f', '/l/f\n')
+    check(t, 'realpath -s -m l/nope', '/l/nope\n')
+    check(t, 'realpath -s -m l/../z', '/z\n')
+    // `-e` still asks the filesystem, which answers through the link.
+    check(t, 'realpath -s -e l/nope', '', { stderr: 'realpath: l/nope: No such file or directory\n', exitCode: 1 })
+  })
+
   it('realpath keeps a path it cannot resolve where -m asked for one that need not be there', () => {
     const t = terminal({ self: { type: 'link', target: 'self' }, 'a.txt': 'x\n' })
     check(t, 'realpath self', '', { stderr: 'realpath: self: Too many levels of symbolic links\n', exitCode: 1 })
     check(t, 'realpath -m self/deeper', '/self/deeper\n')
     check(t, 'realpath -m a.txt/under', '/a.txt/under\n')
+    // A name that is not there is kept as it was spelled and the walk goes
+    // on, so a `..` after it cancels it and a link past it is expanded.
+    check(t, 'realpath -m nope/../a.txt', '/a.txt\n')
   })
 
   it('hands a wired command the links a directory holds, and the target each one carries', () => {

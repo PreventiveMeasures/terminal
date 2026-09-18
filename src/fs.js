@@ -52,8 +52,11 @@ export function lookup(cwd, path, fs, { follow = true } = {}) {
 // The walk itself, for the one caller that wants more than an answer: where
 // the resolution got to, what stopped it, and the components it never reached.
 // `realpath` prints what a name that is not there yet would be, which is that
-// furthest point plus what is left of the name.
-export function walkPath(cwd, path, fs, { follow = true } = {}) {
+// furthest point plus what is left of the name. `lenient` is what `realpath -m`
+// asks for, where none of the path need be there: a component the filesystem
+// cannot answer for is kept as it was spelled and the walk goes on, so a `..`
+// after it cancels it and a link past it is expanded as ever.
+export function walkPath(cwd, path, fs, { follow = true, lenient = false } = {}) {
   if (path === '' || path.includes('\0')) return { path: '/', error: 'No such file or directory', rest: [] }
   const rest = (path.startsWith('/') ? path : cwd + '/' + path).split('/').filter(Boolean)
   // A trailing slash names a directory, which is the target's to be and not
@@ -64,8 +67,15 @@ export function walkPath(cwd, path, fs, { follow = true } = {}) {
   while (rest.length > 0) {
     const part = rest.shift()
     if (!fs.isDir(at)) {
-      const error = fs.isFile(at) || isLink(fs, at) ? 'Not a directory' : 'No such file or directory'
-      return { path: at, error, rest: [part, ...rest] }
+      if (!lenient) {
+        const error = fs.isFile(at) || isLink(fs, at) ? 'Not a directory' : 'No such file or directory'
+        return { path: at, error, rest: [part, ...rest] }
+      }
+      // Nothing under a name that is not a directory can be a link, so the
+      // components below it are the ones they spell and nothing else.
+      if (part === '..') at = dirname(at)
+      else if (part !== '.') at = joinPath(at, part)
+      continue
     }
     if (part === '..') { at = dirname(at); continue }
     if (part !== '.') at = joinPath(at, part)
