@@ -239,24 +239,35 @@ function outputOverlaps(copies, ctx, { recursive, noClobber }) {
   // A name is not an inode: the overlay can hold one inode under two names,
   // and a `sed -i` backup can put the descriptor's file anywhere at all.
   const holds = (path) => output.identity === undefined ? output.path === path : output.identity === ctx.fs.fileIdentity?.(path)
-  return copies.some(([source, destination]) => {
+  // An operand landing on a name an earlier one has just made is refused
+  // rather than overwritten, and a refusal opens nothing — so the operands are
+  // read in order, carrying what they have taken. (A source named twice needs
+  // no set of its own: it resolves to the destination its first mention
+  // already answered for.)
+  const copied = new Set()
+  for (const [source, destination] of copies) {
     const found = lookup(ctx.cwd, source, ctx.fs)
-    if (found.error) return false
+    if (found.error) continue
     const into = resolve(ctx.cwd, destination)
-    if (!ctx.fs.isDir(found.path)) return copiesFile(found.path, destination, ctx, noClobber) && (holds(found.path) || holds(into))
-    if (!recursive || !copiesDirectory(found.path, destination, ctx)) return false
-    // Every file below the source is read, and written to the name it keeps
-    // below the destination — but only where the entry gets that far. Its
-    // parents are this copy's own to make, so a component that is not there
-    // yet says nothing about it; what is already in the way does.
-    const root = found.path === '/' ? 0 : found.path.length
-    for (const path of ctx.fs.walkFiles(found.path)) {
-      const to = into + path.slice(root)
-      if (refusedBeforeWriting(path, lookup(ctx.cwd, to, ctx.fs), ctx, noClobber)) continue
-      if (holds(path) || holds(to)) return true
+    if (ctx.fs.isDir(found.path)) {
+      if (!recursive || !copiesDirectory(found.path, destination, ctx)) continue
+      // Every file below the source is read, and written to the name it keeps
+      // below the destination — but only where the entry gets that far. Its
+      // parents are this copy's own to make, so a component that is not there
+      // yet says nothing about it; what is already in the way does.
+      const root = found.path === '/' ? 0 : found.path.length
+      for (const path of ctx.fs.walkFiles(found.path)) {
+        const to = into + path.slice(root)
+        if (refusedBeforeWriting(path, lookup(ctx.cwd, to, ctx.fs), ctx, noClobber)) continue
+        if (holds(path) || holds(to)) return true
+      }
+      continue
     }
-    return false
-  })
+    if (copied.has(into) || !copiesFile(found.path, destination, ctx, noClobber)) continue
+    copied.add(into)
+    if (holds(found.path) || holds(into)) return true
+  }
+  return false
 }
 
 // A copy that refuses before it writes has opened neither name, so nothing it

@@ -146,6 +146,21 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
     check(t, 'cat /tmp/out', '')
   })
 
+  it('leaves an operand a just-created name refuses out of the overlap', () => {
+    const t = terminal()
+    check(t, 'mkdir -p /tmp/one /tmp/two /tmp/d; printf ONE >/tmp/one/x; printf TWO >/tmp/two/x')
+    // The second operand lands on the name the first has just made, so it is
+    // refused before `/tmp/two/x` is opened and the descriptor on it meets
+    // nothing; GNU copies the first and leaves its line there.
+    check(t, 'cp -v /tmp/one/x /tmp/two/x /tmp/d >/tmp/two/x', '', "cp: will not overwrite just-created '/tmp/d/x' with '/tmp/two/x'\n", 1)
+    check(t, 'cat /tmp/two/x', "'/tmp/one/x' -> '/tmp/d/x'\n")
+    check(t, 'cat /tmp/d/x', 'ONE')
+    // The operand that is copied still refuses when the descriptor is its own
+    // source, since that is the file the line would be written into.
+    const refused = t.run('cp -v /tmp/one/x /tmp/two/x /tmp/d >/tmp/one/x')
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+  })
+
   it('quotes unusual filenames consistently with other file commands', () => {
     const name = 'a\nspace \'quote'
     const t = createTerminal({ [name]: 'content' }, { mount: '/repo', cwd: '/repo', writable: '/tmp/' })
