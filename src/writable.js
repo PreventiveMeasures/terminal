@@ -1,10 +1,24 @@
-import { compareNames, lookup, resolve, walkTree } from './fs.js'
+import { compareNames, lookup, resolve, walkPath, walkTree } from './fs.js'
 import { decodeUtf8, encodeUtf8 } from './util.js'
 
 // The overlay is mounted at /tmp, so what may be written is what falls inside
 // it. Commands ask before acting, where the answer decides more than whether a
 // write would succeed.
 export const inOverlay = (absolute) => absolute === '/tmp' || absolute.startsWith('/tmp/')
+
+// Which file a write lands on, and so which side of that boundary it is. The
+// kernel resolves every component of a name before it opens anything, so a
+// link on the way decides — and at the end too, where opening a link opens
+// what it names and a link to nothing is that name made. Unlinking a name and
+// replacing it act on the name itself, as `lstat` reads one, and pass
+// `follow: false`. A component that is not there is kept as it was spelled,
+// since the file being made is the one being asked about.
+// A name no resolution can start on — empty, or holding a NUL — keeps the
+// spelling it came with, so the overlay answers for it where it was aimed and
+// the diagnostic is the one that name earns.
+const writeTarget = (fs, cwd, path, follow = true) => path === '' || path.includes('\0')
+  ? resolve(cwd, path)
+  : walkPath(cwd, path, fs, { follow, lenient: true }).path
 
 // Only the overlay owns mutable bytes. The mounted source map and its
 // directory index remain separate and are never copied into this map.
@@ -48,7 +62,7 @@ export function writableFs(base) {
       for (const entry of walkTree(fs, path)) if (entry.kind === 'file') yield entry.path
     },
     openWritable(cwd, path, append = false) {
-      const absolute = resolve(cwd, path)
+      const absolute = writeTarget(fs, cwd, path)
       if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return null
       checkTarget(fs, cwd, path)
       let inode = files.get(absolute)
@@ -59,7 +73,7 @@ export function writableFs(base) {
     makeWritableDir: (cwd, path) => addDirectory(fs, { dirs, files, reshaped }, cwd, path),
     removeWritableDir: (cwd, path) => dropDirectory(fs, { dirs, reshaped }, cwd, path),
     copyWritable(cwd, source, target) {
-      const absolute = resolve(cwd, target)
+      const absolute = writeTarget(fs, cwd, target)
       if (!absolute.startsWith('/tmp/')) return false
       checkTarget(fs, cwd, target)
       const inode = files.get(source)
@@ -73,7 +87,7 @@ export function writableFs(base) {
     },
     replaceWritable: (cwd, path, content, backup) => replaceFile(fs, { files, put }, cwd, path, content, backup),
     removeWritable(cwd, path) {
-      const absolute = resolve(cwd, path)
+      const absolute = writeTarget(fs, cwd, path, false)
       if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
       const found = lookup(cwd, path, fs)
       if (found.error) throw pathError(path, found.error)
@@ -92,7 +106,9 @@ export function writableFs(base) {
 // is asked for. `false` says the path is not the overlay's to make, which is
 // the read-only filesystem every other write meets outside /tmp/.
 function addDirectory(fs, overlay, cwd, path) {
-  const absolute = resolve(cwd, path)
+  // `mkdir` never follows a link in the final position: a name already there
+  // is `File exists` whatever it leads to, so only the way to it resolves.
+  const absolute = writeTarget(fs, cwd, path, false)
   if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
   if (overlay.dirs.has(absolute)) return true
   checkTarget(fs, cwd, path)
@@ -107,8 +123,10 @@ function addDirectory(fs, overlay, cwd, path) {
 // A whole-file rewrite, as `sed -i` and `patch` make one, optionally keeping
 // what was there under a backup name.
 function replaceFile(fs, overlay, cwd, path, content, backupPath) {
-  const absolute = resolve(cwd, path)
-  const backup = backupPath === undefined ? null : resolve(cwd, backupPath)
+  // A whole-file rewrite replaces the name, as `sed -i` replaces a link with
+  // the file it wrote rather than writing what the link named.
+  const absolute = writeTarget(fs, cwd, path, false)
+  const backup = backupPath === undefined ? null : writeTarget(fs, cwd, backupPath, false)
   if (!absolute.startsWith('/tmp/') || backup !== null && !backup.startsWith('/tmp/')) return false
   checkTarget(fs, cwd, path)
   const inode = overlay.files.get(absolute)
@@ -126,7 +144,7 @@ function replaceFile(fs, overlay, cwd, path, content, backupPath) {
 // overlay is mounted rather than something inside it, and a mount point is not
 // the tree below it to remove — which is the busy device Linux reports.
 function dropDirectory(fs, overlay, cwd, path) {
-  const absolute = resolve(cwd, path)
+  const absolute = writeTarget(fs, cwd, path, false)
   if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
   const found = lookup(cwd, path, fs)
   if (found.error) throw pathError(path, found.error)

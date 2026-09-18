@@ -424,13 +424,44 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
 })
 
 describe('what a link cannot change', () => {
-  it('leaves the read-only sources read-only, whichever name a write is aimed at', () => {
-    const t = createTerminal({ file: 'x\n', link: { type: 'link', target: '/tmp/out' }, own: { type: 'link', target: 'file' } }, { mount: '/repo', writable: '/tmp/' })
-    check(t, 'printf kept > /tmp/out', '', { cwd: '/repo' })
-    // `rm` unlinks the name it is given: the target is not what it removes.
-    check(t, 'rm link', '', { stderr: "rm: cannot remove 'link': Read-only file system\n", exitCode: 1, cwd: '/repo' })
-    check(t, 'cat /tmp/out', 'kept', { cwd: '/repo' })
-    check(t, 'cat link', 'kept', { cwd: '/repo' })
+  it('writes where a link leads, which is the file the overlay answers for', () => {
+    const sources = {
+      file: 'src\n',
+      out: { type: 'link', target: '/tmp/out' },
+      fresh: { type: 'link', target: '/tmp/new' },
+      dirlink: { type: 'link', target: '/tmp/d' },
+      outside: { type: 'link', target: '/repo/file' },
+    }
+    const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    const at = { cwd: '/repo' }
+    // Opening a link opens what it names, and a link to a name not there yet
+    // is that name made — the file written either way is the overlay's.
+    check(made(), 'printf seed > /tmp/out; echo x > out; cat /tmp/out', 'x\n', at)
+    check(made(), 'echo y > fresh; cat /tmp/new', 'y\n', at)
+    check(made(), 'printf seed > /tmp/out; cp file out; cat /tmp/out', 'src\n', at)
+    check(made(), 'touch fresh; wc -c /tmp/new', '0 /tmp/new\n', at)
+    check(made(), 'mkdir /tmp/d; mkdir -p dirlink/sub; find /tmp -type d', '/tmp\n/tmp/d\n/tmp/d/sub\n', at)
+    // A link leading into the sources leads nowhere a write may go.
+    gap(made(), 'echo z > outside', '>', 'error: `>` cannot write to `outside`: only `/tmp/` is writable\n')
+  })
+
+  it('unlinks and replaces the name it was given, which a link in the sources is not', () => {
+    const sources = {
+      file: 'x\n',
+      out: { type: 'link', target: '/tmp/out' },
+      dirlink: { type: 'link', target: '/tmp/d' },
+    }
+    const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    const at = { cwd: '/repo' }
+    // `rm` takes the name away and `sed -i` writes a file over it, so both
+    // answer for a name the sources hold — never for what it points at.
+    check(made(), 'printf kept > /tmp/out; rm out; cat /tmp/out', 'kept', {
+      stderr: "rm: cannot remove 'out': Read-only file system\n", cwd: '/repo',
+    })
+    gap(made(), 'printf seed > /tmp/out; sed -i s/seed/other/ out', '-i', 'sed: out: file system is read-only\n')
+    // A link on the way to the name is followed all the same.
+    check(made(), 'mkdir /tmp/d; printf a > /tmp/d/f; sed -i s/a/b/ dirlink/f; cat /tmp/d/f', 'b', at)
+    check(made(), 'mkdir /tmp/d; printf a > /tmp/d/f; rm dirlink/f; find /tmp -type f', '', at)
   })
 
   it('realpath resolves every link on the way, and -s keeps the name as written', () => {

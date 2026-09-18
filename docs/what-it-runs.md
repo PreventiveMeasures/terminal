@@ -35,6 +35,13 @@ holds files and directories alone, so such a copy is refused rather than
 written as the files those links point at. A link handed to `cp` without `-r`
 is read through, which is what GNU reads there too.
 
+A write lands where a name leads: the overlay answers for the file a link
+names, so `echo x > out` with `out -> /tmp/out` writes that file, and one
+naming a path in the read-only sources is refused as any other name there is.
+`rm` and `sed -i` are the two that answer for the name itself — the first
+takes it away, the second writes a file over it — so a link the sources hold
+is read-only to them however the file it names could be written.
+
 `mkdir` makes them one at a time and `mkdir -p` makes a whole path, passing
 over what is already there and naming the component it stops at. `rm -r` takes
 a tree away again, emptying a directory before removing it. The overlay's own
