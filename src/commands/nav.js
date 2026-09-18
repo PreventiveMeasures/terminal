@@ -82,7 +82,6 @@ function ls(_stdin, tokens, ctx) {
     }
   }
   hidden.emit(ctx.notes, 'ls', 'Hidden entries are included with -a.')
-  long?.note()
   return { stdout: blocks.length ? blocks.join('\n\n') + '\n' : '', stderr: errors.length ? errors.join('\n') + '\n' : '', exitCode: errors.length ? 2 : 0 }
 }
 

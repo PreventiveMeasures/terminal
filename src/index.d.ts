@@ -259,7 +259,6 @@ export interface RunResult {
    * and nested shell commands cannot suppress them.
    *
    * Notes cover hidden entries omitted by `ls`, `tree` or pathname globs,
-   * the defaults `ls -l` fills in for permissions, ownership and times,
    * unmatched globs passed literally, input shortened by `head`/`tail`,
    * depth-limited traversal, grep binary/filter exclusions, and NUL bytes
    * discarded by command substitution. Omission lists include absolute paths
