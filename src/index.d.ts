@@ -140,15 +140,15 @@ export interface CreateTerminalOptions {
   user?: string
   /**
    * The locale the terminal runs in. Only C.UTF-8 is implemented, so only that
-   * is accepted, spelt with or without the hyphen in either case, and it is
-   * the default. `$LANG` answers it; a shell assignment that would move the
+   * is accepted — spelt as glibc spells it, `'C.UTF-8'` or `'C.utf8'` in
+   * either case — and it is the default. `$LANG` answers it; a shell assignment that would move the
    * character set — `LANG`, `LC_ALL` or `LC_CTYPE` set to any other value,
    * or `LANG` unset — is refused with an unsupported diagnostic, while the
    * other `LC_` categories also take `C` and `POSIX`, which read the same
    * as C.UTF-8 in them. A fork keeps the locale of the terminal it came from.
    * @throws if any other value is given.
    */
-  locale?: 'C.UTF-8'
+  locale?: string
   /**
    * Commands to add to the built-in set — the wiring point for anything this
    * package will not implement itself, such as a `sha256sum` whose hashing

@@ -23,6 +23,8 @@ describe('broad audit — ordered shell output and control flow', () => {
     ['for x in a b; do for y in c d; do echo $x$y; break 2; done; echo wrong; done; echo done', 'ac\ndone\n'],
     ['for x in a b; do for y in c d; do echo $x$y; continue +2; done; echo wrong; done', 'ac\nbc\n'],
     ['x=a; export x+=b y=c; echo $x $y', 'ab c\n'],
+    // A name the shell answers without a binding appends to what it answers.
+    ['export HOME+=/x USER+=y; echo $HOME $USER', '//x usery\n'],
     ['x=a; y=b; unset x bad-name y; echo "${x}" "${y}"', ' \n'],
     ['unset -- -name; echo done', 'done\n'],
   ]) it(command, () => check(command, out))

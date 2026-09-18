@@ -29,6 +29,8 @@ describe('the locale is C.UTF-8', () => {
       // The other categories read the same in C and POSIX as in C.UTF-8.
       'LC_COLLATE=C sort -u dot >/dev/null; echo ok', 'LC_NUMERIC=POSIX du -bh cafe >/dev/null; echo ok', 'LC_TIME= echo ok', 'export LC_MESSAGES=C; echo ok',
       'unset LC_ALL LC_CTYPE; echo ok',
+      // Appending nothing to what $LANG answers leaves it as it was.
+      'export LANG+=; echo ok',
     ]) {
       const r = run(line)
       assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.unsupported], ['ok\n', '', 0, []], line)
@@ -46,9 +48,12 @@ describe('the locale is C.UTF-8', () => {
       const message = `${name}: ${MESSAGE}`
       assert.deepEqual(run(line), ok('', { stderr: `error: ${message}\n`, exitCode: 1, unsupported: [{ kind: 'feature', command: null, detail: name, message }] }), line)
     }
-    const exported = run('export LC_ALL=C')
-    assert.deepEqual([exported.stdout, exported.exitCode, exported.unsupported.map((u) => [u.command, u.detail])], ['', 1, [['export', 'LC_ALL']]])
-    assert.match(exported.stderr, /LC_ALL: only the C\.UTF-8 locale is supported/u)
+    // `export` appends to what $LANG answers, so the result names no locale.
+    for (const [line, name] of [['export LC_ALL=C', 'LC_ALL'], ['export LANG+=C.UTF-8', 'LANG']]) {
+      const exported = run(line)
+      assert.deepEqual([exported.stdout, exported.exitCode, exported.unsupported.map((u) => [u.command, u.detail])], ['', 1, [['export', name]]], line)
+      assert.match(exported.stderr, new RegExp(`${name}: only the C\\.UTF-8 locale is supported`, 'u'), line)
+    }
   })
 
   it('refuses unsetting LANG, which would hand the character set to C', () => {
