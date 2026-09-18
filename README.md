@@ -54,7 +54,8 @@ terminal.run('shopt -s nullglob').unsupported
 ## Writing
 
 Sources are read-only. Pass `writable: '/tmp/'` for a scratch overlay; the mount
-must live outside it. Sources mount at `/` unless `mount` says otherwise, and
+must live outside it. The overlay starts as one directory, and `cp -r` is what
+makes any others in it. Sources mount at `/` unless `mount` says otherwise, and
 `cwd` and `home` start there too unless set on their own.
 
 ```js
@@ -125,8 +126,21 @@ not.
 
 `ls` `cd` `cat` `grep` `rg` `egrep` `fgrep` `sed` `awk` `find` `head` `tail` `wc`
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
-`printf` `test` `cp` `rm` `diff` `patch` `du` `stat` `realpath` `pwd` `seq`
-`which` `basename` `dirname` — plus your own, via `opts.commands`.
+`printf` `test` `cp` `rm` `touch` `diff` `patch` `du` `stat` `realpath` `pwd`
+`seq` `which` `basename` `dirname` — plus your own, via `opts.commands`.
+
+`cp -r` copies a tree into the overlay, making each directory before what goes
+inside it; `-R` and `--recursive` spell the same flag, and `-v` announces a
+directory once, where it is made. A destination inside the source, a
+destination that is the source, and a directory over a file are refused with
+GNU's own diagnostics. Directories exist in the overlay only where `cp -r` puts
+them, since nothing else here makes one.
+
+`touch` creates the empty files it names, and `-c` leaves an absent name alone.
+Times are the half it cannot answer: every entry carries the one time the
+terminal was made, so a name already there reports an unsupported diagnostic
+rather than a success that changed nothing, and `-a`, `-m`, `-d`, `-t` and `-r`
+are refused for the same reason.
 
 `ls -l` fills in what the filesystem does not keep with one deliberate model
 rather than a guess per entry: every entry is the session user's alone

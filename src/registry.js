@@ -28,7 +28,7 @@ const COMMAND_ORDER = [
   'ls', 'cd', 'cat', 'grep', 'rg', 'find',
   'head', 'tail', 'wc', 'tree', 'du', 'stat', 'realpath',
   'sort', 'uniq', 'cut', 'tr', 'awk', 'nl', 'tac', 'hexdump', 'base64',
-  'xargs', 'echo', 'printf', 'test', 'cp', 'rm', 'diff', 'patch',
+  'xargs', 'echo', 'printf', 'test', 'cp', 'rm', 'touch', 'diff', 'patch',
   'pwd', 'seq', 'which', 'basename', 'dirname',
 ]
 const BUILTIN_NAMES = orderedCommandNames()

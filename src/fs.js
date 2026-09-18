@@ -44,6 +44,19 @@ export function lookup(cwd, path, fs) {
   return { path: at, error: null }
 }
 
+// What creating `name` would fail with, before anything tries: path resolution
+// reports a missing or non-directory parent ahead of whatever the filesystem
+// would say about being read-only, and a name that resolves needs no answer.
+export function creationError(cwd, name, fs, found = lookup(cwd, name, fs)) {
+  if (found.path !== null) return null
+  if (name === '' || name.includes('\0') || name.endsWith('/') || found.error !== 'No such file or directory') return found.error
+  // Preserve components until lookup has checked them: file/../new and
+  // missing/../new cannot create a sibling by lexical normalization alone.
+  const slash = name.lastIndexOf('/')
+  const parent = lookup(cwd, slash < 0 ? '.' : name.slice(0, slash) || '/', fs)
+  return parent.error ?? (fs.isDir(parent.path) ? null : 'Not a directory')
+}
+
 export function dirname(path) {
   const p = normalize(path)
   if (p === '/') return '/'

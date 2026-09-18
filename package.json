@@ -108,6 +108,7 @@
     "src/commands/stat.js",
     "src/commands/test.js",
     "src/commands/text.js",
+    "src/commands/touch.js",
     "src/commands/tree.js",
     "src/commands/wc-format.js",
     "src/commands/xargs.js",

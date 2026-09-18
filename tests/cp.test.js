@@ -192,7 +192,7 @@ describe('cp reports ordinary path, operand, and read-only failures', () => {
 })
 
 describe('cp unsupported features and write guards retain diagnostics', () => {
-  for (const option of ['-r', '-R', '--recursive', '-a', '-p', '-i', '--parents', '--preserve', '--reflink', '--remove-destination']) {
+  for (const option of ['-a', '-p', '-i', '--parents', '--preserve', '--reflink', '--remove-destination']) {
     it(option, () => {
       const t = terminal()
       const r = t.run(`cp ${option} a /tmp/out 2>/dev/null | cat`)

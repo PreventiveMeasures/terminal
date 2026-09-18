@@ -1,5 +1,5 @@
 import { parseArgs } from '../args.js'
-import { basename, lookup, resolve } from '../fs.js'
+import { compareNames, creationError, lookup, resolve } from '../fs.js'
 import { err, reason } from '../util.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
@@ -10,7 +10,7 @@ const SPECIAL_FILES = new Set(['/dev/null', '/dev/stdin', '/dev/stdout', '/dev/s
 
 export function cp(_stdin, tokens, ctx) {
   const parsed = parseArgs(tokens, {
-    short: ['f', 'n', 'v', 'T'], long: ['force', 'no-clobber', 'verbose', 'no-target-directory'],
+    short: ['f', 'n', 'v', 'T', 'r', 'R'], long: ['force', 'no-clobber', 'verbose', 'no-target-directory', 'recursive'],
     valueShort: ['t'], valueLong: ['target-directory'],
   })
   const operands = copyOperands(parsed, ctx)
@@ -18,11 +18,12 @@ export function cp(_stdin, tokens, ctx) {
   const { sources, target, directory } = operands
   const { flags } = parsed
   const verbose = flags.has('v') || flags.has('verbose')
-  const copies = sources.map((source) => [source, directory ? target.replace(/\/+$/u, '') + '/' + basename(source) : target])
+  const copies = sources.map((source) => [source, directory ? target.replace(/\/+$/u, '') + '/' + lastComponent(source) : target])
   const state = {
     ctx, result: emptyOutput(), failed: false, sources: new Set(), copied: new Set(),
     noClobber: flags.has('n') || flags.has('no-clobber'),
     force: flags.has('f') || flags.has('force'), verbose,
+    recursive: flags.has('r') || flags.has('R') || flags.has('recursive'),
     outputOverlap: verbose && outputOverlaps(copies, ctx),
   }
   for (const [source, destination] of copies) {
@@ -64,7 +65,14 @@ function copyOperands({ positional, flags, order }, ctx) {
   return { target, directory, sources: explicit === undefined ? positional.slice(0, -1) : positional }
 }
 
-function copyFile(source, destination, state) {
+// GNU names a copy after the last component of the source as it was typed,
+// rather than after the directory that spelling resolves to: `cp -r a/. d`
+// copies what `a` holds into `d` itself, and says so as `'a/./x' -> 'd/./x'`.
+const lastComponent = (name) => name.replace(/\/+$/u, '').split('/').at(-1)
+
+// `top` names the operands a nested copy came from, which is what GNU's
+// into-itself diagnostic reports however deep the loop is found.
+function copyFile(source, destination, state, top = null) {
   const { ctx } = state
   if (isSpecialFile(source, ctx.cwd) || isSpecialFile(destination, ctx.cwd)) throw new UnsupportedError('feature', 'special file', 'copying special files is not supported')
   const shownSource = quoteName(source, ctx)
@@ -72,7 +80,10 @@ function copyFile(source, destination, state) {
   const found = lookupWithNote(ctx, 'cp', source)
   const fail = (message) => report(state, 'cp: ' + message + '\n', true)
   if (found.error) return fail(`cannot stat ${shownSource}: ${found.error}`)
-  if (ctx.fs.isDir(found.path)) return fail(`-r not specified; omitting directory ${shownSource}`)
+  if (ctx.fs.isDir(found.path)) {
+    if (!state.recursive) return fail(`-r not specified; omitting directory ${shownSource}`)
+    return copyDirectory(source, found.path, destination, state, top ?? { source: shownSource, target: shownTarget })
+  }
   if (state.sources.has(found.path)) return report(state, `cp: warning: source file ${shownSource} specified more than once\n`, false, true)
   state.sources.add(found.path)
   const dest = lookup(ctx.cwd, destination, ctx.fs)
@@ -82,7 +93,7 @@ function copyFile(source, destination, state) {
   if (ctx.fs.isDir(dest.path)) return fail(`cannot overwrite directory ${shownTarget} with non-directory ${shownSource}`)
   const absolute = resolve(ctx.cwd, destination)
   if (state.copied.has(absolute)) return fail(`will not overwrite just-created ${shownTarget} with ${shownSource}`)
-  const invalid = targetError(destination, dest, ctx)
+  const invalid = creationError(ctx.cwd, destination, ctx.fs, dest)
   if (state.verbose) {
     if (state.outputOverlap) throw new UnsupportedError('feature', 'copy output buffering', 'buffered verbose output sharing a copied file is not supported')
     report(state, `${shownSource} -> ${shownTarget}\n`)
@@ -102,6 +113,69 @@ function copyFile(source, destination, state) {
     return fail(`cannot create regular file ${shownTarget}: ${message.startsWith(destination + ': ') ? message.slice(destination.length + 2) : message}`)
   }
   state.copied.add(absolute)
+}
+
+// A directory is copied by making the destination and then copying what the
+// source held when it was read. An entry that is the destination itself is the
+// loop GNU refuses to follow, and refusing it leaves the rest of the tree
+// copied, as GNU leaves it.
+function copyDirectory(source, absolute, destination, state, top) {
+  const { ctx } = state
+  const shownSource = quoteName(source, ctx)
+  const shownTarget = quoteName(destination, ctx)
+  const fail = (message) => report(state, 'cp: ' + message + '\n', true)
+  const dest = lookup(ctx.cwd, destination, ctx.fs)
+  if (dest.error && dest.error !== 'No such file or directory') return fail(`cannot stat ${shownTarget}: ${dest.error}`)
+  const target = resolve(ctx.cwd, destination)
+  if (target === absolute) return fail(`${shownSource} and ${shownTarget} are the same file`)
+  // A destination under the source is the loop GNU names. GNU makes the
+  // directory, copies what it read before reaching it, and only then refuses;
+  // what that leaves behind follows the order the host read the directory in,
+  // which a tree sorted for determinism cannot reproduce. So the refusal comes
+  // first here, rather than a half-made copy that is neither GNU's nor asked
+  // for. The diagnostic and the status are GNU's.
+  if (target.startsWith(absolute === '/' ? '/' : absolute + '/')) {
+    return fail(`cannot copy a directory, ${top.source}, into itself, ${top.target}`)
+  }
+  if (dest.path !== null && !ctx.fs.isDir(dest.path)) return fail(`cannot overwrite non-directory ${shownTarget} with directory ${shownSource}`)
+  // GNU keeps the sources it has copied, and names a directory as a directory.
+  if (state.sources.has(absolute)) return report(state, `cp: warning: source directory ${shownSource} specified more than once\n`, false, true)
+  state.sources.add(absolute)
+  const { dirs, files } = ctx.fs.listDir(absolute)
+  if (dest.path === null && !makeDirectory(source, destination, dest, state)) return
+  const from = source.replace(/\/+$/u, ''), into = destination.replace(/\/+$/u, '')
+  for (const name of [...dirs, ...files].sort(compareNames)) {
+    // Each entry finishes before the next is opened, as each operand does.
+    ctx.io.setReads([])
+    copyFile(`${from}/${name}`, `${into}/${name}`, state, top)
+  }
+}
+
+function makeDirectory(source, destination, dest, state) {
+  const { ctx } = state
+  const shownTarget = quoteName(destination, ctx)
+  const fail = (message) => report(state, 'cp: cannot create directory ' + shownTarget + ': ' + message + '\n', true)
+  const invalid = creationError(ctx.cwd, destination, ctx.fs, dest)
+  if (invalid) {
+    missingPathNote(ctx, 'cp', destination, invalid)
+    fail(invalid)
+    return false
+  }
+  try {
+    if (!ctx.fs.makeWritableDir?.(ctx.cwd, destination)) {
+      fail('Read-only file system')
+      return false
+    }
+  } catch (e) {
+    if (unsupportedNote(e)) throw e
+    missingPathNote(ctx, 'cp', e?.path, e?.fsError)
+    const message = reason(e)
+    fail(message.startsWith(destination + ': ') ? message.slice(destination.length + 2) : message)
+    return false
+  }
+  // GNU announces a directory it makes, and says nothing of one already there.
+  if (state.verbose) report(state, `${quoteName(source, ctx)} -> ${shownTarget}\n`)
+  return true
 }
 
 function sameFile(source, destination, fs) {
@@ -125,14 +199,6 @@ function outputOverlaps(copies, ctx) {
 function isSpecialFile(name, cwd) {
   const path = name.startsWith('/') ? name : cwd + '/' + name
   return SPECIAL_FILES.has(path.replace(/\/\.(?=\/)/gu, '').replace(/\/+/gu, '/'))
-}
-
-function targetError(name, found, ctx) {
-  if (found.path !== null) return null
-  if (name === '' || name.includes('\0') || name.endsWith('/') || found.error !== 'No such file or directory') return found.error
-  const slash = name.lastIndexOf('/')
-  const parent = lookup(ctx.cwd, slash < 0 ? '.' : name.slice(0, slash) || '/', ctx.fs)
-  return parent.error ?? (ctx.fs.isDir(parent.path) ? null : 'Not a directory')
 }
 
 function report(state, text, failed = false, warning = false) {
