@@ -626,3 +626,71 @@ describe('GNU conformance — a conditional bash rejects too', () => {
     }
   })
 })
+
+describe('GNU conformance — sort -o', () => {
+  // `-o` writes where stdout would have carried the answer. It reads every
+  // input before it writes any of it, which is what makes `sort -o f f` the
+  // documented way to sort a file in place; and it writes nothing at all
+  // when something goes wrong, leaving the named file as it was. Recorded
+  // from coreutils 9.4 in the C locale.
+  const staged = (command) => {
+    const terminal = createTerminal({ seed: 'x\n' }, { mount: '/src', writable: '/tmp/' })
+    const setup = 'cd /tmp; mkdir adir; printf "b\\na\\n" > input; printf "d\\nc\\n" > input2; printf "OLD\\n" > out; '
+    const result = terminal.run(setup + command)
+    return { ...result, file: terminal.run('cat /tmp/out 2>/dev/null').stdout }
+  }
+
+  const SORTED = [
+    ['sort -o out input', 'a\nb\n'],
+    ['sort input -o out', 'a\nb\n'],
+    ['sort -oout input', 'a\nb\n'],
+    ['sort --output=out input', 'a\nb\n'],
+    ['sort --output out input', 'a\nb\n'],
+    ['sort -o out input input2', 'a\nb\nc\nd\n'],
+    ['sort -u -o out input input', 'a\nb\n'],
+    ['sort -r -o out input', 'b\na\n'],
+    // No operand reads standard input, which has nothing in it here.
+    ['sort -o out', ''],
+  ]
+  for (const [command, file] of SORTED) {
+    it(JSON.stringify(command), () => {
+      const r = staged(command)
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.file], ['', '', 0, file])
+    })
+  }
+
+  const REFUSED = [
+    ['sort -o out -o out2 input', 'sort: multiple output files specified\n'],
+    ['sort -o out missing', 'sort: cannot read: missing: No such file or directory\n'],
+    ['sort -o adir input', 'sort: open failed: adir: Is a directory\n'],
+    ['sort -o nodir/x input', 'sort: open failed: nodir/x: No such file or directory\n'],
+  ]
+  for (const [command, stderr] of REFUSED) {
+    it(JSON.stringify(command), () => {
+      const r = staged(command)
+      // Nothing is written, so the named file keeps what it held.
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.file], ['', stderr, 2, 'OLD\n'])
+    })
+  }
+
+  it('sorts a file in place, reading all of it first', () => {
+    const r = staged('sort -o input input; cat input')
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['a\nb\n', '', 0])
+    assert.deepEqual([staged('sort input -o input; cat input').stdout], ['a\nb\n'])
+  })
+
+  it('writes the two device names that are not files', () => {
+    assert.deepEqual([staged('sort -o /dev/null input').stdout, staged('sort -o /dev/null input').file], ['', 'OLD\n'])
+    assert.equal(staged('sort -o /dev/stdout input').stdout, 'a\nb\n')
+  })
+
+  // A mount this terminal cannot write to is the one open failure GNU has no
+  // wording for, since it never meets one; it reads as the reason it is.
+  it('refuses a path outside the writable overlay, and says why', () => {
+    const terminal = createTerminal({ input: 'b\na\n' }, { mount: '/src', writable: '/tmp/' })
+    const r = terminal.run('sort -o input input')
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', 'sort: open failed: input: Read-only file system\n', 2])
+    assert.deepEqual(r.unsupported.map((u) => u.detail), ['-o'])
+    assert.equal(terminal.run('cat input').stdout, 'b\na\n')
+  })
+})

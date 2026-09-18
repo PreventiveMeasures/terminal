@@ -2,15 +2,21 @@
 
 import { parseArgs } from '../args.js'
 import { encodeUtf8Loose, err, joinLines, okWith, readInputs, splitLines } from '../util.js'
-import { unsupported } from '../unsupported.js'
+import { unsupported, unsupportedFrom } from '../unsupported.js'
 import { compareNames as cmpStrings } from '../fs.js'
+import { missingPathNote } from '../notes.js'
 
 export function sort(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, {
     short: ['n', 'r', 'u', 'f', 'b', 'z'],
-    valueShort: ['t'],
-    repeatable: ['k'],
+    valueShort: ['t', 'o'],
+    valueLong: ['output'],
+    repeatable: ['k', 'o', 'output'],
   })
+  // `-o` and `--output` name the same file, and naming it twice is an error
+  // rather than the last one winning.
+  const targets = [...values.get('o') ?? [], ...values.get('output') ?? []]
+  if (targets.length > 1) return err('sort: multiple output files specified', 2)
   const sep = values.get('t')
   if (sep !== undefined && encodeUtf8Loose(sep).length !== 1) return err(`sort: multi-character tab '${sep}'`, 2)
   const globals = { n: flags.has('n'), f: flags.has('f'), b: flags.has('b'), r: flags.has('r') }
@@ -24,7 +30,30 @@ export function sort(stdin, tokens, ctx) {
   // With no -k, the whole line is one key with the same modifier semantics.
   const specs = keys.specs.length ? keys.specs : [{ start: 1, ...globals }]
   const ordered = sortByKeys(lines, specs, sep, flags.has('u'), globals.r)
-  return okWith(joinLines(ordered, delimiter), r)
+  const text = joinLines(ordered, delimiter)
+  return targets.length === 0 ? okWith(text, r) : written(targets[0], text, ctx, r)
+}
+
+// `-o` puts the answer where stdout would have carried it, and only once the
+// sort has one: a read that fails leaves the file as it was, which is what
+// lets `sort -o f f` rewrite the file it read.
+function written(name, text, ctx, r) {
+  if (name === '/dev/null') return okWith('', r)
+  if (name === '/dev/stdout') return okWith(text, r)
+  // Every input is read and sorted before this point, so writing one of the
+  // files that was read is the `sort -o f f` GNU documents rather than a
+  // write racing a read. Ancestor scopes keep guarding their own input.
+  ctx.io?.setReads([])
+  let handle
+  try {
+    handle = ctx.writable && ctx.fs.openWritable(ctx.cwd, name)
+    if (handle) handle.write(text)
+  } catch (e) {
+    missingPathNote(ctx, 'sort', e?.path, e?.fsError)
+    return unsupportedFrom(e, 'sort', `sort: open failed: ${e.message}`, 2)
+  }
+  if (!handle) return unsupported('feature', 'sort', '-o', `sort: open failed: ${name}: Read-only file system`, 2)
+  return okWith('', r)
 }
 
 // Keys extend to end of line unless an end field is given. Any per-key modifier
