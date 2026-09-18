@@ -6,8 +6,8 @@
 // File operands can include assignments (applied when reached) and `-` for
 // stdin. Parse errors exit 1, fatal errors exit 2, and warnings keep status.
 //
-// Deliberate limits include locale-sensitive non-ASCII regexes, signed NaN
-// formatting, arrays of arrays, and unavailable environment/process metadata.
+// Deliberate limits include signed NaN formatting, arrays of arrays, and
+// unavailable environment/process metadata.
 // Array iteration uses insertion order; rand() uses a deterministic generator
 // different from gawk's. split()/RS ignore empty separators, including gawk's
 // exceptional cases, and sub() refuses substitution into a temporary value.

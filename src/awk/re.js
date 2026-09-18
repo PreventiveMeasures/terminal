@@ -5,28 +5,20 @@
 // States use next for consuming edges and x/y for split edges.
 
 import { AwkError } from './common.js'
+import { LOCALE, classTables } from '../locale.js'
 import { codePointSize } from '../unicode.js'
 
 const MAX_STATES = 50_000
 
-const isWordCode = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || c === 95 || (c >= 97 && c <= 122)
-
-function caseVariants(code) {
-  const ch = String.fromCodePoint(code)
-  return [code, ch.toLowerCase().codePointAt(0), ch.toUpperCase().codePointAt(0)]
-}
-
-function setTest(items, negate, ignoreCase) {
+function setTest(items, negate) {
   const inSet = (c) => {
     for (let k = 0; k < items.length; k++) if (c >= items[k][0] && c <= items[k][1]) return true
     return false
   }
-  if (!ignoreCase) return negate ? (c) => !inSet(c) : inSet
-  const folded = (c) => caseVariants(c).some(inSet)
-  return negate ? (c) => !folded(c) : folded
+  return negate ? (c) => !inSet(c) : inSet
 }
 
-export function compileNfa(ast, ignoreCase) {
+export function compileNfa(ast, tables = classTables(LOCALE)) {
   const states = []
   const push = (s) => {
     if (states.length >= MAX_STATES) throw new AwkError('regex too large', null, 'regex state limit')
@@ -37,9 +29,9 @@ export function compileNfa(ast, ignoreCase) {
   // returning the entry state.
   function comp(node, next) {
     switch (node.type) {
-      case 'char': return push({ op: 'char', codes: ignoreCase ? caseVariants(node.code) : [node.code], next })
+      case 'char': return push({ op: 'char', codes: [node.code], next })
       case 'any': return push({ op: 'any', next })
-      case 'set': return push({ op: 'set', test: setTest(node.items, node.negate, ignoreCase), next })
+      case 'set': return push({ op: 'set', test: setTest(node.items, node.negate), next })
       case 'assert': return push({ op: 'assert', kind: node.kind, next })
       case 'group': return comp(node.node, next)
       case 'cat': {
@@ -80,7 +72,7 @@ export function compileNfa(ast, ignoreCase) {
     pc = states[pc].next
   }
   if (states[pc].op !== 'match' || literal === '') literal = null
-  return { states, start, literal, gen: new Int32Array(states.length).fill(-1), stamp: 0 }
+  return { states, start, literal, isWord: (c) => tables.has('word', c), gen: new Int32Array(states.length).fill(-1), stamp: 0 }
 }
 
 function codeBefore(str, at) {
@@ -90,11 +82,11 @@ function codeBefore(str, at) {
   return low
 }
 
-function checkAssert(kind, str, at) {
+function checkAssert(kind, str, at, isWord) {
   if (kind === '^') return at === 0
   if (kind === '$') return at === str.length
-  const before = isWordCode(codeBefore(str, at))
-  const here = at < str.length && isWordCode(str.codePointAt(at))
+  const before = isWord(codeBefore(str, at))
+  const here = at < str.length && isWord(str.codePointAt(at))
   if (kind === 'y') return before !== here
   if (kind === 'B') return before === here
   if (kind === '<') return !before && here
@@ -130,7 +122,7 @@ export function search(nfa, str, from) {
       gen[pc] = stamp
       const s = states[pc]
       if (s.op === 'split') stack.push(s.y, s.x)
-      else if (s.op === 'assert') { if (checkAssert(s.kind, str, at)) stack.push(s.next) }
+      else if (s.op === 'assert') { if (checkAssert(s.kind, str, at, nfa.isWord)) stack.push(s.next) }
       else list.push(pc, start)
     }
   }

@@ -77,7 +77,7 @@ describe('grep -xo emits full matches without changing capture numbering', () =>
 
 describe('grep -x retains unsupported diagnostics', () => {
   for (const [line, files, detail] of [
-    ["grep -x '[[:alpha:]]' text", { text: 'é\n' }, 'non-ASCII regex semantics'],
+    ["grep -xi '\\(é\\)\\1' text", { text: 'é\n' }, 'non-ASCII regex semantics'],
     ["grep -xF a binary", { binary: 'a\0b\n' }, 'binary input'],
     ["grep -x a binary", { binary: 'a\0b\n' }, 'binary input'],
     ["grep -xP '(?i)a' lines", FILES, 'PCRE group'],

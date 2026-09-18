@@ -8,8 +8,9 @@ import { TREES } from './fixtures/conformance/trees.js'
 
 // A data-driven conformance corpus: one line per case, so adding coverage
 // means adding a line. Every expectation was recorded from the real tool —
-// bash 5.2.21, GNU grep 3.11, GNU sed 4.9, gawk 5.2.1, all in the C locale —
-// never from what this implementation happened to print.
+// bash 5.2.21, GNU grep 3.11, GNU sed 4.9, gawk 5.2.1, all in the C locale
+// (utf8.tests in C.UTF-8) — never from what this implementation happened to
+// print.
 //
 //   command       => "stdout"           that output, exit 0, nothing on the feed
 //   command       => "stdout" 2         that output and that status

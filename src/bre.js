@@ -2,7 +2,7 @@ import { readPosixClass } from './charclass.js'
 import { UnsupportedError } from './unsupported.js'
 
 // Callers validate GNU syntax and unsupported escapes before translation.
-export function breToEs(pattern) {
+export function breToEs(pattern, tables) {
   const swap = '(){}+?|'
   let canRepeat = false, groups = 0, inClass = false, out = ''
   for (let i = 0; i < pattern.length; i++) {
@@ -10,7 +10,7 @@ export function breToEs(pattern) {
     if (inClass) {
       if (c === '[' && (pattern[i + 1] === '.' || pattern[i + 1] === '=')) throw new UnsupportedError('feature', 'regex collating or equivalence class', 'grep: collating and equivalence classes are not supported')
       if (c === '[') {
-        const cls = readPosixClass(pattern, i)
+        const cls = readPosixClass(pattern, i, { classes: tables })
         if (cls) { out += cls.body; i = cls.end - 1; continue }
       }
       out += c

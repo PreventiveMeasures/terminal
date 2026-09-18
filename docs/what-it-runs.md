@@ -71,14 +71,19 @@ refused rather than answered differently from ripgrep. Literal matching crosses
 scripts, but Unicode-aware matching does not: `-i`, `-w`, `.` and `\w` over a
 tree holding any non-ASCII file report an unsupported diagnostic.
 
-`grep` and `sed` read a regular expression the way GNU does in the C.UTF-8
-locale: `.`, and a bracket of ASCII members, negated or not, take one
-character, accented or not, so `grep -rln 'template.js' .` answers over a
-tree with accented text in it. A non-ASCII literal on its own is matched
-exactly; one beside a `.`, a bracket or a repetition still reports an
-unsupported diagnostic over non-ASCII input, as do case folding, `-w`, `\b`,
-`\w` and the named classes past space and blank: their C.UTF-8 tables are not
-modelled yet.
+`grep`, `sed` and `awk` read a regular expression the way GNU does in the
+C.UTF-8 locale, from glibc's own tables: `.` and a bracket take one character,
+accented or not; the named classes, `\w`, `\s`, `\b`, `\<`, `\>` and `-w` go by
+the locale's letters, digits and spaces, so `grep -rn 'fn\b' .` answers over a
+tree with accented text in it; and `-i`, sed's `I` and awk's `IGNORECASE` fold
+case as GNU does, letter by letter — `s` stands for `s`, `S` and `ſ`, the
+Kelvin sign for itself alone, and a range runs between its endpoints' upper
+cases, so `[a-{]` takes `_` under `-i`. A range or a collating element with a
+character past ASCII in it is GNU's "Invalid collation character", as it is in
+C.UTF-8. What still reports an unsupported diagnostic over non-ASCII text:
+`-P`, whose PCRE reads its own tables; `-i` with a backreference; and case
+folding over the Cyrillic Extended-C letters, which GNU's two matchers read
+differently.
 
 The locale is C.UTF-8 and nothing else: `$LANG` answers it, and a `LANG`,
 `LC_ALL` or `LC_CTYPE` set to any other value, or a `LANG` unset, is refused,

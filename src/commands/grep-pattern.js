@@ -4,13 +4,13 @@ import { err } from '../util.js'
 import { AwkRegex } from '../awk/regex.js'
 import { parseEre } from '../awk/re-parse.js'
 import { breToEs, validateBackreferences } from '../bre.js'
-import { asciiCompatible, hasUnicodeSpace } from '../regex-locale.js'
-import { LOCALE } from '../locale.js'
+import { EXTENDED_C, LOCALE, classTables } from '../locale.js'
+import { foldFixed, foldPattern } from '../regex-fold.js'
 import { pcreSource } from './grep-pcre.js'
 
-// POSIX named classes are shared with the glob translator. Collating
-// and equivalence expressions need locale semantics that we do not model.
-export function ereClasses(pattern) {
+// POSIX named classes come from the locale's table. Collating and
+// equivalence expressions need collation semantics that we do not model.
+export function ereClasses(pattern, tables) {
   let out = ''
   let inClass = false
   for (let i = 0; i < pattern.length; i++) {
@@ -22,7 +22,7 @@ export function ereClasses(pattern) {
     }
     if (inClass && c === '[') {
       if (pattern[i + 1] === '.' || pattern[i + 1] === '=') throw new UnsupportedError('feature', 'regex collating or equivalence class', 'grep: collating and equivalence classes are not supported')
-      const cls = readPosixClass(pattern, i)
+      const cls = readPosixClass(pattern, i, { classes: tables })
       if (cls) { out += cls.body; i = cls.end - 1; continue }
     }
     if (c === '[' && !inClass) {
@@ -43,8 +43,10 @@ function gnuEscape(next) {
   return '^$\\.*+?()[]{}|/bBsSwW<>`\'123456789'.includes(next) ? '\\' + next : RegExp.escape(next)
 }
 
-// Literal Unicode text and anchors have the same meaning in byte and
-// character locales. Character classes, repetition and dot do not.
+// What PCRE reads by its own Unicode tables rather than the locale's: its
+// word and space escapes, boundaries, and everything a dot, a bracket or a
+// repetition spans. None of that is modelled past ASCII, so a `-P` pattern
+// carrying any of it is refused over non-ASCII input.
 export function localeSensitive(source) {
   for (let i = 0; i < source.length; i++) {
     if (source[i] === '\\') {
@@ -57,10 +59,14 @@ export function localeSensitive(source) {
 // The canonical pattern retains GNU assertions. Render them separately
 // for the boolean JS matcher and the AWK extent matcher. Walk escapes
 // instead of replaceAll so a literal `\\b` remains a backslash and b.
-export function grepSource(source, extent = false) {
+// The JS matcher gets the locale's word and space sets spelt out, since
+// its own `\\b` and `\\w` know ASCII only; the extent matcher reads the
+// escapes itself, from the same tables.
+export function grepSource(source, extent = false, tables = classTables(LOCALE)) {
+  const js = tables.assertions()
   const assertions = extent ? { b: '\\y' } : {
-    '<': '(?<!\\w)(?=\\w)', '>': '(?<=\\w)(?!\\w)',
-    '`': '^', "'": '$', s: '[ \\t\\n\\r\\f\\v]', S: '[^ \\t\\n\\r\\f\\v]',
+    '<': js['<'], '>': js['>'], b: js.boundary, B: js.inside,
+    w: js.word, W: js.nonWord, s: js.space, S: js.nonSpace, '`': '^', "'": '$',
   }
   let out = ''
   let bracket = false
@@ -213,7 +219,7 @@ export function posixQuantifiers(source) {
 // Refuse them rather than letting the JS engine silently pick a dialect.
 // Bracket expressions and interval bounds are checked here, on the
 // pattern as written, so BRE and ERE get the same diagnostics.
-export function validateRegex(pattern, extended) {
+export function validateRegex(pattern, extended, multibyte = false) {
   // Membership is by position, not by the next `]`: a class ends where
   // validateBracket says it does, so the `]` closing `[:alpha:]` inside it
   // — or a literal `]` in first position — does not end it early. Members
@@ -228,34 +234,52 @@ export function validateRegex(pattern, extended) {
       if (next === undefined) throw new Error('trailing backslash')
       if (bracket || (next && 'dDxXuUpPkKcC'.includes(next))) throw new UnsupportedError('feature', 'regex escape', 'grep: this regex escape is not supported with GNU semantics')
       if (!extended && next === '{') intervalBounds(pattern, i - 1, false)
-    } else if (c === '[' && !bracket) bracketEnd = validateBracket(pattern, i)
+    } else if (c === '[' && !bracket) bracketEnd = validateBracket(pattern, i, multibyte)
     else if (bracket) continue
     else if (extended && c === '{') intervalBounds(pattern, i, true)
     else if (extended && c === '(' && pattern[i + 1] === '?') throw new UnsupportedError('feature', 'regex extension', 'grep: ECMAScript group extensions are not supported in ERE')
   }
 }
 
-export function compilePatterns(patterns, flags) {
+// A backreference outside a bracket, where a backslash is an escape.
+function hasBackreference(pattern) {
+  for (let i = 0; i < pattern.length; i++) {
+    if (pattern[i] !== '\\') continue
+    if (/[1-9]/u.test(pattern[++i] ?? '')) return true
+  }
+  return false
+}
+
+export function compilePatterns(patterns, flags, locale = LOCALE) {
   // Compile -e patterns separately: combining them would shift backreference
   // numbers across patterns. A line matches if any pattern selects it.
+  const tables = classTables(locale)
   const res = []
-  const reFlags = flags.has('i') ? 'isu' : 'su'
   const whole = flags.has('x'), word = flags.has('w') && !whole
   if (flags.has('P') && new Set(patterns).size > 1) return { error: err('grep: -P only supports a single pattern', 2) }
   for (const pattern of patterns) {
-    if (!flags.has('F') && !flags.has('P')) validateRegex(pattern, flags.has('E'))
+    const gnu = !flags.has('F') && !flags.has('P')
+    if (gnu) validateRegex(pattern, flags.has('E'), tables.multibyte)
+    // -i is spelt into the pattern from the locale's tables (../regex-fold.js)
+    // and the matchers run case-sensitively, as GNU's do. A backreference
+    // has to see the text as written, so a pattern with one keeps the JS
+    // flag instead, which agrees with GNU over ASCII and is refused past it
+    // (inputGap); -P reads case by PCRE's own tables and is refused the same.
+    const backrefs = gnu && hasBackreference(pattern)
+    const folded = flags.has('i') && !flags.has('P') && !backrefs
+    const reFlags = flags.has('i') && !folded ? 'isu' : 'su'
     let source
-    if (flags.has('F')) source = RegExp.escape(pattern)
+    if (flags.has('F')) source = folded ? foldFixed(pattern, tables) : RegExp.escape(pattern)
     else if (flags.has('P')) source = pcreSource(pattern)
-    else if (flags.has('E')) source = ereClasses(pattern)
+    else if (flags.has('E')) source = ereClasses(folded ? foldPattern(pattern, tables) : pattern, tables)
     else {
-      const r = breToEs(pattern)
+      const r = breToEs(folded ? foldPattern(pattern, tables) : pattern, tables)
       if (r.error) return { error: err(`grep: ${r.error}`, 2) }
       source = r.source
     }
     const canonical = source
-    if (!flags.has('F') && !flags.has('P') && validateBackreferences(canonical)) return { error: unsupported('feature', 'grep', 'conditional backreference', 'grep: backreferences with conditional or repeated-empty captures are not supported', 2) }
-    if (word) source = `(?<![A-Za-z0-9_])(?:${source})(?![A-Za-z0-9_])`
+    if (gnu && validateBackreferences(canonical)) return { error: unsupported('feature', 'grep', 'conditional backreference', 'grep: backreferences with conditional or repeated-empty captures are not supported', 2) }
+    if (word) source = `(?<!${tables.assertions().word})(?:${source})(?!${tables.assertions().word})`
     if (whole) source = `^(?:${source})$`
     try {
       // The boolean matcher needs POSIX quantifier stacking spelled out
@@ -263,17 +287,18 @@ export function compilePatterns(patterns, flags) {
       // already reads those the way GNU does, so it takes `source` as is.
       // `-P` selects the ECMAScript reading, where `a+?` really is lazy,
       // so the rewrite is ERE's alone.
-      const re = new RegExp(flags.has('F') || flags.has('P') ? source : grepSource(posixQuantifiers(source)), reFlags)
+      const re = new RegExp(gnu ? grepSource(posixQuantifiers(source), false, tables) : source, reFlags)
       re.pcre = flags.has('P')
-      re.localeSensitive = flags.has('i') || word || (!flags.has('F') && localeSensitive(canonical)) || (re.pcre && /\\[dD]/u.test(canonical))
-      // The ASCII proof understands POSIX patterns, not PCRE escapes/classes.
-      re.asciiCompatible = !re.pcre && re.localeSensitive && !flags.has('i') && !word && asciiCompatible(grepSource(canonical, true), pattern)
-      re.spaceClass = /\[:(?:space|blank):\]|\\[sS]/u.test(pattern)
+      // What still reads text by rules other than the locale's tables:
+      // PCRE's own, and the JS case flag a backreference pattern keeps.
+      re.localeSensitive = re.pcre ? flags.has('i') || word || localeSensitive(canonical) || /\\[dD]/u.test(canonical) : flags.has('i') && backrefs
+      re.folded = folded
+      re.extendedC = folded && EXTENDED_C.test(pattern)
       re.unicodePattern = /[\u0080-\u{10FFFF}]/u.test(pattern)
-      re.binaryLiteral = !whole && (flags.has('F') || !/[\\.^$*+?()[\]{}|]/u.test(source))
-      if (flags.has('o') && !flags.has('F') && !flags.has('P') && !whole) {
+      re.binaryLiteral = !whole && !word && (flags.has('F') || !/[\\.^$*+?()[\]{}|]/u.test(pattern))
+      if (flags.has('o') && gnu && !whole) {
         if (word || /\\[1-9]|\(\?/u.test(source)) return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: only-matching with backreferences, lookarounds or word constraints is not supported', 2) }
-        try { re.extent = new AwkRegex(grepSource(source, true), flags.has('i')) } catch {
+        try { re.extent = new AwkRegex(grepSource(source, true, tables), false, null, tables) } catch {
           return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: POSIX match extent for this pattern is not supported', 2) }
         }
       }
@@ -311,13 +336,17 @@ export function inputGap(inputs, res, invert, forceText = false, locale = LOCALE
   // no other locale's: anywhere else, a pattern the locale could change is
   // refused over non-ASCII text before any of it is read.
   const nonAscii = /[\u0080-\u{10FFFF}]/u
-  if (locale !== LOCALE && res.some((re) => re.localeSensitive) && (res.some((re) => re.unicodePattern) || inputs.some((inp) => nonAscii.test(inp.content)))) {
+  if (locale !== LOCALE && res.some((re) => re.localeSensitive || re.folded) && (res.some((re) => re.unicodePattern) || inputs.some((inp) => nonAscii.test(inp.content)))) {
     return unsupported('feature', 'grep', 'locale', `grep: matching non-ASCII text in the ${locale} locale is not supported`, 2)
   }
-  const localePatterns = res.filter((re) => re.localeSensitive && (!re.asciiCompatible || re.spaceClass))
-  if (localePatterns.length === 0) return null
-  const unicode = localePatterns.some((re) => !re.unicodePattern) && inputs.some((inp) => /[\u0080-\u{10FFFF}]/u.test(inp.content))
-  const unicodeSpace = localePatterns.some((re) => re.asciiCompatible && re.spaceClass) && inputs.some((inp) => hasUnicodeSpace(inp.content))
-  if (localePatterns.some((re) => (unicode || re.unicodePattern) && (!re.asciiCompatible || (re.spaceClass && unicodeSpace)))) return unsupported('feature', 'grep', 'non-ASCII regex semantics', 'grep: locale-sensitive regular expression matching on non-ASCII input is not supported', 2)
-  return null
+  // GNU's two matchers fold the Cyrillic Extended-C letters differently
+  // (see EXTENDED_C in ../locale.js), so a case-insensitive match over them
+  // is refused rather than guessed.
+  if (res.some((re) => re.extendedC) || (res.some((re) => re.folded) && inputs.some((inp) => EXTENDED_C.test(inp.content)))) {
+    return unsupported('feature', 'grep', 'locale-sensitive regex', 'grep: case-insensitive matching over Cyrillic Extended-C letters is not supported', 2)
+  }
+  const sensitive = res.filter((re) => re.localeSensitive)
+  if (sensitive.length === 0 || !(sensitive.some((re) => re.unicodePattern) || inputs.some((inp) => nonAscii.test(inp.content)))) return null
+  const why = sensitive.some((re) => re.pcre) ? 'PCRE matching' : 'case-insensitive matching with backreferences'
+  return unsupported('feature', 'grep', 'non-ASCII regex semantics', `grep: ${why} on non-ASCII input is not supported`, 2)
 }

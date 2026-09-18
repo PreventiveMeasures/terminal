@@ -565,14 +565,17 @@ describe('createTerminal — text commands', () => {
     assert.equal(t.run("grep -E '(' src/x.js").exitCode, 2)
   })
 
-  it('grep: error label reflects -i and dotAll flags', () => {
-    // Minor accuracy: the label tells users which RegExp flags were
-    // actually in effect when the compile failed. Hard-coding `/u`
-    // hid the fact that `-i` was set.
+  it('grep: error label reflects the RegExp flags in effect', () => {
+    // The label tells users which RegExp flags were actually in effect
+    // when the compile failed. `-i` is spelt into a GNU pattern from the
+    // locale's tables, so no flag carries it there; a PCRE pattern keeps it.
     const t = createTerminal({ 'src/x.js': 'hi\n' })
     const r = t.run("grep -iE '(' src/x.js")
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /\/isu/u)
+    assert.match(r.stderr, /\/su\)/u)
+    const p = t.run("grep -iP '(' src/x.js")
+    assert.notEqual(p.exitCode, 0)
+    assert.match(p.stderr, /\/isu\)/u)
   })
 
   it('grep BRE: `^` is literal mid-pattern, anchor at start (matches ugrep)', () => {
@@ -7058,10 +7061,9 @@ describe('createTerminal — known divergences from GNU (tracked)', () => {
     assert.equal(r.unsupported[0].detail, 'signed NaN')
   })
 
-  it('awk diagnoses locale-sensitive classes on non-ASCII input', () => {
-    const r = createTerminal({}).run("awk 'BEGIN { print (\"É\" ~ /[[:upper:]]/) }'")
-    assert.notEqual(r.exitCode, 0)
-    assert.equal(r.unsupported[0].detail, 'locale-sensitive character classes')
+  it('awk reads the named classes from the C.UTF-8 tables', () => {
+    const r = createTerminal({}).run("awk 'BEGIN { print (\"É\" ~ /[[:upper:]]/), (\"é\" ~ /[[:upper:]]/) }'")
+    assert.deepEqual([r.stdout, r.exitCode, r.unsupported], ['1 0\n', 0, []])
   })
 
   it('ls / sed exit 2 on missing files (matching GNU), not 1', () => {

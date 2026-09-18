@@ -34,7 +34,7 @@ describe('grep line scanning', () => {
     const inputs = { binary: 'hit\n\0', unicode: 'hit\né\n' }
     const cases = [
       ['hit binary', 'binary input', 'grep: binary input detection and output are not supported'],
-      ["'[[:alpha:]]' unicode", 'non-ASCII regex semantics', 'grep: locale-sensitive regular expression matching on non-ASCII input is not supported'],
+      ["-i '\\(h\\)\\1' unicode", 'non-ASCII regex semantics', 'grep: case-insensitive matching with backreferences on non-ASCII input is not supported'],
     ]
     for (const mode of ['-q', '-l', '-L', '-cm1', '-m1']) {
       for (const [operands, detail, message] of cases) {
