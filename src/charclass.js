@@ -47,7 +47,10 @@ export function checkInterval(min, max) {
 // set of literal characters. Messages are GNU's, for callers that report
 // them verbatim. Escapes are consumed as single items, matching how the
 // BRE and ERE translators read a class.
-export function validateBracket(pattern, start) {
+// In a multibyte locale a range, a collating symbol or an equivalence class
+// with a character past ASCII in it is GNU's "Invalid collation character":
+// glibc's regex has no collation to place one by. A member on its own is fine.
+export function validateBracket(pattern, start, multibyte = false) {
   let i = start + 1
   if (pattern[i] === '^') i++
   let first = true
@@ -62,6 +65,7 @@ export function validateBracket(pattern, start) {
       const close = pattern.indexOf(kind + ']', i + 2)
       if (close === -1) throw new Error('Unmatched [, [^, [:, [., or [=')
       if (kind === ':' && !(pattern.slice(i + 2, close) in POSIX_CLASSES)) throw new Error('Invalid character class name')
+      if (kind !== ':' && multibyte && /\P{ASCII}/u.test(pattern.slice(i + 2, close))) throw new Error('Invalid collation character')
       i = close + 2
       // A character class or an equivalence class names a set, so it is
       // not a range endpoint: a `-` after one reads exactly as a `-`
@@ -85,6 +89,8 @@ export function validateBracket(pattern, start) {
       if (opens === ':' || opens === '=') throw new Error('Invalid range end')
       const close = opens === '.' ? pattern.indexOf('.]', endAt + 2) : -1
       if (opens === '.' && close === -1) throw new Error('Unmatched [, [^, [:, [., or [=')
+      const endpoint = opens === '.' ? endAt + 2 : endAt + (pattern[endAt] === '\\' ? 1 : 0)
+      if (multibyte && (pattern.codePointAt(i + width - 1) > 127 || pattern.codePointAt(endpoint) > 127)) throw new Error('Invalid collation character')
       i = close === -1 ? endAt + (pattern[endAt] === '\\' ? 2 : 1) : close + 2
       ranged = true
       continue
@@ -100,7 +106,7 @@ export function validateBracket(pattern, start) {
 export function readPosixClass(s, i, opts = {}) {
   const m = /^\[:([a-z]+):\]/u.exec(s.slice(i))
   if (!m) return null
-  const body = POSIX_CLASSES[m[1]]
+  const body = opts.classes ? opts.classes.body(m[1]) : POSIX_CLASSES[m[1]]
   if (body === undefined) {
     if (opts?.unknown !== 'empty') throw new Error(`invalid character class \`[:${m[1]}:]\``)
     return { body: '', end: i + m[0].length }

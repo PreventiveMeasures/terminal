@@ -146,4 +146,18 @@ export const TREES = {
 
   // One long name, for the patterns that used to make the matcher explode.
   long: { ['a'.repeat(30)]: 'x\n', ['dir/' + 'a'.repeat(30)]: 'y\n' },
+
+  // Text past ASCII, for C.UTF-8's case, class and word tables: accented
+  // Latin; Greek with its final sigma; the dotless i, the dotted I, the long
+  // s and the Kelvin sign, whose case folds are one-way; a titlecase digraph;
+  // the combining iota and the micro sign, whose upper cases are letters of
+  // their own; a CJK line with no case at all; the spaces past ASCII; a
+  // Cyrillic Extended-C letter; and the ASCII neighbours of the letters, for
+  // what a range takes once upper-cased.
+  accents: {
+    one: 'é\n', dot: 'aéb\n', cafe: 'café\nCAFÉ\nCafé\ncafe\n', sigma: 'Σ\nς\nσ\n',
+    si: 'ı\nİ\ni\nI\nſ\nS\ns\n\u212A\nk\nK\n', dz: 'ǅ\nǄ\nǆ\n', iota: '\u0345\nΙ\nι\n\u1FBE\n', micro: 'µ\nμ\nΜ\n',
+    words: 'é\nfoo é bar\ncafé_x\nΣ\nnaïve\ncafe\n', space: 'a\u2003b\na\u00A0b\na b\n', cjk: '日本語\n',
+    misc: '_\n{\nb\na\n[\n`\n', ve: '\u1C80\nВ\nв\n', mixed: 'oak\nOAK\nOak\n',
+  },
 }

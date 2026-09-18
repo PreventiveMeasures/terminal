@@ -69,12 +69,11 @@ describe('sed unsupported features retain diagnostics', () => {
     ["sed -n 'p;# comment' input", 'comments'],
     ["sed 's/a/x/ # comment' input", 'comments'],
     [String.raw`sed -E 's/a/\U&/' input`, 'replacement escape'],
-    [String.raw`sed -n '/[[:alpha:]]/p' unicode`, 'non-ASCII regex semantics'],
-    ["sed -n '/^[[:alpha:]]$/p' unicode", 'non-ASCII regex semantics'],
+    ["sed -n '/в/Ip' extended", 'case folding of Cyrillic Extended-C letters'],
   ]
   for (const [command, detail] of gaps) {
     it(command, () => {
-      const terminal = createTerminal({ input: 'aa\n', unicode: 'é\n' })
+      const terminal = createTerminal({ input: 'aa\n', extended: '\u1C80\n' })
       const result = terminal.run(command)
       assert.notEqual(result.exitCode, 0)
       assert.notEqual(result.stderr, '')
@@ -86,13 +85,13 @@ describe('sed unsupported features retain diagnostics', () => {
     })
   }
 
-  it('preserves earlier output and its diagnostic when a later address cannot match reliably', () => {
-    const terminal = createTerminal({ input: 'a\né\n' })
-    for (const command of ["sed -n '/^[[:alpha:]]$/p' input", "sed -E 's/[[:alpha:]]/x/' input"]) {
+  it('preserves earlier output and its diagnostic when a later line cannot be folded reliably', () => {
+    const terminal = createTerminal({ input: 'a\n\u1C80\n' })
+    for (const command of ["sed -n '/^[[:alpha:]]$/Ip' input", "sed -E 's/[[:alpha:]]/x/I' input"]) {
       const result = terminal.run(`${command} 2>/dev/null | cat`)
       assert.equal(result.stdout, command.includes('-n') ? 'a\n' : 'x\n')
       assert.equal(result.stderr, '')
-      assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['non-ASCII regex semantics'])
+      assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['case folding of Cyrillic Extended-C letters'])
     }
   })
 

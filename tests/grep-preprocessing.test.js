@@ -12,19 +12,21 @@ function diagnoses(command, files, detail, message, exitCode = 2) {
   }, command)
 }
 
-const localeMessage = 'grep: locale-sensitive regular expression matching on non-ASCII input is not supported'
+const localeMessage = 'grep: case-insensitive matching with backreferences on non-ASCII input is not supported'
 
 describe('grep input preprocessing', () => {
-  it('checks Unicode whitespace in every relevant pattern when a literal also matches', () => {
+  it('reads Unicode whitespace from the C.UTF-8 tables in every pattern', () => {
     const files = { text: 'TODO café\n', space: 'TODO\u2003\n' }
     assert.deepEqual(createTerminal(files).run("grep -e TODO -e '[[:space:]]' text"), {
       stdout: 'TODO café\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
-    diagnoses("grep -e TODO -e '[[:space:]]' space", files, 'non-ASCII regex semantics', localeMessage)
+    assert.deepEqual(createTerminal(files).run("grep -e TODO -e '[[:space:]]' space"), {
+      stdout: 'TODO\u2003\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
+    })
   })
 
-  it('diagnoses a locale-sensitive Unicode pattern even on an empty file', () => {
-    diagnoses("grep -e TODO -e 'é.*' empty", { empty: '' }, 'non-ASCII regex semantics', localeMessage)
+  it('diagnoses a pattern the tables cannot answer even on an empty file', () => {
+    diagnoses("grep -i -e TODO -e '\\(é\\)\\1' empty", { empty: '' }, 'non-ASCII regex semantics', localeMessage)
   })
 
   it('reports binary input before a locale gap in an earlier file', () => {

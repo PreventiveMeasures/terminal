@@ -75,9 +75,23 @@ const CASES = [
     input: "",
     stdout: "4 _😀_a_b_\n",
   },
+  {
+    purpose: "reads the named classes from the C.UTF-8 tables after warming a capture matcher on ASCII input",
+    prog: "{ print gensub(/([[:alpha:]]+)/, \"[\\\\1]\", \"g\") }",
+    input: "alpha\ncafé\n",
+    stdout: "[alpha]\n[café]\n",
+  },
 ]
 
 const GAPS = [
+  {
+    purpose: "checks case folding after warming a capture matcher on ASCII input",
+    prog: "{ IGNORECASE = 1; print gensub(/(в+)/, \"[\\\\1]\", \"g\") }",
+    input: "alpha\n\u1C80\n",
+    stdout: "alpha\n",
+    detail: "locale-sensitive regex",
+    message: "awk: case-insensitive matching over Cyrillic Extended-C letters is not supported",
+  },
   {
     purpose: "keeps unsafe capture diagnostics after a record without a match",
     prog: "{ print gensub(/(x(y)?)+/, \"[\\\\1]\", \"g\") }",
@@ -85,14 +99,6 @@ const GAPS = [
     stdout: "zzz\n",
     detail: "regex capture semantics",
     message: "awk: capture extraction across repeated or alternative groups is not supported",
-  },
-  {
-    purpose: "checks locale semantics after warming a capture matcher on ASCII input",
-    prog: "{ print gensub(/([[:alpha:]]+)/, \"[\\\\1]\", \"g\") }",
-    input: "alpha\ncafé\n",
-    stdout: "[alpha]\n",
-    detail: "locale-sensitive character classes",
-    message: "awk: POSIX character classes on non-ASCII input require locale support",
   },
   {
     purpose: "retains the NFA state limit even for a fixed literal on empty input",

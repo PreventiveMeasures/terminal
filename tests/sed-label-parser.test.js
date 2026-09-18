@@ -8,7 +8,7 @@ import { unsupportedNote } from '../src/unsupported.js'
 // https://github.com/mirror/sed/blob/v4.9/sed/compile.c
 const compile = (...sources) => {
   const state = {}
-  return finishSedProgram(sources.flatMap((source) => parseSedScript(source, false, false, state)), state)
+  return finishSedProgram(sources.flatMap((source) => parseSedScript(source, false, 'C.UTF-8', state)), state)
 }
 
 describe('sed label grammar and program linking', () => {

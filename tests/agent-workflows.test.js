@@ -165,8 +165,7 @@ describe('agent workflows — deduplication and ordering', () => {
 })
 
 describe('agent workflows — silent option and metadata gaps', () => {
-  for (const command of ['grep -2 x g', 'cat -2 g', 'head -n1 -2 g', 'tail -n1 -2 g',
-    "echo 'é' | grep '^[[:alpha:]]$'", "echo 'k' | grep -Fi 'K'", "echo -e 'a\\0b' | grep a",
+  for (const command of ['grep -2 x g', 'cat -2 g', 'head -n1 -2 g', 'tail -n1 -2 g', "echo -e 'a\\0b' | grep a",
     `awk 'BEGIN { PROCINFO["sorted_in"]="@ind_num_asc"; a[2]=2; a[1]=1; for (k in a) print k }'`,
     `awk 'BEGIN { print PROCINFO["pid"] }'`, `awk 'BEGIN { print length(PROCINFO) }'`,
     `awk 'BEGIN { for (k in PROCINFO) print k }'`, `awk 'BEGIN { print ENVIRON["HOME"] }'`,
@@ -189,9 +188,12 @@ describe('agent workflows — silent option and metadata gaps', () => {
     check('tail -2 g', 'x\n')
     check('seq -2 0', '-2\n-1\n0\n')
   })
-  it('literal Unicode search remains supported without locale-sensitive rules', () => {
+  it('Unicode search reads the C.UTF-8 tables', () => {
     check("echo 'é' | grep -F 'é'", 'é\n')
     check("echo 'é' | grep '^é$'", 'é\n')
+    check("echo 'é' | grep '^[[:alpha:]]$'", 'é\n')
+    // The Kelvin sign is its own upper case, so `k` does not fold to it.
+    check("echo 'k' | grep -Fi 'K'", '', 1)
   })
   it('virtual bin aliases do not invent executables for shell-only builtins', () => {
     const r = createTerminal(FILES).run('x="a b"; /usr/bin/export y=$x')

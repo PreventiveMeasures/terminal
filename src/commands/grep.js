@@ -42,7 +42,7 @@ export function grep(stdin, tokens, ctx) {
   const conflict = checkConflicts(flags)
   if (conflict) return conflict
   let re
-  try { re = compilePatterns(patterns, flags) } catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
+  try { re = compilePatterns(patterns, flags, ctx.locale) } catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
   if (re.error) return re.error
   const counts = parseCounts(values)
   if (counts.error) return counts.error

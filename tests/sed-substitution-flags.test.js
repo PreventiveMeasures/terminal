@@ -29,6 +29,12 @@ describe('sed case-insensitive substitution flags', () => {
     ['range character folding', 's/[a-z]/X/ig', 'aAzZ0\n', 'XXXX0\n'],
     ['negated character folding', 's/[^a]/X/ig', 'AaBb\n', 'AaXX\n'],
     ['POSIX lower class folding', 's/[[:lower:]]/X/ig', 'aAzZ0\n', 'XXXX0\n'],
+    // Past ASCII, case is glibc's C.UTF-8 table and the fold is GNU's: the
+    // Kelvin sign is its own upper case, so `k` does not stand for it.
+    ['accented letter folding', 's/é/X/I', 'É\n', 'X\n'],
+    ['ASCII folding beside non-ASCII text', 's/a/X/i', 'aé\n', 'Xé\n'],
+    ['one-way folds', 's/k/X/ig', 'K k K\n', 'K X X\n'],
+    ['Greek final sigma', 's/σ/X/Ig', 'Σςσ\n', 'XXX\n'],
     ['whole match preserves original case', 's/ab/[&]/ig', 'aB AB ab\n', '[aB] [AB] [ab]\n'],
     ['BRE capture preserves original case', String.raw`s/\(ab\)/[\1]/i`, 'AB\n', '[AB]\n'],
     ['ERE capture preserves original case', String.raw`s/(ab)/[\1]/I`, 'aB\n', '[aB]\n', '-E'],
@@ -66,6 +72,7 @@ describe('sed uppercase I regex address modifier', () => {
 
   const cases = [
     ['/a/I!p', 'A\nb\n', 'b\n'],
+    ['/k/Ip', 'K\nk\n', 'k\n'],
     ['/a/I,/end/Ip', 'A\nbody\nEND\noutside\n', 'A\nbody\nEND\n'],
     ['/a/Is//X/', 'A\nb\n', 'X\nb\n', ''],
     [String.raw`/\(a\)/Is//[\1]/`, 'A\n', '[A]\n', ''],
@@ -107,9 +114,11 @@ describe('sed regex flag errors and engine limitations', () => {
     })
   }
 
-  for (const [script, input] of [
-    ['s/k/X/i', 'K\n'], ['s/é/X/I', 'É\n'], ['s/a/X/i', 'aé\n'],
-    ['/k/Ip', 'K\n'], [String.raw`s/(a)|(b)/\1/i`, 'A\n'],
+  for (const [script, input, detail] of [
+    [String.raw`s/(a)|(b)/\1/i`, 'A\n', 'regex capture semantics'],
+    // GNU's two matchers fold the Cyrillic Extended-C letters differently.
+    ['s/в/X/I', '\u1C80\n', 'case folding of Cyrillic Extended-C letters'],
+    ['s/\u1C80/X/I', 'в\n', 'case folding of Cyrillic Extended-C letters'],
   ]) {
     it(`preserves regex engine diagnostics: ${script}`, () => {
       const t = createTerminal({ input })
@@ -117,7 +126,7 @@ describe('sed regex flag errors and engine limitations', () => {
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 1)
       assert.equal(result.unsupported.length, 1)
-      assert.equal(result.unsupported[0].detail, script.includes('(a)') ? 'regex capture semantics' : 'non-ASCII regex semantics')
+      assert.equal(result.unsupported[0].detail, detail)
       assert.deepEqual(t.run(`sed -E ${quote(script)} input 2>/dev/null | cat`), { ...expected(), notes: [], unsupported: result.unsupported })
     })
   }

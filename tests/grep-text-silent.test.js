@@ -115,8 +115,8 @@ describe('grep — suppress input read errors', () => {
       ['grep -s --unknown hit good', 'option', '--unknown'],
       [String.raw`grep -s '\d' good`, 'feature', 'regex escape'],
       ['grep -s hit binary', 'feature', 'binary input'],
-      ["grep -as '[[:alpha:]]' unicode", 'feature', 'non-ASCII regex semantics'],
-      ["grep --no-messages -aq '[[:alpha:]]' unicode", 'feature', 'non-ASCII regex semantics'],
+      ["grep -asi '\\(x\\)\\1' unicode", 'feature', 'non-ASCII regex semantics'],
+      ["grep --no-messages -aqi '\\(x\\)\\1' unicode", 'feature', 'non-ASCII regex semantics'],
       ['grep -sq hit missing binary', 'feature', 'binary input'],
     ]
     for (const [command, kind, detail] of gaps) {
@@ -129,8 +129,8 @@ describe('grep — suppress input read errors', () => {
   })
 
   it('keeps unsupported metadata through stderr redirection and a successful following stage', () => {
-    const result = createTerminal(FILES).run("grep -as '[[:alpha:]]' unicode 2>/dev/null | true")
-    const message = 'grep: locale-sensitive regular expression matching on non-ASCII input is not supported'
+    const result = createTerminal(FILES).run("grep -asi '\\(x\\)\\1' unicode 2>/dev/null | true")
+    const message = 'grep: case-insensitive matching with backreferences on non-ASCII input is not supported'
     assert.deepEqual(result, {
       stdout: '', stderr: '', exitCode: 0, cwd: '/',
       notes: [], unsupported: [{ kind: 'feature', command: 'grep', detail: 'non-ASCII regex semantics', message }],

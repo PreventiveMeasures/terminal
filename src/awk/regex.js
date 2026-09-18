@@ -1,8 +1,11 @@
 // One parsed AST feeds a JS RegExp for boolean tests and a leftmost-longest
 // NFA for match extents (sub/gsub/gensub, match, splitting). Cache by source
 // and case mode because dynamic patterns and IGNORECASE can change per record.
+// Case folding is spelt into the AST by the parser, from the locale's
+// tables, so both matchers run case-sensitively.
 
 import { AwkError } from './common.js'
+import { EXTENDED_C, LOCALE, classTables } from '../locale.js'
 import { parseEre, toJsSource } from './re-parse.js'
 import { compileNfa, search } from './re.js'
 import { stepAt } from '../unicode.js'
@@ -10,16 +13,16 @@ import { stepAt } from '../unicode.js'
 export { stepAt }
 
 const CACHE = new Map()
-const NON_ASCII = /[\u0080-\u{10FFFF}]/u
 
 export class AwkRegex {
-  constructor(src, ignoreCase, warn) {
-    const { ast, groups } = parseEre(src, warn)
+  constructor(src, ignoreCase, warn, tables = classTables(LOCALE)) {
+    const { ast, groups } = parseEre(src, warn, tables, ignoreCase)
     this.src = src
     this.ignoreCase = ignoreCase
+    this.tables = tables
     this.groupCount = groups
-    this.source = toJsSource(ast)
-    this.flags = ignoreCase ? 'siu' : 'su'
+    this.source = toJsSource(ast, tables)
+    this.flags = 'su'
     try {
       this.js = new RegExp(this.source, this.flags)
     } catch (e) {
@@ -31,17 +34,18 @@ export class AwkRegex {
     this.captureShape = captureShape(ast)
   }
 
-  test(s) { this.checkLocale(s); return this.js.test(s) }
+  test(s) { this.checkCase(s); return this.js.test(s) }
 
-  checkLocale(s) {
-    if (this.src.includes('[:') && NON_ASCII.test(s)) throw new AwkError('POSIX character classes on non-ASCII input require locale support', null, 'locale-sensitive character classes')
-    if ((this.ignoreCase || /\\[sSwWyB<>]/u.test(this.src)) && NON_ASCII.test(s + this.src)) throw new AwkError('non-ASCII case folding, classes and word boundaries require locale support', null, 'locale-sensitive regex')
+  // GNU's two matchers fold the Cyrillic Extended-C letters differently
+  // (see EXTENDED_C), so a case-insensitive match over them is refused.
+  checkCase(s) {
+    if (this.ignoreCase && EXTENDED_C.test(s + this.src)) throw new AwkError('case-insensitive matching over Cyrillic Extended-C letters is not supported', null, 'locale-sensitive regex')
   }
 
   // Leftmost-longest match at or after `from`: { start, end } or null.
   search(s, from = 0) {
-    this.checkLocale(s)
-    if (this.nfa === null) this.nfa = compileNfa(this.ast, this.ignoreCase)
+    this.checkCase(s)
+    if (this.nfa === null) this.nfa = compileNfa(this.ast, this.tables)
     return search(this.nfa, s, from)
   }
 
@@ -77,12 +81,12 @@ function captureShape(node) {
   return { groups, nullable, unsafe: repeated || (node.type === 'alt' && groups > 0) || shapes.some((s) => s.unsafe) }
 }
 
-export function compileRegex(src, ignoreCase = false, warn = null) {
-  const key = (ignoreCase ? 'i' : 'c') + src
+export function compileRegex(src, ignoreCase = false, warn = null, tables = classTables(LOCALE)) {
+  const key = (ignoreCase ? 'i' : 'c') + tables.name + '\0' + src
   const cached = CACHE.get(key)
   if (cached) return cached
   if (CACHE.size >= 500) CACHE.clear()
-  const re = new AwkRegex(src, ignoreCase, warn)
+  const re = new AwkRegex(src, ignoreCase, warn, tables)
   CACHE.set(key, re)
   return re
 }

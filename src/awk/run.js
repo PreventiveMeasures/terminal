@@ -1,6 +1,7 @@
 // BEGIN, per-file/per-record rules, then END. Statements return control-flow
 // signals; user functions throw them across expression evaluation boundaries.
 
+import { classTables } from '../locale.js'
 import { AwkError, MAX_STEPS } from './common.js'
 import { callBuiltin } from './builtins.js'
 import { Signal, evalExpr, getArray, regexOf, setRecord, setVar, subscriptKeys } from './eval.js'
@@ -31,7 +32,7 @@ export function createMachine(program, ctx, stdin, operands) {
   const m = {
     program, globals, frame: undefined, callDepth: 0, record: '', recordValue: new StrNum(''), fields: [undefined], nf: 0,
     fieldMode: 'FS', out: [], errOut: [], steps: 0, exitCode: 0, ranges: [], rng: initialRng(),
-    input: new Input(ctx, stdin), byteLocale: byteLocale(ctx),
+    input: new Input(ctx, stdin), byteLocale: byteLocale(ctx), tables: classTables(ctx.locale),
     hasFileRules: program.beginFile.length > 0,
     // Injected so ./eval.js and ./input.js need no import of this
     // module or of the builtins.

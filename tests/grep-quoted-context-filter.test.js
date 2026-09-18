@@ -64,13 +64,7 @@ describe('grep quoted context-line filter from agent logs', () => {
     assert.deepEqual(createTerminal({ input: 'keep this' }).run(`${command} input`), result('keep this\n'))
   })
 
-  it('keeps locale-sensitive Unicode whitespace visible in diagnostics', () => {
-    const actual = createTerminal({ input: 'src/file.js-12-\u2003"/route"\n' }).run(`${command} input 2>/dev/null | cat`)
-    assert.equal(actual.stdout, '')
-    assert.equal(actual.stderr, '')
-    assert.equal(actual.exitCode, 0)
-    assert.deepEqual(actual.unsupported.map((entry) => ({ command: entry.command, detail: entry.detail })), [
-      { command: 'grep', detail: 'non-ASCII regex semantics' },
-    ])
+  it('reads Unicode whitespace before the quote as GNU\'s \\s does in C.UTF-8', () => {
+    assert.deepEqual(createTerminal({ input: 'src/file.js-12-\u2003"/route"\n' }).run(`${command} input`), result('', 1))
   })
 })

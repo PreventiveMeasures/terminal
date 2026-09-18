@@ -50,7 +50,7 @@ export function setVar(m, name, v) {
   if (scope === m.globals) {
     if (name === 'NF') { setNF(m, v); return }
     if (name === 'FIELDWIDTHS') m.widths = parseWidths(toStr(v, m))
-    if (name === 'FPAT' || ((name === 'FS' || name === 'RS') && toStr(v, m).length > 1)) compileRegex(toStr(v, m), ignoreCase(m), m.warn)
+    if (name === 'FPAT' || ((name === 'FS' || name === 'RS') && toStr(v, m).length > 1)) compileRegex(toStr(v, m), ignoreCase(m), m.warn, m.tables)
     if (FIELD_MODES.has(name)) {
       m.fieldMode = name
       const info = m.globals.get('PROCINFO')
@@ -182,8 +182,8 @@ const COMPARE = {
 // compiled as a dynamic regex. Both honor IGNORECASE.
 export function regexOf(m, node) {
   const ic = ignoreCase(m)
-  if (node.type === 'regex') return ic ? compileRegex(node.source, true) : node.re
-  return compileRegex(toStr(evalExpr(m, node), m), ic, m.warn)
+  if (node.type === 'regex') return ic ? compileRegex(node.source, true, null, m.tables) : node.re
+  return compileRegex(toStr(evalExpr(m, node), m), ic, m.warn, m.tables)
 }
 
 function scalar(v, name) {

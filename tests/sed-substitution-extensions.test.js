@@ -98,12 +98,12 @@ describe('sed numeric substitution occurrences', () => {
       assert.deepEqual(actual.unsupported, [])
     })
   }
-  it('keeps locale-dependent regex limitations visible for numeric selectors', () => {
-    const actual = createTerminal({ input: 'é😀z\n' }).run("sed 's/[[:alpha:]]/X/2' input 2>/dev/null | cat")
+  it('keeps case-folding limitations visible for numeric selectors', () => {
+    const actual = createTerminal({ input: 'в \u1C80\n' }).run("sed 's/в/X/2I' input 2>/dev/null | cat")
     assert.equal(actual.exitCode, 0)
     assert.equal(actual.stderr, '')
     assert.equal(actual.unsupported.length, 1)
-    assert.equal(actual.unsupported[0].detail, 'non-ASCII regex semantics')
+    assert.equal(actual.unsupported[0].detail, 'case folding of Cyrillic Extended-C letters')
   })
   it('reports unsupported numeric precision even when stderr is redirected', () => {
     const actual = createTerminal({ input: 'a\n' }).run("sed 's/a/X/9007199254740992' input 2>/dev/null | cat")

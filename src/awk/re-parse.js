@@ -5,9 +5,14 @@
 // Empty concatenations match empty text. GNU syntax treats leading quantifiers
 // and unmatched closing brackets as literals; intervals require a valid closing
 // brace. Unknown escapes warn and become literals.
+//
+// Under `ignoreCase` the AST is the folded pattern: a letter is the set of
+// characters it stands for, a range the ranges it takes once upper-cased,
+// and [:upper:] and [:lower:] read as [:alpha:], all by the locale's tables
+// (fold and foldRange in ../locale.js), so the matchers run case-sensitively.
 
 import { AwkError } from './common.js'
-import { POSIX_RANGES as CLASSES } from '../charclass.js'
+import { LOCALE, classTables, foldedClass } from '../locale.js'
 import { codePointSize } from '../unicode.js'
 
 const CONTROL = { __proto__: null, n: 10, t: 9, r: 13, f: 12, v: 11, a: 7, b: 8 }
@@ -17,10 +22,12 @@ const isHex = (c) => c !== undefined && /[0-9a-fA-F]/u.test(c)
 const isOctal = (c) => c !== undefined && c >= '0' && c <= '7'
 
 class EreParser {
-  constructor(src, warn) {
+  constructor(src, warn, tables, ignoreCase) {
     this.src = src
     this.i = 0
     this.warn = warn
+    this.tables = tables
+    this.ignoreCase = ignoreCase
     this.groups = 0
   }
 
@@ -30,7 +37,13 @@ class EreParser {
   literal() {
     const code = this.src.codePointAt(this.i)
     this.i += codePointSize(code)
-    return { type: 'char', code }
+    return this.charNode(code)
+  }
+
+  // One character, or the set it stands for under case folding.
+  charNode(code) {
+    const set = this.ignoreCase ? this.tables.fold(code) : [code]
+    return set.length === 1 ? { type: 'char', code } : { type: 'set', negate: false, items: set.map((c) => [c, c]) }
   }
 
   parse() {
@@ -118,10 +131,10 @@ class EreParser {
     if (c === '<' || c === '>' || c === 'B') return { type: 'assert', kind: c }
     if (c === '`') return { type: 'assert', kind: '^' }
     if (c === "'") return { type: 'assert', kind: '$' }
-    if (c === 's' || c === 'S') return { type: 'set', negate: c === 'S', items: CLASSES.space }
-    if (c === 'w' || c === 'W') return { type: 'set', negate: c === 'W', items: CLASSES.word }
+    if (c === 's' || c === 'S') return { type: 'set', negate: c === 'S', items: this.tables.ranges('space') }
+    if (c === 'w' || c === 'W') return { type: 'set', negate: c === 'W', items: this.tables.ranges('word') }
     if (c === 'b') this.warn?.('regexp escape sequence `\\b\' is a backspace here, as in gawk; `\\y\' is the word boundary')
-    return { type: 'char', code: this.escapedCode(c, true) }
+    return this.charNode(this.escapedCode(c, true))
   }
 
   // The code point an escape denotes; used outside and inside brackets.
@@ -158,8 +171,9 @@ class EreParser {
         const close = this.src.indexOf(':]', this.i + 2)
         if (close !== -1) {
           const name = this.src.slice(this.i + 2, close)
-          if (!(name in CLASSES)) this.fail(`invalid character class \`[:${name}:]\``)
-          items.push(...CLASSES[name])
+          const ranges = this.tables.ranges(this.ignoreCase ? foldedClass(name) : name)
+          if (ranges === undefined) this.fail(`invalid character class \`[:${name}:]\``)
+          items.push(...ranges)
           this.i = close + 2
           continue
         }
@@ -168,9 +182,11 @@ class EreParser {
       if (this.peek() === '-' && this.src[this.i + 1] !== ']' && this.src[this.i + 1] !== undefined) {
         this.i++
         const hi = this.bracketChar()
-        if (hi < lo) this.fail('invalid range end')
-        items.push([lo, hi])
-      } else items.push([lo, lo])
+        const range = this.ignoreCase ? this.tables.foldRange(lo, hi) : hi < lo ? null : [[lo, hi]]
+        if (range === null) this.fail('invalid range end')
+        items.push(...range)
+      } else if (this.ignoreCase) items.push(...this.tables.fold(lo).map((code) => [code, code]))
+      else items.push([lo, lo])
     }
     return { type: 'set', negate, items }
   }
@@ -202,8 +218,8 @@ class EreParser {
 }
 
 // `warn`, when given, receives gawk's warnings about dubious escapes.
-export function parseEre(src, warn = null) {
-  const p = new EreParser(src, warn)
+export function parseEre(src, warn = null, tables = classTables(LOCALE), ignoreCase = false) {
+  const p = new EreParser(src, warn, tables, ignoreCase)
   return { ast: p.parse(), groups: p.groups }
 }
 
@@ -218,23 +234,26 @@ const hex = (code) => `\\u{${code.toString(16)}}`
 // point escape, valid anywhere in a /u regex, bracket expressions included.
 const esc = (code) => ((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) ? String.fromCodePoint(code) : hex(code))
 
-const ASSERT_JS = {
-  __proto__: null,
-  '^': '^', $: '$', y: '\\b', B: '\\B',
-  '<': '(?<!\\w)(?=\\w)', '>': '(?<=\\w)(?!\\w)',
+// Word boundaries are spelt out over the locale's word set: JS's own \\b
+// knows ASCII only.
+function jsAssertion(kind, tables) {
+  if (kind === '^' || kind === '$') return kind
+  const js = tables.assertions()
+  return kind === 'y' ? js.boundary : kind === 'B' ? js.inside : js[kind]
 }
 
-export function toJsSource(node) {
+export function toJsSource(node, tables = classTables(LOCALE)) {
+  const render = (child) => toJsSource(child, tables)
   switch (node.type) {
     case 'char': return esc(node.code)
     case 'any': return '.'
     case 'set': return `[${node.negate ? '^' : ''}${node.items.map(([lo, hi]) => (lo === hi ? esc(lo) : `${esc(lo)}-${esc(hi)}`)).join('')}]`
-    case 'assert': return ASSERT_JS[node.kind]
-    case 'group': return `(${toJsSource(node.node)})`
-    case 'cat': return node.nodes.map(toJsSource).join('')
-    case 'alt': return `(?:${node.nodes.map(toJsSource).join('|')})`
+    case 'assert': return jsAssertion(node.kind, tables)
+    case 'group': return `(${render(node.node)})`
+    case 'cat': return node.nodes.map(render).join('')
+    case 'alt': return `(?:${node.nodes.map(render).join('|')})`
     case 'rep': {
-      const inner = `(?:${toJsSource(node.node)})`
+      const inner = `(?:${render(node.node)})`
       if (node.max === null) return node.min === 0 ? `${inner}*` : node.min === 1 ? `${inner}+` : `${inner}{${node.min},}`
       if (node.min === 0 && node.max === 1) return `${inner}?`
       return `${inner}{${node.min},${node.max}}`

@@ -212,11 +212,11 @@ describe('sed in-place quit and errors preserve the right files', () => {
   })
   it('unsupported runtime matching preserves input and reports diagnostics', () => {
     const t = terminal()
-    t.run('printf "é\\n" >/tmp/input')
-    const result = t.run("sed -i.bak 's/[[:alpha:]]/X/' /tmp/input")
+    t.run('printf "\u1C80\\n" >/tmp/input')
+    const result = t.run("sed -i.bak 's/в/X/I' /tmp/input")
     assert.equal(result.exitCode, 1)
     assert.equal(result.unsupported.length, 1)
-    contents(t, '/tmp/input', 'é\n')
+    contents(t, '/tmp/input', '\u1C80\n')
     assert.deepEqual(t.run('test -f /tmp/input.bak'), expected('', 1))
   })
   it('a missing backup parent fails ordinarily and preserves the original', () => {

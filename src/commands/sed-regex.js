@@ -1,10 +1,10 @@
 import { AwkRegex, substituteAll } from '../awk/regex.js'
 import { breToEs, validateBackreferences } from '../bre.js'
 import { ereClasses, grepSource, validateRegex } from './grep-pattern.js'
-import { asciiCompatible, hasUnicodeSpace } from '../regex-locale.js'
 import { scriptGap } from './sed-common.js'
 import { UnsupportedError } from '../unsupported.js'
-import { LOCALE } from '../locale.js'
+import { EXTENDED_C, LOCALE, classTables } from '../locale.js'
+import { foldPattern } from '../regex-fold.js'
 
 const controls = { n: '\n', t: '\t', r: '\r', a: '\u0007', f: '\f', v: '\v' }
 
@@ -116,20 +116,24 @@ export function compilePattern(pattern, extended, noSub = false, ignoreCase = fa
     if (ignoreCase) throw new Error('cannot specify modifiers on empty regexp')
     return { re: null }
   }
-  validateRegex(pattern, extended)
+  const tables = classTables(locale)
+  validateRegex(pattern, extended, tables.multibyte)
   const normalized = pattern.replace(/\\(.)/gu, (s, c) => {
     if (c === 'o') scriptGap('regex escape')
     return Object.hasOwn(controls, c) ? controls[c] : s
   })
-  const translated = extended ? { source: ereClasses(normalized) } : breToEs(normalized)
+  // I is spelt into the pattern from the locale's tables (../regex-fold.js)
+  // and the matcher runs case-sensitively, as GNU's does.
+  const folded = ignoreCase ? foldPattern(normalized, tables) : normalized
+  const translated = extended ? { source: ereClasses(folded, tables) } : breToEs(folded, tables)
   if (translated.error) throw new Error(translated.error)
   validateSedRegex(translated.source, extended)
   validateBackreferences(translated.source)
   for (const [, escape] of translated.source.matchAll(/\\(.)/gu)) {
     if (/[1-9]/u.test(escape)) scriptGap('regex backreferences')
   }
-  const re = new AwkRegex(grepSource(translated.source, true), ignoreCase)
-  return { re, noSub, locale, compatible: !ignoreCase && asciiCompatible(re.src, pattern), spaceClass: /\[:(?:space|blank):\]|\\[sS]/u.test(pattern) }
+  const re = new AwkRegex(grepSource(translated.source, true, tables), false, null, tables)
+  return { re, noSub, locale, ignoreCase, pattern: normalized }
 }
 
 // GNU sed's POSIX modes are stricter than grep and AWK: ERE rejects stray
@@ -189,7 +193,9 @@ export function checkRegexText(text, command) {
   // The matcher reads a character at a time, which is C.UTF-8's reading and
   // no other locale's.
   if (command.locale !== LOCALE) throw new UnsupportedError('feature', 'locale', `matching non-ASCII text in the ${command.locale} locale is not supported`)
-  if (!command.compatible || (command.spaceClass && hasUnicodeSpace(text))) scriptGap('non-ASCII regex semantics')
+  // GNU's two matchers fold the Cyrillic Extended-C letters differently
+  // (see EXTENDED_C in ../locale.js), so a match over them is refused.
+  if (command.ignoreCase && EXTENDED_C.test(text + command.pattern)) scriptGap('case folding of Cyrillic Extended-C letters')
 }
 
 export function resolvePattern(command, state, neededGroups = null) {

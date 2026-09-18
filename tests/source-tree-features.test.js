@@ -49,14 +49,18 @@ describe('source analysis features — permanent regressions', () => {
     supported("sed 's+[a+]\\++X+' f", { f: 'a+\n' }, 'X\n')
     supported("sed 's/[[:blank:]]*$//' f", { f: 'café \t\nline \r\n' }, 'café\nline \r\n')
   })
+  it('named classes and Unicode whitespace read the C.UTF-8 tables', () => {
+    supported("grep -oE '[[:alpha:]]+' f", { f: 'é \n' }, 'é\n')
+    supported("grep -E '[[:space:]]' f", { f: '\u2003\n' }, '\u2003\n')
+    supported("sed 's/[[:alpha:]]/x/' f", { f: 'é' }, 'x')
+  })
   it('diagnoses unmodeled regex and binary behavior even with stderr hidden', () => {
     const cases = [
       ['grep -I TODO f', { f: 'TODO\n'.repeat(30000) + '\0' }, 'late binary detection'],
-      ["grep -oE '[[:alpha:]]+' f", { f: 'é \n' }, 'non-ASCII regex semantics'],
-      ["grep -E '[[:space:]]' f", { f: '\u2003\n' }, 'non-ASCII regex semantics'],
+      ["grep -iE '(é)\\1' f", { f: 'é \n' }, 'non-ASCII regex semantics'],
       ["sed 's/a/b/e' f", { f: 'a' }, 'substitution flag e'],
       ["sed 's/\\(a\\)\\|\\(ab\\)/\\1/g' f", { f: 'ab' }, 'regex capture semantics'],
-      ["sed 's/[[:alpha:]]/x/' f", { f: 'é' }, 'non-ASCII regex semantics'],
+      ["sed 's/в/x/I' f", { f: '\u1C80' }, 'case folding of Cyrillic Extended-C letters'],
     ]
     for (const [command, files, detail] of cases) {
       const r = createTerminal(files).run(command)

@@ -123,7 +123,7 @@ describe('egrep errors and unsupported diagnostics', () => {
   }
 
   it('preserves runtime regex limitations after stderr redirection', () => {
-    const result = createTerminal(FILES).run("egrep '[[:alpha:]]' unicode 2>/dev/null | cat")
+    const result = createTerminal(FILES).run("egrep -i '(a)\\1' unicode 2>/dev/null | cat")
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, '')
     assert.deepEqual(result.unsupported.map(({ command, detail }) => [command, detail]), [['egrep', 'non-ASCII regex semantics']])
