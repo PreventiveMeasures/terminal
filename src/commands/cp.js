@@ -21,11 +21,11 @@ export function cp(_stdin, tokens, ctx) {
   const verbose = flags.has('v') || flags.has('verbose')
   const recursive = flags.has('r') || flags.has('R') || flags.has('recursive')
   const copies = sources.map((source) => [source, directory ? target.replace(/\/+$/u, '') + '/' + lastComponent(source) : target])
+  const noClobber = flags.has('n') || flags.has('no-clobber')
   const state = {
     ctx, result: emptyOutput(), failed: false, sources: new Set(), copied: new Set(),
-    noClobber: flags.has('n') || flags.has('no-clobber'),
-    force: flags.has('f') || flags.has('force'), verbose, recursive,
-    outputOverlap: verbose && outputOverlaps(copies, ctx, recursive),
+    noClobber, force: flags.has('f') || flags.has('force'), verbose, recursive,
+    outputOverlap: verbose && outputOverlaps(copies, ctx, { recursive, noClobber }),
   }
   for (const [source, destination] of copies) {
     // Each copy finishes before the next operand is opened. Ancestor scopes
@@ -233,23 +233,27 @@ function sameFile(source, destination, fs) {
 // What a copy touches is each source file and the same name under the
 // destination, so a file already in the destination that no source entry names
 // is untouched and its descriptor is nobody's business here.
-function outputOverlaps(copies, ctx, recursive) {
+function outputOverlaps(copies, ctx, { recursive, noClobber }) {
   const output = ctx.outputFds[1]
   if (typeof output !== 'object') return false
   // A name is not an inode: the overlay can hold one inode under two names,
   // and a `sed -i` backup can put the descriptor's file anywhere at all.
   const holds = (path) => output.identity === undefined ? output.path === path : output.identity === ctx.fs.fileIdentity?.(path)
+  // `-n` leaves a destination that is already there alone, and an entry it
+  // leaves alone is one it neither reads nor writes.
+  const skipped = (path) => noClobber && (ctx.fs.isFile(path) || ctx.fs.isDir(path))
   return copies.some(([source, destination]) => {
     const found = lookup(ctx.cwd, source, ctx.fs)
     if (found.error) return false
     const into = resolve(ctx.cwd, destination)
-    if (!ctx.fs.isDir(found.path)) return holds(found.path) || holds(into)
+    if (!ctx.fs.isDir(found.path)) return !skipped(into) && (holds(found.path) || holds(into))
     if (!recursive) return false
     // Every file below the source is read, and written to the name it keeps
     // below the destination.
     const root = found.path === '/' ? 0 : found.path.length
     for (const path of ctx.fs.walkFiles(found.path)) {
-      if (holds(path) || holds(into + path.slice(root))) return true
+      const to = into + path.slice(root)
+      if (!skipped(to) && (holds(path) || holds(to))) return true
     }
     return false
   })

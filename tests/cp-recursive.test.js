@@ -348,6 +348,23 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     check(t, 'cat /tmp/dest/sub/two', '2\n')
   })
 
+  it('leaves alone what -n will not overwrite', () => {
+    const t = terminal()
+    const setup = 'mkdir /tmp/d; printf OLD >/tmp/d/one'
+    check(t, setup)
+    // `-n` passes over `one`, so this copy neither reads nor writes it and a
+    // descriptor on it meets nothing of the copy's: GNU copies the rest and
+    // the lines land there when the buffer flushes at exit.
+    const lines = terminal().run(`${setup}; cp -rvn a/. /tmp/d`).stdout
+    assert.ok(lines.includes("'a/./sub/two' -> '/tmp/d/./sub/two'") && !lines.includes("/tmp/d/./one"), lines)
+    check(t, 'cp -rvn a/. /tmp/d >/tmp/d/one')
+    check(t, 'cat /tmp/d/one', lines)
+    check(t, 'cat /tmp/d/sub/two', '2\n')
+    // Without -n the same name is overwritten, and that is still refused.
+    const refused = terminal().run(`${setup}; cp -rv a/. /tmp/d >/tmp/d/one`)
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+  })
+
   it('sees a descriptor a backup name put inside the tree', () => {
     const t = createTerminal({ x: 'x\n' }, { mount: '/repo', cwd: '/tmp', writable: '/tmp/' })
     const run = (command) => t.run(command)
