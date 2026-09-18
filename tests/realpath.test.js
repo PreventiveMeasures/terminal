@@ -304,10 +304,16 @@ describe('realpath mount paths and missing-path narration', () => {
     assert.deepEqual(r.notes, ['realpath: relative path "dir" was not found from cwd "/repo/sub". A dir exists at "/repo/dir".'])
   })
 
-  it('does not narrate cwd alternatives for an absolute operand', () => {
+  it('narrates the mounted alternative for an absolute operand, without naming a cwd it did not use', () => {
     const r = mounted().run('realpath -e /file')
     assert.equal(r.exitCode, 1)
-    assert.deepEqual(r.notes, [])
+    assert.deepEqual(r.notes, ['realpath: absolute path "/file" was not found. A file exists at "/repo/file".'])
+  })
+
+  it('narrates the home alternative for an absolute operand', () => {
+    const r = mounted().run('realpath -e /child')
+    assert.equal(r.exitCode, 1)
+    assert.deepEqual(r.notes, ['realpath: absolute path "/child" was not found. A file exists at "/repo/dir/child".'])
   })
 })
 
