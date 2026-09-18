@@ -239,9 +239,6 @@ function outputOverlaps(copies, ctx, { recursive, noClobber }) {
   // A name is not an inode: the overlay can hold one inode under two names,
   // and a `sed -i` backup can put the descriptor's file anywhere at all.
   const holds = (path) => output.identity === undefined ? output.path === path : output.identity === ctx.fs.fileIdentity?.(path)
-  // `-n` leaves a destination that is already there alone, and an entry it
-  // leaves alone is one it neither reads nor writes.
-  const skipped = (path) => noClobber && (ctx.fs.isFile(path) || ctx.fs.isDir(path))
   return copies.some(([source, destination]) => {
     const found = lookup(ctx.cwd, source, ctx.fs)
     if (found.error) return false
@@ -249,11 +246,14 @@ function outputOverlaps(copies, ctx, { recursive, noClobber }) {
     if (!ctx.fs.isDir(found.path)) return copiesFile(found.path, destination, ctx, noClobber) && (holds(found.path) || holds(into))
     if (!recursive) return false
     // Every file below the source is read, and written to the name it keeps
-    // below the destination.
+    // below the destination — but only where the entry gets that far. Its
+    // parents are this copy's own to make, so a component that is not there
+    // yet says nothing about it; what is already in the way does.
     const root = found.path === '/' ? 0 : found.path.length
     for (const path of ctx.fs.walkFiles(found.path)) {
       const to = into + path.slice(root)
-      if (!skipped(to) && (holds(path) || holds(to))) return true
+      if (refusedBeforeWriting(path, lookup(ctx.cwd, to, ctx.fs), ctx, noClobber)) continue
+      if (holds(path) || holds(to)) return true
     }
     return false
   })
@@ -262,13 +262,19 @@ function outputOverlaps(copies, ctx, { recursive, noClobber }) {
 // A copy that refuses before it writes has opened neither name, so nothing it
 // says can meet anything it does: the diagnostic and the verbose line that goes
 // with it are GNU's own, whatever the descriptor happens to point at. These are
-// the refusals `copyFile` reaches before the write, in its order.
+// the refusals `copyFile` reaches before the write, in its order, and they are
+// the same ones for an entry a walk reaches as for an operand.
+function refusedBeforeWriting(source, dest, ctx, noClobber) {
+  if (dest.error && dest.error !== 'No such file or directory') return true
+  if (noClobber && dest.path !== null) return true
+  return sameFile(source, dest.path, ctx.fs) || ctx.fs.isDir(dest.path)
+}
+
+// An operand answers for its own missing components as well; an entry below it
+// does not, since the copy makes that entry's parents on the way down.
 function copiesFile(source, destination, ctx, noClobber) {
   const dest = lookup(ctx.cwd, destination, ctx.fs)
-  if (dest.error && dest.error !== 'No such file or directory') return false
-  if (noClobber && dest.path !== null) return false
-  if (sameFile(source, dest.path, ctx.fs) || ctx.fs.isDir(dest.path)) return false
-  return !creationError(ctx.cwd, destination, ctx.fs, dest)
+  return !refusedBeforeWriting(source, dest, ctx, noClobber) && !creationError(ctx.cwd, destination, ctx.fs, dest)
 }
 
 function isSpecialFile(name, cwd) {

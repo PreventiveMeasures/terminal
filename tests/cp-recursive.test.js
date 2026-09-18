@@ -365,6 +365,23 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
   })
 
+  it('leaves an entry that is refused before it is opened out of the overlap', () => {
+    const setup = 'cp -r a /tmp/s; mkdir -p /tmp/d/one'
+    const t = terminal()
+    check(t, setup)
+    // `/tmp/d/one` is a directory, so that entry is refused before either name
+    // is opened; a descriptor on it meets nothing this copy does, and the rest
+    // of the tree is copied with its lines landing there, as GNU has it.
+    const lines = terminal().run(`${setup}; cp -rv /tmp/s/. /tmp/d`).stdout
+    assert.ok(lines.includes("'/tmp/s/./sub/two' -> '/tmp/d/./sub/two'") && !lines.includes("'/tmp/d/./one'"), lines)
+    check(t, 'cp -rv /tmp/s/. /tmp/d >/tmp/s/one', '', "cp: cannot overwrite directory '/tmp/d/./one' with non-directory '/tmp/s/./one'\n", 1)
+    check(t, 'cat /tmp/s/one', lines)
+    check(t, 'cat /tmp/d/sub/two', '2\n')
+    // A descriptor on an entry that is copied still refuses.
+    const refused = terminal().run(`${setup}; cp -rv /tmp/s/. /tmp/d >/tmp/s/sub/two`)
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+  })
+
   it('sees a descriptor a backup name put inside the tree', () => {
     const t = createTerminal({ x: 'x\n' }, { mount: '/repo', cwd: '/tmp', writable: '/tmp/' })
     const run = (command) => t.run(command)
