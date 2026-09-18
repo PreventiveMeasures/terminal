@@ -292,6 +292,24 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     check(t, 'cat /tmp/dest/src/one', '')
   })
 
+  it('leaves a destination file no source entry names alone', () => {
+    const t = terminal()
+    check(t, 'cp -r a/. /tmp/dest; printf EXTRA >/tmp/dest/extra')
+    // Nothing under `a` is named `extra`, so this copy neither reads nor writes
+    // it and there is no ordering to be unsure about: GNU's buffer meets no
+    // file of its own, and the lines land in `extra` when it flushes at exit.
+    const lines = t.run('cp -rv a/. /tmp/dest').stdout
+    assert.ok(lines.includes("'a/./one' -> '/tmp/dest/./one'"), lines)
+    check(t, 'cp -rv a/. /tmp/dest >/tmp/dest/extra')
+    check(t, 'cat /tmp/dest/extra', lines)
+    check(t, 'cat /tmp/dest/one', '1\n')
+    // A destination file a source entry does name is still refused: what a
+    // caller would read back there depends on when the buffer was flushed.
+    const refused = t.run('cp -rv a/. /tmp/dest >/tmp/dest/one')
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+    check(t, 'cat /tmp/dest/one', '')
+  })
+
   it('lets a refusal that needs no output answer before the buffering one', () => {
     const t = terminal()
     check(t, 'cp -r a /tmp/src')

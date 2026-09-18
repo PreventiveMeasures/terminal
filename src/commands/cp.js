@@ -228,30 +228,31 @@ function sameFile(source, destination, fs) {
   return identity !== undefined && identity === fs.fileIdentity(destination)
 }
 
-// GNU buffers verbose stdout; buffer fills and error() flushes can change
-// a later copy when that descriptor points to a source or destination.
+// GNU buffers verbose stdout; buffer fills and error() flushes can change a
+// later copy when that descriptor points to a file this copy reads or writes.
+// What a copy touches is each source file and the same name under the
+// destination, so a file already in the destination that no source entry names
+// is untouched and its descriptor is nobody's business here.
 function outputOverlaps(copies, ctx, recursive) {
   const output = ctx.outputFds[1]
   if (typeof output !== 'object') return false
-  return copies.some((paths) => paths.some((name) => {
-    const found = lookup(ctx.cwd, name, ctx.fs)
+  // A name is not an inode: the overlay can hold one inode under two names,
+  // and a `sed -i` backup can put the descriptor's file anywhere at all.
+  const holds = (path) => output.identity === undefined ? output.path === path : output.identity === ctx.fs.fileIdentity?.(path)
+  return copies.some(([source, destination]) => {
+    const found = lookup(ctx.cwd, source, ctx.fs)
     if (found.error) return false
-    // A recursive copy reads and writes every name below these two, so a
-    // descriptor anywhere under one of them is the same overlap a named file
-    // is — by name, and by inode as well: the overlay can hold one inode under
-    // two names, and a `sed -i` backup can put a descriptor's file inside a
-    // tree it does not lexically belong to.
-    if (ctx.fs.isDir(found.path)) {
-      if (!recursive) return false
-      if (typeof output.path === 'string' && output.path.startsWith(found.path === '/' ? '/' : found.path + '/')) return true
-      if (output.identity === undefined) return false
-      for (const path of ctx.fs.walkFiles(found.path)) {
-        if (ctx.fs.fileIdentity?.(path) === output.identity) return true
-      }
-      return false
+    const into = resolve(ctx.cwd, destination)
+    if (!ctx.fs.isDir(found.path)) return holds(found.path) || holds(into)
+    if (!recursive) return false
+    // Every file below the source is read, and written to the name it keeps
+    // below the destination.
+    const root = found.path === '/' ? 0 : found.path.length
+    for (const path of ctx.fs.walkFiles(found.path)) {
+      if (holds(path) || holds(into + path.slice(root))) return true
     }
-    return output.identity === undefined ? output.path === found.path : output.identity === ctx.fs.fileIdentity?.(found.path)
-  }))
+    return false
+  })
 }
 
 function isSpecialFile(name, cwd) {
