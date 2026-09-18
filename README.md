@@ -132,8 +132,8 @@ not.
 rather than a guess per entry: every entry is the session user's alone
 (`-rw-------` and `drwx------`) and is dated to the moment the terminal was
 created, a time its forks carry with them. Link counts, directory sizes and
-the `total` line are what ext4 would report for the same tree, `-h` rounds
-sizes as `du -h` does, and a note on the run says these are defaults.
+the `total` line are what ext4 would report for the same tree, and `-h`
+rounds sizes as `du -h` does.
 
 `du -b` measures UTF-8 content bytes recursively, including hidden files;
 `du -bs src` reports a directory total. `--apparent-size` (also accepted as the

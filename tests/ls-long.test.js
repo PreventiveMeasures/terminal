@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
-const NOTE = "ls: permissions, ownership and times in a long listing are this terminal's defaults: every entry is the session user's alone, and dated to when the terminal was created."
 const HIDDEN_NOTE = 'ls: omitted 1 hidden entry: "/.hidden". Hidden entries are included with -a.'
 const FILES = { 'README.md': 'hello world\n', 'src/app.js': 'x\n', 'src/lib/util.js': 'y\n', '.hidden': 'h\n', big: '0'.repeat(1500), empty: '' }
 const MADE = Date.UTC(2026, 8, 18, 5, 52)
@@ -20,11 +19,11 @@ const made = (sources = FILES, opts = {}, now = MADE) => at(now, () => {
   return t
 })
 const run = (t, line, now = MADE) => at(now, () => t.run(line))
-const expected = (stdout, notes = [NOTE], extra = {}) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [], notes, ...extra })
+const expected = (stdout, notes = [], extra = {}) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', unsupported: [], notes, ...extra })
 const lines = (...rows) => rows.join('\n') + '\n'
 
 describe('ls -l lists what the filesystem does not keep as this terminal’s defaults', () => {
-  it('lists a directory with its total, one row per entry, and says the fields are defaults', () => {
+  it('lists a directory with its total and one row per entry', () => {
     assert.deepEqual(run(made(), 'ls -la'), expected(lines(
       'total 24',
       'drwx------ 3 user user 4096 Sep 18 05:52 .',
@@ -77,7 +76,7 @@ describe('ls -l lists what the filesystem does not keep as this terminal’s def
       'total 8',
       '-rw------- 1 user user    2 Sep 18 05:52 app.js',
       'drwx------ 2 user user 4096 Sep 18 05:52 lib',
-    ), [NOTE], { stderr: "ls: cannot access 'missing': No such file or directory\n", exitCode: 2 }))
+    ), [], { stderr: "ls: cannot access 'missing': No such file or directory\n", exitCode: 2 }))
   })
 
   it('-h rounds sizes and the total as du -h does', () => {
@@ -87,7 +86,7 @@ describe('ls -l lists what the filesystem does not keep as this terminal’s def
       '-rw------- 1 user user 1.5K Sep 18 05:52 big',
       '-rw------- 1 user user    0 Sep 18 05:52 empty',
       'drwx------ 3 user user 4.0K Sep 18 05:52 src',
-    ), [HIDDEN_NOTE, NOTE]))
+    ), [HIDDEN_NOTE]))
   })
 
   it('-h without -l changes nothing', () => {
@@ -96,7 +95,7 @@ describe('ls -l lists what the filesystem does not keep as this terminal’s def
 
   it('an empty directory is a total of nothing', () => {
     const t = made({}, { mount: '/repo', writable: '/tmp/' })
-    assert.deepEqual(run(t, 'ls -l /tmp'), expected('total 0\n', [NOTE], { cwd: '/repo' }))
+    assert.deepEqual(run(t, 'ls -l /tmp'), expected('total 0\n', [], { cwd: '/repo' }))
   })
 
   it('a block size from the environment is refused rather than applied', () => {
@@ -106,9 +105,6 @@ describe('ls -l lists what the filesystem does not keep as this terminal’s def
     }))
   })
 
-  it('a listing that printed nothing carries no note', () => {
-    assert.deepEqual(run(made(), 'ls -l missing'), expected('', [], { stderr: "ls: cannot access 'missing': No such file or directory\n", exitCode: 2 }))
-  })
 })
 
 describe('ls -l ownership and time', () => {

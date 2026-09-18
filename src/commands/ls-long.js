@@ -4,8 +4,7 @@
 // entry is the session user's alone (`-rw-------`, `drwx------`) and is dated
 // to the moment the terminal was created, a time its forks carry with them.
 // Link counts, directory sizes and the `total` line are what ext4 would say of
-// the same tree, so the listing reads as one taken from a disk. The run's
-// notes say these are defaults, since nothing in the listing itself can.
+// the same tree, so the listing reads as one taken from a disk.
 
 import { UnsupportedError } from '../unsupported.js'
 import { encodeUtf8 } from '../util.js'
@@ -19,7 +18,6 @@ const BLOCK_UNITS = BLOCK / 512
 // What GNU ls calls recent, and so dates to the minute rather than the year:
 // within the past half of an average Gregorian year, and not in the future.
 const HALF_YEAR = 31556952 * 1000 / 2
-const NOTE = "ls: permissions, ownership and times in a long listing are this terminal's defaults: every entry is the session user's alone, and dated to when the terminal was created."
 
 export function longFormat(ctx, human) {
   // A block size from the environment would change the size column and the
@@ -35,12 +33,10 @@ export function longFormat(ctx, human) {
   const time = formatDate(new Date(mtime), recent ? '%b %e %H:%M' : '%b %e  %Y', ctx.vars.has('TZ'))
   const size = (bytes) => scale ? duSize(BigInt(bytes), scale) : String(bytes)
   const width = (strings) => Math.max(0, ...strings.map((s) => s.length))
-  let used = false
   return {
     // Entries carry a name to print, an absolute path and whether they are a
     // directory; a directory listing also gets its `total` line first.
     lines(entries, listing) {
-      used = true
       const rows = entries.map(({ name, abs, dir }) => {
         const bytes = dir ? BLOCK : ctx.fs.fileSize(abs) ?? encodeUtf8(ctx.fs.readFile(abs)).length
         const units = dir ? BLOCK_UNITS : Math.ceil(bytes / BLOCK) * BLOCK_UNITS
@@ -54,6 +50,5 @@ export function longFormat(ctx, human) {
       }
       return lines
     },
-    note() { if (used) ctx.notes.add(NOTE) },
   }
 }
