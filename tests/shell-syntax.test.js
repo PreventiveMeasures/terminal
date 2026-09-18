@@ -111,6 +111,16 @@ describe('shell syntax — parameters', () => {
       assert.deepEqual([refused.stdout, refused.stderr, refused.exitCode], ['', `error: shell parameter ${name} is not supported\n`, 1], line)
       assert.deepEqual(refused.unsupported, [{ kind: 'feature', command: null, detail: '$' + name, message: `shell parameter ${name} is not supported` }], line)
     }
+    // What the session itself said about such a name is known, and answered:
+    // an assignment where bash allows one, and an unset either way.
+    for (const [line, stdout] of [
+      ['unset PATH; echo [$PATH] [${PATH:-x}]', '[] [x]\n'],
+      ['SHELL=/bin/sh; echo [$SHELL] [${SHELL:-x}]', '[/bin/sh] [/bin/sh]\n'],
+      ['HOSTNAME=box; [[ -v HOSTNAME ]] && echo set; unset HOSTNAME; [[ -v HOSTNAME ]] || echo unset', 'set\nunset\n'],
+    ]) {
+      const known = createTerminal(SOURCES).run(line)
+      assert.deepEqual([known.stdout, known.stderr, known.exitCode, known.unsupported], [stdout, '', 0, []], line)
+    }
   })
 
   it('`$$`, `$!`, `$0`, `$-` and `$_` are refused, not answered with their own text', () => {

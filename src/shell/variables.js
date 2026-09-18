@@ -8,10 +8,18 @@ const SHELL_STATE = new Set(['PPID', 'UID', 'EUID', 'BASHPID', 'BASH_SUBSHELL', 
 // Presence is separate from value: defaults and -v must not treat an empty
 // binding as unset or diagnose an ordinary missing variable while probing it.
 export function probeParameter(name, ctx) {
-  if (PROCESS_PARAMS.has(name) || UNMODELED_VARIABLES.has(name) || SHELL_STATE.has(name)) throw refused(name)
-  return parameterValue(name, ctx) ?? { value: '', set: false }
+  if (PROCESS_PARAMS.has(name)) throw refused(name)
+  const found = parameterValue(name, ctx)
+  if (found) return found
+  if (unknown(name)) throw refused(name)
+  return { value: '', set: false }
 }
 
+// A name the shell knows — assigned here, or unset here on purpose — is
+// answered from that knowledge, whatever bash would have had in it. A name
+// bash sets itself, or one whose value would change how this shell runs, is
+// refused when nothing here has said what it is.
+const unknown = (name) => UNMODELED_VARIABLES.has(name) || SHELL_STATE.has(name)
 const refused = (name) => new UnsupportedError('feature', `$${name}`, `shell parameter ${name} is not supported`)
 
 function parameterValue(name, ctx) {
@@ -37,12 +45,12 @@ export function lookupParameter(name, ctx) {
   if (PROCESS_PARAMS.has(name)) {
     throw new UnsupportedError('feature', `$${name}`, `shell parameter ${name} is not supported (this terminal runs no process)`)
   }
+  const found = parameterValue(name, ctx)
+  if (found) return found
   // What bash itself would have answered — a uid, a path, a random number —
   // has no honest substitute either, and a probe of the same name already
   // refuses: an empty value here would be a wrong one wearing a warning.
-  if (UNMODELED_VARIABLES.has(name) || SHELL_STATE.has(name)) throw refused(name)
-  const found = parameterValue(name, ctx)
-  if (found) return found
+  if (unknown(name)) throw refused(name)
   report(ctx, `$${name}`, `warning: $${name} is unset (this shell has no environment variables; only \`for\` bindings and \`NAME=value\` assignments)`)
   return { value: '' }
 }
