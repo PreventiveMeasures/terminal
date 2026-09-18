@@ -79,10 +79,13 @@ describe('fork — a child and its parent go their own way', () => {
 
   it('an assignment after the fork does not cross, in either direction', () => {
     const t = terminal()
-    check(t, 'FOO=before')
+    check(t, 'FOO=before; export SHIPPED=before')
     const child = t.fork()
-    check(t, 'FOO=parent; ONLY_PARENT=p')
-    check(child, 'FOO=child; ONLY_CHILD=c')
+    check(child, 'echo $FOO $SHIPPED', 'before before\n')
+    // There is no environment to export to here, so an exported name is a
+    // variable like any other: copied at the fork, each terminal's own after it.
+    check(t, 'FOO=parent; export ONLY_PARENT=p')
+    check(child, 'FOO=child; export ONLY_CHILD=c')
     check(t, 'echo $FOO $ONLY_PARENT', 'parent p\n')
     check(child, 'echo $FOO $ONLY_CHILD', 'child c\n')
     for (const [t2, name] of [[t, 'ONLY_CHILD'], [child, 'ONLY_PARENT']]) {
