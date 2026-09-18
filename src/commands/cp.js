@@ -258,12 +258,12 @@ function outputOverlaps(copies, ctx, { recursive, noClobber }) {
       const root = found.path === '/' ? 0 : found.path.length
       for (const path of ctx.fs.walkFiles(found.path)) {
         const to = into + path.slice(root)
-        if (refusedBeforeWriting(path, lookup(ctx.cwd, to, ctx.fs), ctx, noClobber)) continue
+        if (refusedBeforeWriting(path, to, lookup(ctx.cwd, to, ctx.fs), ctx, noClobber)) continue
         if (holds(path) || holds(to)) return true
       }
       continue
     }
-    if (copied.has(into) || !copiesFile(found.path, destination, ctx, noClobber)) continue
+    if (copied.has(into) || !copiesFile(found.path, into, destination, ctx, noClobber)) continue
     copied.add(into)
     if (holds(found.path) || holds(into)) return true
   }
@@ -275,17 +275,21 @@ function outputOverlaps(copies, ctx, { recursive, noClobber }) {
 // with it are GNU's own, whatever the descriptor happens to point at. These are
 // the refusals `copyFile` reaches before the write, in its order, and they are
 // the same ones for an entry a walk reaches as for an operand.
-function refusedBeforeWriting(source, dest, ctx, noClobber) {
+function refusedBeforeWriting(source, to, dest, ctx, noClobber) {
   if (dest.error && dest.error !== 'No such file or directory') return true
   if (noClobber && dest.path !== null) return true
-  return sameFile(source, dest.path, ctx.fs) || ctx.fs.isDir(dest.path)
+  if (sameFile(source, dest.path, ctx.fs) || ctx.fs.isDir(dest.path)) return true
+  // A destination outside the overlay is refused by the filesystem before the
+  // source is opened, so that copy reads nothing either. The line it announced
+  // on the way is GNU's own, and lands wherever it was pointed.
+  return !ctx.writable || !inOverlay(to)
 }
 
 // An operand answers for its own missing components as well; an entry below it
 // does not, since the copy makes that entry's parents on the way down.
-function copiesFile(source, destination, ctx, noClobber) {
+function copiesFile(source, to, destination, ctx, noClobber) {
   const dest = lookup(ctx.cwd, destination, ctx.fs)
-  return !refusedBeforeWriting(source, dest, ctx, noClobber) && !creationError(ctx.cwd, destination, ctx.fs, dest)
+  return !refusedBeforeWriting(source, to, dest, ctx, noClobber) && !creationError(ctx.cwd, destination, ctx.fs, dest)
 }
 
 // The refusals `copyDirectory` reaches before it lists anything, in its order.
@@ -298,7 +302,10 @@ function copiesDirectory(absolute, destination, ctx) {
   if (dest.path === null && creationError(ctx.cwd, named, ctx.fs)) return false
   if (dest.path !== null && !ctx.fs.isDir(dest.path)) return false
   const target = resolve(ctx.cwd, named)
-  return target !== absolute && !target.startsWith(absolute === '/' ? '/' : absolute + '/')
+  if (target === absolute || target.startsWith(absolute === '/' ? '/' : absolute + '/')) return false
+  // Nothing below a destination outside the overlay is written either, whether
+  // the walk is stopped at its making or every file in it is refused in turn.
+  return Boolean(ctx.writable) && inOverlay(target)
 }
 
 function isSpecialFile(name, cwd) {

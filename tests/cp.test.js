@@ -161,6 +161,21 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
     assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
   })
 
+  it('leaves a destination it cannot write out of the overlap', () => {
+    const t = terminal()
+    check(t, 'printf A >/tmp/a')
+    // `/repo` is read-only, so the filesystem refuses before the source is
+    // read. GNU announces first, so the line lands in the source it names and
+    // the failure follows it.
+    check(t, 'cp -v /tmp/a /repo/new >/tmp/a', '', "cp: cannot create regular file '/repo/new': Read-only file system\n", 1)
+    check(t, 'cat /tmp/a', "'/tmp/a' -> '/repo/new'\n")
+    // A destination it can write still refuses, since the source is read then.
+    check(t, 'printf A >/tmp/a')
+    const refused = t.run('cp -v /tmp/a /tmp/b >/tmp/a')
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+    check(t, 'test -e /tmp/b', '', '', 1)
+  })
+
   it('quotes unusual filenames consistently with other file commands', () => {
     const name = 'a\nspace \'quote'
     const t = createTerminal({ [name]: 'content' }, { mount: '/repo', cwd: '/repo', writable: '/tmp/' })
