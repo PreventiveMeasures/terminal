@@ -112,4 +112,6 @@ other.run('echo $TAG').unsupported  // [{ …, detail: '$TAG' }] — nothing of 
 other.cwd()                         // '/repo/src' — where it stands is `cwd`'s business, not `inherit`'s
 ```
 
-MIT
+## License
+
+[MIT](./LICENSE)
