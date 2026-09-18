@@ -315,26 +315,28 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     check(t, 'rg -n --hidden run node_modules', 'node_modules/pkg/bin/cli.js:1:run\n')
   })
 
-  it('cp copies what a link points at, which is what GNU copies without -d', () => {
+  it('cp reads through a link it is handed, which is what GNU does without -r', () => {
     const t = createTerminal(SOURCES, { mount: '/repo', writable: '/tmp/' })
     check(t, 'cp node_modules/.bin/cli /tmp/cli; cat /tmp/cli', 'run\n', { cwd: '/repo' })
-    // A link leading nowhere is one GNU cannot dereference either, and it
-    // fails that entry alone.
-    check(t, 'cp -r node_modules/.bin /tmp/bin; find /tmp -type f', '/tmp/bin/cli\n/tmp/cli\n', {
-      stderr: "cp: cannot stat 'node_modules/.bin/stale': No such file or directory\n", cwd: '/repo',
-    })
+    // A link leading nowhere is one GNU cannot read through either.
     check(t, 'cp node_modules/.bin/stale /tmp/stale', '', {
       stderr: "cp: cannot stat 'node_modules/.bin/stale': No such file or directory\n", exitCode: 1, cwd: '/repo',
     })
   })
 
-  it('cp refuses a link to a directory, before a copy that would find it writes anything', () => {
-    const t = createTerminal({ 'a/file': 'x\n', 'a/up': { type: 'link', target: '.' } }, { mount: '/repo', writable: '/tmp/' })
-    const refused = gap(t, 'cp -r a /tmp/copy', 'symbolic link to a directory', 'cp: copying a symbolic link to a directory is not supported: a/up\n')
+  it('cp refuses a link a recursive copy meets, before that copy writes anything', () => {
+    const sources = { 'a/file': 'x\n', 'a/link': { type: 'link', target: 'file' }, 'a/sub/deep': 'y\n', 'plain/f': 'z\n' }
+    const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    // `-r` keeps every link it meets as the link it is, and only `-L` reads
+    // through one. Nothing here can make a link, so writing the file it points
+    // at in its place would be a tree the copy was never asked for.
+    const refused = gap(t, 'cp -r a /tmp/copy', 'symbolic link', 'cp: copying a symbolic link is not supported: a/link (a recursive copy keeps the link, and nothing here makes one)\n')
     assert.equal(refused.stdout, '')
     check(t, 'ls /tmp', '', { cwd: '/repo' })
-    // Without -r it is the directory GNU declines to copy, which needs no link.
-    check(t, 'cp a/up /tmp/copy', '', { stderr: "cp: -r not specified; omitting directory 'a/up'\n", exitCode: 1, cwd: '/repo' })
+    gap(t, 'cp -r a/link /tmp/copy', 'symbolic link', 'cp: copying a symbolic link is not supported: a/link (a recursive copy keeps the link, and nothing here makes one)\n')
+    // A tree with no link in it is copied as ever.
+    check(t, 'cp -r plain /tmp/plain; find /tmp -type f', '/tmp/plain/f\n', { cwd: '/repo' })
+    check(t, 'cp -r a/sub /tmp/sub; find /tmp/sub -type f', '/tmp/sub/deep\n', { cwd: '/repo' })
   })
 
   it('diff names a link that is only on one side, and refuses only a walk that would cross one', () => {

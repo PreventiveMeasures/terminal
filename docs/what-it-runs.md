@@ -29,7 +29,11 @@ inside it; `-R` and `--recursive` spell the same flag, and `-v` announces a
 directory once, where it is made. A destination inside the source, a
 destination that is the source, and a directory over a file are refused with
 GNU's own diagnostics. Directories exist in the overlay only where `cp -r` puts
-them, since nothing else here makes one.
+them, since nothing else here makes one. A link is the one thing it cannot
+carry over: `-r` keeps every link it meets as the link it is, and the overlay
+holds files and directories alone, so such a copy is refused rather than
+written as the files those links point at. A link handed to `cp` without `-r`
+is read through, which is what GNU reads there too.
 
 `mkdir` makes them one at a time and `mkdir -p` makes a whole path, passing
 over what is already there and naming the component it stops at. `rm -r` takes

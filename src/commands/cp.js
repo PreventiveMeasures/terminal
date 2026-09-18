@@ -27,12 +27,13 @@ export function cp(_stdin, tokens, ctx) {
     noClobber, force: flags.has('f') || flags.has('force'), verbose, recursive,
     outputOverlap: verbose && outputOverlaps(copies, ctx, { recursive, noClobber }),
   }
-  // A link is copied as what it points at, which is GNU's own default, and a
-  // link leading to a directory would copy that whole tree — including, where
-  // it points above itself, the tree already being copied. That is the cyclic
-  // link GNU refuses by name and this does not model, so it is refused; and
-  // refused here, before a copy that would find it halfway makes anything.
-  if (recursive) for (const [source] of copies) refuseLinkedDirectory(source, ctx)
+  // A recursive copy follows no link in the source — `-r` keeps each one as
+  // the link it is, and only `-L` would read through it — and nothing here can
+  // make a link, since the overlay holds files and directories alone. So a
+  // link a recursive copy meets is refused rather than written as the file it
+  // points at: refused here, before the copy that would find it halfway has
+  // made anything.
+  if (recursive) for (const [source] of copies) refuseLinkedCopy(source, ctx)
   for (const [source, destination] of copies) {
     // Each copy finishes before the next operand is opened. Ancestor scopes
     // (such as xargs reading its arguments) still guard their own input.
@@ -72,15 +73,17 @@ function copyOperands({ positional, flags, order }, ctx) {
   return { target, directory, sources: explicit === undefined ? positional.slice(0, -1) : positional }
 }
 
-function refuseLinkedDirectory(source, ctx) {
+function refuseLinkedCopy(source, ctx) {
   const root = lookup(ctx.cwd, source, ctx.fs, { follow: false }).path
   if (root === null) return
   for (const entry of walkTree(ctx.fs, root)) {
-    if (entry.kind !== 'link' || !ctx.fs.isDir(lookup(ctx.cwd, entry.path, ctx.fs).path)) continue
+    if (entry.kind !== 'link') continue
     const named = entry.path === root ? source : source.replace(/\/+$/u, '') + '/' + relativeTo(root, entry.path)
-    throw new UnsupportedError('feature', 'symbolic link to a directory', `copying a symbolic link to a directory is not supported: ${named}`)
+    throw linkedCopy(named)
   }
 }
+
+const linkedCopy = (name) => new UnsupportedError('feature', 'symbolic link', `copying a symbolic link is not supported: ${name} (a recursive copy keeps the link, and nothing here makes one)`)
 
 // GNU names a copy after the last component of the source as it was typed,
 // rather than after the directory that spelling resolves to: `cp -r a/. d`
@@ -100,6 +103,10 @@ function copyFile(source, destination, state, top = null) {
   if (isSpecialFile(source, ctx.cwd) || isSpecialFile(destination, ctx.cwd)) throw new UnsupportedError('feature', 'special file', 'copying special files is not supported')
   const shownSource = quoteName(source, ctx)
   const shownTarget = quoteName(destination, ctx)
+  // Without `-r` a link operand is read through, which is GNU's default for
+  // one it is handed; with it, every link is the link itself to copy, and
+  // this filesystem has nowhere to put one.
+  if (state.recursive && ctx.fs.isLink?.(lookup(ctx.cwd, source, ctx.fs, { follow: false }).path)) throw linkedCopy(source)
   const found = lookupWithNote(ctx, 'cp', source)
   const fail = (message) => report(state, 'cp: ' + message + '\n', true)
   if (found.error) return fail(`cannot stat ${shownSource}: ${found.error}`)
@@ -307,12 +314,11 @@ function treeOverlaps(from, into, scan) {
 }
 
 // What a walk finds there: what is there now, and what an earlier operand will
-// have put there by the time this one runs. A link is copied to a name of its
-// own like anything else, so it is one of the names the scan has to account for.
+// have put there by the time this one runs. Files are all of it, since a walk
+// that meets a link copies nothing at all.
 function filesUnder(from, scan) {
   const prefix = from === '/' ? '/' : from + '/'
-  const entries = scan.ctx.fs.isDir(from) ? [...walkTree(scan.ctx.fs, from)] : []
-  const present = entries.filter((entry) => entry.kind !== 'dir').map((entry) => entry.path)
+  const present = scan.ctx.fs.isDir(from) ? [...scan.ctx.fs.walkFiles(from)] : []
   return new Set([...present, ...[...scan.made].filter((path) => path.startsWith(prefix))])
 }
 
