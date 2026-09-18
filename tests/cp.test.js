@@ -132,6 +132,50 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
     check(t, 'cat /tmp/out', '')
   })
 
+  it('leaves a copy that refuses before it writes to say so itself', () => {
+    const t = terminal()
+    check(t, 'printf old >/tmp/out')
+    // The name normalizes onto the descriptor's file, but `missing` is not
+    // there, so nothing is opened and the failure is the whole answer. GNU
+    // prints the line before it tries, and the line lands in `out`.
+    check(t, 'cp -v a /tmp/missing/../out >/tmp/out', '', "cp: cannot create regular file '/tmp/missing/../out': No such file or directory\n", 1)
+    check(t, 'cat /tmp/out', "'a' -> '/tmp/missing/../out'\n")
+    // The same file under both names refuses before the line, so GNU leaves
+    // the redirect's truncation standing.
+    check(t, 'cp -v /tmp/out /tmp/out >/tmp/out', '', "cp: '/tmp/out' and '/tmp/out' are the same file\n", 1)
+    check(t, 'cat /tmp/out', '')
+  })
+
+  it('leaves an operand a just-created name refuses out of the overlap', () => {
+    const t = terminal()
+    check(t, 'mkdir -p /tmp/one /tmp/two /tmp/d; printf ONE >/tmp/one/x; printf TWO >/tmp/two/x')
+    // The second operand lands on the name the first has just made, so it is
+    // refused before `/tmp/two/x` is opened and the descriptor on it meets
+    // nothing; GNU copies the first and leaves its line there.
+    check(t, 'cp -v /tmp/one/x /tmp/two/x /tmp/d >/tmp/two/x', '', "cp: will not overwrite just-created '/tmp/d/x' with '/tmp/two/x'\n", 1)
+    check(t, 'cat /tmp/two/x', "'/tmp/one/x' -> '/tmp/d/x'\n")
+    check(t, 'cat /tmp/d/x', 'ONE')
+    // The operand that is copied still refuses when the descriptor is its own
+    // source, since that is the file the line would be written into.
+    const refused = t.run('cp -v /tmp/one/x /tmp/two/x /tmp/d >/tmp/one/x')
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+  })
+
+  it('leaves a destination it cannot write out of the overlap', () => {
+    const t = terminal()
+    check(t, 'printf A >/tmp/a')
+    // `/repo` is read-only, so the filesystem refuses before the source is
+    // read. GNU announces first, so the line lands in the source it names and
+    // the failure follows it.
+    check(t, 'cp -v /tmp/a /repo/new >/tmp/a', '', "cp: cannot create regular file '/repo/new': Read-only file system\n", 1)
+    check(t, 'cat /tmp/a', "'/tmp/a' -> '/repo/new'\n")
+    // A destination it can write still refuses, since the source is read then.
+    check(t, 'printf A >/tmp/a')
+    const refused = t.run('cp -v /tmp/a /tmp/b >/tmp/a')
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+    check(t, 'test -e /tmp/b', '', '', 1)
+  })
+
   it('quotes unusual filenames consistently with other file commands', () => {
     const name = 'a\nspace \'quote'
     const t = createTerminal({ [name]: 'content' }, { mount: '/repo', cwd: '/repo', writable: '/tmp/' })
@@ -192,7 +236,7 @@ describe('cp reports ordinary path, operand, and read-only failures', () => {
 })
 
 describe('cp unsupported features and write guards retain diagnostics', () => {
-  for (const option of ['-r', '-R', '--recursive', '-a', '-p', '-i', '--parents', '--preserve', '--reflink', '--remove-destination']) {
+  for (const option of ['-a', '-p', '-i', '--parents', '--preserve', '--reflink', '--remove-destination']) {
     it(option, () => {
       const t = terminal()
       const r = t.run(`cp ${option} a /tmp/out 2>/dev/null | cat`)

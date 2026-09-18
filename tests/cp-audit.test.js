@@ -30,16 +30,30 @@ describe('cp does not invent a verbose-output buffering order', () => {
     }
   }
 
-  it('detects a later operand before the first verbose line changes its contents', () => {
+  it('detects a later operand that reads what the first verbose line changed', () => {
     const terminal = makeTerminal()
-    terminal.run('printf later >/tmp/later')
-    const result = terminal.run('cp -v a missing /tmp/later /tmp >>/tmp/later 2>/dev/null | cat')
+    terminal.run('printf later >/tmp/later; mkdir /tmp/into')
+    const result = terminal.run('cp -v a /tmp/later /tmp/into >>/tmp/later 2>/dev/null | cat')
     assert.equal(result.exitCode, 0)
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, '')
     assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['copy output buffering'])
     assert.deepEqual(terminal.run('cat /tmp/later'), expected('later'))
-    assert.deepEqual(terminal.run('test -e /tmp/a'), expected('', '', 1))
+    assert.deepEqual(terminal.run('test -e /tmp/into/a'), expected('', '', 1))
+  })
+
+  // Checked against GNU coreutils 9.4: `cp -v a missing d/later d >>d/later`
+  // copies `a`, appends the line to `later`, and reports both failures. The
+  // operand naming the descriptor is refused before it is opened, so nothing
+  // this command does meets the file the line goes to.
+  it('leaves a later operand that neither reads nor writes the descriptor alone', () => {
+    const terminal = makeTerminal()
+    terminal.run('printf later >/tmp/later')
+    const result = terminal.run('cp -v a missing /tmp/later /tmp >>/tmp/later 2>/dev/null')
+    assert.equal(result.exitCode, 1)
+    assert.deepEqual(result.unsupported, [])
+    assert.deepEqual(terminal.run('cat /tmp/later'), expected("later'a' -> '/tmp/a'\n"))
+    assert.deepEqual(terminal.run('cat /tmp/a'), expected('alpha'))
   })
 
   it('detects an open stdout inode subsequently moved to a backup path', () => {
