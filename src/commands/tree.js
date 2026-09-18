@@ -42,12 +42,18 @@ function walk(fs, root, out, flags, limit, count, omitted, hidden) {
   while (stack.length) {
     const frame = stack.at(-1)
     if (frame.i >= frame.items.length) { stack.pop(); continue }
-    const { n, isDir } = frame.items[frame.i++]
-    if ([...n].some((c) => c.codePointAt(0) < 32 || c.codePointAt(0) === 127 || c === '\\')) {
+    const { n, isDir, target } = frame.items[frame.i++]
+    if ([...(n + (target ?? ''))].some((c) => c.codePointAt(0) < 32 || c.codePointAt(0) === 127 || c === '\\')) {
       return unsupported('feature', 'tree', 'filename escaping', 'tree: listing names requiring escaping is not supported')
     }
+    // `-F` marks each kind tree lists with its own character, and which one a
+    // link earns is not modelled: tree's own list of indicators leaves links
+    // out, and marking one either way would be a guess about its output.
+    if (target !== undefined && flags.has('F')) {
+      return unsupported('option', 'tree', '-F with a symbolic link', 'tree: -F over a symbolic link is not supported')
+    }
     const last = frame.i === frame.items.length
-    out.push(frame.prefix + (last ? '└── ' : '├── ') + n + (isDir && flags.has('F') ? '/' : ''))
+    out.push(frame.prefix + (last ? '└── ' : '├── ') + n + (isDir && flags.has('F') ? '/' : '') + (target === undefined ? '' : ' -> ' + target))
     count[isDir ? 'dirs' : 'files']++
     if (!isDir) continue
     const dir = joinPath(frame.dir, n)
@@ -66,8 +72,14 @@ function walk(fs, root, out, flags, limit, count, omitted, hidden) {
 // both the tree and the totals under it. Files excluded by -d are left out for
 // a different reason, and are not this note's to claim.
 function itemsFor(fs, dir, flags, hidden = null) {
-  const { dirs, files } = fs.listDir(dir)
-  if (hidden && !flags.has('a')) hidden.collect(dir, flags.has('d') ? dirs : [...dirs, ...files])
-  return [...dirs.map((n) => ({ n, isDir: true })), ...(flags.has('d') ? [] : files.map((n) => ({ n, isDir: false })))]
+  const { dirs, files, links } = fs.listDir(dir)
+  if (hidden && !flags.has('a')) hidden.collect(dir, flags.has('d') ? dirs : [...dirs, ...files, ...links])
+  // A link is named beside what it points at, and counted among the files:
+  // tree crosses one no more than the walk below it does.
+  const listed = flags.has('d') ? [] : [
+    ...files.map((n) => ({ n, isDir: false })),
+    ...links.map((n) => ({ n, isDir: false, target: fs.readLink(joinPath(dir, n)) })),
+  ]
+  return [...dirs.map((n) => ({ n, isDir: true })), ...listed]
     .filter(({ n }) => flags.has('a') || !n.startsWith('.')).sort((a, b) => compareNames(a.n, b.n))
 }

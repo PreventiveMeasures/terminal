@@ -147,7 +147,7 @@ describe('mounted paths participate in shell and custom command I/O', () => {
     check(t, 'inspect', JSON.stringify({
       cwd: '/workspace/src', relative: '/workspace/README.md', absolute: '/README.md',
       file: 'readme\n', mounted: true, unmounted: false, directory: true,
-      files: ['/workspace/src/a.js', '/workspace/src/b.js'], listing: { dirs: [], files: ['a.js', 'b.js'] },
+      files: ['/workspace/src/a.js', '/workspace/src/b.js'], listing: { dirs: [], files: ['a.js', 'b.js'], links: [] },
     }))
     check(t, 'read a.js /workspace/README.md', 'alpha\nreadme\n')
   })

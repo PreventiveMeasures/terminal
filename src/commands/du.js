@@ -15,7 +15,10 @@ export function du(_stdin, tokens, ctx) {
   if (options.stderr) appendOutput(state.result, ctx.flushOutput(emptyOutput(options.stderr)))
   for (const operand of options.operands) {
     const name = operand.length > 2 ? operand.replace(/\/+$/u, '/') : operand
-    const found = lookupWithNote(ctx, 'du', name)
+    // du measures the names it is given, as `-P` has it by default; `-D` and
+    // `-L` each ask about what an operand points at instead.
+    const follow = options.flags.has('L') || options.flags.has('D')
+    const found = lookupWithNote(ctx, 'du', name, { follow })
     if (found.error) {
       appendOutput(state.result, ctx.flushOutput(err(`du: cannot access ${quoteName(name, ctx)}: ${found.error}`)))
       state.failed = true
@@ -53,6 +56,12 @@ function measure(path, name, state) {
     }
     const isDir = ctx.fs.isDir(item.path)
     if (isDir && ctx.fs.isFile(item.path)) throw new UnsupportedError('feature', 'ambiguous file type', `path is both a file and a directory: ${item.name}`)
+    // A walk measures the links it finds, which is what du does without `-L`.
+    // What `-L` would measure instead — the tree each one leads to, and the
+    // cycle a link above itself makes of that walk — is not modelled.
+    if (!isDir && options.flags.has('L') && ctx.fs.isLink?.(item.path)) {
+      throw new UnsupportedError('option', 'dereference', `following symbolic links is not supported: ${item.name}`)
+    }
     const identity = isDir ? item.path : ctx.fs.fileIdentity?.(item.path) ?? item.path
     if (!options.flags.has('l') && state.seen.has(identity)) continue
     state.seen.add(identity)
@@ -62,7 +71,7 @@ function measure(path, name, state) {
       item.total = own
       stack.push(item)
       const entries = ctx.fs.listDir(item.path)
-      const children = [...new Set([...entries.dirs, ...entries.files])].sort(compareNames)
+      const children = [...new Set([...entries.dirs, ...entries.files, ...entries.links])].sort(compareNames)
       const prefix = item.name.endsWith('/') ? item.name : item.name + '/'
       for (let i = children.length - 1; i >= 0; i--) {
         stack.push({ path: joinPath(item.path, children[i]), name: prefix + children[i], depth: item.depth + 1, parent: item })

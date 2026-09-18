@@ -15,6 +15,9 @@ import { formatDate } from './extra.js'
 // takes one block, an empty file none, and `total` is the sum in KiB.
 const BLOCK = 4096
 const BLOCK_UNITS = BLOCK / 512
+// ext4 keeps a link target of under 60 bytes in the inode's own block list,
+// where it occupies no block at all: the fast symlink.
+const FAST_LINK = 60
 // What GNU ls calls recent, and so dates to the minute rather than the year:
 // within the past half of an average Gregorian year, and not in the future.
 const HALF_YEAR = 31556952 * 1000 / 2
@@ -34,16 +37,22 @@ export function longFormat(ctx, human) {
   const size = (bytes) => scale ? duSize(BigInt(bytes), scale) : String(bytes)
   const width = (strings) => Math.max(0, ...strings.map((s) => s.length))
   return {
-    // Entries carry a name to print, an absolute path and whether they are a
-    // directory; a directory listing also gets its `total` line first.
+    // Entries carry a name to print, an absolute path and what kind of entry
+    // they are — a link also carries what it points at, which the row names
+    // after it; a directory listing gets its `total` line first.
     lines(entries, listing) {
-      const rows = entries.map(({ name, abs, dir }) => {
+      const rows = entries.map(({ name, abs, kind, target }) => {
+        const dir = kind === 'dir'
         const bytes = dir ? BLOCK : ctx.fs.fileSize(abs) ?? encodeUtf8(ctx.fs.readFile(abs)).length
-        const units = dir ? BLOCK_UNITS : Math.ceil(bytes / BLOCK) * BLOCK_UNITS
-        return { name, dir, units, links: String(dir ? 2 + ctx.fs.listDir(abs).dirs.length : 1), size: size(bytes) }
+        // A link's own mode is the one every symbolic link on Linux carries,
+        // and a target ext4 can hold in the inode takes no block of its own.
+        const mode = dir ? 'drwx------' : kind === 'link' ? 'lrwxrwxrwx' : '-rw-------'
+        const units = dir ? BLOCK_UNITS : kind === 'link' && bytes < FAST_LINK ? 0 : Math.ceil(bytes / BLOCK) * BLOCK_UNITS
+        const shown = kind === 'link' ? `${name} -> ${target}` : name
+        return { name: shown, mode, units, links: String(dir ? 2 + ctx.fs.listDir(abs).dirs.length : 1), size: size(bytes) }
       })
       const linkWidth = width(rows.map((row) => row.links)), sizeWidth = width(rows.map((row) => row.size))
-      const lines = rows.map((row) => `${row.dir ? 'drwx------' : '-rw-------'} ${row.links.padStart(linkWidth)} ${user} ${user} ${row.size.padStart(sizeWidth)} ${time} ${row.name}`)
+      const lines = rows.map((row) => `${row.mode} ${row.links.padStart(linkWidth)} ${user} ${user} ${row.size.padStart(sizeWidth)} ${time} ${row.name}`)
       if (listing) {
         const units = rows.reduce((sum, row) => sum + row.units, 0)
         lines.unshift('total ' + (scale ? duSize(BigInt(units) * 512n, scale) : String(units / 2)))

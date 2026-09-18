@@ -16,7 +16,7 @@ export function writableFs(base) {
   const dirs = new Set(['/tmp'])
   let observer
   const root = base.listDir('/')
-  const rootEntries = { dirs: [...root.dirs, 'tmp'].sort(compareNames), files: root.files }
+  const rootEntries = { dirs: [...root.dirs, 'tmp'].sort(compareNames), files: root.files, links: root.links ?? [] }
   const listings = overlayListings(dirs, files)
   const reshaped = listings.reshaped
   const put = (path, inode) => {
@@ -31,6 +31,9 @@ export function writableFs(base) {
     readIdentity: (inode) => { observer?.read(inode); return decodeUtf8(inode.bytes) },
     isFile: (path) => files.has(path) || base.isFile(path),
     isDir: (path) => dirs.has(path) || base.isDir(path),
+    // Nothing here makes a link, so the sources own every one there is.
+    isLink: (path) => base.isLink?.(path) === true,
+    readLink: (path) => base.readLink?.(path),
     readFile: (path) => {
       const inode = files.get(path)
       observer?.read(inode ?? path)
@@ -149,7 +152,7 @@ function overlayListings(dirs, files) {
     of(path) {
       const cached = cache.get(path)
       if (cached) return cached
-      const entries = { dirs: children(dirs, path + '/'), files: children(files.keys(), path + '/') }
+      const entries = { dirs: children(dirs, path + '/'), files: children(files.keys(), path + '/'), links: [] }
       cache.set(path, entries)
       return entries
     },

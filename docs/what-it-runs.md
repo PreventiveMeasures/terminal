@@ -49,7 +49,10 @@ rather than a guess per entry: every entry is the session user's alone
 (`-rw-------` and `drwx------`) and is dated to the moment the terminal was
 created, a time its forks carry with them. Link counts, directory sizes and
 the `total` line are what ext4 would report for the same tree, and `-h`
-rounds sizes as `du -h` does.
+rounds sizes as `du -h` does. A symbolic link — one a source entry declares,
+since nothing here makes one — is the row the model has nothing to guess at:
+the `lrwxrwxrwx` every link on Linux carries, the length of the path it holds
+as its size, and that path named after it.
 
 `du -b` measures UTF-8 content bytes recursively, including hidden files;
 `du -bs src` reports a directory total. `--apparent-size` (also accepted as the

@@ -171,7 +171,7 @@ describe('run().unsupported — what counts as a gap', () => {
       ['sort -k2g f.txt', 'sort -k2Z f.txt'],           // key modifier
       ['sort -k1.2 f.txt', 'sort -k1.2.3 f.txt'],       // character offset
       ['sort -k1.2 f.txt', 'sort -k1,2,3.4 f.txt'],     // ...vs three parts
-      ['find . -type l', 'find . -type q'],             // file type
+      ['find . -type p', 'find . -type q'],             // file type
       ['nl -b p1 f.txt', 'nl -b x f.txt'],              // numbering style
     ]) {
       assert.equal(gaps(gap).length, 1, `${gap} should be a gap`)
@@ -185,12 +185,14 @@ describe('run().unsupported — what counts as a gap', () => {
   })
 
   it('classifies every file type GNU has and this FS cannot represent', () => {
-    // A virtual FS of path -> content has no symlinks, devices, FIFOs,
-    // or sockets to match against, so each is a gap rather than a typo.
-    for (const ty of ['l', 'b', 'c', 'p', 's']) {
+    // A virtual FS of path -> content has no devices, FIFOs or sockets to
+    // match against, so each is a gap rather than a typo. Files, directories
+    // and the links a source map can declare are all answerable, and a tree
+    // holding none of one kind answers that nothing is of it.
+    for (const ty of ['b', 'c', 'p', 's']) {
       assert.deepEqual(details(`find . -type ${ty}`), [`-type ${ty}`], ty)
     }
-    for (const ty of ['f', 'd']) {
+    for (const ty of ['f', 'd', 'l']) {
       assert.equal(term().run(`find . -type ${ty}`).exitCode, 0, ty)
     }
   })

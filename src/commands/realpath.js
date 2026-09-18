@@ -1,27 +1,26 @@
 import { parseArgs } from '../args.js'
-import { dirname, joinPath, lookup, resolve } from '../fs.js'
+import { dirname, joinPath, lookup, resolve, walkPath } from '../fs.js'
 import { missingPathNote } from '../notes.js'
 import { quoteShell } from './quote-name.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { err, ok } from '../util.js'
 
+// Every link on the way is replaced by what it names, unless `-s` asked for
+// the path as it was written. `-m` needs none of the path to be there, so
+// whatever the walk could not reach — a name that is not there, a component
+// that is not a directory, a link that never stops leading to another — is
+// kept as it was spelled. `-e` needs all of it; and the default mode allows
+// the last component alone to be missing, which is where a link pointing at
+// nothing leads.
 function canonicalize(ctx, path, mode, strip) {
-  const missing = { error: 'No such file or directory' }
-  const notDir = { error: 'Not a directory' }
-  if (path === '' || path.includes('\0')) return missing
-  if (mode === 'm') return { path: resolve(ctx.cwd, path) }
+  if (path === '' || path.includes('\0')) return { error: 'No such file or directory' }
   if (strip && mode === 'E') return strippedPath(ctx, path)
-  const parts = (path.startsWith('/') ? path : ctx.cwd + '/' + path).split('/').filter(Boolean)
-  let at = '/'
-  for (const part of parts) {
-    if (!ctx.fs.isDir(at)) return ctx.fs.isFile(at) ? notDir : missing
-    if (part === '..') at = dirname(at)
-    else if (part !== '.') at = joinPath(at, part)
-  }
-  const exists = ctx.fs.isDir(at) || ctx.fs.isFile(at)
-  if (!exists && mode === 'e') return missing
-  if (exists && path.endsWith('/') && !ctx.fs.isDir(at)) return notDir
-  return { path: at }
+  const found = walkPath(ctx.cwd, path, ctx.fs, { follow: !strip })
+  if (mode === 'm') return { path: found.rest.length ? resolve(found.path, found.rest.join('/')) : found.path }
+  if (found.error === 'No such file or directory' && found.rest.length === 0 && mode !== 'e') return { path: found.path }
+  if (found.error) return { error: found.error }
+  if (path.endsWith('/') && !ctx.fs.isDir(found.path)) return { error: 'Not a directory' }
+  return { path: found.path }
 }
 
 // GNU -s defers ordinary-parent checks to the final lookup. In default mode
@@ -78,7 +77,8 @@ function relativeOptions(ctx, values, mode, strip) {
 }
 
 export function realpath(_stdin, tokens, ctx) {
-  // There are no symlinks in this filesystem; -L and -P produce the same paths.
+  // -L and -P name the same walk here: this resolution is the physical one,
+  // and no link is left in the path either of them prints.
   const { flags, values, positional, order } = parseArgs(tokens, {
     short: ['e', 'm', 'L', 'P', 's', 'q', 'z'],
     long: ['canonicalize-existing', 'canonicalize-missing', 'logical', 'physical', 'strip', 'no-symlinks', 'quiet', 'zero'],

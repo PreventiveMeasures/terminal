@@ -48,13 +48,16 @@ export function statFormat(format, escapes) {
 export function formatStat(parts, name, path, fs) {
   const isDir = fs.isDir(path)
   if (isDir && fs.isFile(path)) throw new UnsupportedError('feature', 'ambiguous file type', `path is both a file and a directory: ${name}`)
+  // A link's own size is the length of the path it holds, which is what it
+  // takes on disk; `stat` reaches one only where it was not asked to follow.
+  const isLink = !isDir && fs.isLink?.(path) === true
   let size
   const chunks = parts.map((part) => {
     if (!part.field) return part
     if (part.field === 'n') return stringField(name, part)
     if (part.field === 's' && isDir) throw new UnsupportedError('feature', 'directory byte size', `directory byte sizes are not available: ${name}`)
     size ??= isDir ? 0 : fs.fileSize(path)
-    if (part.field === 'F') return stringField(isDir ? 'directory' : size === 0 ? 'regular empty file' : 'regular file', part)
+    if (part.field === 'F') return stringField(isDir ? 'directory' : isLink ? 'symbolic link' : size === 0 ? 'regular empty file' : 'regular file', part)
     return encodeUtf8(printfIntegerField(BigInt(size), part))
   })
   const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))

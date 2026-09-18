@@ -130,8 +130,14 @@ function completePath(word, ctx, dirsOnly = false) {
   const path = home ? homeOf(ctx) + dirPart.slice(1) : dirPart || '.'
   const absDir = lookup(ctx.cwd, path, ctx.fs).path
   if (!ctx.fs.isDir(absDir)) return []
-  const { dirs, files } = ctx.fs.listDir(absDir)
+  const { dirs, files, links } = ctx.fs.listDir(absDir)
   const names = dirs.map((name) => name + '/')
+  // A link completes as what it leads to: one naming a directory takes the
+  // slash that lets the next component follow it, and `cd` offers only those.
+  for (const name of links) {
+    if (ctx.fs.isDir(lookup(absDir, name, ctx.fs).path)) names.push(name + '/')
+    else if (!dirsOnly) names.push(name)
+  }
   if (!dirsOnly) names.push(...files)
   return names.filter((name) => name.startsWith(partial) && (partial.startsWith('.') || !name.startsWith('.')))
     // A bare dash filename would become an option (or stdin for commands like cat).

@@ -323,7 +323,7 @@ describe('createTerminal — opts.commands: the io.fs view', () => {
     assert.equal(inspect('probe', (io) => io.fs.isFile('a.txt')), true)
     assert.equal(inspect('probe', (io) => io.fs.isFile('src')), false)
     assert.equal(inspect('probe', (io) => io.fs.isDir('src')), true)
-    assert.deepEqual(inspect('probe', (io) => io.fs.listDir('/')), { dirs: ['src'], files: ['a.txt', 'b.txt'] })
+    assert.deepEqual(inspect('probe', (io) => io.fs.listDir('/')), { dirs: ['src'], files: ['a.txt', 'b.txt'], links: [] })
     assert.deepEqual(inspect('probe', (io) => io.fs.walkFiles('src')), ['/src/x.js', '/src/y.js'])
     assert.deepEqual(inspect('probe', (io) => io.fs.walkFiles('/nope')), [])
   })
@@ -356,7 +356,7 @@ describe('createTerminal — opts.commands: the io.fs view', () => {
 
   it('is read-only: the source tree cannot be written through it', () => {
     const t = createTerminal(SOURCES, { commands: { probe: (io) => Object.keys(io.fs).join(',') + '\n' } })
-    assert.equal(t.run('probe').stdout, 'resolve,isFile,isDir,readFile,listDir,walkFiles\n')
+    assert.equal(t.run('probe').stdout, 'resolve,isFile,isDir,isLink,readLink,readFile,listDir,walkFiles\n')
   })
 })
 

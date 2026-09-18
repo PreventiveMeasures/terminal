@@ -74,7 +74,7 @@ const COMMAND_GAPS = [
   ['find . ! -mtime 1', '-mtime'],
   ['find . -not -newer f', '-newer'],
   ['find . -type f , -print', 'comma operator'],
-  ['find . -type f,l', '-type f,l'],
+  ['find . -type f,p', '-type f,p'],
   ['grep --e a f', '--e'],
   [String.raw`grep -E 'a{z}' f`, 'GNU regex syntax'],
   [String.raw`grep -E '{1}' f`, 'GNU regex syntax'],

@@ -1,5 +1,5 @@
 import { parseArgs } from '../args.js'
-import { compareNames, creationError, lookup, resolve } from '../fs.js'
+import { compareNames, creationError, lookup, relativeTo, resolve, walkTree } from '../fs.js'
 import { err, reason } from '../util.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
@@ -27,6 +27,12 @@ export function cp(_stdin, tokens, ctx) {
     noClobber, force: flags.has('f') || flags.has('force'), verbose, recursive,
     outputOverlap: verbose && outputOverlaps(copies, ctx, { recursive, noClobber }),
   }
+  // A link is copied as what it points at, which is GNU's own default, and a
+  // link leading to a directory would copy that whole tree — including, where
+  // it points above itself, the tree already being copied. That is the cyclic
+  // link GNU refuses by name and this does not model, so it is refused; and
+  // refused here, before a copy that would find it halfway makes anything.
+  if (recursive) for (const [source] of copies) refuseLinkedDirectory(source, ctx)
   for (const [source, destination] of copies) {
     // Each copy finishes before the next operand is opened. Ancestor scopes
     // (such as xargs reading its arguments) still guard their own input.
@@ -64,6 +70,16 @@ function copyOperands({ positional, flags, order }, ctx) {
     return { error: `${explicit === undefined ? 'target' : 'target directory'} ${quoteName(target, ctx)}: ${found.error ?? 'Not a directory'}` }
   }
   return { target, directory, sources: explicit === undefined ? positional.slice(0, -1) : positional }
+}
+
+function refuseLinkedDirectory(source, ctx) {
+  const root = lookup(ctx.cwd, source, ctx.fs, { follow: false }).path
+  if (root === null) return
+  for (const entry of walkTree(ctx.fs, root)) {
+    if (entry.kind !== 'link' || !ctx.fs.isDir(lookup(ctx.cwd, entry.path, ctx.fs).path)) continue
+    const named = entry.path === root ? source : source.replace(/\/+$/u, '') + '/' + relativeTo(root, entry.path)
+    throw new UnsupportedError('feature', 'symbolic link to a directory', `copying a symbolic link to a directory is not supported: ${named}`)
+  }
 }
 
 // GNU names a copy after the last component of the source as it was typed,
@@ -171,10 +187,10 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
     if (state.sources.has(absolute)) return report(state, `cp: warning: source directory ${shownSource} specified more than once\n`, false, true)
     state.sources.add(absolute)
   }
-  const { dirs, files } = ctx.fs.listDir(absolute)
+  const { dirs, files, links } = ctx.fs.listDir(absolute)
   if (dest.path === null && !makeDirectory(source, destination, named, state)) return
   const from = source.replace(/\/+$/u, ''), into = destination.replace(/\/+$/u, '')
-  for (const name of [...dirs, ...files].sort(compareNames)) {
+  for (const name of [...dirs, ...files, ...links].sort(compareNames)) {
     // Each entry finishes before the next is opened, as each operand does.
     ctx.io.setReads([])
     copyFile(`${from}/${name}`, `${into}/${name}`, state, top)
@@ -291,10 +307,12 @@ function treeOverlaps(from, into, scan) {
 }
 
 // What a walk finds there: what is there now, and what an earlier operand will
-// have put there by the time this one runs.
+// have put there by the time this one runs. A link is copied to a name of its
+// own like anything else, so it is one of the names the scan has to account for.
 function filesUnder(from, scan) {
   const prefix = from === '/' ? '/' : from + '/'
-  const present = scan.ctx.fs.isDir(from) ? [...scan.ctx.fs.walkFiles(from)] : []
+  const entries = scan.ctx.fs.isDir(from) ? [...walkTree(scan.ctx.fs, from)] : []
+  const present = entries.filter((entry) => entry.kind !== 'dir').map((entry) => entry.path)
   return new Set([...present, ...[...scan.made].filter((path) => path.startsWith(prefix))])
 }
 

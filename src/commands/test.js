@@ -3,7 +3,7 @@ import { err, ok } from '../util.js'
 import { UnsupportedError, unsupportedFrom } from '../unsupported.js'
 import { INT64_MAX, INT64_MIN } from '../numeric.js'
 
-const UNARY_GAPS = new Set(['-b', '-c', '-g', '-h', '-k', '-p', '-r', '-s', '-t', '-u', '-v', '-w', '-x', '-G', '-L', '-N', '-O', '-R', '-S', '-o'])
+const UNARY_GAPS = new Set(['-b', '-c', '-g', '-k', '-p', '-r', '-s', '-t', '-u', '-v', '-w', '-x', '-G', '-N', '-O', '-R', '-S', '-o'])
 const BINARY_GAPS = new Set(['-nt', '-ot', '-ef', '<', '>'])
 export const INTEGER_TESTS = {
   __proto__: null,
@@ -44,7 +44,7 @@ function evaluate(tokens, ctx) {
     if (first === '!') return second === ''
     if (first === '-n') return second !== ''
     if (first === '-z') return second === ''
-    if (['-a', '-e', '-f', '-d'].includes(first)) return fileTest(first, second, ctx)
+    if (['-a', '-e', '-f', '-d', '-h', '-L'].includes(first)) return fileTest(first, second, ctx)
     if (UNARY_GAPS.has(first)) gap(first)
     throw new Error(`${first}: unary operator expected`)
   }
@@ -83,10 +83,16 @@ export function fileTest(operator, operand, ctx) {
   const fs = {
     isDir: (path) => path === '/dev' || path === '/dev/fd' || ctx.fs.isDir(path),
     isFile: (path) => path === '/dev/null' || isStream(path) || ctx.fs.isFile(path),
+    isLink: (path) => ctx.fs.isLink?.(path) === true,
+    readLink: (path) => ctx.fs.readLink?.(path),
   }
-  const { path, error } = lookup(ctx.cwd, operand, fs)
+  // `-h` and `-L` ask about the name itself; every other test asks about what
+  // it leads to, so a link to nothing is not there for any of them.
+  const link = operator === '-h' || operator === '-L'
+  const { path, error } = lookup(ctx.cwd, operand, fs, { follow: !link })
   if (error) return false
   if (isStream(path)) gap('stream device metadata')
+  if (link) return fs.isLink(path)
   if (operator === '-e' || operator === '-a') return true
   if (operator === '-d') return fs.isDir(path)
   return path !== '/dev/null' && ctx.fs.isFile(path)

@@ -14,7 +14,8 @@ import { grepPatterns } from './grep-pattern-files.js'
 const FLAGS = '[-i] [-a|-I] [-s] [-v] [-n] [-r|-R] [-w] [-x] [-o] [-E|-F|-G|-P] [-l] [-L] [-c] [-q] [-m N] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
 const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} [-e PATTERN] [-f FILE] ... [PATH...]`
 
-// -r and -R coincide because the virtual filesystem has no symlinks.
+// -r and -R coincide over a tree holding no links; where one does, -R is the
+// spelling that would follow it, and refuses instead.
 const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'x', 'h', 'H', 'o', 'E', 'F', 'G', 'P', 'q', 'I', 'a', 's']
 const VALUE_SHORTS = ['A', 'B', 'C', 'm']
 
@@ -55,6 +56,7 @@ export function grep(stdin, tokens, ctx) {
   filters.ignoreBinary = binaryMode === 'I' && counts.max !== 0
   filters.forceText = binaryMode === 'a' || binaryMode === 'text'
   filters.silent = flags.has('s') || flags.has('no-messages')
+  filters.follow = flags.has('R')
   try { return filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) }
   finally { filterNotes(filters, ctx.notes) }
 }
@@ -200,6 +202,12 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
       return false
     }
     for (const entry of walkTree(ctx.fs, abs, Infinity, descend)) {
+      // `-r` passes over a link a walk reaches, and `-R` searches what it
+      // points at. What following one would reach is not modelled here, so
+      // `-R` refuses the tree it would have to cross rather than skip it.
+      if (entry.kind === 'link' && filters.follow) {
+        throw new UnsupportedError('option', '-R', `following symbolic links is not supported: ${displayName(rest.length ? p : '', abs, entry.path)}`)
+      }
       if (entry.kind !== 'file') continue
       const filePath = entry.path
       // Preserve operand spelling; the implicit '.' root has no display prefix.

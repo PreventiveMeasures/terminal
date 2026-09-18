@@ -12,6 +12,9 @@ export function stat(_stdin, tokens, ctx) {
     short: ['L', 't'], long: ['dereference', 'terse'], valueShort: ['c'], valueLong: ['format', 'printf', 'cached'],
   })
   if (!positional.length) return err('stat: missing operand')
+  // stat describes the name it is given, as `lstat` does; `-L` asks about
+  // what a link points at instead.
+  const follow = order.some(({ name }) => name === 'L' || name === 'dereference')
   let format
   for (const option of order) {
     if (option.name === 'cached') {
@@ -26,7 +29,7 @@ export function stat(_stdin, tokens, ctx) {
   const result = emptyOutput()
   let failed = false
   for (const name of positional) {
-    const next = statOperand(parts, name, ctx)
+    const next = statOperand(parts, name, ctx, follow)
     appendOutput(result, next)
     failed ||= next.exitCode !== 0
   }
@@ -34,13 +37,13 @@ export function stat(_stdin, tokens, ctx) {
   return result
 }
 
-function statOperand(parts, name, ctx) {
+function statOperand(parts, name, ctx, follow) {
   if (name === '-') {
     const result = unsupported('feature', 'stat', 'standard input metadata', 'stat: standard input metadata is not supported')
     ctx.unsupported.add({ kind: 'feature', command: 'stat', detail: 'standard input metadata', message: result.stderr.trimEnd() })
     return result
   }
-  const found = lookupWithNote(ctx, 'stat', name)
+  const found = lookupWithNote(ctx, 'stat', name, { follow })
   if (found.error) return err(`stat: cannot statx ${quoteName(name, ctx)}: ${found.error}`)
   try { return ok(formatStat(parts, name, found.path, ctx.fs)) } catch (e) {
     const result = unsupportedFrom(e, 'stat', 'stat: ' + reason(e))

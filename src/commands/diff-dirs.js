@@ -1,4 +1,5 @@
 import { compareNames, lookup } from '../fs.js'
+import { UnsupportedError } from '../unsupported.js'
 import { globMatch } from '../glob.js'
 import { compareFiles, joinName, report } from './diff.js'
 
@@ -21,14 +22,14 @@ export function compareDirs(state, dirA, dirB) {
 // A name in one directory only, with -N: the other side stands in empty.
 function compareStandIn(state, [pathA, pathB], kind) {
   if (kind === 'file') compareFiles(state, pathA, pathB, true)
-  else if (state.opts.recursive) compareDirs(state, pathA, pathB)
+  else if (state.opts.recursive) enterDirs(state, [pathA, pathB], [kind, kind])
   else report(state, `Common subdirectories: ${pathA} and ${pathB}\n`)
 }
 
 function comparePair(state, [pathA, pathB], [kindA, kindB]) {
   const { opts } = state
-  if (kindA === 'dir' && kindB === 'dir') {
-    if (opts.recursive) compareDirs(state, pathA, pathB)
+  if (isDir(kindA) && isDir(kindB)) {
+    if (opts.recursive) enterDirs(state, [pathA, pathB], [kindA, kindB])
     else report(state, `Common subdirectories: ${pathA} and ${pathB}\n`)
   } else if (kindA === kindB) compareFiles(state, pathA, pathB, true)
   else {
@@ -37,11 +38,28 @@ function comparePair(state, [pathA, pathB], [kindA, kindB]) {
   }
 }
 
-const TYPE = { dir: 'directory', file: 'regular file' }
+const TYPE = { dir: 'directory', link: 'directory', file: 'regular file' }
 
+const isDir = (kind) => kind === 'dir' || kind === 'link'
+
+// diff compares what a name leads to, as GNU does for an operand: a link to a
+// file is that file, and a link to a directory that directory. Entering the
+// tree a link names is the one thing left out — a link pointing above itself
+// would enter the tree already being compared, which is the cycle GNU stops
+// at and this does not model — so only a walk that would cross one refuses,
+// and a name listed, named as a type or compared as a file never does.
 function entryKind(ctx, path) {
   const found = lookup(ctx.cwd, path, ctx.fs)
-  return ctx.fs.isDir(found.path) ? 'dir' : 'file'
+  if (!ctx.fs.isDir(found.path)) return 'file'
+  return ctx.fs.isLink?.(lookup(ctx.cwd, path, ctx.fs, { follow: false }).path) ? 'link' : 'dir'
+}
+
+function enterDirs(state, [pathA, pathB], [kindA, kindB]) {
+  for (const [kind, path] of [[kindA, pathA], [kindB, pathB]]) {
+    if (kind !== 'link') continue
+    throw new UnsupportedError('feature', 'symbolic link to a directory', `comparing what a symbolic link to a directory holds is not supported: ${path}`)
+  }
+  compareDirs(state, pathA, pathB)
 }
 
 // Every entry, hidden ones included, sorted as C-locale strcmp sorts, less
@@ -50,8 +68,8 @@ function entryNames(state, dir) {
   const { ctx, opts } = state
   const found = lookup(ctx.cwd, dir, ctx.fs)
   if (found.error || !ctx.fs.isDir(found.path)) return []
-  const { dirs, files } = ctx.fs.listDir(found.path)
-  const names = [...dirs, ...files].sort(compareNames)
+  const { dirs, files, links } = ctx.fs.listDir(found.path)
+  const names = [...dirs, ...files, ...links].sort(compareNames)
   return opts.excludes.length ? names.filter((name) => !opts.excludes.some((pattern) => globMatch(name, pattern))) : names
 }
 

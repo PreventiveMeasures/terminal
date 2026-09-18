@@ -28,7 +28,9 @@ export function rm(_stdin, tokens, ctx) {
 
 function removeOperand(name, state) {
   const { ctx } = state
-  const found = lookup(ctx.cwd, name, ctx.fs)
+  // `rm` unlinks the name it is given: a link is taken away itself, and never
+  // resolved to the file it points at.
+  const found = lookup(ctx.cwd, name, ctx.fs, { follow: false })
   let error = found.error
   // GNU -f ignores ENOTDIR as well as ENOENT: neither names an existing file.
   if (state.force && (error === 'No such file or directory' || error === 'Not a directory')) return

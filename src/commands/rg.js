@@ -125,7 +125,10 @@ function ignoreFileIn(roots, ctx) {
 // anything is a question this runtime does not try to answer.
 function bites(path, mustBite, ctx) {
   if (!mustBite || ctx.fs.isDir(path)) return true
-  return (ctx.fs.readFile(path) ?? '').split('\n').some((line) => line.trim() !== '' && !line.trimStart().startsWith('#'))
+  // An ignore file reached through a link is the file that link names, which
+  // is what ripgrep opens and reads its rules from.
+  const found = lookup('/', path, ctx.fs).path
+  return (ctx.fs.readFile(found ?? path) ?? '').split('\n').some((line) => line.trim() !== '' && !line.trimStart().startsWith('#'))
 }
 
 function namedBinary(operands, ctx) {
