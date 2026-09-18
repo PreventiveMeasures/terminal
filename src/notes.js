@@ -15,37 +15,38 @@ export function lookupWithNote(ctx, command, path) {
 // Roots that coincide, and roots that lead to the same file, are one root and
 // one alternative: home follows the mount unless it was set apart.
 export function missingPathNote(ctx, command, path, error) {
-  if (error !== 'No such file or directory' || typeof path !== 'string' || path === '' || path.includes('\0')) return
+  if (error !== 'No such file or directory' || typeof path !== 'string') return
   const absolute = path.startsWith('/')
+  // Where it was already looked up, and so the one root with nothing to add.
   const from = absolute ? '/' : ctx.cwd
-  // Each root takes the path as its own: every leading slash goes, or lookup
-  // would read `//x` as the `/x` that has already failed.
-  const wanted = absolute ? path.replace(/^\/+/u, '') : path
-  if (wanted === '') return
+  // Every leading slash goes with it: another root takes `//x` as its own `x`,
+  // not as the `/x` that has just failed. An empty path and a NUL need no guard
+  // of their own, since lookup refuses them as it refuses a missing one.
+  const wanted = path.replace(/^\/+/u, '')
   const alternatives = new Set()
-  for (const base of new Set(['/', ctx.mount ?? '/', ctx.home ?? '/'])) {
-    if (base === from) continue
-    const found = lookup(base, wanted, ctx.fs)
+  for (const root of new Set(['/', ctx.mount ?? '/', ctx.home ?? '/'])) {
+    if (root === from) continue
+    const found = lookup(root, wanted, ctx.fs)
     if (!found.error) alternatives.add(found.path)
   }
   if (!alternatives.size) return
-  const missed = absolute
-    ? `absolute path ${JSON.stringify(path)} was not found`
-    : `relative path ${JSON.stringify(path)} was not found from cwd ${JSON.stringify(ctx.cwd)}`
-  ctx.notes?.add(`${command}: ${missed}. ${existingPaths(ctx, [...alternatives].sort(compareNames))}`)
+  const cwd = absolute ? '' : ` from cwd ${JSON.stringify(ctx.cwd)}`
+  const missed = `${absolute ? 'absolute' : 'relative'} path ${JSON.stringify(path)} was not found${cwd}`
+  ctx.notes?.add(`${command}: ${missed}. ${existingPaths(ctx, alternatives)}`)
 }
 
 // Name every root that answered: one dropped for brevity would be a path the
 // caller is left to guess at. Contents are compared only where every one of
 // them is a file, and comparing each to the first is enough, since contents
 // equal to the same contents are equal to each other.
-function existingPaths(ctx, paths) {
+function existingPaths(ctx, alternatives) {
+  const paths = [...alternatives].sort(compareNames)
   const names = paths.map((path) => JSON.stringify(path))
-  if (names.length === 1) return `A ${ctx.fs.isDir(paths[0]) ? 'dir' : 'file'} exists at ${names[0]}.`
+  if (paths.length === 1) return `A ${ctx.fs.isDir(paths[0]) ? 'dir' : 'file'} exists at ${names[0]}.`
   const files = paths.every((path) => !ctx.fs.isDir(path) && ctx.fs.isFile(path))
   const differ = files && paths.some((path) => !ctx.fs.sameFileContents(paths[0], path))
   const listed = `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
-  return `${names.length === 2 ? 'Both' : 'All'} of ${listed} exist${differ ? ', and they differ in contents' : ''}.`
+  return `${paths.length === 2 ? 'Both' : 'All'} of ${listed} exist${differ ? ', and they differ in contents' : ''}.`
 }
 
 // ls, tree and pathname globbing all drop dot-prefixed names silently. Each
