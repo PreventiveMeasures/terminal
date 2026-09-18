@@ -27,15 +27,16 @@ function touchPath(name, noCreate, state) {
   const shown = quoteName(name, ctx)
   const found = lookup(ctx.cwd, name, ctx.fs)
   if (found.error === null) return existing(name, shown, found.path, state)
-  missingPathNote(ctx, 'touch', name, found.error)
   // GNU opens a name to create it, and where it cannot — `-c`, or a trailing
   // slash no open would make a file of — sets times directly instead, naming
   // in the diagnostic which of the two it was doing. `-c` passes over a name
   // that is simply absent; every other failure is still one.
-  if (noCreate || name.endsWith('/')) {
-    if (noCreate && found.error === 'No such file or directory') return
-    return fail(state, `setting times of ${shown}: ${found.error}`)
-  }
+  const setting = noCreate || name.endsWith('/')
+  // Nothing is reported for a name `-c` passes over, and a failure nobody is
+  // told about is not one to hint about either.
+  if (noCreate && found.error === 'No such file or directory') return
+  missingPathNote(ctx, 'touch', name, found.error)
+  if (setting) return fail(state, `setting times of ${shown}: ${found.error}`)
   const invalid = creationError(ctx.cwd, name, ctx.fs, found)
   if (invalid) return fail(state, `cannot touch ${shown}: ${invalid}`)
   try {

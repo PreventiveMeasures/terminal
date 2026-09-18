@@ -157,6 +157,17 @@ describe('touch reports a name it cannot reach the way GNU reports it', () => {
     assert.deepEqual(noted.notes, ['touch: relative path "dir/leaf" was not found from cwd "/". A file exists at "/repo/dir/leaf".'])
   })
 
+  it('hints at nothing for a name -c passes over', () => {
+    const quiet = terminal({ cwd: '/' }).run('touch -c dir/leaf')
+    assert.equal(quiet.stderr, '')
+    assert.equal(quiet.exitCode, 0)
+    // A hint accompanies a failure a caller was told about; there is none here.
+    assert.deepEqual(quiet.notes, [])
+    const reported = terminal({ cwd: '/' }).run('touch dir/leaf')
+    assert.equal(reported.exitCode, 1)
+    assert.deepEqual(reported.notes, ['touch: relative path "dir/leaf" was not found from cwd "/". A file exists at "/repo/dir/leaf".'])
+  })
+
   it('quotes a name that needs it', () => {
     const t = createTerminal({ 'a b': 'x' }, { mount: '/repo', cwd: '/repo', writable: '/tmp/' })
     check(t, 'touch "a b"', '', "touch: setting times of 'a b': Read-only file system\n", 1)

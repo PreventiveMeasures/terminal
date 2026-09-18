@@ -232,9 +232,18 @@ function outputOverlaps(copies, ctx, recursive) {
     const found = lookup(ctx.cwd, name, ctx.fs)
     if (found.error) return false
     // A recursive copy reads and writes every name below these two, so a
-    // descriptor anywhere under one of them is the same overlap a named file is.
+    // descriptor anywhere under one of them is the same overlap a named file
+    // is — by name, and by inode as well: the overlay can hold one inode under
+    // two names, and a `sed -i` backup can put a descriptor's file inside a
+    // tree it does not lexically belong to.
     if (ctx.fs.isDir(found.path)) {
-      return recursive && typeof output.path === 'string' && output.path.startsWith(found.path === '/' ? '/' : found.path + '/')
+      if (!recursive) return false
+      if (typeof output.path === 'string' && output.path.startsWith(found.path === '/' ? '/' : found.path + '/')) return true
+      if (output.identity === undefined) return false
+      for (const path of ctx.fs.walkFiles(found.path)) {
+        if (ctx.fs.fileIdentity?.(path) === output.identity) return true
+      }
+      return false
     }
     return output.identity === undefined ? output.path === found.path : output.identity === ctx.fs.fileIdentity?.(found.path)
   }))

@@ -314,6 +314,22 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     check(t, 'cat /tmp/dest/sub/two', '2\n')
   })
 
+  it('sees a descriptor a backup name put inside the tree', () => {
+    const t = createTerminal({ x: 'x\n' }, { mount: '/repo', cwd: '/tmp', writable: '/tmp/' })
+    const run = (command) => t.run(command)
+    assert.equal(run('mkdir tree; printf original >out').exitCode, 0)
+    // `sed -i` renames what `out` held into the tree, so the descriptor opened
+    // on `out` now points at a file inside `tree` under another name. Lexically
+    // it is nowhere near it; by inode it is one of the files about to be copied.
+    const refused = run("{ sed -i'tree/*' s/x/y/ out; cp -rv tree dest; } >out")
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+    assert.equal(run('test -e dest').exitCode, 1)
+    // The redirect truncated that inode before sed renamed it into the tree,
+    // and the refusal came before any verbose line, so it is still empty —
+    // without the guard it would hold this command's own diagnostics.
+    assert.equal(run('cat tree/out').stdout, '')
+  })
+
   it('leaves a descriptor outside both trees alone', () => {
     const t = terminal()
     check(t, 'cp -r a /tmp/src')
