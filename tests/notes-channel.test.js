@@ -97,7 +97,7 @@ describe('notes survive nested shell execution and output routing', () => {
     ['(ls)', 'visible\n'],
     ['{ ls; } >/dev/null', ''],
     ['value=$(ls); printf "%s" "$value"', 'visible'],
-    ['find . -maxdepth 0 -exec ls {} \\;', 'visible\n', ['find: depth limit omitted contents of 1 directory: "/".']],
+    ['find . -maxdepth 0 -exec ls {} \\;', 'visible\n', ['find: depth limit omitted contents of 1 directory: ".".']],
     ["printf '%s\\n' / | xargs ls", 'visible\n'],
     ['for dir in / /; do ls "$dir"; done', 'visible\nvisible\n'],
     ['ls; ls', 'visible\nvisible\n'],

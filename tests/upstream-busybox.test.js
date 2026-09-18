@@ -173,10 +173,10 @@ describe('upstream BusyBox audit — find', () => {
     ['failed individual exec is a false predicate, not an error', 'find project/main.js -exec false {} \\;', null, ''],
     ['successful batched exec', 'find project/main.js -exec true {} +', null, ''],
     ['failed batched exec fails find', 'find project/main.js -exec false {} +', null, '', 1],
-    ['root name ignores repeated slashes', 'find /// -maxdepth 0 -name /', null, '///\n', 0, ['find: depth limit omitted contents of 1 directory: "/".']],
-    ['root name is not its repeated slash spelling', 'find /// -maxdepth 0 -name ///', null, '', 0, ['find: depth limit omitted contents of 1 directory: "/".']],
-    ['dot root name ignores trailing slashes', 'find .//// -maxdepth 0 -name .', null, './///\n', 0, ['find: depth limit omitted contents of 1 directory: "/".']],
-    ['dot root name is not its path spelling', 'find .//// -maxdepth 0 -name .////', null, '', 0, ['find: depth limit omitted contents of 1 directory: "/".']],
+    ['root name ignores repeated slashes', 'find /// -maxdepth 0 -name /', null, '///\n', 0, ['find: depth limit omitted contents of 1 directory: "///".']],
+    ['root name is not its repeated slash spelling', 'find /// -maxdepth 0 -name ///', null, '', 0, ['find: depth limit omitted contents of 1 directory: "///".']],
+    ['dot root name ignores trailing slashes', 'find .//// -maxdepth 0 -name .', null, './///\n', 0, ['find: depth limit omitted contents of 1 directory: ".////".']],
+    ['dot root name is not its path spelling', 'find .//// -maxdepth 0 -name .////', null, '', 0, ['find: depth limit omitted contents of 1 directory: ".////".']],
   ])
 })
 
