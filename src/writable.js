@@ -1,4 +1,4 @@
-import { compareNames, lookup, resolve, walkPath, walkTree } from './fs.js'
+import { compareNames, dirname, lookup, resolve, walkPath, walkTree } from './fs.js'
 import { decodeUtf8, encodeUtf8 } from './util.js'
 
 // The overlay is mounted at /tmp, so what may be written is what falls inside
@@ -16,7 +16,7 @@ export const inOverlay = (absolute) => absolute === '/tmp' || absolute.startsWit
 // A name no resolution can start on — empty, or holding a NUL — keeps the
 // spelling it came with, so the overlay answers for it where it was aimed and
 // the diagnostic is the one that name earns.
-const writeTarget = (fs, cwd, path, follow = true) => path === '' || path.includes('\0')
+export const writeTarget = (fs, cwd, path, follow = true) => path === '' || path.includes('\0')
   ? resolve(cwd, path)
   : walkPath(cwd, path, fs, { follow, lenient: true }).path
 
@@ -191,20 +191,23 @@ function sameFileContents(base, files, a, b) {
   return left !== null && right !== null && left.length === right.length && left.every((byte, i) => byte === right[i])
 }
 
+// What a name can be written as, asked of the walk rather than of the spelling:
+// components are checked where they are, so `file/../new` and `missing/../new`
+// cannot make a sibling by lexical normalization alone, and the name a link
+// leads to answers for its own parent — a link into a directory that is not
+// there names a file nothing can make, where the spelling's parent is fine.
 function checkTarget(fs, cwd, path) {
-  const found = lookup(cwd, path, fs)
-  if (found.path !== null) {
+  const found = walkPath(cwd, path, fs)
+  if (found.error === null) {
     if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
+    // A trailing slash names a directory, and what is there is not one.
+    if (path.endsWith('/')) throw pathError(path, 'Not a directory')
     return
   }
-  if (found.error !== 'No such file or directory' || path.includes('\0') || path.endsWith('/')) throw pathError(path, found.error)
-  // Preserve components until lookup has checked them: file/../new and
-  // missing/../new cannot create a sibling by lexical normalization alone.
-  const slash = path.lastIndexOf('/')
-  const parent = slash < 0 ? '.' : path.slice(0, slash) || '/'
-  const directory = lookup(cwd, parent, fs)
-  if (directory.error) throw pathError(path, directory.error)
-  if (!fs.isDir(directory.path)) throw new Error(`${path}: Not a directory`)
+  // Only the last name may be missing, and only where it is a name a file can
+  // take: a trailing slash names a directory, and a NUL names nothing.
+  if (found.rest.length > 0 || path.endsWith('/') || path.includes('\0')) throw pathError(path, found.error)
+  if (!fs.isDir(dirname(found.path))) throw pathError(path, 'No such file or directory')
 }
 
 function pathError(path, fsError) {

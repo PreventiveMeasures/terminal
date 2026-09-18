@@ -445,6 +445,41 @@ describe('what a link cannot change', () => {
     gap(made(), 'echo z > outside', '>', 'error: `>` cannot write to `outside`: only `/tmp/` is writable\n')
   })
 
+  it('refuses a write to a link naming a file under a directory that is not there', () => {
+    const sources = { file: 'x\n', orphan: { type: 'link', target: '/tmp/gone/file' } }
+    const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    // The name a link leads to answers for its own parent: where that is not
+    // there, the write fails as the kernel fails it rather than leaving bytes
+    // under a directory nothing can reach.
+    check(made(), 'echo x > orphan', '', { stderr: 'error: orphan: No such file or directory\n', exitCode: 1, cwd: '/repo' })
+    check(made(), 'cp file orphan', '', { stderr: "cp: cannot create regular file 'orphan': No such file or directory\n", exitCode: 1, cwd: '/repo' })
+    check(made(), 'touch orphan', '', { stderr: "touch: cannot touch 'orphan': No such file or directory\n", exitCode: 1, cwd: '/repo' })
+    // Nothing of the refused write is left behind, reachable or not.
+    const after = made()
+    after.run('echo x > orphan')
+    check(after, 'find /tmp', '/tmp\n', { cwd: '/repo' })
+  })
+
+  it('empties what a slashed link names and still cannot unlink the name', () => {
+    const t = createTerminal({ dirlink: { type: 'link', target: '/tmp/d' } }, { mount: '/repo', writable: '/tmp/' })
+    check(t, 'mkdir /tmp/d; printf x > /tmp/d/f', '', { cwd: '/repo' })
+    // GNU walks into the directory the slash asked for, empties it, and then
+    // fails the name itself, which is a link and not the directory it led to.
+    check(t, 'rm -r dirlink/', '', { stderr: "rm: cannot remove 'dirlink/': Not a directory\n", exitCode: 1, cwd: '/repo' })
+    check(t, 'find /tmp', '/tmp\n/tmp/d\n', { cwd: '/repo' })
+  })
+
+  it('watches the file a copy will write, where a link names the one it reports on', () => {
+    const sources = { file: 'src\n', out: { type: 'link', target: '/tmp/out' } }
+    const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    // GNU buffers its verbose line, so a copy whose report shares the file it
+    // writes is refused — by the name the copy lands on, link or not.
+    const spelled = gap(made(), 'printf seed > /tmp/out; cp -v file /tmp/out > /tmp/out', 'copy output buffering', 'cp: buffered verbose output sharing a copied file is not supported\n')
+    const linked = gap(made(), 'printf seed > /tmp/out; cp -v file out > /tmp/out', 'copy output buffering', 'cp: buffered verbose output sharing a copied file is not supported\n')
+    assert.deepEqual(linked.stdout, spelled.stdout)
+    check(made(), 'printf seed > /tmp/out; cp -v file out; cat /tmp/out', "'file' -> 'out'\nsrc\n", { cwd: '/repo' })
+  })
+
   it('unlinks and replaces the name it was given, which a link in the sources is not', () => {
     const sources = {
       file: 'x\n',

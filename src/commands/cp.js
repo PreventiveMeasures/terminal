@@ -5,7 +5,7 @@ import { appendOutput, emptyOutput } from '../shell/output.js'
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
 import { lookupWithNote, missingPathNote } from '../notes.js'
-import { inOverlay } from '../writable.js'
+import { inOverlay, writeTarget } from '../writable.js'
 
 const SPECIAL_FILES = new Set(['/dev/null', '/dev/stdin', '/dev/stdout', '/dev/stderr'])
 
@@ -123,7 +123,7 @@ function copyFile(source, destination, state, top = null) {
   if (state.noClobber && dest.path !== null) return
   if (sameFile(found.path, dest.path, ctx.fs)) return fail(`${shownSource} and ${shownTarget} are the same file`)
   if (ctx.fs.isDir(dest.path)) return fail(`cannot overwrite directory ${shownTarget} with non-directory ${shownSource}`)
-  const absolute = resolve(ctx.cwd, destination)
+  const absolute = writeTarget(ctx.fs, ctx.cwd, destination)
   // Two operands landing on one name is the mistake GNU refuses; two trees
   // merging onto one is what a recursive copy is for, and the second source
   // wins there, so only operands answer to this.
@@ -282,7 +282,10 @@ function operandOverlaps(source, destination, scan) {
   // A name that is not there yet may be one an earlier operand makes.
   const coming = found.error === 'No such file or directory' && (scan.made.has(from) || madeDirectory(from, scan))
   if (found.error && !coming) return false
-  const into = resolve(ctx.cwd, destination)
+  // A copy writes where the destination leads, so that is the name the scan
+  // has to watch: a link naming the descriptor's file overlaps as surely as
+  // the file named outright.
+  const into = writeTarget(ctx.fs, ctx.cwd, destination)
   if (found.error === null ? ctx.fs.isDir(found.path) : !scan.made.has(from)) {
     if (!scan.recursive || !copiesDirectory(from, destination, ctx) || scan.sources.has(from)) return false
     scan.sources.add(from)
