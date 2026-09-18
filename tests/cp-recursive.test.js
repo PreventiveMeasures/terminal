@@ -151,6 +151,20 @@ describe('cp -r refuses what GNU refuses', () => {
     check(t, 'cat /tmp/taken', 'x')
   })
 
+  it('names a file in the way as a file, not as a loop', () => {
+    const t = terminal()
+    check(t, 'cp -r a /tmp/src')
+    // The destination is under the source either way; what it already is
+    // settles it first.
+    check(t, 'cp -rT /tmp/src /tmp/src/one', '', "cp: cannot overwrite non-directory '/tmp/src/one' with directory '/tmp/src'\n", 1)
+    check(t, 'cp -r /tmp/src /tmp/src/one', '', "cp: cannot overwrite non-directory '/tmp/src/one' with directory '/tmp/src'\n", 1)
+    check(t, 'cat /tmp/src/one', '1\n')
+    // A directory under the source is still the loop, and the source itself
+    // is still the same file.
+    check(t, 'cp -r /tmp/src /tmp/src/sub', '', "cp: cannot copy a directory, '/tmp/src', into itself, '/tmp/src/sub/src'\n", 1)
+    check(t, 'cp -r /tmp/src/sub /tmp/src', '', "cp: '/tmp/src/sub' and '/tmp/src/sub' are the same file\n", 1)
+  })
+
   it('will not make a directory where there is no directory to make it in', () => {
     const t = terminal()
     check(t, 'cp -r a /tmp/missing/inner', '', "cp: cannot create directory '/tmp/missing/inner': No such file or directory\n", 1)

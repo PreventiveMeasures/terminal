@@ -149,6 +149,9 @@ function copyDirectory(source, absolute, destination, state, top) {
       return fail(`cannot create directory ${shownTarget}: ${invalid}`)
     }
   }
+  // What the destination already is settles it before where it falls, too: a
+  // file under the source is a file in the way, not a loop.
+  if (dest.path !== null && !ctx.fs.isDir(dest.path)) return fail(`cannot overwrite non-directory ${shownTarget} with directory ${shownSource}`)
   const target = resolve(ctx.cwd, named)
   if (target === absolute) return fail(`${shownSource} and ${shownTarget} are the same file`)
   // A destination under the source is the loop GNU names. GNU makes the
@@ -160,7 +163,6 @@ function copyDirectory(source, absolute, destination, state, top) {
   if (target.startsWith(absolute === '/' ? '/' : absolute + '/')) {
     return fail(`cannot copy a directory, ${top.source}, into itself, ${top.target}`)
   }
-  if (dest.path !== null && !ctx.fs.isDir(dest.path)) return fail(`cannot overwrite non-directory ${shownTarget} with directory ${shownSource}`)
   // GNU keeps the sources it has copied, and names a directory as a directory.
   if (state.sources.has(absolute)) return report(state, `cp: warning: source directory ${shownSource} specified more than once\n`, false, true)
   state.sources.add(absolute)

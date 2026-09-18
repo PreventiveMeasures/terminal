@@ -102,6 +102,27 @@ describe('mkdir refuses what it cannot make', () => {
     })
   }
 
+  it('names an empty operand rather than passing over it', () => {
+    const t = terminal()
+    // A silent success here would let `mkdir -p "$dir" && …` run on a name it
+    // never got.
+    check(t, "mkdir -p ''", '', "mkdir: cannot create directory '': No such file or directory\n", 1)
+    check(t, "mkdir ''", '', "mkdir: cannot create directory '': No such file or directory\n", 1)
+    const gated = t.run("mkdir -p '' && echo continued")
+    assert.equal(gated.stdout, '')
+    assert.equal(gated.exitCode, 1)
+    assert.deepEqual(gated.notes, ['mkdir: exited 1, so the command after && did not run.'])
+    check(t, "mkdir -p /tmp/made ''", '', "mkdir: cannot create directory '': No such file or directory\n", 1)
+    check(t, 'ls /tmp', 'made\n')
+  })
+
+  it('passes over the root, which is there whichever way it is spelled', () => {
+    const t = terminal()
+    check(t, 'mkdir -p /')
+    check(t, 'mkdir -p //')
+    check(t, 'mkdir -p /tmp')
+  })
+
   it('has no /tmp to make anything in without an overlay', () => {
     check(terminal({ writable: false }), 'mkdir /tmp/new', '', "mkdir: cannot create directory '/tmp/new': No such file or directory\n", 1)
   })
