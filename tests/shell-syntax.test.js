@@ -99,10 +99,18 @@ describe('shell syntax — parameters', () => {
     const t = createTerminal(SOURCES, { user: 'ann' })
     assert.equal(out('echo $HOME $USER $LOGNAME $PWD', t), '/ ann ann /\n')
     assert.equal(out('cd src; echo $PWD $OLDPWD', t), '/src /\n')
-    const unset = t.run('echo [$PATH]')
+    const unset = t.run('echo [$EDITOR]')
     assert.equal(unset.stdout, '[]\n')
-    assert.match(unset.stderr, /^warning: \$PATH is unset/u)
-    assert.deepEqual(unset.unsupported, [{ kind: 'feature', command: null, detail: '$PATH', message: unset.stderr.trimEnd() }])
+    assert.match(unset.stderr, /^warning: \$EDITOR is unset/u)
+    assert.deepEqual(unset.unsupported, [{ kind: 'feature', command: null, detail: '$EDITOR', message: unset.stderr.trimEnd() }])
+    // A name bash sets on its own is refused rather than answered empty, in
+    // the plain form as in a probe: `$PATH` and `${PATH:-x}` fail the same way.
+    for (const line of ['echo [$PATH]', 'echo [${PATH:-x}]', 'echo [$UID]', 'echo [$RANDOM]']) {
+      const refused = t.run(line)
+      const name = /[A-Z]+/u.exec(line)[0]
+      assert.deepEqual([refused.stdout, refused.stderr, refused.exitCode], ['', `error: shell parameter ${name} is not supported\n`, 1], line)
+      assert.deepEqual(refused.unsupported, [{ kind: 'feature', command: null, detail: '$' + name, message: `shell parameter ${name} is not supported` }], line)
+    }
   })
 
   it('`$$`, `$!`, `$0`, `$-` and `$_` are refused, not answered with their own text', () => {

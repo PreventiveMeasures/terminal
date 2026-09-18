@@ -1,8 +1,9 @@
 // Bash expansion order: braces, tilde, substitutions and word splitting, then globs.
 // Quoting is per character: "$d"/*.js still globs, while "$f" never splits.
-// Bindings and a few shell-derived variables exist here; unknown environment
-// names expand to nothing with a warning and an unsupported entry. Process
-// parameters such as $$ remain literal with the same diagnostic.
+// Bindings and a few shell-derived variables exist here; an unknown name
+// expands to nothing with a warning and an unsupported entry, as it would in
+// a shell with an empty environment. A name bash itself would have answered —
+// $$, $UID, $PATH, $RANDOM — is refused instead, since empty would be wrong.
 
 import { assignmentOf, homePrefixes, sliceWord } from './word.js'
 import { UnsupportedError } from '../unsupported.js'
