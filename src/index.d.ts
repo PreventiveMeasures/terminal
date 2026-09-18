@@ -128,7 +128,9 @@ export interface CreateTerminalOptions {
    * Only `/tmp/`, `false`, and `undefined` are accepted. Disabled by default.
    * Requires mount to be neither `/`, `/tmp`, nor a descendant of `/tmp`.
    * The source tree remains read-only. Missing parent directories are not
-   * created by output redirection; `cp -r` is what makes a directory there. Unsupported streaming read/write overlap
+   * created by output redirection; `mkdir` and `cp -r` are what make one there,
+   * and `rm -r` is what takes it away — except for `/tmp` itself, which is
+   * where the overlay is mounted rather than something inside it. Unsupported streaming read/write overlap
    * and changes to inherited input files reach the diagnostic channel.
    */
   writable?: '/tmp/' | false | undefined

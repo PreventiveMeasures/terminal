@@ -133,7 +133,7 @@ describe('rm failures preserve filesystem state', () => {
 })
 
 describe('rm keeps unsupported modes visible without deleting operands', () => {
-  for (const flag of ['-r', '-R', '--recursive', '-rf', '-d', '--dir', '-i', '-I', '--interactive=never', '--one-file-system', '--preserve-root', '--no-preserve-root']) {
+  for (const flag of ['-d', '--dir', '-i', '-I', '--interactive=never', '--one-file-system', '--preserve-root', '--no-preserve-root']) {
     it(flag, () => {
       const terminal = setup()
       const actual = terminal.run(`rm ${flag} /tmp/a 2>/dev/null | cat`)

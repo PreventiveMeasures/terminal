@@ -240,10 +240,12 @@ describe('output paths respect the writable directory boundary', () => {
     check(t, 'printf valid >/tmp/../tmp/result; cat /tmp/./result', 'valid')
     check(t, 'printf relative >../tmp/from-relative; printf source >/repo/src/../../tmp/from-source')
     check(t, 'cat /tmp/from-relative /tmp/from-source', 'relativesource')
-    const result = t.run('mkdir /tmp/nested 2>/dev/null | cat')
-    assert.equal(result.stderr, '')
-    assert.equal(result.exitCode, 0)
-    assert.ok(result.unsupported.length > 0)
+    // A redirect makes the file it names and nothing above it; making the
+    // directory is `mkdir`'s to do, and then the same redirect lands.
+    const result = t.run('printf x >/tmp/nested/file')
+    assert.notEqual(result.exitCode, 0)
+    assert.deepEqual(result.unsupported, [])
     check(t, 'ls /tmp', 'from-relative\nfrom-source\nresult\n')
+    check(t, 'mkdir /tmp/nested; printf x >/tmp/nested/file; cat /tmp/nested/file', 'x')
   })
 })

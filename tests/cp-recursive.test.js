@@ -178,6 +178,66 @@ describe('cp -r refuses what GNU refuses', () => {
   })
 })
 
+describe('cp -r keeps a copy inside the destination it was given', () => {
+  it('names a source ending in .. after the target, as cp.c does', () => {
+    const sources = { 'base/source/f': 'x\n', 'base/sibling': 'sib\n' }
+    const t = createTerminal(sources, { mount: '/repo', cwd: '/repo/base', writable: '/tmp/' })
+    assert.equal(t.run('mkdir /tmp/out').exitCode, 0)
+    const copied = t.run('cp -rv source/.. /tmp/out')
+    assert.equal(copied.stderr, '')
+    assert.equal(copied.stdout, "'source/../sibling' -> '/tmp/out/./sibling'\n'source/../source' -> '/tmp/out/./source'\n'source/../source/f' -> '/tmp/out/./source/f'\n")
+    // Everything lands under the target: `/tmp/out/..` would have climbed out.
+    assert.equal(t.run('find /tmp').stdout, '/tmp\n/tmp/out\n/tmp/out/sibling\n/tmp/out/source\n/tmp/out/source/f\n')
+  })
+
+  it('merges two sources of the same name, with the second winning', () => {
+    const sources = { 'one/shared/a': 'first\n', 'two/shared/a': 'second\n', 'two/shared/only': 'kept\n' }
+    const t = createTerminal(sources, { mount: '/repo', cwd: '/repo', writable: '/tmp/' })
+    const copied = t.run('cp -rv one/shared two/shared /tmp')
+    assert.equal(copied.stderr, '')
+    assert.equal(copied.exitCode, 0)
+    assert.equal(t.run('cat /tmp/shared/a /tmp/shared/only').stdout, 'second\nkept\n')
+  })
+
+  it('still refuses two operands landing on one file', () => {
+    const sources = { 'one/a': 'first\n', 'two/a': 'second\n' }
+    const t = createTerminal(sources, { mount: '/repo', cwd: '/repo', writable: '/tmp/' })
+    const copied = t.run('cp -r one/a two/a /tmp')
+    assert.equal(copied.stderr, "cp: will not overwrite just-created '/tmp/a' with 'two/a'\n")
+    assert.equal(copied.exitCode, 1)
+    assert.equal(t.run('cat /tmp/a').stdout, 'first\n')
+  })
+
+  it('refuses verbose output written into a tree it is copying, before making any of it', () => {
+    const t = terminal()
+    check(t, 'cp -r a /tmp/src')
+    const refused = t.run('cp -rv /tmp/src /tmp/dest >/tmp/src/one')
+    assert.equal(refused.exitCode, 1)
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+    // The redirect truncated the file; nothing was written to it after that.
+    check(t, 'cat /tmp/src/one', '')
+    check(t, 'test -e /tmp/dest', '', '', 1)
+  })
+
+  it('refuses it for the destination tree as well', () => {
+    const t = terminal()
+    check(t, 'cp -r a /tmp/src; mkdir /tmp/dest; cp -r /tmp/src /tmp/dest')
+    // The copy overwrites /tmp/dest/src/one, which is where the verbose output
+    // of this very command would go.
+    const refused = t.run('cp -rv /tmp/src /tmp/dest >/tmp/dest/src/one')
+    assert.equal(refused.exitCode, 1)
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+    check(t, 'cat /tmp/dest/src/one', '')
+  })
+
+  it('leaves a descriptor outside both trees alone', () => {
+    const t = terminal()
+    check(t, 'cp -r a /tmp/src')
+    check(t, 'cp -rv /tmp/src /tmp/dest >/tmp/log')
+    check(t, 'cat /tmp/log', "'/tmp/src' -> '/tmp/dest'\n'/tmp/src/.hidden' -> '/tmp/dest/.hidden'\n'/tmp/src/one' -> '/tmp/dest/one'\n'/tmp/src/sub' -> '/tmp/dest/sub'\n'/tmp/src/sub/deep' -> '/tmp/dest/sub/deep'\n'/tmp/src/sub/deep/three' -> '/tmp/dest/sub/deep/three'\n'/tmp/src/sub/two' -> '/tmp/dest/sub/two'\n")
+  })
+})
+
 describe('a copied tree reads back like any other directory', () => {
   const copied = () => {
     const t = terminal()

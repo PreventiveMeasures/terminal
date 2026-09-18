@@ -18,13 +18,13 @@ export function cp(_stdin, tokens, ctx) {
   const { sources, target, directory } = operands
   const { flags } = parsed
   const verbose = flags.has('v') || flags.has('verbose')
+  const recursive = flags.has('r') || flags.has('R') || flags.has('recursive')
   const copies = sources.map((source) => [source, directory ? target.replace(/\/+$/u, '') + '/' + lastComponent(source) : target])
   const state = {
     ctx, result: emptyOutput(), failed: false, sources: new Set(), copied: new Set(),
     noClobber: flags.has('n') || flags.has('no-clobber'),
-    force: flags.has('f') || flags.has('force'), verbose,
-    recursive: flags.has('r') || flags.has('R') || flags.has('recursive'),
-    outputOverlap: verbose && outputOverlaps(copies, ctx),
+    force: flags.has('f') || flags.has('force'), verbose, recursive,
+    outputOverlap: verbose && outputOverlaps(copies, ctx, recursive),
   }
   for (const [source, destination] of copies) {
     // Each copy finishes before the next operand is opened. Ancestor scopes
@@ -68,7 +68,13 @@ function copyOperands({ positional, flags, order }, ctx) {
 // GNU names a copy after the last component of the source as it was typed,
 // rather than after the directory that spelling resolves to: `cp -r a/. d`
 // copies what `a` holds into `d` itself, and says so as `'a/./x' -> 'd/./x'`.
-const lastComponent = (name) => name.replace(/\/+$/u, '').split('/').at(-1)
+// A source ending in `..` is named `.` for the reason cp.c gives: `d/..` would
+// put the copy beside the directory it was asked to go in, or anywhere else a
+// climb out of it reaches.
+const lastComponent = (name) => {
+  const last = name.replace(/\/+$/u, '').split('/').at(-1)
+  return last === '..' ? '.' : last
+}
 
 // `top` names the operands a nested copy came from, which is what GNU's
 // into-itself diagnostic reports however deep the loop is found.
@@ -92,12 +98,12 @@ function copyFile(source, destination, state, top = null) {
   if (sameFile(found.path, dest.path, ctx.fs)) return fail(`${shownSource} and ${shownTarget} are the same file`)
   if (ctx.fs.isDir(dest.path)) return fail(`cannot overwrite directory ${shownTarget} with non-directory ${shownSource}`)
   const absolute = resolve(ctx.cwd, destination)
-  if (state.copied.has(absolute)) return fail(`will not overwrite just-created ${shownTarget} with ${shownSource}`)
+  // Two operands landing on one name is the mistake GNU refuses; two trees
+  // merging onto one is what a recursive copy is for, and the second source
+  // wins there, so only operands answer to this.
+  if (top === null && state.copied.has(absolute)) return fail(`will not overwrite just-created ${shownTarget} with ${shownSource}`)
   const invalid = creationError(ctx.cwd, destination, ctx.fs, dest)
-  if (state.verbose) {
-    if (state.outputOverlap) throw new UnsupportedError('feature', 'copy output buffering', 'buffered verbose output sharing a copied file is not supported')
-    report(state, `${shownSource} -> ${shownTarget}\n`)
-  }
+  announce(shownSource, shownTarget, state)
   if (invalid) {
     missingPathNote(ctx, 'cp', destination, invalid)
     return fail(`cannot create regular file ${shownTarget}: ${invalid}`)
@@ -112,7 +118,7 @@ function copyFile(source, destination, state, top = null) {
     const message = reason(e)
     return fail(`cannot create regular file ${shownTarget}: ${message.startsWith(destination + ': ') ? message.slice(destination.length + 2) : message}`)
   }
-  state.copied.add(absolute)
+  if (top === null) state.copied.add(absolute)
 }
 
 // A directory is copied by making the destination and then copying what the
@@ -121,6 +127,9 @@ function copyFile(source, destination, state, top = null) {
 // copied, as GNU leaves it.
 function copyDirectory(source, absolute, destination, state, top) {
   const { ctx } = state
+  // Before a directory is made rather than after, so a copy that cannot be
+  // announced leaves nothing of itself behind.
+  refuseBufferedOutput(state)
   const shownSource = quoteName(source, ctx)
   const shownTarget = quoteName(destination, ctx)
   const fail = (message) => report(state, 'cp: ' + message + '\n', true)
@@ -174,8 +183,22 @@ function makeDirectory(source, destination, dest, state) {
     return false
   }
   // GNU announces a directory it makes, and says nothing of one already there.
-  if (state.verbose) report(state, `${quoteName(source, ctx)} -> ${shownTarget}\n`)
+  announce(quoteName(source, ctx), shownTarget, state)
   return true
+}
+
+// Verbose output is GNU's to buffer, so where its descriptor is a file this
+// copy also reads or writes, what a caller reads back depends on when that
+// buffer was flushed. Nothing is said before the refusal, since the line would
+// be the very thing in question.
+function announce(source, target, state) {
+  if (!state.verbose) return
+  refuseBufferedOutput(state)
+  report(state, `${source} -> ${target}\n`)
+}
+
+function refuseBufferedOutput(state) {
+  if (state.outputOverlap) throw new UnsupportedError('feature', 'copy output buffering', 'buffered verbose output sharing a copied file is not supported')
 }
 
 function sameFile(source, destination, fs) {
@@ -186,12 +209,17 @@ function sameFile(source, destination, fs) {
 
 // GNU buffers verbose stdout; buffer fills and error() flushes can change
 // a later copy when that descriptor points to a source or destination.
-function outputOverlaps(copies, ctx) {
+function outputOverlaps(copies, ctx, recursive) {
   const output = ctx.outputFds[1]
   if (typeof output !== 'object') return false
   return copies.some((paths) => paths.some((name) => {
     const found = lookup(ctx.cwd, name, ctx.fs)
-    if (found.error || ctx.fs.isDir(found.path)) return false
+    if (found.error) return false
+    // A recursive copy reads and writes every name below these two, so a
+    // descriptor anywhere under one of them is the same overlap a named file is.
+    if (ctx.fs.isDir(found.path)) {
+      return recursive && typeof output.path === 'string' && output.path.startsWith(found.path === '/' ? '/' : found.path + '/')
+    }
     return output.identity === undefined ? output.path === found.path : output.identity === ctx.fs.fileIdentity?.(found.path)
   }))
 }

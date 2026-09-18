@@ -49,6 +49,7 @@ export function writableFs(base) {
       return writeHandle(absolute, inode, append, () => observer?.write(inode))
     },
     makeWritableDir: (cwd, path) => addDirectory(fs, { dirs, files, reshaped }, cwd, path),
+    removeWritableDir: (cwd, path) => dropDirectory(fs, { dirs, reshaped }, cwd, path),
     copyWritable(cwd, source, target) {
       const absolute = resolve(cwd, target)
       if (!absolute.startsWith('/tmp/')) return false
@@ -62,20 +63,7 @@ export function writableFs(base) {
       fs.openWritable(cwd, target).writeBytes(bytes)
       return true
     },
-    replaceWritable(cwd, path, content, backupPath) {
-      const absolute = resolve(cwd, path)
-      const backup = backupPath === undefined ? null : resolve(cwd, backupPath)
-      if (!absolute.startsWith('/tmp/') || backup !== null && !backup.startsWith('/tmp/')) return false
-      checkTarget(fs, cwd, path)
-      const inode = files.get(absolute)
-      if (!inode) throw pathError(path, 'No such file or directory')
-      if (backup !== null) checkTarget(fs, cwd, backupPath)
-      const replacement = { bytes: encodeUtf8(content) }
-      if (backup !== null) put(backup, inode)
-      // Renaming a replacement keeps already-open descriptors on the old file.
-      put(absolute, replacement)
-      return true
-    },
+    replaceWritable: (cwd, path, content, backup) => replaceFile(fs, { files, put }, cwd, path, content, backup),
     removeWritable(cwd, path) {
       const absolute = resolve(cwd, path)
       if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
@@ -104,6 +92,41 @@ function addDirectory(fs, overlay, cwd, path) {
   // directory can take.
   if (overlay.files.has(absolute)) throw new Error(`${path}: File exists`)
   overlay.dirs.add(absolute)
+  overlay.reshaped()
+  return true
+}
+
+// A whole-file rewrite, as `sed -i` and `patch` make one, optionally keeping
+// what was there under a backup name.
+function replaceFile(fs, overlay, cwd, path, content, backupPath) {
+  const absolute = resolve(cwd, path)
+  const backup = backupPath === undefined ? null : resolve(cwd, backupPath)
+  if (!absolute.startsWith('/tmp/') || backup !== null && !backup.startsWith('/tmp/')) return false
+  checkTarget(fs, cwd, path)
+  const inode = overlay.files.get(absolute)
+  if (!inode) throw pathError(path, 'No such file or directory')
+  if (backup !== null) checkTarget(fs, cwd, backupPath)
+  const replacement = { bytes: encodeUtf8(content) }
+  if (backup !== null) overlay.put(backup, inode)
+  // Renaming a replacement keeps already-open descriptors on the old file.
+  overlay.put(absolute, replacement)
+  return true
+}
+
+// Removing a directory is removing it alone: `rm -r` clears what is inside it
+// first, so anything left here is a caller's mistake. `/tmp` is where the
+// overlay is mounted rather than something inside it, and a mount point is not
+// the tree below it to remove — which is the busy device Linux reports.
+function dropDirectory(fs, overlay, cwd, path) {
+  const absolute = resolve(cwd, path)
+  if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
+  const found = lookup(cwd, path, fs)
+  if (found.error) throw pathError(path, found.error)
+  if (!overlay.dirs.has(found.path)) throw new Error(`${path}: Not a directory`)
+  if (found.path === '/tmp') throw new Error(`${path}: Device or resource busy`)
+  const { dirs, files } = fs.listDir(found.path)
+  if (dirs.length || files.length) throw new Error(`${path}: Directory not empty`)
+  overlay.dirs.delete(found.path)
   overlay.reshaped()
   return true
 }
