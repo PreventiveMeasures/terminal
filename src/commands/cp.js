@@ -236,39 +236,69 @@ function sameFile(source, destination, fs) {
 function outputOverlaps(copies, ctx, { recursive, noClobber }) {
   const output = ctx.outputFds[1]
   if (typeof output !== 'object') return false
-  // A name is not an inode: the overlay can hold one inode under two names,
-  // and a `sed -i` backup can put the descriptor's file anywhere at all.
-  const holds = (path) => output.identity === undefined ? output.path === path : output.identity === ctx.fs.fileIdentity?.(path)
-  // An operand landing on a name an earlier one has just made is refused
-  // rather than overwritten, and a refusal opens nothing — so the operands are
-  // read in order, carrying what they have taken. (A source named twice needs
-  // no set of its own: it resolves to the destination its first mention
-  // already answered for.)
-  const copied = new Set()
-  for (const [source, destination] of copies) {
-    const found = lookup(ctx.cwd, source, ctx.fs)
-    if (found.error) continue
-    const into = resolve(ctx.cwd, destination)
-    if (ctx.fs.isDir(found.path)) {
-      if (!recursive || !copiesDirectory(found.path, destination, ctx)) continue
-      // Every file below the source is read, and written to the name it keeps
-      // below the destination — but only where the entry gets that far. Its
-      // parents are this copy's own to make, so a component that is not there
-      // yet says nothing about it; what is already in the way does.
-      const root = found.path === '/' ? 0 : found.path.length
-      for (const path of ctx.fs.walkFiles(found.path)) {
-        const to = into + path.slice(root)
-        if (refusedBeforeWriting(path, to, lookup(ctx.cwd, to, ctx.fs), ctx, noClobber)) continue
-        if (holds(path) || holds(to)) return true
-      }
-      continue
-    }
-    if (copied.has(into) || !copiesFile(found.path, into, destination, ctx, noClobber)) continue
-    copied.add(into)
-    if (holds(found.path) || holds(into)) return true
+  const scan = {
+    ctx, recursive, noClobber,
+    // A name is not an inode: the overlay can hold one inode under two names,
+    // and a `sed -i` backup can put the descriptor's file anywhere at all.
+    holds: (path) => output.identity === undefined ? output.path === path : output.identity === ctx.fs.fileIdentity?.(path),
+    // `cp` copies in order, and the order is part of the answer: an operand can
+    // name what an earlier one has just put there, a source already copied is
+    // warned about rather than copied again, and a name an earlier operand has
+    // taken is refused rather than overwritten. None of those opens anything.
+    made: new Set(), sources: new Set(), copied: new Set(),
+  }
+  return copies.some(([source, destination]) => operandOverlaps(source, destination, scan))
+}
+
+function operandOverlaps(source, destination, scan) {
+  const { ctx } = scan
+  const found = lookup(ctx.cwd, source, ctx.fs)
+  const from = found.path ?? resolve(ctx.cwd, source)
+  // A name that is not there yet may be one an earlier operand makes.
+  const coming = found.error === 'No such file or directory' && (scan.made.has(from) || madeDirectory(from, scan))
+  if (found.error && !coming) return false
+  const into = resolve(ctx.cwd, destination)
+  if (found.error === null ? ctx.fs.isDir(found.path) : !scan.made.has(from)) {
+    if (!scan.recursive || !copiesDirectory(from, destination, ctx) || scan.sources.has(from)) return false
+    scan.sources.add(from)
+    return treeOverlaps(from, into, scan)
+  }
+  // A source is one directory or one file however it is spelled, and `cp` keeps
+  // it by the name it resolves to — `s` and `s/sub/..` are the same operand
+  // twice even though they would be copied to different destinations.
+  if (scan.sources.has(from)) return false
+  scan.sources.add(from)
+  if (scan.copied.has(into) || !copiesFile(from, into, destination, ctx, scan.noClobber)) return false
+  scan.copied.add(into)
+  scan.made.add(into)
+  return scan.holds(from) || scan.holds(into)
+}
+
+// Every file below the source is read, and written to the name it keeps below
+// the destination — but only where the entry gets that far. Its parents are
+// this copy's own to make, so a component that is not there yet says nothing
+// about it; what is already in the way does.
+function treeOverlaps(from, into, scan) {
+  const { ctx } = scan
+  const root = from === '/' ? 0 : from.length
+  for (const path of filesUnder(from, scan)) {
+    const to = into + path.slice(root)
+    if (refusedBeforeWriting(path, to, lookup(ctx.cwd, to, ctx.fs), ctx, scan.noClobber)) continue
+    scan.made.add(to)
+    if (scan.holds(path) || scan.holds(to)) return true
   }
   return false
 }
+
+// What a walk finds there: what is there now, and what an earlier operand will
+// have put there by the time this one runs.
+function filesUnder(from, scan) {
+  const prefix = from === '/' ? '/' : from + '/'
+  const present = scan.ctx.fs.isDir(from) ? [...scan.ctx.fs.walkFiles(from)] : []
+  return new Set([...present, ...[...scan.made].filter((path) => path.startsWith(prefix))])
+}
+
+const madeDirectory = (path, scan) => [...scan.made].some((file) => file.startsWith(path + '/'))
 
 // A copy that refuses before it writes has opened neither name, so nothing it
 // says can meet anything it does: the diagnostic and the verbose line that goes

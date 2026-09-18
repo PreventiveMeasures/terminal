@@ -17,6 +17,7 @@ const terminal = (options = {}) => createTerminal(SOURCES, { mount: '/repo', cwd
 function check(t, command, stdout = '', stderr = '', exitCode = 0, cwd = '/repo') {
   assert.deepEqual(t.run(command), { stdout, stderr, exitCode, cwd, notes: [], unsupported: [] }, command)
 }
+const check2 = (t, command, stdout = '') => check(t, command, stdout, '', 0, '/tmp')
 
 const TREE = '/tmp/copy\n/tmp/copy/.hidden\n/tmp/copy/one\n/tmp/copy/sub\n/tmp/copy/sub/deep\n/tmp/copy/sub/deep/three\n/tmp/copy/sub/two\n'
 
@@ -396,6 +397,32 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     const refused = t.run('cp -rv file /tmp/s /tmp/dest >/tmp/s/out')
     assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
     check(t, 'find /tmp/dest', '/tmp/dest\n')
+  })
+
+  it('sees a source an earlier operand has yet to make', () => {
+    const t = createTerminal({ 's/x': 'X\n' }, { mount: '/repo', cwd: '/tmp', writable: '/tmp/' })
+    check2(t, 'cp -r /repo/s /tmp/s; mkdir -p /tmp/d/s')
+    // `/tmp/d/s/x` is not there when the command starts; the first operand
+    // makes it, and the second copies it onto the descriptor's own file. GNU
+    // ends with its buffered lines there instead of the copied bytes, which is
+    // the ordering this refuses to invent.
+    const refused = t.run('cp -rv s /tmp/d/s/x /tmp/d >/tmp/d/x')
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+    check2(t, 'cat /tmp/d/x', '')
+  })
+
+  it('leaves a source spelled twice out of the overlap', () => {
+    const t = createTerminal({ 's/a': 'A\n', 's/sub/b': 'B\n' }, { mount: '/repo', cwd: '/tmp', writable: '/tmp/' })
+    check2(t, 'cp -r /repo/s /tmp/s; mkdir /tmp/d')
+    // `s/sub/..` is `s` again, so cp warns instead of copying it — even though
+    // that spelling would land in `/tmp/d` itself and take the descriptor's
+    // name with it. The first spelling copies into `/tmp/d/s`, which does not.
+    const lines = "'s' -> '/tmp/d/s'\n's/a' -> '/tmp/d/s/a'\n's/sub' -> '/tmp/d/s/sub'\n's/sub/b' -> '/tmp/d/s/sub/b'\n"
+    const result = t.run('cp -rv s s/sub/.. /tmp/d >/tmp/d/a')
+    assert.deepEqual(result.unsupported, [])
+    assert.equal(result.stderr, "cp: warning: source directory 's/sub/..' specified more than once\n")
+    check2(t, 'cat /tmp/d/a', lines)
+    check2(t, 'find /tmp/d -type f', '/tmp/d/a\n/tmp/d/s/a\n/tmp/d/s/sub/b\n')
   })
 
   it('sees a descriptor a backup name put inside the tree', () => {
