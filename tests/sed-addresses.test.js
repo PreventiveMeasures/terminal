@@ -70,7 +70,7 @@ describe('sed unsupported features retain diagnostics', () => {
     ["sed 's/a/x/ # comment' input", 'comments'],
     [String.raw`sed -E 's/a/\U&/' input`, 'replacement escape'],
     [String.raw`sed -n '/[[:alpha:]]/p' unicode`, 'non-ASCII regex semantics'],
-    ["sed -n '/^.$/p' unicode", 'non-ASCII regex semantics'],
+    ["sed -n '/^[[:alpha:]]$/p' unicode", 'non-ASCII regex semantics'],
   ]
   for (const [command, detail] of gaps) {
     it(command, () => {
@@ -88,7 +88,7 @@ describe('sed unsupported features retain diagnostics', () => {
 
   it('preserves earlier output and its diagnostic when a later address cannot match reliably', () => {
     const terminal = createTerminal({ input: 'a\né\n' })
-    for (const command of ["sed -n '/^.$/p' input", "sed -E 's/./x/' input"]) {
+    for (const command of ["sed -n '/^[[:alpha:]]$/p' input", "sed -E 's/[[:alpha:]]/x/' input"]) {
       const result = terminal.run(`${command} 2>/dev/null | cat`)
       assert.equal(result.stdout, command.includes('-n') ? 'a\n' : 'x\n')
       assert.equal(result.stderr, '')
