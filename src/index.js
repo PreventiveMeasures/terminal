@@ -4,7 +4,7 @@
 // Informational notes share that scope without changing the command's streams.
 // Caller-provided command handlers use the contract in custom.js.
 
-import { mountSources } from './mount.js'
+import { forkSettings, mountSources } from './mount.js'
 import { parseUnits } from './shell/parse.js'
 import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
@@ -17,12 +17,34 @@ import { commandWriteError, createIoGuard, routeExternalOutput, runSteps } from 
 
 export function createTerminal(sources, opts = {}) {
   const { fs, cwd, home, mount, writable } = mountSources(sources, opts)
-  // stdinLeft tracks consumption within a command list; stdinOrigin allows
-  // /dev/stdin to reopen a redirected file independently of that offset.
   const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
+  // The I/O guard watches one filesystem's reads and writes, and the writable
+  // overlay it observes holds a single observer, so the guard belongs to the
+  // filesystem rather than to a terminal: a fork over the same tree shares it.
+  const shared = { fs, io: createIoGuard(fs), mount, writable, registry }
+  return terminal(context(shared, { cwd, home, user: opts.user ?? 'user', vars: new BindingMap(), functions: new Map(), lastExit: 0 }), 'createTerminal')
+}
+
+// A fork is the process fork rather than a second terminal over the same
+// sources: the filesystem, the /tmp/ overlay, and the wired commands stay the
+// parent's, while the working directory, the variables, the functions, and the
+// last exit status are copies taken now. Afterwards neither side's cd,
+// assignment, or unset is visible to the other, and only what they write in
+// /tmp/ passes between them — as it does between two processes sharing a disk.
+function fork(parent, opts = {}) {
+  const { cwd, home, user } = forkSettings(parent, opts)
+  const state = { cwd, home, user, vars: new BindingMap(parent.vars), functions: new Map(parent.functions), lastExit: parent.lastExit }
+  return terminal(context(parent, state), 'fork')
+}
+
+// Stdin position, open descriptors and the two diagnostic feeds belong to
+// whoever is running a line, so every terminal starts with a set of its own.
+// stdinLeft tracks consumption within a command list; stdinOrigin allows
+// /dev/stdin to reopen a redirected file independently of that offset.
+function context({ fs, io, mount, writable, registry }, session) {
   const ctx = {
-    cwd, fs, io: createIoGuard(fs), user: opts.user ?? 'user', home, mount, writable, registry, functions: new Map(), calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
-    vars: new BindingMap(), lastExit: 0, loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '',
+    fs, io, mount, writable, registry, ...session, calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
+    loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '',
     unsupported: createUnsupportedFeed(), notes: new Set(),
   }
   // find -exec and xargs dispatch externally in isolated shell state.
@@ -32,11 +54,19 @@ export function createTerminal(sources, opts = {}) {
   ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)
   ctx.invoke = (name, tokens, stdin) => dispatch(name, tokens, stdin, ctx)
   ctx.substitute = (command, backtick) => commandSubstitution(command, ctx, runSteps, backtick)
-  if (!fs.isDir(ctx.cwd)) throw new Error(`createTerminal: cwd is not a directory: ${ctx.cwd}`)
+  return ctx
+}
+
+// The public surface, and the check both entry points share: a working
+// directory that does not exist is the caller's mistake either way, so the
+// error names the call that made it.
+function terminal(ctx, label) {
+  if (!ctx.fs.isDir(ctx.cwd)) throw new Error(`${label}: cwd is not a directory: ${ctx.cwd}`)
   return {
     run: (line) => safeRun(line, ctx),
     cwd: () => ctx.cwd,
-    complete: (line) => complete(line, ctx, registry),
+    complete: (line) => complete(line, ctx, ctx.registry),
+    fork: (opts) => fork(ctx, opts),
     ...reading(ctx),
   }
 }
