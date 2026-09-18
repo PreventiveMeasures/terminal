@@ -43,12 +43,20 @@ export function duOptions(tokens, ctx) {
     }
   }
   if (flags.has('inodes')) options.scale = { ...options.scale, unit: 1n, suffix: options.scale.suffix?.endsWith('B') ? 'B' : '' }
+  if (options.scale.base) humanScale(ctx, options.scale.base)
   return options
 }
 
-// `-h` rounds up to one decimal, written with the `.` of C.UTF-8's numeric
-// locale — the only one a session can be in, and the same point C would write.
-export const humanScale = (base = 1024n) => ({ base, unit: 1n })
+// `-h` rounds up to one decimal, written with the numeric locale's decimal
+// point: `.` in C, POSIX and C.UTF-8, the ones a session can be in today. Any
+// other would write it differently, so this keeps checking the category
+// against the locale — LC_ALL, LC_NUMERIC, then the environment's — rather
+// than trusting that the assignment guard never lets another through.
+export function humanScale(ctx, base = 1024n) {
+  const numeric = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_NUMERIC') || ctx.locale
+  if (!/^(?:C|POSIX|C\.UTF-?8)$/iu.test(numeric)) throw new UnsupportedError('feature', 'numeric locale', 'human-readable sizes in this numeric locale are not supported')
+  return { base, unit: 1n }
+}
 
 function depthOption(value) {
   const match = /^[ \t\n\r\v\f]*([+-]?)(0[xX][\da-fA-F]+|0[0-7]*|[1-9]\d*)$/u.exec(value)
