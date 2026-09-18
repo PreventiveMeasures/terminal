@@ -292,6 +292,18 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     check(t, 'cat /tmp/dest/src/one', '')
   })
 
+  it('lets a refusal that needs no output answer before the buffering one', () => {
+    const t = terminal()
+    check(t, 'cp -r a /tmp/src')
+    // These refuse before anything is made or announced, so what GNU would
+    // have buffered never arises and the ordinary diagnostic stands.
+    check(t, 'cp -rvT /tmp/src /tmp/src >/tmp/src/one', '', "cp: '/tmp/src' and '/tmp/src' are the same file\n", 1)
+    check(t, 'cp -rv /tmp/src /tmp/src >/tmp/src/one', '', "cp: cannot copy a directory, '/tmp/src', into itself, '/tmp/src/src'\n", 1)
+    check(t, 'cp -rv /tmp/src/sub /tmp/src >/tmp/src/one', '', "cp: '/tmp/src/sub' and '/tmp/src/sub' are the same file\n", 1)
+    // The redirect truncated the file; nothing wrote to it after that.
+    check(t, 'cat /tmp/src/one', '')
+  })
+
   it('leaves a descriptor outside both trees alone', () => {
     const t = terminal()
     check(t, 'cp -r a /tmp/src')

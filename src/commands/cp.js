@@ -132,9 +132,6 @@ function copyFile(source, destination, state, top = null) {
 // copied, as GNU leaves it.
 function copyDirectory(source, absolute, destination, state, top, operand) {
   const { ctx } = state
-  // Before a directory is made rather than after, so a copy that cannot be
-  // announced leaves nothing of itself behind.
-  refuseBufferedOutput(state)
   const shownSource = quoteName(source, ctx)
   const shownTarget = quoteName(destination, ctx)
   const fail = (message) => report(state, 'cp: ' + message + '\n', true)
@@ -168,6 +165,11 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
   if (target.startsWith(absolute === '/' ? '/' : absolute + '/')) {
     return fail(`cannot copy a directory, ${top.source}, into itself, ${top.target}`)
   }
+  // Everything above refuses without making or announcing anything, so what
+  // GNU would have buffered is not in question there. From here it is: the
+  // guard comes before the directory is made rather than after, so a copy that
+  // cannot be announced leaves nothing of itself behind.
+  refuseBufferedOutput(state)
   // GNU keeps the operands it has copied, and names a directory as a directory.
   if (operand) {
     if (state.sources.has(absolute)) return report(state, `cp: warning: source directory ${shownSource} specified more than once\n`, false, true)
