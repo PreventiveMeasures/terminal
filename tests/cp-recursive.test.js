@@ -185,6 +185,32 @@ describe('cp -r refuses what GNU refuses', () => {
     check(t, 'find /tmp -type f', '/tmp/a/.hidden\n/tmp/a/one\n/tmp/a/sub/deep/three\n/tmp/a/sub/two\n')
   })
 
+  it('copies an operand that another operand contains, to both of its names', () => {
+    const t = terminal()
+    check(t, 'mkdir /tmp/dest')
+    // The warning is for an operand repeated on the command line. `a/sub/two`
+    // and `a` are two names with two destinations, so both are copied.
+    check(t, 'cp -r a/sub/two a /tmp/dest')
+    check(t, 'find /tmp/dest -type f', '/tmp/dest/a/.hidden\n/tmp/dest/a/one\n/tmp/dest/a/sub/deep/three\n/tmp/dest/a/sub/two\n/tmp/dest/two\n')
+  })
+
+  it('copies overlapping directory operands in full', () => {
+    const t = terminal()
+    check(t, 'mkdir /tmp/dest')
+    // GNU refuses the second copy of `a/sub` as a hard link it would rather
+    // make than copy; nothing here is linked, so each name is copied for
+    // itself and the tree the operands asked for is what comes out.
+    check(t, 'cp -r a/sub a /tmp/dest')
+    check(t, 'find /tmp/dest -type f', '/tmp/dest/a/.hidden\n/tmp/dest/a/one\n/tmp/dest/a/sub/deep/three\n/tmp/dest/a/sub/two\n/tmp/dest/sub/deep/three\n/tmp/dest/sub/two\n')
+  })
+
+  it('still warns for one operand given twice, however it is spelled', () => {
+    const t = terminal()
+    check(t, 'cp -r a a /tmp', '', "cp: warning: source directory 'a' specified more than once\n")
+    check(t, 'mkdir /tmp/dest; cp -r a a/. /tmp/dest', '', "cp: warning: source directory 'a/.' specified more than once\n")
+    check(t, 'cp file file /tmp/dest', '', "cp: warning: source file 'file' specified more than once\n")
+  })
+
   it('keeps copying the operands after one of them fails', () => {
     const t = terminal()
     check(t, 'cp -r a missing file /tmp', '', "cp: cannot stat 'missing': No such file or directory\n", 1)

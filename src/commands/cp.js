@@ -88,10 +88,15 @@ function copyFile(source, destination, state, top = null) {
   if (found.error) return fail(`cannot stat ${shownSource}: ${found.error}`)
   if (ctx.fs.isDir(found.path)) {
     if (!state.recursive) return fail(`-r not specified; omitting directory ${shownSource}`)
-    return copyDirectory(source, found.path, destination, state, top ?? { source: shownSource, target: shownTarget })
+    return copyDirectory(source, found.path, destination, state, top ?? { source: shownSource, target: shownTarget }, top === null)
   }
-  if (state.sources.has(found.path)) return report(state, `cp: warning: source file ${shownSource} specified more than once\n`, false, true)
-  state.sources.add(found.path)
+  // Repeated *operands* are what GNU warns about; an entry a walk reaches has
+  // a destination of its own and repeats nothing, so `cp -r a/sub/x a d` copies
+  // the file twice, as the two names it was given ask for.
+  if (top === null) {
+    if (state.sources.has(found.path)) return report(state, `cp: warning: source file ${shownSource} specified more than once\n`, false, true)
+    state.sources.add(found.path)
+  }
   const dest = lookup(ctx.cwd, destination, ctx.fs)
   if (dest.error && dest.error !== 'No such file or directory') return fail(`cannot stat ${shownTarget}: ${dest.error}`)
   if (state.noClobber && dest.path !== null) return
@@ -125,7 +130,7 @@ function copyFile(source, destination, state, top = null) {
 // source held when it was read. An entry that is the destination itself is the
 // loop GNU refuses to follow, and refusing it leaves the rest of the tree
 // copied, as GNU leaves it.
-function copyDirectory(source, absolute, destination, state, top) {
+function copyDirectory(source, absolute, destination, state, top, operand) {
   const { ctx } = state
   // Before a directory is made rather than after, so a copy that cannot be
   // announced leaves nothing of itself behind.
@@ -163,9 +168,11 @@ function copyDirectory(source, absolute, destination, state, top) {
   if (target.startsWith(absolute === '/' ? '/' : absolute + '/')) {
     return fail(`cannot copy a directory, ${top.source}, into itself, ${top.target}`)
   }
-  // GNU keeps the sources it has copied, and names a directory as a directory.
-  if (state.sources.has(absolute)) return report(state, `cp: warning: source directory ${shownSource} specified more than once\n`, false, true)
-  state.sources.add(absolute)
+  // GNU keeps the operands it has copied, and names a directory as a directory.
+  if (operand) {
+    if (state.sources.has(absolute)) return report(state, `cp: warning: source directory ${shownSource} specified more than once\n`, false, true)
+    state.sources.add(absolute)
+  }
   const { dirs, files } = ctx.fs.listDir(absolute)
   if (dest.path === null && !makeDirectory(source, destination, named, state)) return
   const from = source.replace(/\/+$/u, ''), into = destination.replace(/\/+$/u, '')
