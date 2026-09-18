@@ -176,6 +176,15 @@ refused rather than answered differently from ripgrep. Literal matching crosses
 scripts, but Unicode-aware matching does not: `-i`, `-w`, `.` and `\w` over a
 tree holding any non-ASCII file report an unsupported diagnostic.
 
+`grep` and `sed` read a regular expression the way GNU does in the C.UTF-8
+locale: `.`, and a bracket of ASCII members, negated or not, take one
+character, accented or not, so `grep -rln 'template.js' .` answers over a
+tree with accented text in it. A non-ASCII literal on its own is matched
+exactly; one beside a `.`, a bracket or a repetition still reports an
+unsupported diagnostic over non-ASCII input, as do case folding, `-w`, `\b`,
+`\w` and the named classes past space and blank: their C.UTF-8 tables are not
+modelled yet.
+
 `stat -c '%s %n' file` reports byte size and name; `%F` reports file type.
 `--printf` adds escape processing and controls line endings. Default `stat`
 output, directory byte sizes, and fields requiring ownership, permissions,

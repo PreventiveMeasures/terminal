@@ -99,7 +99,7 @@ describe('sed numeric substitution occurrences', () => {
     })
   }
   it('keeps locale-dependent regex limitations visible for numeric selectors', () => {
-    const actual = createTerminal({ input: 'é😀z\n' }).run("sed 's/./X/2' input 2>/dev/null | cat")
+    const actual = createTerminal({ input: 'é😀z\n' }).run("sed 's/[[:alpha:]]/X/2' input 2>/dev/null | cat")
     assert.equal(actual.exitCode, 0)
     assert.equal(actual.stderr, '')
     assert.equal(actual.unsupported.length, 1)
