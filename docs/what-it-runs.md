@@ -62,7 +62,10 @@ as its size, and that path named after it.
 `du -bs src` reports a directory total. `--apparent-size` (also accepted as the
 BSD `-A`) supports block and human-readable units, and `--inodes` counts
 entries. Allocated disk sizes are unavailable, so plain `du` and `du -sh`
-report an unsupported diagnostic.
+report an unsupported diagnostic. A link is measured as the link it is, which
+is what `-P` asks for and what `du` does without being asked; `-D` and `-H`
+measure what an operand points at, and `-L`, which would measure what every
+link in a walk points at, reports an unsupported diagnostic where it meets one.
 
 `rg` covers the search itself: recursion, `-n -N -i -s -w -v -F -a -l -c -e -q
 -H -I -A -B -C -u`, and skipping hidden entries unless `--hidden`. Options are

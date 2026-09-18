@@ -244,10 +244,18 @@ describe('the rest of the tree tools answer for a link without crossing it', () 
     check(t, 'du -ab node_modules/.bin', '17\tnode_modules/.bin/cli\n14\tnode_modules/.bin/stale\n31\tnode_modules/.bin\n')
     check(t, 'du -b node_modules/.bin/cli', '17\tnode_modules/.bin/cli\n')
     check(t, 'du --inodes -s node_modules/.bin', '3\tnode_modules/.bin\n')
-    // `-D` asks about what an operand points at, which is a name away and
-    // needs no walk; `-L` asks it of every link a walk reaches.
+    // `-D`, spelled `-H` as well, asks about what an operand points at, which
+    // is a name away and needs no walk; `-L` asks it of every link a walk
+    // reaches. The three name one setting, so the last of them answers.
     check(t, 'du -Db node_modules/.bin/cli', '4\tnode_modules/.bin/cli\n')
+    check(t, 'du -Hb node_modules/.bin/cli', '4\tnode_modules/.bin/cli\n')
+    check(t, 'du -PHb node_modules/.bin/cli', '4\tnode_modules/.bin/cli\n')
+    check(t, 'du -HPb node_modules/.bin/cli', '17\tnode_modules/.bin/cli\n')
+    // An operand followed is the only link `-D` and `-H` follow: the ones a
+    // walk reaches below it are measured as the links they are.
+    check(t, 'du -Hb node_modules/.bin', '31\tnode_modules/.bin\n')
     gap(t, 'du -Lb node_modules/.bin', 'dereference', 'du: following symbolic links is not supported: node_modules/.bin/cli\n')
+    check(t, 'du -LPb node_modules/.bin', '31\tnode_modules/.bin\n')
   })
 
   it('stat describes the name it is given, and -L what that name leads to', () => {

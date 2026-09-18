@@ -15,10 +15,9 @@ export function du(_stdin, tokens, ctx) {
   if (options.stderr) appendOutput(state.result, ctx.flushOutput(emptyOutput(options.stderr)))
   for (const operand of options.operands) {
     const name = operand.length > 2 ? operand.replace(/\/+$/u, '/') : operand
-    // du measures the names it is given, as `-P` has it by default; `-D` and
-    // `-L` each ask about what an operand points at instead.
-    const follow = options.flags.has('L') || options.flags.has('D')
-    const found = lookupWithNote(ctx, 'du', name, { follow })
+    // du measures the names it is given, as `-P` has it by default; `-D` (or
+    // `-H`) and `-L` each ask about what an operand points at instead.
+    const found = lookupWithNote(ctx, 'du', name, { follow: options.links !== 'none' })
     if (found.error) {
       appendOutput(state.result, ctx.flushOutput(err(`du: cannot access ${quoteName(name, ctx)}: ${found.error}`)))
       state.failed = true
@@ -59,7 +58,7 @@ function measure(path, name, state) {
     // A walk measures the links it finds, which is what du does without `-L`.
     // What `-L` would measure instead — the tree each one leads to, and the
     // cycle a link above itself makes of that walk — is not modelled.
-    if (!isDir && options.flags.has('L') && ctx.fs.isLink?.(item.path)) {
+    if (!isDir && options.links === 'all' && ctx.fs.isLink?.(item.path)) {
       throw new UnsupportedError('option', 'dereference', `following symbolic links is not supported: ${item.name}`)
     }
     const identity = isDir ? item.path : ctx.fs.fileIdentity?.(item.path) ?? item.path
