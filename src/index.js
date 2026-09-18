@@ -22,19 +22,33 @@ export function createTerminal(sources, opts = {}) {
   // overlay it observes holds a single observer, so the guard belongs to the
   // filesystem rather than to a terminal: a fork over the same tree shares it.
   const shared = { fs, io: createIoGuard(fs), mount, writable, registry }
-  return terminal(context(shared, { cwd, home, user: opts.user ?? 'user', vars: new BindingMap(), functions: new Map(), lastExit: 0 }), 'createTerminal')
+  return terminal(context(shared, { cwd, home, user: opts.user ?? 'user', ...freshSession() }), 'createTerminal')
 }
+
+// The shell state a terminal starts with when it starts with none of anyone's:
+// no variables, no names it knows to be unset, no functions, nothing yet to
+// report as the last exit status.
+const freshSession = () => ({ vars: new BindingMap(), functions: new Map(), lastExit: 0 })
+
+// Copies, taken now: neither side's later assignment, unset or definition can
+// reach the other through them.
+const copiedSession = (parent) => ({ vars: new BindingMap(parent.vars), functions: new Map(parent.functions), lastExit: parent.lastExit })
 
 // A fork is the process fork rather than a second terminal over the same
 // sources: the filesystem, the /tmp/ overlay, and the wired commands stay the
-// parent's, while the working directory, the variables, the functions, and the
-// last exit status are copies taken now. Afterwards neither side's cd,
-// assignment, or unset is visible to the other, and only what they write in
-// /tmp/ passes between them — as it does between two processes sharing a disk.
+// parent's, while the shell state — variables, functions, last exit status — is
+// copied. Afterwards neither side's cd, assignment, or unset is visible to the
+// other, and only what they write in /tmp/ passes between them, as it does
+// between two processes sharing a disk.
+//
+// `inherit: false` starts that shell state empty instead, which is the honest
+// companion to setting a home or a user: a fork wearing another name has no
+// business carrying the variables, the functions and the $HOME assignment of
+// the session it left. Where it stands is its own setting either way.
 function fork(parent, opts = {}) {
-  const { cwd, home, user } = forkSettings(parent, opts)
-  const state = { cwd, home, user, vars: new BindingMap(parent.vars), functions: new Map(parent.functions), lastExit: parent.lastExit }
-  return terminal(context(parent, state), 'fork')
+  const { cwd, home, user, inherit } = forkSettings(parent, opts)
+  const session = inherit ? copiedSession(parent) : freshSession()
+  return terminal(context(parent, { cwd, home, user, ...session }), 'fork')
 }
 
 // Stdin position, open descriptors and the two diagnostic feeds belong to

@@ -95,6 +95,20 @@ read-only sources.
 cannot honor — `writable` and `commands` among them — is refused rather than
 quietly dropped.
 
+`fork({ inherit: false })` withholds the copy: no variables, no functions, no
+`$?`, leaving the filesystem, the `/tmp/` overlay and the wired commands as the
+only things shared. It is what a new home or user asks for — a session under
+another name carrying the last one's variables, and its `HOME` assignment in
+front of the home you just set, is the odd shape, not the useful one.
+
+```js
+const other = terminal.fork({ inherit: false, home: '/home/ada', user: 'ada' })
+
+other.run('echo ~; whoami').stdout  // '/home/ada\nada\n' — the home it was given
+other.run('echo $TAG').unsupported  // [{ …, detail: '$TAG' }] — nothing of the parent's is set
+other.cwd()                         // '/repo/src' — where it stands is `cwd`'s business, not `inherit`'s
+```
+
 ## What it runs
 
 Pipelines, `&&`/`||`/`;`/`!`, subshells and groups, `if`, `for … in`,

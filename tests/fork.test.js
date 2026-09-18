@@ -122,6 +122,89 @@ describe('fork — a child and its parent go their own way', () => {
   })
 })
 
+describe('fork — inherit: false hands the child no session at all', () => {
+  function loaded() {
+    const t = terminal({ home: '/repo/home', user: 'ada' })
+    check(t, 'FOO=parent; export SHIPPED=parent; GONE=x; unset GONE; greet() { echo hi; }')
+    assert.equal(t.run('false').exitCode, 1)
+    return t
+  }
+
+  it('starts with no variables, set or known-unset', () => {
+    const child = loaded().fork({ inherit: false })
+    for (const name of ['FOO', 'SHIPPED', 'GONE']) {
+      const result = child.run(`echo $${name}`)
+      assert.equal(result.stdout, '\n')
+      // A name the parent unset is known-empty there and unknown here: the
+      // child never saw it, so it says so rather than staying quiet.
+      assert.deepEqual(result.unsupported.map(({ detail }) => detail), [`$${name}`])
+    }
+  })
+
+  it('starts with no functions', () => {
+    const result = loaded().fork({ inherit: false }).run('greet')
+    assert.equal(result.exitCode, 127)
+    assert.deepEqual(result.unsupported.map(({ kind, detail }) => [kind, detail]), [['command', 'greet']])
+  })
+
+  it('starts with nothing to report as the last exit status', () => {
+    check(loaded().fork({ inherit: false }), 'echo $?', '0\n')
+    check(loaded().fork(), 'echo $?', '1\n')
+  })
+
+  it('leaves the parent session where it was', () => {
+    const t = loaded()
+    t.fork({ inherit: false }).run('FOO=child')
+    check(t, 'echo $FOO $SHIPPED; greet', 'parent parent\nhi\n')
+  })
+
+  it('still stands where the parent stands, under the parent home and user', () => {
+    const t = loaded()
+    check(t, 'cd src', '', '/repo/src')
+    const child = t.fork({ inherit: false })
+    assert.equal(child.cwd(), '/repo/src')
+    check(child, 'pwd; echo ~; whoami', '/repo/src\n/repo/home\nada\n')
+  })
+
+  it('lets a home and a user of its own actually take, with no inherited HOME in front', () => {
+    const t = loaded()
+    check(t, 'HOME=/repo/src')
+    check(t.fork({ home: '/repo' }), 'echo ~', '/repo/src\n')
+    check(t.fork({ inherit: false, home: '/repo', user: 'grace' }), 'echo ~ $HOME; whoami', '/repo /repo\ngrace\n')
+  })
+
+  it('shares the filesystem, the overlay and the wired commands like any other fork', () => {
+    const commands = { shout: ({ args }) => args.join(' ').toUpperCase() + '\n' }
+    const t = terminal({ commands })
+    check(t, 'printf from-parent >/tmp/shared')
+    const child = t.fork({ inherit: false })
+    check(child, 'cat /tmp/shared; cat /repo/src/a.js; shout hi', 'from-parentalpha\nHI\n')
+    check(child, 'printf from-child >>/tmp/shared')
+    check(t, 'cat /tmp/shared', 'from-parentfrom-child')
+  })
+
+  it('reads inherit: true as the default it is', () => {
+    const t = loaded()
+    check(t.fork({ inherit: true }), 'echo $FOO; greet', 'parent\nhi\n')
+    check(t.fork(), 'echo $FOO; greet', 'parent\nhi\n')
+  })
+
+  it('forks a fork that inherited nothing', () => {
+    const child = loaded().fork({ inherit: false })
+    check(child, 'OWN=child')
+    check(child.fork(), 'echo $OWN', 'child\n')
+    const bare = child.fork({ inherit: false }).run('echo $OWN')
+    assert.deepEqual(bare.unsupported.map(({ detail }) => detail), ['$OWN'])
+  })
+
+  it('refuses an inherit that is not true or false', () => {
+    const t = terminal()
+    for (const inherit of ['no', 0, 1, null, {}, []]) {
+      assert.throws(() => t.fork({ inherit }), /fork: inherit must be true or false/u)
+    }
+  })
+})
+
 describe('fork — /tmp/ is the one thing they share', () => {
   it('hands the parent what the child wrote', () => {
     const t = terminal()

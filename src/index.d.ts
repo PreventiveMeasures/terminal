@@ -164,11 +164,26 @@ export interface ForkOptions {
    * Home path used by `~`, `$HOME`, and argumentless `cd`. Defaults to the
    * parent's; a relative path resolves from the parent's working directory. A
    * `HOME` assignment inherited from the parent stands in front of it, exactly
-   * as an assignment stands in front of {@link CreateTerminalOptions.home}.
+   * as an assignment stands in front of {@link CreateTerminalOptions.home} —
+   * which is the reason to pass `inherit: false` along with it.
    */
   home?: string
   /** User name reported by `whoami`. Defaults to the parent's. */
   user?: string
+  /**
+   * Whether to hand the fork the parent's shell state: its variables — the
+   * names it knows to be unset included — its functions, and `$?`. `true` by
+   * default, which is what makes this a fork.
+   *
+   * `false` starts that state empty, where a newly created terminal starts,
+   * leaving the filesystem, the `/tmp/` overlay and the wired commands as the
+   * only things shared. It is the companion to {@link ForkOptions.home} and
+   * {@link ForkOptions.user}: a session under another name has no business
+   * carrying the variables, the functions and the `HOME` assignment of the one
+   * it came from. Where the fork stands is {@link ForkOptions.cwd}'s business
+   * either way, inherited or not.
+   */
+  inherit?: boolean
 }
 
 /**
@@ -389,8 +404,12 @@ export interface Terminal {
    * Each terminal's {@link RunResult} is its own: `unsupported` and `notes`
    * report the line that terminal ran, and nothing else.
    *
-   * @throws if `opts` is not an object, or carries an option a fork cannot
-   * honor.
+   * {@link ForkOptions.inherit} set to `false` withholds that copy — no
+   * variables, no functions, no `$?` — for a fork that shares the filesystem
+   * and nothing of the session.
+   *
+   * @throws if `opts` is not an object, carries an option a fork cannot honor,
+   * or sets `inherit` to anything but a boolean.
    * @throws if `opts.cwd` or `opts.home` is not a string or contains a NUL.
    * @throws if `opts.cwd` does not resolve to an existing directory.
    */
