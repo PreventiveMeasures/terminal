@@ -1,6 +1,6 @@
 {
   "name": "@preventive/terminal",
-  "version": "1.9.2",
+  "version": "1.10.0",
   "description": "Virtual terminal over an virtual FS",
   "keywords": [
     "terminal"
