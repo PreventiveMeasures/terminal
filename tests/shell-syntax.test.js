@@ -592,7 +592,7 @@ describe('shell syntax — compound commands', () => {
     assert.deepEqual(gaps('[[ x =~ x ]]'), ['feature:[[ =~'])
     assert.deepEqual(gaps('time ls'), ['feature:time'])
     // Builtins are shell features, not missing commands: no "Available:" hint.
-    for (const line of ['source x', 'type ls', 'set -e']) {
+    for (const line of ['source x', 'type ls', 'set -x']) {
       const r = term().run(line)
       assert.equal(r.unsupported[0].kind, 'feature', line)
       assert.doesNotMatch(r.stderr, /Available:/u, line)

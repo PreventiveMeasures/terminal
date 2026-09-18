@@ -30,11 +30,11 @@ export function createTerminal(sources, opts = {}) {
 // The shell state a terminal starts with when it starts with none of anyone's:
 // no variables, no names it knows to be unset, no functions, nothing yet to
 // report as the last exit status.
-const freshSession = () => ({ vars: new BindingMap(), functions: new Map(), lastExit: 0 })
+const freshSession = () => ({ vars: new BindingMap(), functions: new Map(), lastExit: 0, errexit: false })
 
 // Copies, taken now: neither side's later assignment, unset or definition can
 // reach the other through them.
-const copiedSession = (parent) => ({ vars: new BindingMap(parent.vars), functions: new Map(parent.functions), lastExit: parent.lastExit })
+const copiedSession = (parent) => ({ vars: new BindingMap(parent.vars), functions: new Map(parent.functions), lastExit: parent.lastExit, errexit: parent.errexit })
 
 // A fork is the process fork rather than a second terminal over the same
 // sources: the filesystem, the /tmp/ overlay, and the wired commands stay the

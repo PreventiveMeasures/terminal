@@ -263,9 +263,93 @@ f() { echo hi; }; f > /dev/null; echo after => "after\n"
 cat <(echo hi) => ! <( 1
 diff <(echo a) <(echo b) => ! <( 1
 echo x > >(cat) => ! >( 1
-set -e => ! set 127
 shopt -s nullglob => ! shopt 127
 "trap \"echo bye\" EXIT" => ! trap 127
+
+# `set -e`, and the seven places bash says it does not look. The last four
+# groups are the sentence the manual ends that list with: a compound command
+# other than a subshell does not stop the shell over a status `-e` was told
+# to ignore, and a subshell, a function call and a pipeline stage each end
+# that indulgence at their own edge.
+set -e => ""
+set -e; true; echo after => "after\n"
+set -e; false; echo after => "" 1
+set -o errexit; false; echo after => "" 1
+set -e; set +e; false; echo after => "after\n"
+set -e; set +o errexit; false; echo after => "after\n"
+set -e; (exit 7); echo after => "" 7
+set -e; echo a; exit 5; echo b => "a\n" 5
+set -e; y=1 false; echo after => "" 1
+set -e; grep -c . input; echo after => "3\nafter\n"
+set -e; grep -q zzz input; echo after => "" 1
+set -e; grep -q zzz input || echo none; echo after => "none\nafter\n"
+set -e; for f in input; do wc -l < $f; done; echo after => "3\nafter\n"
+set -e; cat nosuch; echo after => "" 1 %
+set -e; false && echo a; echo after => "after\n"
+set -e; true && false; echo after => "" 1
+set -e; false || true; echo after => "after\n"
+set -e; false || false; echo after => "" 1
+set -e; true && false || true; echo after => "after\n"
+set -e; ! false; echo after => "after\n"
+set -e; ! true; echo after => "after\n"
+set -e; if false; then echo no; fi; echo after => "after\n"
+set -e; if true; then false; fi; echo after => "" 1
+set -e; while false; do echo no; done; echo after => "after\n"
+set -e; until true; do echo no; done; echo after => "after\n"
+set -e; for i in a b; do false; echo in; done; echo after => "" 1
+set -e; false | true; echo after => "after\n"
+set -e; true | false; echo after => "" 1
+set -e; { false; echo in; } | cat; echo after => "after\n"
+set -e; { ! :; }; echo after => "after\n"
+set -e; { { ! :; }; }; echo after => "after\n"
+set -e; { false && true; }; echo after => "after\n"
+set -e; for i in a b; do ! :; done; echo after => "after\n"
+set -e; while :; do ! :; break; done; echo after => "after\n"
+set -e; until false; do ! :; break; done; echo after => "after\n"
+set -e; if :; then ! :; fi; echo after => "after\n"
+set -e; if :; then :; else ! :; fi; echo after => "after\n"
+set -e; { ! :; } > /dev/null; echo after => "after\n"
+set -e; { ! :; } && echo a; echo after => "after\n"
+set -e; { ! :; } || echo a; echo after => "a\nafter\n"
+set -e; true && { ! :; }; echo after => "after\n"
+set -e; false || { ! :; }; echo after => "after\n"
+set -e; { ! :; true; }; echo after => "after\n"
+set -e; { ! :; false; }; echo after => "" 1
+set -e; { false; ! :; }; echo after => "" 1
+set -e; ( ! : ); echo after => "" 1
+set -e; { ( ! : ); }; echo after => "" 1
+set -e; ( false && true ); echo after => "" 1
+set -e; for i in a b; do ( ! : ); done; echo after => "" 1
+set -e; true && ( ! : ); echo after => "" 1
+set -e; f() { ! :; }; f; echo after => "" 1
+set -e; true | { ! :; }; echo after => "" 1
+set -e; { ! :; } | cat; echo after => "after\n"
+set -e; ( false; echo in ); echo after => "" 1
+set -e; ( set +e; false; echo in ); echo after => "in\nafter\n"
+set -e; f() { set +e; false; echo in; }; f; echo after => "in\nafter\n"
+set -e; ! { false; echo in; }; echo after => "in\nafter\n"
+set -e; ! ( false; echo in ); echo after => "in\nafter\n"
+set -e; if { false; echo in; }; then echo then; fi; echo after => "in\nthen\nafter\n"
+set -e; f() { false; echo in; }; ! f; echo after => "in\nafter\n"
+set -e; f() { false; echo in; }; f && echo a; echo after => "in\na\nafter\n"
+set -e; f() { false; echo in; }; false || f; echo after => "" 1
+set -e; x=$(false; echo in); echo "[$x] after" => "[in] after\n"
+set -e; echo "$(false; echo in)"; echo after => "in\nafter\n"
+set -e; x=$(! :); echo after => "" 1
+f() { set -e; }; f; false; echo after => "" 1
+set -e; f() { set +e; }; f; false; echo after => "after\n"
+set -e; { set +e; }; false; echo after => "after\n"
+set -e; while :; do set +e; break; done; false; echo after => "after\n"
+set -e; if :; then set +e; fi; false; echo after => "after\n"
+( set -e ); false; echo after => "after\n"
+set -e; ( set +e ); false; echo after => "" 1
+x=$(set -e); false; echo after => "after\n"
+set -e; set +e | true; false; echo after => "" 1
+set -x => ! set 127
+set -eu => ! set 127
+set -o pipefail => ! set 127
+set => ! set 127
+set -- a b => ! set 127
 
 # backtick command substitution, which quotes differently from $( )
 echo `echo hi` => "hi\n"

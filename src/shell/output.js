@@ -11,7 +11,7 @@ export const unorderedOutput = (r) => r.unordered ?? (!r.events && r.stdout !== 
 
 // Command lists and loops accumulate output with the same event ordering.
 export const emptyOutput = (stderr = '') => ({
-  stdout: '', stderr, exitCode: 0,
+  stdout: '', stderr, exitCode: 0, ignored: false,
   events: stderr ? [{ fd: 2, text: stderr }] : [], unordered: false,
 })
 
@@ -19,6 +19,9 @@ export function appendOutput(result, next) {
   result.stdout += next.stdout
   result.stderr += next.stderr
   result.exitCode = next.exitCode
+  // A status `set -e` was told to ignore is carried by the status, so it
+  // travels with it: taking one as your own takes what it is worth.
+  result.ignored = next.ignored ?? false
   result.events.push(...eventsOf(next))
   result.unordered ||= unorderedOutput(next)
 }

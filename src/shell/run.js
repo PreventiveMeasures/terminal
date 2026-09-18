@@ -34,23 +34,40 @@ export function runSteps(steps, ctx, stream, condition = false) {
   // An `if` reads the whole chain for its status, which is what `&&` is for
   // there; only a chain run for its effects has anything to report.
   let blame = null, gate = null
-  for (const step of steps) {
-    if (step.warnings) appendOutput(result, routeOutput({ ...emptyOutput(step.warnings), exitCode: result.exitCode }, { fds: ctx.outputFds }, ctx))
+  for (const [index, step] of steps.entries()) {
+    if (step.warnings) appendOutput(result, routeOutput({ ...emptyOutput(step.warnings), exitCode: result.exitCode, ignored: result.ignored }, { fds: ctx.outputFds }, ctx))
     if (step.gate === 'and' && result.exitCode !== 0) { (gate ??= gateTracker()).skip(condition ? null : blame, result.exitCode); continue }
     if (step.gate === 'or' && result.exitCode === 0) continue
     gate?.flush(ctx.notes)
-    const r = runPipeline(step.stages, ctx, stream)
+    // `set -e` reads the last command of a `&&`/`||` chain and nothing else in
+    // it, nothing a condition asks, and nothing a `!` negates. The exemption
+    // reaches whatever that command itself runs — a subshell, a group, a body
+    // it calls — so it travels with the shell state rather than this call.
+    const exempt = condition || step.negate || continues(steps, index)
+    const r = exempt
+      ? withState(ctx, { errexitOff: true }, () => runPipeline(step.stages, ctx, stream))
+      : runPipeline(step.stages, ctx, stream)
     appendOutput(result, r)
     if (step.negate && !r.halt) result.exitCode = r.exitCode === 0 ? 1 : 0
+    // The status a list ends on is the list's, and so is what `set -e` makes
+    // of it: a status it was told to ignore here is one it ignores out there,
+    // which is how a compound command carries its indulgence to the caller.
+    if (exempt) result.ignored = true
     // `!` inverts the status, so the command no longer explains a gate reading it.
     blame = step.negate ? null : r.blame
     ctx.lastExit = result.exitCode
     if (r.halt || r.control) { Object.assign(result, { halt: r.halt, control: r.control }); break }
+    // The status is the failing command's, as the shell's own exit is.
+    if (result.exitCode !== 0 && !result.ignored && ctx.errexit && !ctx.errexitOff) { result.halt = true; break }
   }
   gate?.flush(ctx.notes)
   ctx.stdinLeft = stream.text
   return Object.assign(result, { blame })
 }
+
+// Whether a `&&`/`||` chain carries on past this step: only the command it
+// ends on is one `set -e` reads.
+const continues = (steps, index) => ['and', 'or'].includes(steps[index + 1]?.gate)
 
 // Multi-stage pipelines isolate shell state and take the last stage's status.
 // Only the first stage consumes the enclosing list's shared input stream.
@@ -65,7 +82,9 @@ function runPipeline(stages, ctx, stream) {
     if (i < stages.length - 1) fds[1] = { write(text) { piped += text } }
     const stageInput = input
     const run = () => pipelineStage(stage, ctx, stageInput, first && ctx.stdinFile, fds, first ? ctx.stdinPiped : true)
-    const routed = stages.length > 1 ? isolated(ctx, run) : run()
+    // Every stage of a real pipeline is its own process, and what `set -e`
+    // ignored in there is as much its own business as the rest of its state.
+    const routed = stages.length > 1 ? { ...isolated(ctx, run), ignored: false } : run()
     if (first) stream.text = routed.inputLeft
     appendOutput(output, routed)
     input = piped
@@ -127,7 +146,9 @@ function pipelineStage(stage, ctx, stdin, stdinFile, fds, stdinPiped) {
         ctx.calling.add(name)
         // A `break` inside the body is no more in the caller's loop than the
         // line the body was defined on was.
-        try { return withState(ctx, { loopDepth: 0 }, () => withTemporaries(expanded.temps, ctx, () => runSteps(body, ctx, { text: io.stdin }))) } finally { ctx.calling.delete(name) }
+        // A call reports the body's status as its own, and no more: bash
+        // exits on it even where the body ended on a `!` it was ignoring.
+        try { return withState(ctx, { loopDepth: 0 }, () => ({ ...withTemporaries(expanded.temps, ctx, () => runSteps(body, ctx, { text: io.stdin })), ignored: false })) } finally { ctx.calling.delete(name) }
       }
       const r = runStage(ctx, expanded)
       if (expanded.argv.length) blame = gateBlame(ctx.registry.chainRole(expanded.argv), expanded.argv[0])

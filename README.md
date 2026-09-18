@@ -68,8 +68,8 @@ terminal.run('echo x > out').exitCode                       // 1, and `>` refuse
 ## Forking
 
 `fork()` gives you a second terminal over the same filesystem, carrying a copy
-of this one's session: its working directory, variables, functions and `$?` as
-they are at the moment of the call. It is the process fork rather than a second
+of this one's session: its working directory, variables, functions, `set -e`
+and `$?` as they are at the moment of the call. It is the process fork rather than a second
 `createTerminal` — the sources, the mount, the `/tmp/` overlay and the wired
 commands are the parent's own, not copies of them.
 
@@ -97,8 +97,8 @@ cannot honor — `writable` and `commands` among them — is refused rather than
 quietly dropped.
 
 `fork({ inherit: false })` withholds the copy: no variables, no functions, no
-`$?`, leaving the filesystem, the `/tmp/` overlay and the wired commands as the
-only things shared. It is what a new home or user asks for — a session under
+`set -e`, no `$?`, leaving the filesystem, the `/tmp/` overlay and the wired
+commands as the only things shared. It is what a new home or user asks for — a session under
 another name carrying the last one's variables, and its `HOME` assignment in
 front of the home you just set, is the odd shape, not the useful one.
 
@@ -117,6 +117,13 @@ Pipelines, `&&`/`||`/`;`/`!`, subshells and groups, `if`, `for … in`,
 expansion, globs with bracket expressions, `$(…)` and backticks, `$(( … ))`,
 and the `${…}` family. A loop that never ends is stopped and reported, since
 nothing here runs beside the line.
+
+`set -e` is the one shell option here, and it stops the line where bash stops
+a script — including at the places bash pointedly does not look: a `&&`/`||`
+chain before the command it ends on, a condition, a `!`, every stage of a
+pipeline but the last, and a compound command other than a subshell that ends
+on any of those. Everything else `set` can be asked for is refused whole:
+applying the `-e` of `set -eu` would run the line under half of what it asked.
 
 `name() { … }` runs wherever the name is called, while its body reads and
 writes no variable — then a call cannot tell itself from the line it stands

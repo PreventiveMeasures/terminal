@@ -10,7 +10,7 @@ const terminal = () => createTerminal({ 'dir/file': 'contents\n' }, { mount: '/s
 describe('complete shell input units run before later parse failures', () => {
   for (const failure of ['echo )', 'echo "', 'echo `unterminated', 'echo @(bad)', 'echo ${!value}']) {
     it(`retains prior unsupported diagnostics before ${failure}`, () => {
-      const result = terminal().run(`set -o errexit\necho before\n${failure}`)
+      const result = terminal().run(`set -o pipefail\necho before\n${failure}`)
       assert.equal(result.stdout, 'before\n')
       assert.notEqual(result.exitCode, 0)
       assert.ok(result.unsupported.some((note) => note.command === 'set'))

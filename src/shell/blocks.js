@@ -38,10 +38,11 @@ function runWhile(loop, ctx, runSteps) {
         appendOutput(result, err(`error: ${TURN_GAP.message}`, 1))
         break
       }
-      const status = result.exitCode
+      const ignored = result.ignored, status = result.exitCode
       const test = runSteps(loop.condition, ctx, stream, true)
       appendOutput(result, test)
       result.exitCode = status
+      result.ignored = ignored
       if (test.halt || test.control) return { ...result, halt: test.halt, control: test.control, blame: test.blame }
       if ((test.exitCode === 0) === Boolean(loop.until)) break
       const r = runSteps(loop.body, ctx, stream)
@@ -95,7 +96,7 @@ function runConditional(conditional, ctx, stdin, runSteps) {
     appendOutput(result, body)
     return { ...result, halt: body.halt, control: body.control, blame: body.blame }
   }
-  if (!conditional.otherwise) { result.exitCode = 0; return result }
+  if (!conditional.otherwise) { result.exitCode = 0; result.ignored = false; return result }
   const last = runSteps(conditional.otherwise, ctx, stream)
   appendOutput(result, last)
   return { ...result, halt: last.halt, control: last.control, blame: last.blame }
@@ -106,5 +107,7 @@ function runGroup(stage, ctx, stdin, runSteps) {
   const stream = { text: stdin }
   if (!stage.isolate) return runSteps(stage.group, ctx, stream)
   const r = isolated(ctx, () => runSteps(stage.group, ctx, stream))
-  return { ...r, halt: false, control: undefined }
+  // A subshell is the one compound bash still exits on: what `set -e` ignored
+  // in the child is nothing the parent reading its status can see.
+  return { ...r, halt: false, control: undefined, ignored: false }
 }

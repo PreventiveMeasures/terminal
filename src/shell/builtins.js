@@ -81,8 +81,27 @@ function unset(_stdin, tokens, ctx) {
   return ok()
 }
 
+// `set -e` is the one shell option this keeps: it changes what a line does,
+// where the rest of what `set` can do changes what the shell prints or what it
+// is handed. Anything else `set` is asked for is refused whole — applying the
+// `-e` of `set -eu` would leave the line running under half of what was asked.
+function setOptions(_stdin, tokens, ctx) {
+  let wanted = null
+  for (let i = 0; i < tokens.length; i++) {
+    const arg = tokens[i]
+    if (arg === '-e' || arg === '+e') wanted = arg === '-e'
+    else if ((arg === '-o' || arg === '+o') && tokens[i + 1] === 'errexit') { wanted = arg === '-o'; i++ }
+    else return refusedSet()
+  }
+  if (wanted === null) return refusedSet()
+  ctx.errexit = wanted
+  return ok()
+}
+
+const refusedSet = () => unsupported('feature', 'set', 'set', 'set: `set` is supported only as `set -e` or `set +e`', 127)
+
 export const SHELL_BUILTINS = {
-  exit, break: loopControl('break'), continue: loopControl('continue'), export: exportCmd, unset,
+  exit, break: loopControl('break'), continue: loopControl('continue'), export: exportCmd, set: setOptions, unset,
 }
 
 // Diagnose unavailable shell machinery after checking registered overrides.
@@ -95,7 +114,6 @@ export const SHELL_GAPS = new Map([
   'exec',
   ['read', ' (there is no interactive input)'],
   ['shift', ' (there are no positional parameters)'],
-  'set',
   'shopt',
   ['local', ' (there are no shell functions)'],
   ['declare', '; use `NAME=value`'],
