@@ -304,6 +304,16 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     check(t, 'cat /tmp/src/one', '')
   })
 
+  it('refuses nothing when -n leaves every copy undone', () => {
+    const t = terminal()
+    check(t, 'cp -r a /tmp/dest')
+    // Every name is already there, so nothing is copied and nothing is
+    // announced: there is no buffered line to be unsure about.
+    check(t, 'cp -rvn a/. /tmp/dest >/tmp/dest/one')
+    check(t, 'cat /tmp/dest/one', '')
+    check(t, 'cat /tmp/dest/sub/two', '2\n')
+  })
+
   it('leaves a descriptor outside both trees alone', () => {
     const t = terminal()
     check(t, 'cp -r a /tmp/src')

@@ -1,7 +1,7 @@
 import { parseArgs } from '../args.js'
 import { compareNames, joinPath, lookup } from '../fs.js'
 import { err, ok, reason } from '../util.js'
-import { unsupportedFrom } from '../unsupported.js'
+import { unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
 import { missingPathNote } from '../notes.js'
 
@@ -67,7 +67,18 @@ function removeEntry(name, path, state, directory, error) {
   const { ctx } = state
   const shown = state.verbose || error !== null || !ctx.writable || !path?.startsWith('/tmp/') ? quoteName(name, ctx) : ''
   const remove = () => directory ? ctx.fs.removeWritableDir?.(ctx.cwd, name) : ctx.fs.removeWritable?.(ctx.cwd, name)
-  if (error === null && !remove()) error = 'Read-only file system'
+  try {
+    if (error === null && !remove()) error = 'Read-only file system'
+  } catch (e) {
+    // A name is looked up again when it is removed, and a walk can take the
+    // components of its own name away first: `rm -r b/sub/../../b` empties
+    // `sub` before it reaches `b`, and GNU cannot find `b` either by then.
+    // That is this operand's failure to report, not the whole command's.
+    if (unsupportedNote(e)) throw e
+    missingPathNote(ctx, 'rm', e?.path, e?.fsError)
+    const message = reason(e)
+    error = e?.fsError ?? (message.startsWith(name + ': ') ? message.slice(name.length + 2) : message)
+  }
   if (error) return report(state, `rm: cannot remove ${shown}: ${error}\n`)
   if (state.verbose) report(state, `removed ${directory ? 'directory ' : ''}${shown}\n`, 1)
 }

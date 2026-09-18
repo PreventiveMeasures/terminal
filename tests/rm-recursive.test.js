@@ -61,6 +61,18 @@ describe('rm -r removes a tree', () => {
     check(t, 'cd /tmp; rm -rv d/sub', "removed 'd/sub/two'\nremoved directory 'd/sub'\n", '', 0, '/tmp')
   })
 
+  it('reports an operand whose own name the walk took away, and keeps going', () => {
+    const t = terminal()
+    // `sub` is removed before `d` is reached, and `d`'s name goes through it,
+    // so the name no longer resolves — which is where GNU fails too. The
+    // operand after it still runs.
+    const result = t.run('rm -rv /tmp/d/sub/../../d /tmp/file')
+    assert.equal(result.stdout, "removed '/tmp/d/sub/../../d/one'\nremoved '/tmp/d/sub/../../d/sub/two'\nremoved directory '/tmp/d/sub/../../d/sub'\nremoved '/tmp/file'\n")
+    assert.equal(result.stderr, "rm: cannot remove '/tmp/d/sub/../../d': No such file or directory\n")
+    assert.equal(result.exitCode, 1)
+    check(t, 'find /tmp', '/tmp\n/tmp/d\n')
+  })
+
   it('passes over what is not there under -f', () => {
     const t = terminal()
     check(t, 'rm -rf /tmp/missing')

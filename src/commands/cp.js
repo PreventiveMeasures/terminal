@@ -165,11 +165,6 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
   if (target.startsWith(absolute === '/' ? '/' : absolute + '/')) {
     return fail(`cannot copy a directory, ${top.source}, into itself, ${top.target}`)
   }
-  // Everything above refuses without making or announcing anything, so what
-  // GNU would have buffered is not in question there. From here it is: the
-  // guard comes before the directory is made rather than after, so a copy that
-  // cannot be announced leaves nothing of itself behind.
-  refuseBufferedOutput(state)
   // GNU keeps the operands it has copied, and names a directory as a directory.
   if (operand) {
     if (state.sources.has(absolute)) return report(state, `cp: warning: source directory ${shownSource} specified more than once\n`, false, true)
@@ -192,6 +187,9 @@ function makeDirectory(source, destination, named, state) {
     report(state, 'cp: cannot create directory ' + shownTarget + ': ' + message + '\n', true)
     return false
   }
+  // Making the directory is what earns it a verbose line, so a line that
+  // cannot be trusted is refused here rather than after the directory exists.
+  refuseBufferedOutput(state)
   try {
     if (!ctx.fs.makeWritableDir?.(ctx.cwd, named)) return fail('Read-only file system')
   } catch (e) {
