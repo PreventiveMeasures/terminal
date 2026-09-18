@@ -382,6 +382,22 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
   })
 
+  it('leaves an operand refused before the walk out of the overlap', () => {
+    const t = terminal()
+    check(t, 'mkdir -p /tmp/s/inside /tmp/dest; printf OUT >/tmp/s/out')
+    // `/tmp/s` names a destination under itself, so it is refused before it is
+    // listed and nothing below it is opened — including the descriptor's file.
+    // The operand beside it is copied and announced, as GNU announces it.
+    check(t, 'cp -rv file /tmp/s /tmp/s/inside >/tmp/s/out', '', "cp: cannot copy a directory, '/tmp/s', into itself, '/tmp/s/inside/s'\n", 1)
+    check(t, 'cat /tmp/s/out', "'file' -> '/tmp/s/inside/file'\n")
+    check(t, 'cat /tmp/s/inside/file', 'plain\n')
+    // The same operand against a destination it can be walked into refuses,
+    // since `out` is then one of the files it reads.
+    const refused = t.run('cp -rv file /tmp/s /tmp/dest >/tmp/s/out')
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+    check(t, 'find /tmp/dest', '/tmp/dest\n')
+  })
+
   it('sees a descriptor a backup name put inside the tree', () => {
     const t = createTerminal({ x: 'x\n' }, { mount: '/repo', cwd: '/tmp', writable: '/tmp/' })
     const run = (command) => t.run(command)

@@ -244,7 +244,7 @@ function outputOverlaps(copies, ctx, { recursive, noClobber }) {
     if (found.error) return false
     const into = resolve(ctx.cwd, destination)
     if (!ctx.fs.isDir(found.path)) return copiesFile(found.path, destination, ctx, noClobber) && (holds(found.path) || holds(into))
-    if (!recursive) return false
+    if (!recursive || !copiesDirectory(found.path, destination, ctx)) return false
     // Every file below the source is read, and written to the name it keeps
     // below the destination — but only where the entry gets that far. Its
     // parents are this copy's own to make, so a component that is not there
@@ -275,6 +275,19 @@ function refusedBeforeWriting(source, dest, ctx, noClobber) {
 function copiesFile(source, destination, ctx, noClobber) {
   const dest = lookup(ctx.cwd, destination, ctx.fs)
   return !refusedBeforeWriting(source, dest, ctx, noClobber) && !creationError(ctx.cwd, destination, ctx.fs, dest)
+}
+
+// The refusals `copyDirectory` reaches before it lists anything, in its order.
+// A directory operand that stops at one of them is never walked, so nothing
+// below it is opened and none of it is the descriptor's business.
+function copiesDirectory(absolute, destination, ctx) {
+  const dest = lookup(ctx.cwd, destination, ctx.fs)
+  if (dest.error && dest.error !== 'No such file or directory') return false
+  const named = destination.replace(/\/+$/u, '') || destination
+  if (dest.path === null && creationError(ctx.cwd, named, ctx.fs)) return false
+  if (dest.path !== null && !ctx.fs.isDir(dest.path)) return false
+  const target = resolve(ctx.cwd, named)
+  return target !== absolute && !target.startsWith(absolute === '/' ? '/' : absolute + '/')
 }
 
 function isSpecialFile(name, cwd) {
