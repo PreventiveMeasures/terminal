@@ -4,6 +4,7 @@ import { err, reason } from '../util.js'
 import { markUnsupported, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
 import { missingPathNote } from '../notes.js'
+import { inOverlay } from '../writable.js'
 
 // `touch` makes the empty files it names, which is the half of the command a
 // map of paths to contents can answer. The other half has nowhere to go: every
@@ -56,7 +57,7 @@ function touchPath(name, noCreate, state) {
 // every other write; inside it, the missing clock is the whole of the reason.
 function existing(name, shown, path, state) {
   const { ctx } = state
-  if (!ctx.writable || path !== '/tmp' && !path.startsWith('/tmp/')) {
+  if (!ctx.writable || !inOverlay(path)) {
     return fail(state, `setting times of ${shown}: Read-only file system`)
   }
   const message = `touch: setting the times of ${shown} is not supported (every entry here carries the one time this filesystem keeps)`

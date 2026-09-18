@@ -1,6 +1,11 @@
 import { compareNames, lookup, resolve, walkTree } from './fs.js'
 import { decodeUtf8, encodeUtf8 } from './util.js'
 
+// The overlay is mounted at /tmp, so what may be written is what falls inside
+// it. Commands ask before acting, where the answer decides more than whether a
+// write would succeed.
+export const inOverlay = (absolute) => absolute === '/tmp' || absolute.startsWith('/tmp/')
+
 // Only the overlay owns mutable bytes. The mounted source map and its
 // directory index remain separate and are never copied into this map.
 export function writableFs(base) {

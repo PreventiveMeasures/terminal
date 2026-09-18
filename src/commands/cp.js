@@ -5,6 +5,7 @@ import { appendOutput, emptyOutput } from '../shell/output.js'
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
 import { lookupWithNote, missingPathNote } from '../notes.js'
+import { inOverlay } from '../writable.js'
 
 const SPECIAL_FILES = new Set(['/dev/null', '/dev/stdin', '/dev/stdout', '/dev/stderr'])
 
@@ -187,11 +188,15 @@ function makeDirectory(source, destination, named, state) {
     report(state, 'cp: cannot create directory ' + shownTarget + ': ' + message + '\n', true)
     return false
   }
-  // Making the directory is what earns it a verbose line, so a line that
-  // cannot be trusted is refused here rather than after the directory exists.
-  refuseBufferedOutput(state)
+  // Making the directory is what earns it a verbose line, and only a making
+  // that succeeds does: a destination outside the overlay is refused with
+  // nothing said, so that answer is GNU's own and no line was ever in
+  // question. Where the directory can be made, the line is refused before it
+  // exists rather than after, so a refusal leaves nothing behind.
+  const writable = ctx.writable && inOverlay(resolve(ctx.cwd, named))
+  if (writable) refuseBufferedOutput(state)
   try {
-    if (!ctx.fs.makeWritableDir?.(ctx.cwd, named)) return fail('Read-only file system')
+    if (!writable || !ctx.fs.makeWritableDir?.(ctx.cwd, named)) return fail('Read-only file system')
   } catch (e) {
     if (unsupportedNote(e)) throw e
     missingPathNote(ctx, 'cp', e?.path, e?.fsError)

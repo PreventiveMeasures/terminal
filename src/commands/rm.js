@@ -4,6 +4,7 @@ import { err, ok, reason } from '../util.js'
 import { unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
 import { missingPathNote } from '../notes.js'
+import { inOverlay } from '../writable.js'
 
 export function rm(_stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['f', 'v', 'r', 'R'], long: ['force', 'verbose', 'recursive'] })
@@ -43,7 +44,7 @@ function removeOperand(name, state) {
     // own root is not the tree below it: refuse before walking, rather than
     // empty a directory and then fail to remove it.
     else if (found.path === '/tmp') error = 'Device or resource busy'
-    else if (!ctx.writable || !found.path.startsWith('/tmp/')) error = 'Read-only file system'
+    else if (!ctx.writable || !inOverlay(found.path)) error = 'Read-only file system'
     else return removeTree(name, found.path, state)
   }
   removeEntry(name, found.path, state, false, error)

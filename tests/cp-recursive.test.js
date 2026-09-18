@@ -304,6 +304,22 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     check(t, 'cat /tmp/src/one', '')
   })
 
+  it('lets a destination it cannot make answer before the buffering one', () => {
+    const t = terminal()
+    check(t, 'cp -r a /tmp/src')
+    // GNU announces a directory only where it makes one, so a destination it
+    // cannot make emits no verbose line and there is nothing to be unsure
+    // about — the read-only answer is the whole of it, redirect or no.
+    check(t, 'cp -rv /tmp/src /repo/new >/tmp/src/one', '', "cp: cannot create directory '/repo/new': Read-only file system\n", 1)
+    check(t, 'cp -rv /tmp/src /repo/new', '', "cp: cannot create directory '/repo/new': Read-only file system\n", 1)
+    check(t, 'cat /tmp/src/one', '')
+    // A destination it *can* make still refuses, since that line would be
+    // written into a file this copy reads.
+    const refused = t.run('cp -rv /tmp/src /tmp/dest >/tmp/src/one')
+    assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
+    check(t, 'test -e /tmp/dest', '', '', 1)
+  })
+
   it('refuses nothing when -n leaves every copy undone', () => {
     const t = terminal()
     check(t, 'cp -r a /tmp/dest')
