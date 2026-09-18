@@ -208,6 +208,28 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     assert.equal(t.run('cat /tmp/a').stdout, 'first\n')
   })
 
+  it('makes a destination spelled with a trailing slash', () => {
+    const t = terminal()
+    check(t, 'cp -rv a /tmp/new/', "'a' -> '/tmp/new/'\n'a/.hidden' -> '/tmp/new/.hidden'\n'a/one' -> '/tmp/new/one'\n'a/sub' -> '/tmp/new/sub'\n'a/sub/deep' -> '/tmp/new/sub/deep'\n'a/sub/deep/three' -> '/tmp/new/sub/deep/three'\n'a/sub/two' -> '/tmp/new/sub/two'\n")
+    check(t, 'cp -rT a /tmp/exact/')
+    check(t, 'find /tmp -type d', '/tmp\n/tmp/exact\n/tmp/exact/sub\n/tmp/exact/sub/deep\n/tmp/new\n/tmp/new/sub\n/tmp/new/sub/deep\n')
+    // The same spelling on a directory that is there copies into it, as ever.
+    check(t, 'cp -r a /tmp/new/')
+    check(t, 'find /tmp/new/a -type f', '/tmp/new/a/.hidden\n/tmp/new/a/one\n/tmp/new/a/sub/deep/three\n/tmp/new/a/sub/two\n')
+  })
+
+  it('names a destination reaching through a directory that is not there', () => {
+    const t = terminal()
+    check(t, 'cp -r a /tmp/src')
+    // Lexically this normalizes inside the source, but the missing component
+    // is what a caller needs told, not a loop that is not one.
+    check(t, 'cp -r /tmp/src /tmp/src/missing/../copy', '', "cp: cannot create directory '/tmp/src/missing/../copy': No such file or directory\n", 1)
+    check(t, 'cp -r /tmp/src /tmp/other/missing/../copy', '', "cp: cannot create directory '/tmp/other/missing/../copy': No such file or directory\n", 1)
+    // A destination that does resolve inside the source is still the loop.
+    check(t, 'cp -r /tmp/src /tmp/src/sub/../inner', '', "cp: cannot copy a directory, '/tmp/src', into itself, '/tmp/src/sub/../inner'\n", 1)
+    check(t, 'find /tmp -type d', '/tmp\n/tmp/src\n/tmp/src/sub\n/tmp/src/sub/deep\n')
+  })
+
   it('refuses verbose output written into a tree it is copying, before making any of it', () => {
     const t = terminal()
     check(t, 'cp -r a /tmp/src')

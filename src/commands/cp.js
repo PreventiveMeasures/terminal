@@ -135,7 +135,21 @@ function copyDirectory(source, absolute, destination, state, top) {
   const fail = (message) => report(state, 'cp: ' + message + '\n', true)
   const dest = lookup(ctx.cwd, destination, ctx.fs)
   if (dest.error && dest.error !== 'No such file or directory') return fail(`cannot stat ${shownTarget}: ${dest.error}`)
-  const target = resolve(ctx.cwd, destination)
+  // A trailing slash says the destination is a directory, which is what this
+  // makes: that spelling refuses a file destination, not this one.
+  const named = destination.replace(/\/+$/u, '') || destination
+  // Whether the destination can be made at all is settled before where it
+  // falls: `..` collapses lexically, so a name reaching through a directory
+  // that is not there would otherwise read as a loop rather than as the
+  // missing component it is.
+  if (dest.path === null) {
+    const invalid = creationError(ctx.cwd, named, ctx.fs)
+    if (invalid) {
+      missingPathNote(ctx, 'cp', named, invalid)
+      return fail(`cannot create directory ${shownTarget}: ${invalid}`)
+    }
+  }
+  const target = resolve(ctx.cwd, named)
   if (target === absolute) return fail(`${shownSource} and ${shownTarget} are the same file`)
   // A destination under the source is the loop GNU names. GNU makes the
   // directory, copies what it read before reaching it, and only then refuses;
@@ -151,7 +165,7 @@ function copyDirectory(source, absolute, destination, state, top) {
   if (state.sources.has(absolute)) return report(state, `cp: warning: source directory ${shownSource} specified more than once\n`, false, true)
   state.sources.add(absolute)
   const { dirs, files } = ctx.fs.listDir(absolute)
-  if (dest.path === null && !makeDirectory(source, destination, dest, state)) return
+  if (dest.path === null && !makeDirectory(source, destination, named, state)) return
   const from = source.replace(/\/+$/u, ''), into = destination.replace(/\/+$/u, '')
   for (const name of [...dirs, ...files].sort(compareNames)) {
     // Each entry finishes before the next is opened, as each operand does.
@@ -160,27 +174,20 @@ function copyDirectory(source, absolute, destination, state, top) {
   }
 }
 
-function makeDirectory(source, destination, dest, state) {
+function makeDirectory(source, destination, named, state) {
   const { ctx } = state
   const shownTarget = quoteName(destination, ctx)
-  const fail = (message) => report(state, 'cp: cannot create directory ' + shownTarget + ': ' + message + '\n', true)
-  const invalid = creationError(ctx.cwd, destination, ctx.fs, dest)
-  if (invalid) {
-    missingPathNote(ctx, 'cp', destination, invalid)
-    fail(invalid)
+  const fail = (message) => {
+    report(state, 'cp: cannot create directory ' + shownTarget + ': ' + message + '\n', true)
     return false
   }
   try {
-    if (!ctx.fs.makeWritableDir?.(ctx.cwd, destination)) {
-      fail('Read-only file system')
-      return false
-    }
+    if (!ctx.fs.makeWritableDir?.(ctx.cwd, named)) return fail('Read-only file system')
   } catch (e) {
     if (unsupportedNote(e)) throw e
     missingPathNote(ctx, 'cp', e?.path, e?.fsError)
     const message = reason(e)
-    fail(message.startsWith(destination + ': ') ? message.slice(destination.length + 2) : message)
-    return false
+    return fail(message.startsWith(named + ': ') ? message.slice(named.length + 2) : message)
   }
   // GNU announces a directory it makes, and says nothing of one already there.
   announce(quoteName(source, ctx), shownTarget, state)
