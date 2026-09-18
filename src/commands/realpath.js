@@ -37,14 +37,16 @@ function canonicalize(ctx, path, mode, links) {
 }
 
 // `-s` expands no link, in any existence mode: the name it prints is the one
-// it was given with `..` taken lexically, and the filesystem is asked only
-// whether what that name leads to is there — which is the kernel's question,
-// through every link on the way.
+// it was given with `..` taken lexically, and `-e` asks whether that name —
+// the reduced one, not the spelling it came from — leads anywhere. The two
+// part where a `..` cancels a link: `l/../z` is `z` here, so `z` is what has
+// to be there, where the walk `-e` makes without `-s` would ask about the
+// directory `l` leads to instead.
 function strippedName(ctx, path, mode) {
   if (mode === 'm') return { path: resolve(ctx.cwd, path) }
   const found = strippedPath(ctx, path)
   if (found.error || mode !== 'e') return found
-  const exists = lookup(ctx.cwd, path, ctx.fs)
+  const exists = lookup('/', found.path, ctx.fs)
   return exists.error ? { error: exists.error } : found
 }
 

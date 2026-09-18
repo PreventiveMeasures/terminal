@@ -81,6 +81,14 @@ refused rather than answered differently from ripgrep. Literal matching crosses
 scripts, but Unicode-aware matching does not: `-i`, `-w`, `.` and `\w` over a
 tree holding any non-ASCII file report an unsupported diagnostic.
 
+A walk stops at a symbolic link rather than crossing it, which is where `find`,
+`rg` and `grep -r` all stop: `find` reports the link as the entry it is, and
+the two searches pass over it, as neither follows one without being asked.
+`grep -R` is the asking, and it reads the file a link names under the link's
+own name, saying so of a link that names nothing; only a link to a directory —
+the tree it would have to walk into — is refused, and only where an
+`--exclude-dir` rule has not already kept the name out.
+
 `grep`, `sed` and `awk` read a regular expression the way GNU does in the
 C.UTF-8 locale, from glibc's own tables: `.` and a bracket take one character,
 accented or not; the named classes, `\w`, `\s`, `\b`, `\<`, `\>` and `-w` go by

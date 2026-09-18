@@ -23,7 +23,7 @@ export function stat(_stdin, tokens, ctx) {
   }
   if (!format) return unsupported('feature', 'stat', 'default metadata', 'stat: default output requires filesystem metadata that is not available')
   const parts = statFormat(format.value, format.name === 'printf')
-  if (parts.some((part) => part.field === 's' || part.field === 'F') && metadataOverlap(positional, ctx)) {
+  if (parts.some((part) => part.field === 's' || part.field === 'F') && metadataOverlap(positional, ctx, follow)) {
     return unsupported('feature', 'stat', 'metadata output overlap', 'stat: buffered output sharing a measured file is not supported')
   }
   const result = emptyOutput()
@@ -54,11 +54,14 @@ function statOperand(parts, name, ctx, follow) {
   }
 }
 
-function metadataOverlap(names, ctx) {
+// What an operand is measured from is what an output descriptor may overlap:
+// a link `stat` was not asked to follow is the entry it describes, and what it
+// points at is nobody's business here.
+function metadataOverlap(names, ctx, follow) {
   const handles = Object.values(ctx.outputFds).filter((fd) => typeof fd === 'object')
   if (!handles.length) return false
   return names.some((name) => {
-    const found = lookup(ctx.cwd, name, ctx.fs)
+    const found = lookup(ctx.cwd, name, ctx.fs, { follow })
     return !found.error && handles.some((fd) => fd.path === found.path || fd.identity !== undefined && fd.identity === ctx.fs.fileIdentity?.(found.path))
   })
 }

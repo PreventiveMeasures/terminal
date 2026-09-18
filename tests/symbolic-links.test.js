@@ -308,11 +308,31 @@ describe('the shell expands and completes a link by its own name', () => {
 })
 
 describe('a search, a copy and a comparison each meet a link on their own terms', () => {
-  it('grep -r passes over a link in a tree, and -R refuses to follow one', () => {
+  it('grep -r passes over a link a walk reaches, where -R searches what it names', () => {
     const t = terminal()
     check(t, 'grep -rn run node_modules', 'node_modules/pkg/bin/cli.js:1:run\n')
     check(t, 'grep -n run node_modules/.bin/cli', '1:run\n')
-    gap(t, 'grep -Rn run node_modules', '-R', 'grep: following symbolic links is not supported: node_modules/.bin/cli\n')
+    // `-R` reads the file a link names, under the link's own name, and says so
+    // of one that names nothing — which is an error, and the status GNU gives
+    // a search that could not read something it was going to.
+    check(t, 'grep -Rn run node_modules', 'node_modules/.bin/cli:1:run\nnode_modules/pkg/bin/cli.js:1:run\n', {
+      stderr: 'grep: node_modules/.bin/stale: No such file or directory\n', exitCode: 2,
+    })
+    // A rule keeping the name out is what no spelling ever opens, so no
+    // diagnostic is earned by a link the rules have already passed over.
+    check(t, 'grep -Rn --exclude=stale run node_modules', 'node_modules/.bin/cli:1:run\nnode_modules/pkg/bin/cli.js:1:run\n', {
+      notes: ['grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/node_modules/.bin/stale".'],
+    })
+  })
+
+  it('grep -R refuses the one link it would have to walk into, unless a rule keeps it out', () => {
+    const t = terminal()
+    gap(t, 'grep -Rn run .', '-R', 'grep: following a symbolic link to a directory is not supported: ./pkg\n')
+    // `--exclude-dir` names a link to a directory as it names a directory,
+    // where `--exclude` names neither.
+    check(t, 'grep -Rn --exclude-dir=pkg --exclude=stale run .', './node_modules/.bin/cli:1:run\n', {
+      notes: ['grep: excluded 3 entries by --include/--exclude/--exclude-dir rules: "/node_modules/.bin/stale", "/node_modules/pkg", "/pkg".'],
+    })
   })
 
   it('rg leaves the links out of its walk, as ripgrep does without -L', () => {
@@ -416,6 +436,26 @@ describe('what a link cannot change', () => {
     check(t, 'realpath -s -m l/../z', '/z\n')
     // `-e` still asks the filesystem, which answers through the link.
     check(t, 'realpath -s -e l/nope', '', { stderr: 'realpath: l/nope: No such file or directory\n', exitCode: 1 })
+  })
+
+  it('realpath -s -e asks about the name it reduced to, not the spelling it came from', () => {
+    const t = terminal({ 'x/z': 'z\n', 'x/y/f': 'y\n', l: { type: 'link', target: 'x/y' } })
+    // `l/../z` is `z` where no link is expanded, and `z` is what has to be
+    // there; the walk `-e` makes without `-s` asks about `x/z` instead.
+    check(t, 'realpath -s l/../z', '/z\n')
+    check(t, 'realpath -s -e l/../z', '', { stderr: 'realpath: l/../z: No such file or directory\n', exitCode: 1 })
+    check(t, 'realpath -e l/../z', '/x/z\n')
+    check(t, 'realpath -s -e l/f', '/l/f\n')
+  })
+
+  it('stat measures the link a redirect points through, and refuses only what -L would measure', () => {
+    const sources = { file: 'content\n', link: { type: 'link', target: '/tmp/out' } }
+    const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    // The size is the link's own — the path it holds — so the file the output
+    // is going to is nothing this measured, and GNU answers it too.
+    check(t, 'printf seed > /tmp/out; stat -c %s link > /tmp/out; cat /tmp/out', '8\n', { cwd: '/repo' })
+    // `-L` measures what the link points at, which is that same file.
+    gap(t, 'stat -L -c %s link > /tmp/out', 'metadata output overlap', 'stat: buffered output sharing a measured file is not supported\n')
   })
 
   it('realpath keeps a path it cannot resolve where -m asked for one that need not be there', () => {

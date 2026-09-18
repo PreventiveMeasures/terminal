@@ -1,6 +1,6 @@
 // Search defaults to BRE; -E selects ERE and -F selects literal patterns.
 
-import { basename, relativeTo, resolve, walkTree } from '../fs.js'
+import { basename, lookup, relativeTo, resolve, walkTree } from '../fs.js'
 import { lookupWithNote, omissionNote } from '../notes.js'
 import { parseArgs } from '../args.js'
 import { consumeStdin, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, usage } from '../util.js'
@@ -202,11 +202,13 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
       return false
     }
     for (const entry of walkTree(ctx.fs, abs, Infinity, descend)) {
-      // `-r` passes over a link a walk reaches, and `-R` searches what it
-      // points at. What following one would reach is not modelled here, so
-      // `-R` refuses the tree it would have to cross rather than skip it.
-      if (entry.kind === 'link' && filters.follow) {
-        throw new UnsupportedError('option', '-R', `following symbolic links is not supported: ${displayName(rest.length ? p : '', abs, entry.path)}`)
+      // `-r` passes over a link a walk reaches; `-R` searches what it names.
+      if (entry.kind === 'link') {
+        if (!filters.follow) continue
+        const found = followedLink(entry.path, displayName(rest.length ? p : '', abs, entry.path), ctx, filters)
+        if (found?.input) inputs.push(found.input)
+        if (found?.error) { stderr += found.error; failed = true }
+        continue
       }
       if (entry.kind !== 'file') continue
       const filePath = entry.path
@@ -215,6 +217,25 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
     }
   }
   return { inputs, stderr: filters.silent ? '' : stderr, failed }
+}
+
+// What `-R` makes of a link a walk reached: the file it names, read under the
+// link's own name, or the diagnostic a link to nothing earns. A rule keeping
+// the name out is what neither spelling ever opens, so the rules answer first
+// — the --exclude-dir ones where the link leads to a directory, the
+// --include/--exclude ones where it leads to a file, as GNU sorts them. A
+// directory is the one thing left: crossing into that tree is not modelled, so
+// `-R` refuses it rather than search a part of it.
+function followedLink(path, named, ctx, filters) {
+  const target = lookup(ctx.cwd, path, ctx.fs)
+  const directory = ctx.fs.isDir(target.path)
+  const kept = directory
+    ? filters.dir.length === 0 || !someMatch(filters.dir, basename(path))
+    : includedByName(basename(path), filters.name)
+  if (!kept) { filters.excluded.add(path); return null }
+  if (directory) throw new UnsupportedError('option', '-R', `following a symbolic link to a directory is not supported: ${named}`)
+  if (target.error) return { error: `grep: ${named}: ${target.error}\n` }
+  return { input: { name: named, content: ctx.fs.readFile(target.path), recursive: true } }
 }
 
 // Name filters retain option order so the last matching include/exclude wins.
