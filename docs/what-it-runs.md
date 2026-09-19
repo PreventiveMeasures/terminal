@@ -47,7 +47,10 @@ directory that is not there fails as the kernel fails it, before the read-only
 filesystem is reached. `rm` and `sed -i` are the two that answer for the name
 itself — the first takes it away, the second writes a file over it — so a link
 the sources hold is read-only to them however the file it names could be
-written.
+written. `patch` answers for the name too, and refuses it outright: GNU
+patches a regular file and nothing else, so a link operand is `not a regular
+file -- refusing to patch` whatever it leads to, while a link on the way to
+the file is followed as any other component is.
 
 `mkdir` makes them one at a time and `mkdir -p` makes a whole path, passing
 over what is already there and naming the component it stops at. A name a link

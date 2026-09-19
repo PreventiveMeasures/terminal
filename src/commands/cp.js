@@ -1,11 +1,11 @@
 import { parseArgs } from '../args.js'
-import { compareNames, creationError, lookup, relativeTo, resolve, walkTree } from '../fs.js'
+import { compareNames, creationError, lookup, relativeTo, resolve, walkTree, writeTarget } from '../fs.js'
 import { err, reason } from '../util.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
 import { lookupWithNote, missingPathNote } from '../notes.js'
-import { inOverlay, writeTarget } from '../writable.js'
+import { inOverlay } from '../writable.js'
 
 const SPECIAL_FILES = new Set(['/dev/null', '/dev/stdin', '/dev/stdout', '/dev/stderr'])
 

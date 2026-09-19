@@ -1,4 +1,4 @@
-import { compareNames, dirname, lookup, resolve, walkPath, walkTree } from './fs.js'
+import { compareNames, dirname, lookup, walkPath, walkTree, writeTarget } from './fs.js'
 import { decodeUtf8, encodeUtf8 } from './util.js'
 
 // The overlay is mounted at /tmp, so what may be written is what falls inside
@@ -6,19 +6,6 @@ import { decodeUtf8, encodeUtf8 } from './util.js'
 // write would succeed.
 export const inOverlay = (absolute) => absolute === '/tmp' || absolute.startsWith('/tmp/')
 
-// Which file a write lands on, and so which side of that boundary it is. The
-// kernel resolves every component of a name before it opens anything, so a
-// link on the way decides — and at the end too, where opening a link opens
-// what it names and a link to nothing is that name made. Unlinking a name and
-// replacing it act on the name itself, as `lstat` reads one, and pass
-// `follow: false`. A component that is not there is kept as it was spelled,
-// since the file being made is the one being asked about.
-// A name no resolution can start on — empty, or holding a NUL — keeps the
-// spelling it came with, so the overlay answers for it where it was aimed and
-// the diagnostic is the one that name earns.
-export const writeTarget = (fs, cwd, path, follow = true) => path === '' || path.includes('\0')
-  ? resolve(cwd, path)
-  : walkPath(cwd, path, fs, { follow, lenient: true }).path
 
 // Only the overlay owns mutable bytes. The mounted source map and its
 // directory index remain separate and are never copied into this map.

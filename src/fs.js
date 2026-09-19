@@ -93,6 +93,20 @@ export function walkPath(cwd, path, fs, { follow = true, lenient = false } = {})
   return { path: at, error: missing ? 'No such file or directory' : null, rest: [] }
 }
 
+// Which file a write lands on, and so which side of a boundary it falls. The
+// kernel resolves every component of a name before it opens anything, so a
+// link on the way decides — and at the end too, where opening a link opens
+// what it names and a link to nothing is that name made. Unlinking a name and
+// replacing it act on the name itself, as `lstat` reads one, and pass
+// `follow: false`. A component that is not there is kept as it was spelled,
+// since the file being made is the one being asked about.
+// A name no resolution can start on — empty, or holding a NUL — keeps the
+// spelling it came with, so it is answered for where it was aimed and the
+// diagnostic is the one that name earns.
+export const writeTarget = (fs, cwd, path, follow = true) => path === '' || path.includes('\0')
+  ? resolve(cwd, path)
+  : walkPath(cwd, path, fs, { follow, lenient: true }).path
+
 // What creating `name` would fail with, before anything tries: path resolution
 // reports a missing or non-directory parent ahead of whatever the filesystem
 // would say about being read-only, and a name that resolves needs no answer.

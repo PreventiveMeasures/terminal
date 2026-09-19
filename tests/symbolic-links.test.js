@@ -613,6 +613,38 @@ describe('what a link cannot change', () => {
     check(made(), 'touch spelled', '', { stderr: "touch: cannot touch 'spelled': Read-only file system\n", exitCode: 1, ...at })
   })
 
+  it('patches through a link on the way, and patches no link itself', () => {
+    const sources = { file: 'a\n', into: { type: 'link', target: '/tmp' }, out: { type: 'link', target: '/tmp/out' } }
+    const made = () => {
+      const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+      t.run("printf 'a\\n' > /tmp/out; printf -- '--- out\\n+++ out\\n@@ -1 +1 @@\\n-a\\n+b\\n' > /tmp/d.patch")
+      return t
+    }
+    const at = { cwd: '/repo' }
+    // The file a write lands on is the walk's answer, so a link on the way
+    // leads where it leads — the overlay owns what is under it.
+    check(made(), 'patch into/out < /tmp/d.patch; cat /tmp/out', 'patching file into/out\nb\n', at)
+    // GNU patches a regular file and nothing else, and reads the name itself
+    // to decide: a link is none, whatever it leads to. What is left is the
+    // rejects, beside the link and so in the read-only sources.
+    const refused = gap(made(), 'patch out < /tmp/d.patch', 'read-only target', 'patch: out.rej: file system is read-only\n')
+    assert.equal(refused.stdout, 'File out is not a regular file -- refusing to patch\n1 out of 1 hunk ignored -- saving rejects to file out.rej\n')
+    check(made(), 'cat /tmp/out', 'a\n', at)
+  })
+
+  it('sed guards the file it reads, which a link naming that file is', () => {
+    const sources = { file: 'a\n', out: { type: 'link', target: '/tmp/out' } }
+    const refusal = 'sed: writing to an actively read input file is not supported\n'
+    // The guard is about the file rather than the name it was opened by, so
+    // both spellings of one file answer alike.
+    for (const name of ['/tmp/out', 'out']) {
+      const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+      t.run("printf 'a\\n' > /tmp/out")
+      gap(t, `sed 's/a/b/' ${name} >> /tmp/out`, 'streaming self-output', refusal)
+      check(t, 'cat /tmp/out', 'a\n', { cwd: '/repo' })
+    }
+  })
+
   it('empties what a slashed link names and still cannot unlink the name', () => {
     const t = createTerminal({ dirlink: { type: 'link', target: '/tmp/d' } }, { mount: '/repo', writable: '/tmp/' })
     check(t, 'mkdir /tmp/d; printf x > /tmp/d/f', '', { cwd: '/repo' })

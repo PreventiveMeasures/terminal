@@ -1,4 +1,4 @@
-import { resolve } from '../fs.js'
+import { lookup, resolve } from '../fs.js'
 import { consumeStdin, readFilesFor } from '../util.js'
 import { refreshSedStdin } from './sed-output.js'
 
@@ -55,7 +55,9 @@ export function sedInput(files, stdin, ctx, delimiter, separate, report) {
   return { next, status, get identity() { return source?.identity } }
 }
 
+// The guard is about the file, not the name it was opened by: a link naming
+// an overlay file is that file, which is what the read below finds.
 function inputIdentity(name, ctx) {
   if (name === '-' || name === '/dev/stdin') return ctx.stdinHandle?.identity
-  return ctx.fs.fileIdentity?.(resolve(ctx.cwd, name))
+  return ctx.fs.fileIdentity?.(lookup(ctx.cwd, name, ctx.fs).path ?? resolve(ctx.cwd, name))
 }
