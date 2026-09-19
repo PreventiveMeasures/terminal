@@ -23,19 +23,28 @@ export function compareDirs(state, dirA, dirB) {
 // side that is goes with it, since a name the listing did have is one this
 // still answers for — a link leading nowhere among them.
 function compareStandIn(state, [pathA, pathB], kind, listed) {
-  if (kind === 'file') compareFiles(state, pathA, pathB, true, listed)
   // The kind is the listed side's, and the stand-in is a name nothing holds:
   // a walk that refuses to cross a link names the side the link is on.
-  else if (state.opts.recursive) enterDirs(state, [pathA, pathB], listed.map((held) => held ? kind : null))
-  else report(state, `Common subdirectories: ${pathA} and ${pathB}\n`)
+  if (isDir(kind)) {
+    if (state.opts.recursive) enterDirs(state, [pathA, pathB], listed.map((held) => held ? kind : null))
+    else report(state, `Common subdirectories: ${pathA} and ${pathB}\n`)
+  } else compareFiles(state, pathA, pathB, true, listed)
 }
 
 function comparePair(state, [pathA, pathB], [kindA, kindB]) {
   const { opts } = state
+  // A name a directory holds and cannot answer for is read rather than typed,
+  // and GNU stops at that read: the side across from it is never opened,
+  // which a directory would otherwise be reported missing for.
+  const gone = [kindA, kindB].indexOf('gone')
+  if (gone !== -1 && isDir([kindA, kindB][1 - gone])) {
+    const path = [pathA, pathB][gone]
+    return report(state, `diff: ${path}: ${lookup(state.ctx.cwd, path, state.ctx.fs).error}\n`, 2, true)
+  }
   if (isDir(kindA) && isDir(kindB)) {
     if (opts.recursive) enterDirs(state, [pathA, pathB], [kindA, kindB])
     else report(state, `Common subdirectories: ${pathA} and ${pathB}\n`)
-  } else if (kindA === kindB) compareFiles(state, pathA, pathB, true, [true, true])
+  } else if (kindA === kindB || gone !== -1) compareFiles(state, pathA, pathB, true, [true, true])
   else {
     const shown = (i, path) => opts.labels[i] ?? path
     report(state, `File ${shown(0, pathA)} is a ${TYPE[kindA]} while file ${shown(1, pathB)} is a ${TYPE[kindB]}\n`, 1)
@@ -54,6 +63,9 @@ const isDir = (kind) => kind === 'dir' || kind === 'link'
 // and a name listed, named as a type or compared as a file never does.
 function entryKind(ctx, path) {
   const found = lookup(ctx.cwd, path, ctx.fs)
+  // A name the listing held and the filesystem cannot answer for — a link
+  // leading nowhere, or one that loops — is none of the three types.
+  if (found.error) return 'gone'
   if (!ctx.fs.isDir(found.path)) return 'file'
   return ctx.fs.isLink?.(lookup(ctx.cwd, path, ctx.fs, { follow: false }).path) ? 'link' : 'dir'
 }

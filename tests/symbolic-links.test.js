@@ -441,6 +441,35 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     check(t, 'diff -N a b', 'Common subdirectories: a/only and b/only\n')
   })
 
+  it('diff reads a name a directory cannot answer for rather than typing it', () => {
+    const t = terminal({
+      'a/keep': 'same\n', 'b/keep': 'same\n',
+      'a/gone': { type: 'link', target: 'nowhere' }, 'b/gone/inner': 'in\n',
+      'a/loop': { type: 'link', target: 'ring' }, 'a/ring': { type: 'link', target: 'loop' },
+      'b/loop': 'file\n', 'b/ring': 'file\n',
+    })
+    // A link leading nowhere, across from a directory, is not a file of some
+    // other type: it is a name that cannot be read, and what stopped the read
+    // is what is said — a loop is not the absence `No such file` reports.
+    const unreadable = [
+      'diff: a/gone: No such file or directory',
+      'diff: a/loop: Too many levels of symbolic links',
+      'diff: a/ring: Too many levels of symbolic links',
+      '',
+    ].join('\n')
+    check(t, 'diff -r a b', '', { stderr: unreadable, exitCode: 2 })
+    check(t, 'diff -rN a b', '', { stderr: unreadable, exitCode: 2 })
+    // An operand answers for itself before the directory beside it is opened,
+    // where `-N` makes an absent one the empty directory the walk compares.
+    check(t, 'diff a/gone b', '', { stderr: 'diff: a/gone: No such file or directory\n', exitCode: 2 })
+    check(t, 'diff -N a/gone b', [
+      'Common subdirectories: a/gone/gone and b/gone',
+      'diff -N a/gone/keep b/keep', '0a1', '> same',
+      'diff -N a/gone/loop b/loop', '0a1', '> file',
+      'diff -N a/gone/ring b/ring', '0a1', '> file', '',
+    ].join('\n'), { exitCode: 1 })
+  })
+
   it('diff answers for a link leading nowhere rather than standing in for it under -N', () => {
     const sources = {
       'a/keep': 'same\n', 'b/keep': 'same\n', 'b/only': 'real\n', 'b/pair': 'realfile\n',
@@ -611,6 +640,23 @@ describe('what a link cannot change', () => {
     })
     check(made(), 'touch through', '', { stderr: "touch: cannot touch 'through': Not a directory\n", exitCode: 1, ...at })
     check(made(), 'touch spelled', '', { stderr: "touch: cannot touch 'spelled': Read-only file system\n", exitCode: 1, ...at })
+  })
+
+  it('refuses no link a copy can never reach', () => {
+    const sources = { 'g/f': 'g\n', 'g/sub/h': 'h\n', 'g/sub/gl': { type: 'link', target: 'h' } }
+    const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    const at = { cwd: '/repo' }
+    const blocked = 'mkdir -p /tmp/dest/g; printf BLOCK > /tmp/dest/g/sub; '
+    // A destination the walk cannot enter ends that branch above the link, so
+    // GNU answers with the name in the way and copies the rest of the tree.
+    check(made(), blocked + 'cp -r g /tmp/dest', '', {
+      stderr: "cp: cannot overwrite non-directory '/tmp/dest/g/sub' with directory 'g/sub'\n", exitCode: 1, ...at,
+    })
+    const after = made()
+    after.run(blocked + 'cp -r g /tmp/dest')
+    check(after, 'find /tmp -type f', '/tmp/dest/g/f\n/tmp/dest/g/sub\n', at)
+    // Where the copy does reach it, the link is refused as ever.
+    gap(made(), 'cp -r g /tmp/fresh', 'symbolic link', 'cp: copying a symbolic link is not supported: g/sub/gl (a recursive copy keeps the link, and nothing here makes one)\n')
   })
 
   it('leaves a link alone where -n has left its destination alone', () => {

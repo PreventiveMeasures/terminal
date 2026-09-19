@@ -81,6 +81,10 @@ function refuseLinkedCopy(source, destination, state) {
     // `-n` decides from the destination alone, so a link whose name is taken
     // there is passed over rather than refused: nothing of it is copied.
     if (skippedByNoClobber(below === null ? destination : `${into}/${below}`, state)) continue
+    // Nor is a link the copy can never reach: a destination the walk cannot
+    // enter stops it above the link, which GNU answers with the name in the
+    // way rather than with anything below it.
+    if (below !== null && blockedAbove(into, below, state)) continue
     throw linkedCopy(below === null ? source : `${from}/${below}`)
   }
 }
@@ -89,6 +93,18 @@ function refuseLinkedCopy(source, destination, state) {
 // already there is left as it is, and the copy neither fails nor happens.
 const skippedByNoClobber = (destination, state) =>
   state.noClobber && lookup(state.ctx.cwd, destination, state.ctx.fs).path !== null
+
+// Each directory the copy would have to enter or make on the way down to an
+// entry. One that is there and is not a directory is the end of that branch.
+function blockedAbove(into, below, state) {
+  const { ctx } = state
+  const parts = below.split('/')
+  for (let i = 1; i < parts.length; i++) {
+    const found = lookup(ctx.cwd, `${into}/${parts.slice(0, i).join('/')}`, ctx.fs)
+    if (found.path !== null && !ctx.fs.isDir(found.path)) return true
+  }
+  return false
+}
 
 const linkedCopy = (name) => new UnsupportedError('feature', 'symbolic link', `copying a symbolic link is not supported: ${name} (a recursive copy keeps the link, and nothing here makes one)`)
 

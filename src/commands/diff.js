@@ -29,10 +29,20 @@ export function diff(stdin, tokens, ctx) {
     const dirSide = kinds[0] === 'dir' ? 0 : 1
     const file = operands[1 - dirSide]
     if (file === '-') return err("diff: cannot compare '-' to a directory", 2)
-    const inside = joinName(operands[dirSide], basename(file))
-    const pair = dirSide === 0 ? [inside, file] : [file, inside]
-    if (operandKind(state, inside) === 'missing') report(state, `diff: ${inside}: No such file or directory\n`, 2, true)
-    else compareFiles(state, pair[0], pair[1], false)
+    // A name that is not there is no file to look for inside the directory:
+    // GNU answers for the operand it was given, and `-N` makes it the empty
+    // directory the walk compares against. Absence alone, as ever — a link
+    // that loops is the error it is.
+    if (kinds[1 - dirSide] === 'missing') {
+      const failure = lookup(state.ctx.cwd, file, state.ctx.fs).error
+      if (opts.newFile && failure === 'No such file or directory') compareDirs(state, left, right)
+      else report(state, `diff: ${file}: ${failure}\n`, 2, true)
+    } else {
+      const inside = joinName(operands[dirSide], basename(file))
+      const pair = dirSide === 0 ? [inside, file] : [file, inside]
+      if (operandKind(state, inside) === 'missing') report(state, `diff: ${inside}: No such file or directory\n`, 2, true)
+      else compareFiles(state, pair[0], pair[1], false)
+    }
   } else compareFiles(state, left, right, false)
   state.out.exitCode = state.status
   return state.out
@@ -77,7 +87,7 @@ export function compareFiles(state, nameA, nameB, inDirectory, listed = null) {
   let failed = false
   for (let i = 0; i < 2; i++) {
     if (!missing[i] || (listed ? !listed[i] : covered)) continue
-    report(state, `diff: ${[nameA, nameB][i]}: No such file or directory\n`, 2, true)
+    report(state, `diff: ${[nameA, nameB][i]}: ${sides[i].error ?? 'No such file or directory'}\n`, 2, true)
     failed = true
   }
   if (failed) return
@@ -132,6 +142,8 @@ function readOperand(state, name) {
     return { content: state.stdin, identity: ctx.stdinHandle?.identity ?? Symbol('stdin') }
   }
   const found = lookupWithNote(ctx, 'diff', name)
-  if (found.error || ctx.fs.isDir(found.path)) return { content: null, identity: undefined }
+  // What stopped the read travels with it: a link that loops is not the
+  // missing file a name that is simply absent is.
+  if (found.error || ctx.fs.isDir(found.path)) return { content: null, identity: undefined, error: found.error }
   return { content: ctx.fs.readFile(found.path), identity: ctx.fs.fileIdentity?.(found.path) ?? found.path }
 }

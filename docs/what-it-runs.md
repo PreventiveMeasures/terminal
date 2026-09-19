@@ -154,7 +154,10 @@ it picks can differ from GNU's; given the same change set, the bytes are
 GNU's. The virtual filesystem keeps no modification
 times, so headers carry the name alone, as they do under `--label`; a file
 `-N` stands in for gets the epoch, which is what tells `patch` it did not
-exist. `-y`, `-e`, `-B`, `-I` and the rest report an unsupported diagnostic.
+exist. A name a directory holds and cannot read — a link leading nowhere, or
+one that loops — is answered for as that read rather than as a type of its
+own, whatever is across from it, and what stopped the read is what is said.
+`-y`, `-e`, `-B`, `-I` and the rest report an unsupported diagnostic.
 
 `patch` applies unified, context and normal diffs (and git-style headers,
 including renames), locating each hunk by line number, then nearby, then
