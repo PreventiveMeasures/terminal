@@ -90,17 +90,21 @@ function refuseLinkedCopy(source, destination, state) {
 }
 
 // `-n` is the one flag that answers before the source is opened at all: a name
-// already there is left as it is, and the copy neither fails nor happens.
+// already there is left as it is, and the copy neither fails nor happens. Only
+// a link asks this, and nothing is written through a link, so the destination
+// is read as `lstat` reads it: one leading nowhere is still a name taken.
 const skippedByNoClobber = (destination, state) =>
-  state.noClobber && lookup(state.ctx.cwd, destination, state.ctx.fs).path !== null
+  state.noClobber && lookup(state.ctx.cwd, destination, state.ctx.fs, { follow: false }).path !== null
 
 // Each directory the copy would have to enter or make on the way down to an
-// entry. One that is there and is not a directory is the end of that branch.
+// entry. One that is there and is not a directory ends that branch — and a
+// link is none of them, whatever it leads to, since a directory is the one
+// thing no link can be written through.
 function blockedAbove(into, below, state) {
   const { ctx } = state
   const parts = below.split('/')
   for (let i = 1; i < parts.length; i++) {
-    const found = lookup(ctx.cwd, `${into}/${parts.slice(0, i).join('/')}`, ctx.fs)
+    const found = lookup(ctx.cwd, `${into}/${parts.slice(0, i).join('/')}`, ctx.fs, { follow: false })
     if (found.path !== null && !ctx.fs.isDir(found.path)) return true
   }
   return false
