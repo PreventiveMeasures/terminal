@@ -386,6 +386,18 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     gap(t, 'diff -r a b', 'symbolic link to a directory', 'diff: comparing what a symbolic link to a directory holds is not supported: a/over\n')
   })
 
+  it('diff names the side a one-sided link is on, where -N stands in for the other', () => {
+    const t = terminal({ 'a/file': 'one\n', 'b/file': 'one\n', 'b/only': { type: 'link', target: '../d' }, 'd/x': 'x\n' })
+    // `-N` stands a name one side lacks in as an empty directory, so the walk
+    // still meets the link — which is on the side whose listing held it,
+    // whichever side that is.
+    for (const order of ['a b', 'b a']) {
+      gap(t, `diff -rN ${order}`, 'symbolic link to a directory', 'diff: comparing what a symbolic link to a directory holds is not supported: b/only\n')
+    }
+    // With no walk to cross it, GNU names it a directory the two share.
+    check(t, 'diff -N a b', 'Common subdirectories: a/only and b/only\n')
+  })
+
   it('diff answers for a link leading nowhere rather than standing in for it under -N', () => {
     const sources = {
       'a/keep': 'same\n', 'b/keep': 'same\n', 'b/only': 'real\n', 'b/pair': 'realfile\n',
@@ -452,12 +464,110 @@ describe('what a link cannot change', () => {
     // there, the write fails as the kernel fails it rather than leaving bytes
     // under a directory nothing can reach.
     check(made(), 'echo x > orphan', '', { stderr: 'error: orphan: No such file or directory\n', exitCode: 1, cwd: '/repo' })
-    check(made(), 'cp file orphan', '', { stderr: "cp: cannot create regular file 'orphan': No such file or directory\n", exitCode: 1, cwd: '/repo' })
     check(made(), 'touch orphan', '', { stderr: "touch: cannot touch 'orphan': No such file or directory\n", exitCode: 1, cwd: '/repo' })
+    // `cp` has a rule of its own for a destination leading nowhere, which it
+    // gives whatever the name is missing.
+    check(made(), 'cp file orphan', '', { stderr: "cp: not writing through dangling symlink 'orphan'\n", exitCode: 1, cwd: '/repo' })
     // Nothing of the refused write is left behind, reachable or not.
     const after = made()
     after.run('echo x > orphan')
     check(after, 'find /tmp', '/tmp\n', { cwd: '/repo' })
+  })
+
+  it('writes through no link that leads nowhere, where GNU writes through neither half', () => {
+    const sources = {
+      file: 'src\n', 'd/inner': 'in\n',
+      out: { type: 'link', target: '/tmp/out' },
+      fresh: { type: 'link', target: '/tmp/new' },
+      outside: { type: 'link', target: '/repo/newname' },
+    }
+    const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    const at = { cwd: '/repo' }
+    // `cp` opens neither the link, which is a name already taken, nor the file
+    // it names, which is not there — so a name a redirect would have made is
+    // refused here.
+    check(made(), 'cp file fresh', '', { stderr: "cp: not writing through dangling symlink 'fresh'\n", exitCode: 1, ...at })
+    check(made(), 'cp file outside', '', { stderr: "cp: not writing through dangling symlink 'outside'\n", exitCode: 1, ...at })
+    // Nothing is left where that copy would have gone.
+    const refused = made()
+    refused.run('cp file fresh')
+    check(refused, 'find /tmp', '/tmp\n', at)
+    // GNU announces the copy it is about to make before the refusal, as it
+    // announces one it goes on to make.
+    check(made(), 'cp -v file fresh', "'file' -> 'fresh'\n", {
+      stderr: "cp: not writing through dangling symlink 'fresh'\n", exitCode: 1, ...at,
+    })
+    // A directory copy meets the same name as one already taken by something
+    // that is not a directory, however little is at the end of it.
+    check(made(), 'cp -r d fresh', '', {
+      stderr: "cp: cannot overwrite non-directory 'fresh' with directory 'd'\n", exitCode: 1, ...at,
+    })
+    // A link leading somewhere is written through, as it always was.
+    check(made(), 'printf seed > /tmp/out; cp file out; cat /tmp/out', 'src\n', at)
+  })
+
+  it('copies into the directory a link names, and over no link that is not one', () => {
+    const sources = { file: 'src\n', 'd/inner': 'in\n', dirlink: { type: 'link', target: '/tmp/d' } }
+    const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    const at = { cwd: '/repo' }
+    // A copy lands where the name leads, so what the overlay may hold is asked
+    // of the walk rather than of the spelling.
+    check(made(), 'mkdir /tmp/d; cp -r d dirlink; find /tmp', '/tmp\n/tmp/d\n/tmp/d/d\n/tmp/d/d/inner\n', at)
+    check(made(), 'mkdir /tmp/d; cp -r d dirlink/sub; find /tmp', '/tmp\n/tmp/d\n/tmp/d/sub\n/tmp/d/sub/inner\n', at)
+    check(made(), 'mkdir /tmp/d; cp -rv d dirlink', "'d' -> 'dirlink/d'\n'd/inner' -> 'dirlink/d/inner'\n", at)
+    // A regular file can be written through a link and a directory cannot, so
+    // GNU reads the destination of a directory copy as `lstat` reads it: `-T`
+    // names the link itself, which is no directory to overwrite.
+    check(made(), 'mkdir /tmp/d; cp -rT d dirlink', '', {
+      stderr: "cp: cannot overwrite non-directory 'dirlink' with directory 'd'\n", exitCode: 1, ...at,
+    })
+  })
+
+  it('makes no directory over a name a link holds, however far the link leads', () => {
+    const sources = {
+      file: 'x\n',
+      dirlink: { type: 'link', target: '/tmp/d' },
+      fresh: { type: 'link', target: '/tmp/new' },
+      through: { type: 'link', target: '/repo/file/sub' },
+    }
+    const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    const at = { cwd: '/repo' }
+    const taken = (name) => `mkdir: cannot create directory '${name}': File exists\n`
+    // The name is taken whatever the link leads to, which `mkdir` never
+    // follows — `-p` follows it, and passes over a directory at the end of it.
+    check(made(), 'mkdir fresh', '', { stderr: taken('fresh'), exitCode: 1, ...at })
+    check(made(), 'mkdir -p fresh', '', { stderr: taken('fresh'), exitCode: 1, ...at })
+    check(made(), 'mkdir -p through', '', { stderr: taken('through'), exitCode: 1, ...at })
+    check(made(), 'mkdir /tmp/d; mkdir dirlink', '', { stderr: taken('dirlink'), exitCode: 1, ...at })
+    check(made(), 'mkdir /tmp/d; mkdir -p dirlink', '', at)
+    check(made(), 'mkdir /tmp/d; mkdir -p dirlink/sub; find /tmp -type d', '/tmp\n/tmp/d\n/tmp/d/sub\n', at)
+    // Under `-p` a component that is not the last answers with what stopped
+    // the walk: a link leading nowhere is its own name in the way, and one
+    // leading through a file cannot hold the name below it.
+    check(made(), 'mkdir -p fresh/sub', '', { stderr: taken('fresh'), exitCode: 1, ...at })
+    check(made(), 'mkdir -p through/sub', '', {
+      stderr: "mkdir: cannot create directory 'through': Not a directory\n", exitCode: 1, ...at,
+    })
+  })
+
+  it('answers for the parent of the name a link leads to before the boundary answers', () => {
+    const sources = {
+      file: 'x\n',
+      orphan: { type: 'link', target: '/repo/missing/file' },
+      spelled: { type: 'link', target: '/repo/newname' },
+      through: { type: 'link', target: '/repo/file/sub' },
+    }
+    const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    const at = { cwd: '/repo' }
+    // Resolution answers before the filesystem does, as it does for the name
+    // written out in full: what is left for a name that resolves is the
+    // read-only filesystem it lands on.
+    check(made(), 'touch orphan', '', { stderr: "touch: cannot touch 'orphan': No such file or directory\n", exitCode: 1, ...at })
+    check(made(), 'touch /repo/missing/file', '', {
+      stderr: "touch: cannot touch '/repo/missing/file': No such file or directory\n", exitCode: 1, ...at,
+    })
+    check(made(), 'touch through', '', { stderr: "touch: cannot touch 'through': Not a directory\n", exitCode: 1, ...at })
+    check(made(), 'touch spelled', '', { stderr: "touch: cannot touch 'spelled': Read-only file system\n", exitCode: 1, ...at })
   })
 
   it('empties what a slashed link names and still cannot unlink the name', () => {

@@ -82,6 +82,13 @@ function refuseLinkedCopy(source, ctx) {
 
 const linkedCopy = (name) => new UnsupportedError('feature', 'symbolic link', `copying a symbolic link is not supported: ${name} (a recursive copy keeps the link, and nothing here makes one)`)
 
+// A destination that is a link leading nowhere. GNU writes through neither
+// half of such a name: not the link, which is a name already taken, and not
+// the file it names, which is not there to open — `-f` and `-n` leave that
+// alone. So the copy is refused rather than made, whatever the link leads to.
+const danglingTarget = (ctx, name, dest) =>
+  dest.path === null && ctx.fs.isLink?.(lookup(ctx.cwd, name, ctx.fs, { follow: false }).path) === true
+
 // GNU names a copy after the last component of the source as it was typed,
 // rather than after the directory that spelling resolves to: `cp -r a/. d`
 // copies what `a` holds into `d` itself, and says so as `'a/./x' -> 'd/./x'`.
@@ -130,6 +137,7 @@ function copyFile(source, destination, state, top = null) {
   if (top === null && state.copied.has(absolute)) return fail(`will not overwrite just-created ${shownTarget} with ${shownSource}`)
   const invalid = creationError(ctx.cwd, destination, ctx.fs, dest)
   announce(shownSource, shownTarget, state)
+  if (danglingTarget(ctx, destination, dest)) return fail(`not writing through dangling symlink ${shownTarget}`)
   if (invalid) {
     missingPathNote(ctx, 'cp', destination, invalid)
     return fail(`cannot create regular file ${shownTarget}: ${invalid}`)
@@ -156,15 +164,24 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
   const shownSource = quoteName(source, ctx)
   const shownTarget = quoteName(destination, ctx)
   const fail = (message) => report(state, 'cp: ' + message + '\n', true)
-  const dest = lookup(ctx.cwd, destination, ctx.fs)
+  // A regular file can be written through a link and a directory cannot, so
+  // GNU reads the destination of a directory copy as `lstat` reads it: the
+  // name itself, whatever it leads to. `cp -rT d link` overwrites no
+  // directory, and neither does a copy into a link that leads nowhere.
+  const dest = lookup(ctx.cwd, destination, ctx.fs, { follow: false })
   if (dest.error && dest.error !== 'No such file or directory') return fail(`cannot stat ${shownTarget}: ${dest.error}`)
   // A trailing slash says the destination is a directory, which is what this
   // makes: that spelling refuses a file destination, not this one.
   const named = destination.replace(/\/+$/u, '') || destination
+  // What the destination already is settles it before where it falls: a file
+  // under the source is a file in the way, not a loop.
+  if (dest.path !== null && !ctx.fs.isDir(dest.path)) {
+    return fail(`cannot overwrite non-directory ${shownTarget} with directory ${shownSource}`)
+  }
   // Whether the destination can be made at all is settled before where it
-  // falls: `..` collapses lexically, so a name reaching through a directory
-  // that is not there would otherwise read as a loop rather than as the
-  // missing component it is.
+  // falls, too: `..` collapses lexically, so a name reaching through a
+  // directory that is not there would otherwise read as a loop rather than as
+  // the missing component it is.
   if (dest.path === null) {
     const invalid = creationError(ctx.cwd, named, ctx.fs)
     if (invalid) {
@@ -172,9 +189,6 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
       return fail(`cannot create directory ${shownTarget}: ${invalid}`)
     }
   }
-  // What the destination already is settles it before where it falls, too: a
-  // file under the source is a file in the way, not a loop.
-  if (dest.path !== null && !ctx.fs.isDir(dest.path)) return fail(`cannot overwrite non-directory ${shownTarget} with directory ${shownSource}`)
   const target = resolve(ctx.cwd, named)
   if (target === absolute) return fail(`${shownSource} and ${shownTarget} are the same file`)
   // A destination under the source is the loop GNU names. GNU makes the
@@ -218,7 +232,9 @@ function makeDirectory(source, destination, named, state) {
   // nothing said, so that answer is GNU's own and no line was ever in
   // question. Where the directory can be made, the line is refused before it
   // exists rather than after, so a refusal leaves nothing behind.
-  const writable = ctx.writable && inOverlay(resolve(ctx.cwd, named))
+  // Which side of the boundary it falls on is the walk's answer rather than
+  // the spelling's, since a link on the way leads where it leads.
+  const writable = ctx.writable && inOverlay(writeTarget(ctx.fs, ctx.cwd, named, false))
   if (writable) refuseBufferedOutput(state)
   try {
     if (!writable || !ctx.fs.makeWritableDir?.(ctx.cwd, named)) return fail('Read-only file system')
@@ -348,23 +364,24 @@ function refusedBeforeWriting(source, to, dest, ctx, noClobber) {
 // does not, since the copy makes that entry's parents on the way down.
 function copiesFile(source, to, destination, ctx, noClobber) {
   const dest = lookup(ctx.cwd, destination, ctx.fs)
-  return !refusedBeforeWriting(source, to, dest, ctx, noClobber) && !creationError(ctx.cwd, destination, ctx.fs, dest)
+  return !refusedBeforeWriting(source, to, dest, ctx, noClobber) &&
+    !danglingTarget(ctx, destination, dest) && !creationError(ctx.cwd, destination, ctx.fs, dest)
 }
 
 // The refusals `copyDirectory` reaches before it lists anything, in its order.
 // A directory operand that stops at one of them is never walked, so nothing
 // below it is opened and none of it is the descriptor's business.
 function copiesDirectory(absolute, destination, ctx) {
-  const dest = lookup(ctx.cwd, destination, ctx.fs)
+  const dest = lookup(ctx.cwd, destination, ctx.fs, { follow: false })
   if (dest.error && dest.error !== 'No such file or directory') return false
   const named = destination.replace(/\/+$/u, '') || destination
-  if (dest.path === null && creationError(ctx.cwd, named, ctx.fs)) return false
   if (dest.path !== null && !ctx.fs.isDir(dest.path)) return false
+  if (dest.path === null && creationError(ctx.cwd, named, ctx.fs)) return false
   const target = resolve(ctx.cwd, named)
   if (target === absolute || target.startsWith(absolute === '/' ? '/' : absolute + '/')) return false
   // Nothing below a destination outside the overlay is written either, whether
   // the walk is stopped at its making or every file in it is refused in turn.
-  return Boolean(ctx.writable) && inOverlay(target)
+  return Boolean(ctx.writable) && inOverlay(writeTarget(ctx.fs, ctx.cwd, named, false))
 }
 
 function isSpecialFile(name, cwd) {

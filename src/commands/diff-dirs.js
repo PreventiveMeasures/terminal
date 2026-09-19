@@ -24,7 +24,9 @@ export function compareDirs(state, dirA, dirB) {
 // still answers for — a link leading nowhere among them.
 function compareStandIn(state, [pathA, pathB], kind, listed) {
   if (kind === 'file') compareFiles(state, pathA, pathB, true, listed)
-  else if (state.opts.recursive) enterDirs(state, [pathA, pathB], [kind, kind])
+  // The kind is the listed side's, and the stand-in is a name nothing holds:
+  // a walk that refuses to cross a link names the side the link is on.
+  else if (state.opts.recursive) enterDirs(state, [pathA, pathB], listed.map((held) => held ? kind : null))
   else report(state, `Common subdirectories: ${pathA} and ${pathB}\n`)
 }
 

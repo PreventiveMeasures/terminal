@@ -33,18 +33,27 @@ them, since nothing else here makes one. A link is the one thing it cannot
 carry over: `-r` keeps every link it meets as the link it is, and the overlay
 holds files and directories alone, so such a copy is refused rather than
 written as the files those links point at. A link handed to `cp` without `-r`
-is read through, which is what GNU reads there too.
+is read through, which is what GNU reads there too. A destination is read the
+way GNU reads one: a regular file can be written through a link and a
+directory cannot, so a file copy follows the destination link and a directory
+copy answers for the name itself, and a destination leading nowhere is refused
+rather than made.
 
 A write lands where a name leads: the overlay answers for the file a link
 names, so `echo x > out` with `out -> /tmp/out` writes that file, and one
 naming a path in the read-only sources is refused as any other name there is.
-`rm` and `sed -i` are the two that answer for the name itself — the first
-takes it away, the second writes a file over it — so a link the sources hold
-is read-only to them however the file it names could be written.
+The name a link leads to answers for its own parent, so a link into a
+directory that is not there fails as the kernel fails it, before the read-only
+filesystem is reached. `rm` and `sed -i` are the two that answer for the name
+itself — the first takes it away, the second writes a file over it — so a link
+the sources hold is read-only to them however the file it names could be
+written.
 
 `mkdir` makes them one at a time and `mkdir -p` makes a whole path, passing
-over what is already there and naming the component it stops at. `rm -r` takes
-a tree away again, emptying a directory before removing it. The overlay's own
+over what is already there and naming the component it stops at. A name a link
+holds is a name already taken, which making a directory never follows; `-p`
+follows it, and passes over only a link that leads to a directory. `rm -r`
+takes a tree away again, emptying a directory before removing it. The overlay's
 `/tmp` is where it is mounted rather than something inside it, so `rm -r /tmp`
 is refused as the busy device Linux calls a mount point, and nothing in it is
 removed on the way to finding that out.

@@ -99,11 +99,14 @@ export function walkPath(cwd, path, fs, { follow = true, lenient = false } = {})
 export function creationError(cwd, name, fs, found = lookup(cwd, name, fs)) {
   if (found.path !== null) return null
   if (name === '' || name.includes('\0') || name.endsWith('/') || found.error !== 'No such file or directory') return found.error
-  // Preserve components until lookup has checked them: file/../new and
-  // missing/../new cannot create a sibling by lexical normalization alone.
-  const slash = name.lastIndexOf('/')
-  const parent = lookup(cwd, slash < 0 ? '.' : name.slice(0, slash) || '/', fs)
-  return parent.error ?? (fs.isDir(parent.path) ? null : 'Not a directory')
+  // The parent is the resolved name's rather than the spelling's: a link
+  // leading into a directory that is not there names a file nothing can make,
+  // where the spelling's own parent is fine. Asking the walk keeps every
+  // component checked where it stands, so `file/../new` and `missing/../new`
+  // cannot make a sibling by lexical normalization alone.
+  const walk = walkPath(cwd, name, fs)
+  if (walk.rest.length > 0) return walk.error
+  return fs.isDir(dirname(walk.path)) ? null : 'Not a directory'
 }
 
 export function dirname(path) {
