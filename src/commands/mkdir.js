@@ -71,6 +71,14 @@ function makeDirectory(name, state, last) {
     if (!state.parents) return fail('File exists')
     return ctx.fs.isDir(found.path) ? true : fail(last ? 'File exists' : 'Not a directory')
   }
+  // Making a directory never follows the final component, so a name a link has
+  // taken is taken whatever the link leads to. `-p` asks where it leads all
+  // the same, and answers with what stopped that question: a link leading
+  // nowhere leaves its own name in the way, and one leading through something
+  // that is not a directory cannot hold the name below it either.
+  if (lookup(ctx.cwd, target, ctx.fs, { follow: false }).error === null) {
+    return fail(!state.parents || last || found.error !== 'Not a directory' ? 'File exists' : 'Not a directory')
+  }
   const invalid = creationError(ctx.cwd, target, ctx.fs, found)
   if (invalid) {
     missingPathNote(ctx, 'mkdir', target, invalid)

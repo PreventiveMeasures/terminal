@@ -1,10 +1,11 @@
-import { compareNames, lookup, resolve, walkTree } from './fs.js'
+import { compareNames, dirname, lookup, walkPath, walkTree, writeTarget } from './fs.js'
 import { decodeUtf8, encodeUtf8 } from './util.js'
 
 // The overlay is mounted at /tmp, so what may be written is what falls inside
 // it. Commands ask before acting, where the answer decides more than whether a
 // write would succeed.
 export const inOverlay = (absolute) => absolute === '/tmp' || absolute.startsWith('/tmp/')
+
 
 // Only the overlay owns mutable bytes. The mounted source map and its
 // directory index remain separate and are never copied into this map.
@@ -16,7 +17,7 @@ export function writableFs(base) {
   const dirs = new Set(['/tmp'])
   let observer
   const root = base.listDir('/')
-  const rootEntries = { dirs: [...root.dirs, 'tmp'].sort(compareNames), files: root.files }
+  const rootEntries = { dirs: [...root.dirs, 'tmp'].sort(compareNames), files: root.files, links: root.links ?? [] }
   const listings = overlayListings(dirs, files)
   const reshaped = listings.reshaped
   const put = (path, inode) => {
@@ -31,6 +32,9 @@ export function writableFs(base) {
     readIdentity: (inode) => { observer?.read(inode); return decodeUtf8(inode.bytes) },
     isFile: (path) => files.has(path) || base.isFile(path),
     isDir: (path) => dirs.has(path) || base.isDir(path),
+    // Nothing here makes a link, so the sources own every one there is.
+    isLink: (path) => base.isLink?.(path) === true,
+    readLink: (path) => base.readLink?.(path),
     readFile: (path) => {
       const inode = files.get(path)
       observer?.read(inode ?? path)
@@ -45,7 +49,7 @@ export function writableFs(base) {
       for (const entry of walkTree(fs, path)) if (entry.kind === 'file') yield entry.path
     },
     openWritable(cwd, path, append = false) {
-      const absolute = resolve(cwd, path)
+      const absolute = writeTarget(fs, cwd, path)
       if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return null
       checkTarget(fs, cwd, path)
       let inode = files.get(absolute)
@@ -56,7 +60,7 @@ export function writableFs(base) {
     makeWritableDir: (cwd, path) => addDirectory(fs, { dirs, files, reshaped }, cwd, path),
     removeWritableDir: (cwd, path) => dropDirectory(fs, { dirs, reshaped }, cwd, path),
     copyWritable(cwd, source, target) {
-      const absolute = resolve(cwd, target)
+      const absolute = writeTarget(fs, cwd, target)
       if (!absolute.startsWith('/tmp/')) return false
       checkTarget(fs, cwd, target)
       const inode = files.get(source)
@@ -70,7 +74,7 @@ export function writableFs(base) {
     },
     replaceWritable: (cwd, path, content, backup) => replaceFile(fs, { files, put }, cwd, path, content, backup),
     removeWritable(cwd, path) {
-      const absolute = resolve(cwd, path)
+      const absolute = writeTarget(fs, cwd, path, false)
       if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
       const found = lookup(cwd, path, fs)
       if (found.error) throw pathError(path, found.error)
@@ -89,7 +93,9 @@ export function writableFs(base) {
 // is asked for. `false` says the path is not the overlay's to make, which is
 // the read-only filesystem every other write meets outside /tmp/.
 function addDirectory(fs, overlay, cwd, path) {
-  const absolute = resolve(cwd, path)
+  // `mkdir` never follows a link in the final position: a name already there
+  // is `File exists` whatever it leads to, so only the way to it resolves.
+  const absolute = writeTarget(fs, cwd, path, false)
   if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
   if (overlay.dirs.has(absolute)) return true
   checkTarget(fs, cwd, path)
@@ -104,8 +110,10 @@ function addDirectory(fs, overlay, cwd, path) {
 // A whole-file rewrite, as `sed -i` and `patch` make one, optionally keeping
 // what was there under a backup name.
 function replaceFile(fs, overlay, cwd, path, content, backupPath) {
-  const absolute = resolve(cwd, path)
-  const backup = backupPath === undefined ? null : resolve(cwd, backupPath)
+  // A whole-file rewrite replaces the name, as `sed -i` replaces a link with
+  // the file it wrote rather than writing what the link named.
+  const absolute = writeTarget(fs, cwd, path, false)
+  const backup = backupPath === undefined ? null : writeTarget(fs, cwd, backupPath, false)
   if (!absolute.startsWith('/tmp/') || backup !== null && !backup.startsWith('/tmp/')) return false
   checkTarget(fs, cwd, path)
   const inode = overlay.files.get(absolute)
@@ -123,7 +131,7 @@ function replaceFile(fs, overlay, cwd, path, content, backupPath) {
 // overlay is mounted rather than something inside it, and a mount point is not
 // the tree below it to remove — which is the busy device Linux reports.
 function dropDirectory(fs, overlay, cwd, path) {
-  const absolute = resolve(cwd, path)
+  const absolute = writeTarget(fs, cwd, path, false)
   if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
   const found = lookup(cwd, path, fs)
   if (found.error) throw pathError(path, found.error)
@@ -149,7 +157,7 @@ function overlayListings(dirs, files) {
     of(path) {
       const cached = cache.get(path)
       if (cached) return cached
-      const entries = { dirs: children(dirs, path + '/'), files: children(files.keys(), path + '/') }
+      const entries = { dirs: children(dirs, path + '/'), files: children(files.keys(), path + '/'), links: [] }
       cache.set(path, entries)
       return entries
     },
@@ -170,20 +178,23 @@ function sameFileContents(base, files, a, b) {
   return left !== null && right !== null && left.length === right.length && left.every((byte, i) => byte === right[i])
 }
 
+// What a name can be written as, asked of the walk rather than of the spelling:
+// components are checked where they are, so `file/../new` and `missing/../new`
+// cannot make a sibling by lexical normalization alone, and the name a link
+// leads to answers for its own parent — a link into a directory that is not
+// there names a file nothing can make, where the spelling's parent is fine.
 function checkTarget(fs, cwd, path) {
-  const found = lookup(cwd, path, fs)
-  if (found.path !== null) {
+  const found = walkPath(cwd, path, fs)
+  if (found.error === null) {
     if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
+    // A trailing slash names a directory, and what is there is not one.
+    if (path.endsWith('/')) throw pathError(path, 'Not a directory')
     return
   }
-  if (found.error !== 'No such file or directory' || path.includes('\0') || path.endsWith('/')) throw pathError(path, found.error)
-  // Preserve components until lookup has checked them: file/../new and
-  // missing/../new cannot create a sibling by lexical normalization alone.
-  const slash = path.lastIndexOf('/')
-  const parent = slash < 0 ? '.' : path.slice(0, slash) || '/'
-  const directory = lookup(cwd, parent, fs)
-  if (directory.error) throw pathError(path, directory.error)
-  if (!fs.isDir(directory.path)) throw new Error(`${path}: Not a directory`)
+  // Only the last name may be missing, and only where it is a name a file can
+  // take: a trailing slash names a directory, and a NUL names nothing.
+  if (found.rest.length > 0 || path.endsWith('/') || path.includes('\0')) throw pathError(path, found.error)
+  if (!fs.isDir(dirname(found.path))) throw pathError(path, 'No such file or directory')
 }
 
 function pathError(path, fsError) {

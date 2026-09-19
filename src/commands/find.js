@@ -9,6 +9,8 @@ import { unsupported } from '../unsupported.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { lookupWithNote, omissionNote } from '../notes.js'
 
+const TYPE_LETTERS = { file: 'f', dir: 'd', link: 'l' }
+
 export function find(stdin, tokens, ctx) {
   const parsed = parseFindArgs(tokens)
   if (parsed.error) return parsed.error
@@ -18,7 +20,9 @@ export function find(stdin, tokens, ctx) {
   const omitted = new Set()
   try {
     for (const start of starts) {
-      const { path: startAbs, error } = lookupWithNote(ctx, 'find', start)
+      // find walks the names it is given, not what they point at: `-P` is its
+      // default, so a link named as a root is the entry it reports.
+      const { path: startAbs, error } = lookupWithNote(ctx, 'find', start, { follow: false })
       if (error) {
         // A bad root does not prevent traversal of the remaining roots.
         collectOutput(result, ctx.flushOutput(emptyOutput(`find: '${start}': ${error}\n`)))
@@ -33,12 +37,12 @@ export function find(stdin, tokens, ctx) {
           runPredicates(groups, { kind: entry.kind, path: display, abs: entry.path, prune: pruned }, ctx, result)
         }
         if (entry.kind !== 'dir' || entry.depth !== maxDepth || pruned.has(entry.path)) continue
-        const { dirs, files } = ctx.fs.listDir(entry.path)
+        const { dirs, files, links } = ctx.fs.listDir(entry.path)
         // Named the way the walk that stopped there would have printed it: a
         // caller reading the note is reading it beside `find`'s own output, and
         // an absolute path is not a name they wrote. Two starts reaching one
         // directory report it twice, under each spelling, as find prints it twice.
-        if (dirs.length || files.length) omitted.add(display)
+        if (dirs.length || files.length || links.length) omitted.add(display)
       }
     }
     // Do not dispatch empty batches. Any failed batch makes find exit 1.
@@ -62,17 +66,19 @@ function runPredicates(groups, entry, ctx, result) {
 function evalPredicate(p, entry, ctx, result) {
   if (p.kind === 'group') return runPredicates(p.groups, entry, ctx, result)
   if (p.kind === 'true') return true
-  if (p.kind === 'type') return p.types.includes(entry.kind === 'file' ? 'f' : 'd')
+  if (p.kind === 'type') return p.types.includes(TYPE_LETTERS[entry.kind])
   if (p.kind === 'name' || p.kind === 'iname') return p.re.test(entry.path.replace(/\/+$/u, '').split('/').at(-1) || '/')
   if (p.kind === 'prune') {
     if (entry.kind === 'dir') entry.prune.add(entry.abs)
     return true
   }
-  // The root of an empty source map is an existing empty directory.
+  // The root of an empty source map is an existing empty directory. A link is
+  // neither of the two things GNU calls empty, whatever it points at.
   if (p.kind === 'empty') {
+    if (entry.kind === 'link') return false
     if (entry.kind === 'file') return ctx.fs.readFile(entry.abs) === ''
-    const { dirs, files } = ctx.fs.listDir(entry.abs)
-    return dirs.length + files.length === 0
+    const { dirs, files, links } = ctx.fs.listDir(entry.abs)
+    return dirs.length + files.length + links.length === 0
   }
   if (p.kind === 'path' || p.kind === 'ipath') return p.re.test(entry.path)
   if (p.kind === 'print' || p.kind === 'print0') {

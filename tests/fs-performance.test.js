@@ -16,7 +16,7 @@ describe('filesystem index and traversal', () => {
       'root/../m.txt': 'middle',
       ignored: null,
     })
-    assert.deepEqual(fs.listDir('/'), { dirs: ['a', '😀'], files: ['a', 'm.txt', 'z.txt', '\uE000', '😀'] })
+    assert.deepEqual(fs.listDir('/'), { dirs: ['a', '😀'], files: ['a', 'm.txt', 'z.txt', '\uE000', '😀'], links: [] })
     assert.equal(fs.readFile('/a/child'), 'replacement')
     assert.equal(fs.isDir('/root'), false)
     assert.deepEqual([...walkTree(fs, '/')].map(({ path, kind, depth }) => [path, kind, depth]), [

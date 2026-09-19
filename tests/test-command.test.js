@@ -84,7 +84,7 @@ describe('test expression argument rules', () => {
 describe('test unavailable predicates remain diagnostic', () => {
   for (const [expression, detail] of [
     ['-r a.txt', '-r'], ['-w a.txt', '-w'], ['-x a.txt', '-x'], ['-s src', '-s'],
-    ['-L a.txt', '-L'], ['-t 1', '-t'], ['-v HOME', '-v'], ['-o errexit', '-o'],
+    ['-t 1', '-t'], ['-v HOME', '-v'], ['-o errexit', '-o'],
     ['a.txt -nt empty', '-nt'], ['a.txt -ef a.txt', '-ef'],
     ['! -r a.txt', '-r'], ['-f a.txt -a -f empty', 'compound expressions'],
     ['"" -o value', 'compound expressions'], ['-f /dev/stdin', 'stream device metadata'],

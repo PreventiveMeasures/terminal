@@ -14,8 +14,8 @@ describe('separate writable filesystem layer', () => {
     assert.equal(fs.readFile('/tmp/source'), 'copy')
     assert.equal(base.readFile('/tmp/source'), undefined)
     assert.equal(base.isDir('/tmp'), false)
-    assert.deepEqual(base.listDir('/'), { dirs: ['repo'], files: [] })
-    assert.deepEqual(fs.listDir('/'), { dirs: ['repo', 'tmp'], files: [] })
+    assert.deepEqual(base.listDir('/'), { dirs: ['repo'], files: [], links: [] })
+    assert.deepEqual(fs.listDir('/'), { dirs: ['repo', 'tmp'], files: [], links: [] })
   })
 
   it('creates or truncates at open, and advances the shared descriptor offset', () => {
@@ -108,7 +108,7 @@ describe('separate writable filesystem layer', () => {
       assert.equal(fs.openWritable('/', path), null, path)
     }
     assert.equal(fs.readFile('/repo/source'), 'original')
-    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: [] })
+    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: [], links: [] })
   })
 
   it('rejects missing or nondirectory components before collapsing dot-dot', () => {
@@ -117,16 +117,16 @@ describe('separate writable filesystem layer', () => {
     for (const path of ['/tmp', '/tmp/', '/tmp/missing/child', '/tmp/missing/../sibling', '/tmp/file/../sibling', '/tmp/bad\0name']) {
       assert.throws(() => fs.openWritable('/', path), undefined, path)
     }
-    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: ['file'] })
+    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: ['file'], links: [] })
   })
 
   it('invalidates directory listings when another overlay file is created', () => {
     const fs = setup()
-    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: [] })
+    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: [], links: [] })
     fs.openWritable('/', '/tmp/z')
-    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: ['z'] })
+    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: ['z'], links: [] })
     fs.openWritable('/', '/tmp/a')
-    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: ['a', 'z'] })
+    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: ['a', 'z'], links: [] })
     assert.deepEqual([...fs.walkFiles('/tmp')], ['/tmp/a', '/tmp/z'])
   })
 
@@ -161,6 +161,6 @@ describe('separate writable filesystem layer', () => {
     assert.throws(() => fs.replaceWritable('/tmp', 'file/../file', 'new', 'backup'), /Not a directory/u)
     assert.equal(fs.readFile('/tmp/file'), 'old')
     assert.equal(fs.readFile('/repo/source'), 'original')
-    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: ['file'] })
+    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: ['file'], links: [] })
   })
 })

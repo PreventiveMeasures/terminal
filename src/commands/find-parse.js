@@ -99,16 +99,19 @@ function valuePredicate(kind, value, negate, depth) {
   return { kind, negate, re: compileGlob(value, { ignoreCase: kind === 'iname' || kind === 'ipath' }) }
 }
 
-// Known but unrepresentable file types are unsupported; invalid types are errors.
-const UNMODELLED_TYPES = 'lbcps'
+// The types a path-to-content map can hold: files, the directories its paths
+// imply, and the links a source entry declares. The rest are known but
+// unrepresentable and so unsupported; anything else is a typo, and an error.
+const MODELLED_TYPES = 'fdl'
+const UNMODELLED_TYPES = 'bcps'
 
 function parseTypes(value) {
   const types = value.split(',')
   const duplicate = types.find((type, i) => types.indexOf(type) !== i)
   if (duplicate !== undefined) return { error: err(`find: Duplicate file type '${duplicate}' in the argument list to -type.`) }
-  if (types.every((type) => type === 'f' || type === 'd')) return { types }
-  const message = `find: -type/--type expects 'f' or 'd', got: ${value}`
-  const known = types.every((type) => type.length === 1 && ('fd' + UNMODELLED_TYPES).includes(type))
+  if (types.every((type) => type.length === 1 && MODELLED_TYPES.includes(type))) return { types }
+  const message = `find: -type/--type expects 'f', 'd' or 'l', got: ${value}`
+  const known = types.every((type) => type.length === 1 && (MODELLED_TYPES + UNMODELLED_TYPES).includes(type))
   return { error: known ? unsupported('option', 'find', `-type ${value}`, message) : err(message) }
 }
 

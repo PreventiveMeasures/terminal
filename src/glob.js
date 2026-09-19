@@ -235,8 +235,10 @@ export function globPaths(word, ctx) {
       }
       candidates = expandSegment(candidates, seg, s === segments.length - 1, ctx, gatedSoFar)
     }
-    // lookup validates literal suffixes and requires a directory for trailing '/'.
-    const live = candidates.filter((c) => lookup(ctx.cwd, c.path, ctx.fs).path !== null)
+    // lookup validates literal suffixes and requires a directory for trailing
+    // '/'. A name is matched as the entry it is, so a link leading nowhere is
+    // still a name the directory holds and still one the pattern produces.
+    const live = candidates.filter((c) => lookup(ctx.cwd, c.path, ctx.fs, { follow: false }).path !== null)
     for (const c of live) for (const mark of c.marks ?? []) hidden.add(mark)
     matched = live.filter((c) => c.marks === null).map((c) => c.path).sort(compareNames)
     return matched
@@ -272,8 +274,12 @@ function expandSegment(candidates, seg, isLast, ctx, gatedSoFar) {
   for (const c of candidates) {
     const abs = lookup(ctx.cwd, c.path || '.', ctx.fs).path
     if (!ctx.fs.isDir(abs)) continue
-    const { dirs, files } = ctx.fs.listDir(abs)
-    for (const name of isLast ? [...dirs, ...files] : dirs) {
+    const { dirs, files, links } = ctx.fs.listDir(abs)
+    // A last segment matches a link by its own name; a segment with a path
+    // after it is crossed only where the link leads to a directory, since
+    // the shell resolves each component before matching the next.
+    const crossed = isLast ? links : links.filter((name) => ctx.fs.isDir(lookup(abs, name, ctx.fs).path))
+    for (const name of isLast ? [...dirs, ...files, ...crossed] : [...dirs, ...crossed]) {
       const gated = !segStartsWithDot && name.startsWith('.')
       // A name the shell itself had to look at answers for its own matching
       // errors. One reached only for the note's sake never raises: it is a

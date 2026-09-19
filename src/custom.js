@@ -119,6 +119,10 @@ function fsView(scope) {
     resolve: (path) => resolve(scope.cwd, path),
     isFile: (path) => scope.fs.isFile(at(path)),
     isDir: (path) => scope.fs.isDir(at(path)),
+    // A link is what it names everywhere else here, so asking whether a path
+    // is one is asking about the name itself: it is looked up unfollowed.
+    isLink: (path) => scope.fs.isLink?.(lookup(scope.cwd, path, scope.fs, { follow: false }).path) === true,
+    readLink: (path) => scope.fs.readLink?.(lookup(scope.cwd, path, scope.fs, { follow: false }).path),
     readFile: (path) => scope.fs.readFile(at(path)),
     listDir: (path) => {
       const { path: abs, error } = lookupWithNote(scope, scope.command, path)
@@ -127,8 +131,8 @@ function fsView(scope) {
       if (!scope.fs.isDir(abs)) {
         throw new Error(`${path}: ${error ?? 'Not a directory'}`)
       }
-      const { dirs, files } = scope.fs.listDir(abs)
-      return { dirs: [...dirs], files: [...files] }
+      const { dirs, files, links = [] } = scope.fs.listDir(abs)
+      return { dirs: [...dirs], files: [...files], links: [...links] }
     },
     walkFiles: (path) => [...scope.fs.walkFiles(at(path))],
   }

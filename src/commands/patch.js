@@ -1,4 +1,4 @@
-import { lookup, resolve } from '../fs.js'
+import { lookup, resolve, writeTarget } from '../fs.js'
 import { consumeStdin, lineRecords } from '../util.js'
 import { UnsupportedError, markUnsupported, unsupportedNote } from '../unsupported.js'
 import { lookupWithNote } from '../notes.js'
@@ -109,7 +109,7 @@ function applyOne(run, scanner, header, inname) {
   let input = { exists: false, isDir: false, content: '' }
   if (!run.skipRest) {
     input = stat(run, inname)
-    if (input.isDir) {
+    if (input.isDir || input.link) {
       run.say(`File ${quoteShell(inname, run.ctx)} is not a regular file -- refusing to patch\n`)
       run.skipRest = true
       run.someFailed = true
@@ -186,17 +186,23 @@ function reportRejects(run, outname, result, text) {
 
 const backupName = (run, name) => name + run.opts.suffix
 
+// GNU patches a regular file and nothing else, and reads the name itself to
+// decide: a link is none, whatever it leads to.
 function stat(run, name) {
+  const itself = lookup(run.dir, name, run.ctx.fs, { follow: false })
+  const link = !itself.error && run.ctx.fs.isLink?.(itself.path) === true
   const found = lookup(run.dir, name, run.ctx.fs)
-  if (found.error) return { exists: false, isDir: false, size: 0, content: '' }
-  if (run.ctx.fs.isDir(found.path)) return { exists: true, isDir: true, size: 0, content: '' }
+  if (found.error) return { exists: false, isDir: false, link, size: 0, content: '' }
+  if (run.ctx.fs.isDir(found.path)) return { exists: true, isDir: true, link, size: 0, content: '' }
   const content = run.ctx.fs.readFile(found.path)
-  return { exists: true, isDir: false, size: content.length, content }
+  return { exists: true, isDir: false, link, size: content.length, content }
 }
 
-// Only the /tmp/ overlay takes writes; the source tree never does.
+// Only the /tmp/ overlay takes writes; the source tree never does. Which side
+// a name falls on is the walk's answer rather than the spelling's, and the
+// name itself is kept: a whole-file rewrite replaces the name it was given.
 function assertWritable(run, name) {
-  const path = resolve(run.dir, name)
+  const path = writeTarget(run.ctx.fs, run.dir, name, false)
   if (run.ctx.writable && path.startsWith('/tmp/')) return
   throw new UnsupportedError('feature', 'read-only target', `${name}: file system is read-only`)
 }

@@ -93,8 +93,8 @@ describe('mounted sources and custom filesystem views remain isolated', () => {
     check(t, 'find . /tmp -type f', './dir/leaf\n./file\n/tmp/file\n')
     check(t, "printf '%s\\n' ./* /tmp/*", './dir\n./file\n/tmp/file\n')
     assert.deepEqual(t.complete('cat /tmp/f'), ['cat /tmp/file'])
-    check(t, 'listing', '{"dirs":[],"files":["file"]}')
-    check(t, 'rm /tmp/file; listing', '{"dirs":[],"files":[]}')
+    check(t, 'listing', '{"dirs":[],"files":["file"],"links":[]}')
+    check(t, 'rm /tmp/file; listing', '{"dirs":[],"files":[],"links":[]}')
     assert.deepEqual(sources, { file: 'source', 'dir/leaf': 'leaf' })
   })
 

@@ -1,5 +1,5 @@
 // tree 2.x's plain UTF-8 listing. Counts include the root directory.
-import { compareNames, joinPath } from '../fs.js'
+import { compareNames, joinPath, lookup } from '../fs.js'
 import { parseArgs } from '../args.js'
 import { err, parseNonNegativeInt } from '../util.js'
 import { unsupported } from '../unsupported.js'
@@ -15,9 +15,13 @@ export function tree(_stdin, tokens, ctx) {
   const start = positional[0] ?? '.'
   const { path: root, error } = lookupWithNote(ctx, 'tree', start)
   const isDir = !error && ctx.fs.isDir(root)
-  const count = { dirs: isDir && itemsFor(ctx.fs, root, flags).length ? 1 : 0, files: !error && !isDir ? 1 : 0 }
-  const rootSuffix = flags.has('F') && !start.endsWith('/') ? '/' : ''
-  const out = [start + (isDir ? rootSuffix : '  [error opening dir]')]
+  // What the operand prints comes from the name itself and what it opens from
+  // where that name leads: a link `tree` cannot open is still a name it found,
+  // counted among the files, and only a name that is not there at all fails.
+  const named = lookup(ctx.cwd, start, ctx.fs, { follow: false })
+  const missing = Boolean(error) && Boolean(named.error)
+  const count = { dirs: isDir && itemsFor(ctx.fs, root, flags).length ? 1 : 0, files: !missing && !isDir ? 1 : 0 }
+  const out = [start + rootMark(ctx, flags, named, isDir) + (isDir ? '' : '  [error opening dir]')]
   if (isDir) {
     const omitted = new Set()
     const hidden = hiddenEntryNotes()
@@ -34,7 +38,17 @@ export function tree(_stdin, tokens, ctx) {
     const files = `${count.files} ${count.files === 1 ? 'file' : 'files'}`
     out.push('', flags.has('d') ? dirs : `${dirs}, ${files}`)
   }
-  return { stdout: out.join('\n') + '\n', stderr: '', exitCode: error ? 2 : 0 }
+  return { stdout: out.join('\n') + '\n', stderr: '', exitCode: missing ? 2 : 0 }
+}
+
+// `-F` marks the operand as it was typed, whatever it ends in — `tree -F d/`
+// prints `d//` — and marks it for what the name itself is, so a link earns the
+// `@` however far it leads. `-d` lists directories alone and marks none of
+// them, the operand included; the `@` still says the operand is not one.
+function rootMark(ctx, flags, named, isDir) {
+  if (!flags.has('F')) return ''
+  if (!named.error && ctx.fs.isLink?.(named.path) === true) return '@'
+  return isDir && !flags.has('d') ? '/' : ''
 }
 
 function walk(fs, root, out, flags, limit, count, omitted, hidden) {
@@ -42,14 +56,19 @@ function walk(fs, root, out, flags, limit, count, omitted, hidden) {
   while (stack.length) {
     const frame = stack.at(-1)
     if (frame.i >= frame.items.length) { stack.pop(); continue }
-    const { n, isDir } = frame.items[frame.i++]
-    if ([...n].some((c) => c.codePointAt(0) < 32 || c.codePointAt(0) === 127 || c === '\\')) {
+    const { n, isDir, target } = frame.items[frame.i++]
+    if ([...(n + (target ?? ''))].some((c) => c.codePointAt(0) < 32 || c.codePointAt(0) === 127 || c === '\\')) {
       return unsupported('feature', 'tree', 'filename escaping', 'tree: listing names requiring escaping is not supported')
     }
     const last = frame.i === frame.items.length
-    out.push(frame.prefix + (last ? '└── ' : '├── ') + n + (isDir && flags.has('F') ? '/' : ''))
+    // `-F` marks what a name leads to, so a link carries the mark on the
+    // target it names rather than on itself, as a long listing does.
+    const mark = isDir && flags.has('F') && !flags.has('d') ? '/' : ''
+    out.push(frame.prefix + (last ? '└── ' : '├── ') + n + (target === undefined ? mark : ' -> ' + target + mark))
     count[isDir ? 'dirs' : 'files']++
-    if (!isDir) continue
+    // A link is counted as what it leads to and crossed no more than the walk
+    // below it is: what it holds is listed where that name is, not here.
+    if (!isDir || target !== undefined) continue
     const dir = joinPath(frame.dir, n)
     if (frame.depth + 1 >= limit) {
       // The depth limit omits this directory's contents whole, and its own note
@@ -66,8 +85,16 @@ function walk(fs, root, out, flags, limit, count, omitted, hidden) {
 // both the tree and the totals under it. Files excluded by -d are left out for
 // a different reason, and are not this note's to claim.
 function itemsFor(fs, dir, flags, hidden = null) {
-  const { dirs, files } = fs.listDir(dir)
-  if (hidden && !flags.has('a')) hidden.collect(dir, flags.has('d') ? dirs : [...dirs, ...files])
-  return [...dirs.map((n) => ({ n, isDir: true })), ...(flags.has('d') ? [] : files.map((n) => ({ n, isDir: false })))]
+  const { dirs, files, links } = fs.listDir(dir)
+  // A link is named beside what it points at and crossed no more than the walk
+  // below it is — but what it leads to is what it counts as, and what decides
+  // whether `-d` lists it: a link to a directory is one of the directories.
+  const linked = links.map((n) => {
+    const found = lookup(dir, n, fs)
+    return { n, isDir: !found.error && fs.isDir(found.path), target: fs.readLink(joinPath(dir, n)) }
+  })
+  const listed = flags.has('d') ? linked.filter(({ isDir }) => isDir) : [...files.map((n) => ({ n, isDir: false })), ...linked]
+  if (hidden && !flags.has('a')) hidden.collect(dir, [...dirs, ...listed.map(({ n }) => n)])
+  return [...dirs.map((n) => ({ n, isDir: true })), ...listed]
     .filter(({ n }) => flags.has('a') || !n.startsWith('.')).sort((a, b) => compareNames(a.n, b.n))
 }

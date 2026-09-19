@@ -167,7 +167,7 @@ describe('unlinking writable files preserves open descriptors', () => {
     const append = fs.openWritable('/', '/tmp/file', true)
     regular.write('old')
     assert.equal(fs.removeWritable('/', '/tmp/file'), true)
-    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: [] })
+    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: [], links: [] })
     regular.write(' regular')
     append.write(' append')
     assert.equal(fs.isFile('/tmp/file'), false)
@@ -175,7 +175,7 @@ describe('unlinking writable files preserves open descriptors', () => {
     regular.write(' more')
     append.write(' tail')
     assert.equal(fs.readFile('/tmp/file'), 'new')
-    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: ['file'] })
+    assert.deepEqual(fs.listDir('/tmp'), { dirs: [], files: ['file'], links: [] })
   })
   it('can remove a file containing invalid UTF-8 without decoding it', () => {
     const fs = writableFs(createFs({}, '/src'))

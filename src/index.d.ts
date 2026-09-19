@@ -1,7 +1,17 @@
 import type { ParseResult, Summary } from './parse.js'
 
+/**
+ * What a source entry is where a string cannot say it. Today that is a
+ * symbolic link: `{ type: 'link', target }` holds the path the link carries,
+ * resolved from the directory the link itself is in, exactly as the kernel
+ * resolves one. The target need not exist — a link leading nowhere is a link,
+ * and `find -type l` and `ls -l` say so — and an absolute target names a path
+ * in the terminal's own filesystem rather than one inside the mount.
+ */
+export type SourceEntry = { type: 'link'; target: string }
+
 /** Virtual source tree: file paths within the configured mount (leading `/` optional) to file contents, as either a plain object or a `Map`. */
-export type Sources = Record<string, string> | Map<string, string>
+export type Sources = Record<string, string | SourceEntry> | Map<string, string | SourceEntry>
 
 /** Read-only view of the virtual source tree, handed to a {@link CommandRun} handler. Paths may be relative to {@link CommandIo.cwd}. */
 export interface CommandFs {
@@ -11,11 +21,15 @@ export interface CommandFs {
   isFile(path: string): boolean
   /** Whether `path` names a directory (directories are derived from the file paths). */
   isDir(path: string): boolean
+  /** Whether `path` itself names a symbolic link — the name is not followed, as `lstat` does not follow one. Every other method here resolves links on the way, and `path` reaching through one is resolved for this check too. */
+  isLink(path: string): boolean
+  /** The path a symbolic link holds, unresolved, or `undefined` if `path` is not one. */
+  readLink(path: string): string | undefined
   /** Contents of `path`, or `undefined` if it is not a file. */
   readFile(path: string): string | undefined
-  /** Immediate children of directory `path`, each list sorted (copies — mutating them cannot affect the tree). Throws `<path>: Not a directory` / `No such file or directory` otherwise. */
-  listDir(path: string): { dirs: string[]; files: string[] }
-  /** Every file path at or under `path`, absolute. Empty if `path` does not exist. */
+  /** Immediate children of directory `path`, each list sorted (copies — mutating them cannot affect the tree). Links are listed apart from the files they may lead to. Throws `<path>: Not a directory` / `No such file or directory` otherwise. */
+  listDir(path: string): { dirs: string[]; files: string[]; links: string[] }
+  /** Every file path at or under `path`, absolute. `path` resolves as it does everywhere else here, so a link naming a directory walks the directory it names; a link the walk then reaches is neither crossed nor named. Empty if `path` does not exist. */
   walkFiles(path: string): string[]
 }
 

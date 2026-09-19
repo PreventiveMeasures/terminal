@@ -1,8 +1,8 @@
 import { compareNames, lookup, resolve } from './fs.js'
 
 // Use only for lookups whose failure is reported, not existence probes.
-export function lookupWithNote(ctx, command, path) {
-  const found = lookup(ctx.cwd, path, ctx.fs)
+export function lookupWithNote(ctx, command, path, options) {
+  const found = lookup(ctx.cwd, path, ctx.fs, options)
   missingPathNote(ctx, command, path, found.error)
   return found
 }

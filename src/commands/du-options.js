@@ -8,6 +8,12 @@ const ALIASES = new Map(Object.entries({
   dereference: 'L', 'dereference-args': 'D', 'no-dereference': 'P',
 }))
 
+// Whether a link is measured or what it points at is: `-P` the link itself,
+// which is the default, `-D` (spelled `-H` as well) what an operand points at,
+// and `-L` what every link a walk reaches points at. The three name one
+// setting, so the last of them on the line is the one that answers.
+const DEREFERENCE = { P: 'none', D: 'args', H: 'args', L: 'all' }
+
 export function duOptions(tokens, ctx) {
   const parsed = parseArgs(tokens, {
     // `-A` is the BSD/macOS spelling of GNU's long-only `--apparent-size`.
@@ -15,10 +21,11 @@ export function duOptions(tokens, ctx) {
     long: [...ALIASES.keys()].filter((name) => !['d', 'B'].includes(ALIASES.get(name))).concat(['inodes', 'si']),
     valueShort: ['d', 'B'], valueLong: ['max-depth', 'block-size'],
   })
-  const options = { operands: parsed.positional.length ? parsed.positional : ['.'], depth: Infinity, flags: new Set(), scale: null, stderr: '' }
+  const options = { operands: parsed.positional.length ? parsed.positional : ['.'], depth: Infinity, flags: new Set(), links: 'none', scale: null, stderr: '' }
   for (const { name, value } of parsed.order) {
     const flag = ALIASES.get(name) ?? name
     options.flags.add(flag)
+    if (Object.hasOwn(DEREFERENCE, flag)) options.links = DEREFERENCE[flag]
     if (flag === 'd') options.depth = depthOption(value)
     if (flag === 'B') options.scale = blockSize(value)
     if (flag === 'b') { options.flags.add('A'); options.scale = { unit: 1n } }

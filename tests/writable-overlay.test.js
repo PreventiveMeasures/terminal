@@ -193,7 +193,7 @@ describe('existing filesystem consumers see current overlay contents', () => {
     check(t, 'capture; printf overlay >/tmp/result')
     assert.deepEqual(saved.walkFiles('/tmp'), ['/tmp/result'])
     check(t, 'inspect', JSON.stringify({
-      files: ['/tmp/result'], listing: { dirs: [], files: ['result'] }, content: 'overlay', original: 'source readme\n',
+      files: ['/tmp/result'], listing: { dirs: [], files: ['result'], links: [] }, content: 'overlay', original: 'source readme\n',
     }))
     check(t, 'read /tmp/result /repo/README.md', 'overlaysource readme\n')
   })

@@ -28,7 +28,9 @@ export function rm(_stdin, tokens, ctx) {
 
 function removeOperand(name, state) {
   const { ctx } = state
-  const found = lookup(ctx.cwd, name, ctx.fs)
+  // `rm` unlinks the name it is given: a link is taken away itself, and never
+  // resolved to the file it points at.
+  const found = lookup(ctx.cwd, name, ctx.fs, { follow: false })
   let error = found.error
   // GNU -f ignores ENOTDIR as well as ENOENT: neither names an existing file.
   if (state.force && (error === 'No such file or directory' || error === 'Not a directory')) return
@@ -45,14 +47,26 @@ function removeOperand(name, state) {
     // empty a directory and then fail to remove it.
     else if (found.path === '/tmp') error = 'Device or resource busy'
     else if (!ctx.writable || !inOverlay(found.path)) error = 'Read-only file system'
-    else return removeTree(name, found.path, state)
+    // A trailing slash walks into what a link names and leaves the name the
+    // link it is: GNU empties that directory and then cannot unlink the name
+    // it was given, which is not the directory the name led to.
+    else return removeTree(name, found.path, state, crossedLink(ctx, name) ? 'Not a directory' : null)
   }
   removeEntry(name, found.path, state, false, error)
 }
 
+// Whether the walk reached a directory only by the operand's trailing slash,
+// where the name itself is a link — which is what `rm` would have to unlink.
+function crossedLink(ctx, name) {
+  const bare = name.replace(/\/+$/u, '')
+  if (bare === name || bare === '') return false
+  return ctx.fs.isLink?.(lookup(ctx.cwd, bare, ctx.fs, { follow: false }).path) === true
+}
+
 // Depth first, as `rm` empties a directory before removing it, and in sorted
-// order, which is the order everything else here walks a tree in.
-function removeTree(name, absolute, state) {
+// order, which is the order everything else here walks a tree in. `last` is
+// what the name itself fails with once the directory under it is empty.
+function removeTree(name, absolute, state, last = null) {
   const { ctx } = state
   const { dirs, files } = ctx.fs.listDir(absolute)
   const base = name.replace(/\/+$/u, '')
@@ -61,7 +75,7 @@ function removeTree(name, absolute, state) {
     if (ctx.fs.isDir(path)) removeTree(`${base}/${child}`, path, state)
     else removeEntry(`${base}/${child}`, path, state, false, null)
   }
-  removeEntry(name, absolute, state, true, null)
+  removeEntry(name, absolute, state, true, last)
 }
 
 function removeEntry(name, path, state, directory, error) {

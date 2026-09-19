@@ -29,11 +29,36 @@ inside it; `-R` and `--recursive` spell the same flag, and `-v` announces a
 directory once, where it is made. A destination inside the source, a
 destination that is the source, and a directory over a file are refused with
 GNU's own diagnostics. Directories exist in the overlay only where `cp -r` puts
-them, since nothing else here makes one.
+them, since nothing else here makes one. A link is the one thing it cannot
+carry over: `-r` keeps every link it meets as the link it is, and the overlay
+holds files and directories alone, so such a copy is refused rather than
+written as the files those links point at. A link handed to `cp` without `-r`
+is read through, which is what GNU reads there too, and one `-n` has left
+alone is never in question, since that flag answers from the destination
+before the source is opened. A destination is read the
+way GNU reads one: a regular file can be written through a link and a
+directory cannot, so a file copy follows the destination link and a directory
+copy answers for the name itself, and a destination leading nowhere is refused
+rather than made.
+
+A write lands where a name leads: the overlay answers for the file a link
+names, so `echo x > out` with `out -> /tmp/out` writes that file, and one
+naming a path in the read-only sources is refused as any other name there is.
+The name a link leads to answers for its own parent, so a link into a
+directory that is not there fails as the kernel fails it, before the read-only
+filesystem is reached. `rm` and `sed -i` are the two that answer for the name
+itself — the first takes it away, the second writes a file over it — so a link
+the sources hold is read-only to them however the file it names could be
+written. `patch` answers for the name too, and refuses it outright: GNU
+patches a regular file and nothing else, so a link operand is `not a regular
+file -- refusing to patch` whatever it leads to, while a link on the way to
+the file is followed as any other component is.
 
 `mkdir` makes them one at a time and `mkdir -p` makes a whole path, passing
-over what is already there and naming the component it stops at. `rm -r` takes
-a tree away again, emptying a directory before removing it. The overlay's own
+over what is already there and naming the component it stops at. A name a link
+holds is a name already taken, which making a directory never follows; `-p`
+follows it, and passes over only a link that leads to a directory. `rm -r`
+takes a tree away again, emptying a directory before removing it. The overlay's
 `/tmp` is where it is mounted rather than something inside it, so `rm -r /tmp`
 is refused as the busy device Linux calls a mount point, and nothing in it is
 removed on the way to finding that out.
@@ -49,13 +74,19 @@ rather than a guess per entry: every entry is the session user's alone
 (`-rw-------` and `drwx------`) and is dated to the moment the terminal was
 created, a time its forks carry with them. Link counts, directory sizes and
 the `total` line are what ext4 would report for the same tree, and `-h`
-rounds sizes as `du -h` does.
+rounds sizes as `du -h` does. A symbolic link — one a source entry declares,
+since nothing here makes one — is the row the model has nothing to guess at:
+the `lrwxrwxrwx` every link on Linux carries, the length of the path it holds
+as its size, and that path named after it.
 
 `du -b` measures UTF-8 content bytes recursively, including hidden files;
 `du -bs src` reports a directory total. `--apparent-size` (also accepted as the
 BSD `-A`) supports block and human-readable units, and `--inodes` counts
 entries. Allocated disk sizes are unavailable, so plain `du` and `du -sh`
-report an unsupported diagnostic.
+report an unsupported diagnostic. A link is measured as the link it is, which
+is what `-P` asks for and what `du` does without being asked; `-D` and `-H`
+measure what an operand points at, and `-L`, which would measure what every
+link in a walk points at, reports an unsupported diagnostic where it meets one.
 
 `rg` covers the search itself: recursion, `-n -N -i -s -w -v -F -a -l -c -e -q
 -H -I -A -B -C -u`, and skipping hidden entries unless `--hidden`. Options are
@@ -70,6 +101,18 @@ pattern spelling out a newline, and a file starting with a byte-order mark, are
 refused rather than answered differently from ripgrep. Literal matching crosses
 scripts, but Unicode-aware matching does not: `-i`, `-w`, `.` and `\w` over a
 tree holding any non-ASCII file report an unsupported diagnostic.
+
+A walk stops at a symbolic link rather than crossing it, which is where `find`,
+`rg` and `grep -r` all stop: `find` reports the link as the entry it is, and
+the two searches pass over it, as neither follows one without being asked.
+`grep -R` is the asking, and it reads the file a link names under the link's
+own name, saying so of a link that names nothing; only a link to a directory —
+the tree it would have to walk into — is refused, and only where an
+`--exclude-dir` rule has not already kept the name out. `tree` names a link
+beside what it points at and crosses it no further, while its counts and its
+`-F` marks follow where the name leads: a link to a directory is one of the
+directories, listed by `-d` as they are and marked on the target rather than
+on itself.
 
 `grep`, `sed` and `awk` read a regular expression the way GNU does in the
 C.UTF-8 locale, from glibc's own tables: `.` and a bracket take one character,
@@ -111,7 +154,10 @@ it picks can differ from GNU's; given the same change set, the bytes are
 GNU's. The virtual filesystem keeps no modification
 times, so headers carry the name alone, as they do under `--label`; a file
 `-N` stands in for gets the epoch, which is what tells `patch` it did not
-exist. `-y`, `-e`, `-B`, `-I` and the rest report an unsupported diagnostic.
+exist. A name a directory holds and cannot read — a link leading nowhere, or
+one that loops — is answered for as that read rather than as a type of its
+own, whatever is across from it, and what stopped the read is what is said.
+`-y`, `-e`, `-B`, `-I` and the rest report an unsupported diagnostic.
 
 `patch` applies unified, context and normal diffs (and git-style headers,
 including renames), locating each hunk by line number, then nearby, then
@@ -124,7 +170,11 @@ scripts and git binary patches are refused the same way.
 
 `realpath` supports GNU canonicalization modes (`-e`, `-m`, and the default),
 relative output (`--relative-to`, `--relative-base`), quiet errors (`-q`) and
-NUL terminators (`-z`). It resolves paths within the virtual filesystem.
+NUL terminators (`-z`). It resolves paths within the virtual filesystem, each
+of the three ways GNU offers: `-P`, the default, expands every link it walks
+through, `..` taken from what the link leads to; `-L` takes `..` from the name
+as written, cancelling the component before it; and `-s` expands no link at
+all, asking the filesystem only whether what the name leads to is there.
 
 Behaviour is checked against the real tools: bash 5.2, GNU grep 3.11, GNU sed
 4.9, gawk 5.2, ripgrep 14.1, GNU diff 3.10 and GNU patch 2.7.6 in the C
