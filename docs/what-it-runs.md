@@ -103,7 +103,11 @@ the two searches pass over it, as neither follows one without being asked.
 `grep -R` is the asking, and it reads the file a link names under the link's
 own name, saying so of a link that names nothing; only a link to a directory —
 the tree it would have to walk into — is refused, and only where an
-`--exclude-dir` rule has not already kept the name out.
+`--exclude-dir` rule has not already kept the name out. `tree` names a link
+beside what it points at and crosses it no further, while its counts and its
+`-F` marks follow where the name leads: a link to a directory is one of the
+directories, listed by `-d` as they are and marked on the target rather than
+on itself.
 
 `grep`, `sed` and `awk` read a regular expression the way GNU does in the
 C.UTF-8 locale, from glibc's own tables: `.` and a bracket take one character,

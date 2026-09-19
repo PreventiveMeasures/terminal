@@ -232,10 +232,24 @@ describe('ls shows a link as the entry it is', () => {
 })
 
 describe('the rest of the tree tools answer for a link without crossing it', () => {
-  it('tree names the target beside the link and counts it among the files', () => {
-    const t = terminal({ 'a/file': 'x\n', 'a/link': { type: 'link', target: 'file' } })
-    check(t, 'tree', '.\n└── a\n    ├── file\n    └── link -> file\n\n2 directories, 2 files\n')
-    gap(t, 'tree -F', '-F with a symbolic link', 'tree: -F over a symbolic link is not supported\n')
+  it('tree names the target beside the link, and counts it as what it leads to', () => {
+    const t = terminal({
+      'a/file': 'x\n', 'a/dir/deep': 'y\n',
+      'a/link': { type: 'link', target: 'file' },
+      'a/up': { type: 'link', target: 'dir' },
+      'a/gone': { type: 'link', target: 'nowhere' },
+    })
+    // A link is named beside what it points at and crossed no further, while
+    // the counts follow where it leads: `up` is one of the directories.
+    check(t, 'tree a', 'a\n├── dir\n│   └── deep\n├── file\n├── gone -> nowhere\n├── link -> file\n└── up -> dir\n\n3 directories, 4 files\n')
+    // `-F` marks what a name leads to, so the mark lands on the target.
+    check(t, 'tree -F a', 'a/\n├── dir/\n│   └── deep\n├── file\n├── gone -> nowhere\n├── link -> file\n└── up -> dir/\n\n3 directories, 4 files\n')
+    // `-d` lists the directories, which a link to one is, and marks none.
+    check(t, 'tree -d a', 'a\n├── dir\n└── up -> dir\n\n3 directories\n')
+    // The operand is opened for where it leads and printed for what it is, so
+    // the `@` is its own and a link leading nowhere is still a name found.
+    check(t, 'tree -F a/up', 'a/up@\n└── deep\n\n1 directory, 1 file\n')
+    check(t, 'tree -F a/gone', 'a/gone@  [error opening dir]\n\n0 directories, 1 file\n')
   })
 
   it('du measures the link rather than what it points at', () => {
@@ -357,9 +371,38 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     // A copy the destination turns away never reaches the tree, so what it
     // holds is not what the refusal is about.
-    check(t, 'cp -r a a', '', { stderr: "cp: cannot copy a directory, 'a', into itself, 'a/a'\n", exitCode: 1, cwd: '/repo' })
+    check(t, 'cp -rT a a', '', { stderr: "cp: 'a' and 'a' are the same file\n", exitCode: 1, cwd: '/repo' })
     check(t, 'cp -r a afile', '', { stderr: "cp: cannot overwrite non-directory 'afile' with directory 'a'\n", exitCode: 1, cwd: '/repo' })
     check(t, 'cp -r a /tmp/nodir/deep', '', { stderr: "cp: cannot create directory '/tmp/nodir/deep': No such file or directory\n", exitCode: 1, cwd: '/repo' })
+    // GNU makes the destination before the walk can find it reaching back
+    // into the source, so a directory it cannot make answers ahead of that
+    // loop — and where it can be made, the loop is what answers.
+    check(t, 'cp -r a a', '', { stderr: "cp: cannot create directory 'a/a': Read-only file system\n", exitCode: 1, cwd: '/repo' })
+    check(t, 'mkdir /tmp/d; cp -r /tmp/d /tmp/d/sub', '', {
+      stderr: "cp: cannot copy a directory, '/tmp/d', into itself, '/tmp/d/sub'\n", exitCode: 1, cwd: '/repo',
+    })
+  })
+
+  it('cp reads a destination link for where it leads, loop and all', () => {
+    const sources = { 'a/file': 'x\n', into: { type: 'link', target: '/tmp/src' } }
+    const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    const at = { cwd: '/repo' }
+    const seed = 'mkdir /tmp/src; printf a > /tmp/src/f; '
+    // A destination reaching back into the source through a link is the loop
+    // it is however it is spelled, and nothing of it is written.
+    check(made(), seed + 'cp -r /tmp/src into', '', {
+      stderr: "cp: cannot copy a directory, '/tmp/src', into itself, 'into/src'\n", exitCode: 1, ...at,
+    })
+    check(made(), seed + 'cp -r /tmp/src into/sub; find /tmp -type f', '/tmp/src/f\n', {
+      stderr: "cp: cannot copy a directory, '/tmp/src', into itself, 'into/sub'\n", ...at,
+    })
+    // Two names for one directory are the same file, which GNU answers before
+    // it asks what the destination is.
+    check(made(), seed + 'cp -rT /tmp/src into', '', {
+      stderr: "cp: '/tmp/src' and 'into' are the same file\n", exitCode: 1, ...at,
+    })
+    // A link leading somewhere else is a directory to copy into, as ever.
+    check(made(), 'mkdir /tmp/src; cp -r a into; find /tmp -type f', '/tmp/src/a/file\n', at)
   })
 
   it('cp refuses a link a recursive copy meets, before that copy writes anything', () => {

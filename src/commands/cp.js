@@ -173,11 +173,18 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
   // A trailing slash says the destination is a directory, which is what this
   // makes: that spelling refuses a file destination, not this one.
   const named = destination.replace(/\/+$/u, '') || destination
+  // Two names for one directory are the same file whatever the way to each,
+  // which GNU answers before it asks what the destination is: a link naming
+  // the source is that directory, not a name in the way.
+  if (writeTarget(ctx.fs, ctx.cwd, named, true) === absolute) return fail(`${shownSource} and ${shownTarget} are the same file`)
   // What the destination already is settles it before where it falls: a file
   // under the source is a file in the way, not a loop.
   if (dest.path !== null && !ctx.fs.isDir(dest.path)) {
     return fail(`cannot overwrite non-directory ${shownTarget} with directory ${shownSource}`)
   }
+  // Where the copy lands, which a link on the way moves: the name the making
+  // itself will answer for, and so the name the checks below ask about.
+  const target = writeTarget(ctx.fs, ctx.cwd, named, false)
   // Whether the destination can be made at all is settled before where it
   // falls, too: `..` collapses lexically, so a name reaching through a
   // directory that is not there would otherwise read as a loop rather than as
@@ -188,9 +195,11 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
       missingPathNote(ctx, 'cp', named, invalid)
       return fail(`cannot create directory ${shownTarget}: ${invalid}`)
     }
+    // GNU makes the destination before the walk can find it reaching back
+    // into the source, so a directory it cannot make answers ahead of the
+    // loop: what is below is only reached where the making would succeed.
+    if (!ctx.writable || !inOverlay(target)) return fail(`cannot create directory ${shownTarget}: Read-only file system`)
   }
-  const target = resolve(ctx.cwd, named)
-  if (target === absolute) return fail(`${shownSource} and ${shownTarget} are the same file`)
   // A destination under the source is the loop GNU names. GNU makes the
   // directory, copies what it read before reaching it, and only then refuses;
   // what that leaves behind follows the order the host read the directory in,
@@ -211,7 +220,7 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
   // halfway would leave a copy neither GNU's nor asked for.
   if (operand) refuseLinkedCopy(source, ctx)
   const { dirs, files, links } = ctx.fs.listDir(absolute)
-  if (dest.path === null && !makeDirectory(source, destination, named, state)) return
+  if (dest.path === null && !makeDirectory(source, destination, named, target, state)) return
   const from = source.replace(/\/+$/u, ''), into = destination.replace(/\/+$/u, '')
   for (const name of [...dirs, ...files, ...links].sort(compareNames)) {
     // Each entry finishes before the next is opened, as each operand does.
@@ -220,7 +229,7 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
   }
 }
 
-function makeDirectory(source, destination, named, state) {
+function makeDirectory(source, destination, named, target, state) {
   const { ctx } = state
   const shownTarget = quoteName(destination, ctx)
   const fail = (message) => {
@@ -234,7 +243,7 @@ function makeDirectory(source, destination, named, state) {
   // exists rather than after, so a refusal leaves nothing behind.
   // Which side of the boundary it falls on is the walk's answer rather than
   // the spelling's, since a link on the way leads where it leads.
-  const writable = ctx.writable && inOverlay(writeTarget(ctx.fs, ctx.cwd, named, false))
+  const writable = ctx.writable && inOverlay(target)
   if (writable) refuseBufferedOutput(state)
   try {
     if (!writable || !ctx.fs.makeWritableDir?.(ctx.cwd, named)) return fail('Read-only file system')
@@ -377,11 +386,12 @@ function copiesDirectory(absolute, destination, ctx) {
   const named = destination.replace(/\/+$/u, '') || destination
   if (dest.path !== null && !ctx.fs.isDir(dest.path)) return false
   if (dest.path === null && creationError(ctx.cwd, named, ctx.fs)) return false
-  const target = resolve(ctx.cwd, named)
-  if (target === absolute || target.startsWith(absolute === '/' ? '/' : absolute + '/')) return false
+  const target = writeTarget(ctx.fs, ctx.cwd, named, false)
+  if (writeTarget(ctx.fs, ctx.cwd, named, true) === absolute) return false
+  if (target.startsWith(absolute === '/' ? '/' : absolute + '/')) return false
   // Nothing below a destination outside the overlay is written either, whether
   // the walk is stopped at its making or every file in it is refused in turn.
-  return Boolean(ctx.writable) && inOverlay(writeTarget(ctx.fs, ctx.cwd, named, false))
+  return Boolean(ctx.writable) && inOverlay(target)
 }
 
 function isSpecialFile(name, cwd) {
