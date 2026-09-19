@@ -70,15 +70,25 @@ function copyOperands({ positional, flags, order }, ctx) {
 // link it is, and only `-L` would read through it — and nothing here can make a
 // link, since the overlay holds files and directories alone. So a link such a
 // copy meets is refused rather than written as the file it points at.
-function refuseLinkedCopy(source, ctx) {
+function refuseLinkedCopy(source, destination, state) {
+  const { ctx } = state
   const root = lookup(ctx.cwd, source, ctx.fs, { follow: false }).path
   if (root === null) return
+  const from = source.replace(/\/+$/u, ''), into = destination.replace(/\/+$/u, '')
   for (const entry of walkTree(ctx.fs, root)) {
     if (entry.kind !== 'link') continue
-    const named = entry.path === root ? source : source.replace(/\/+$/u, '') + '/' + relativeTo(root, entry.path)
-    throw linkedCopy(named)
+    const below = entry.path === root ? null : relativeTo(root, entry.path)
+    // `-n` decides from the destination alone, so a link whose name is taken
+    // there is passed over rather than refused: nothing of it is copied.
+    if (skippedByNoClobber(below === null ? destination : `${into}/${below}`, state)) continue
+    throw linkedCopy(below === null ? source : `${from}/${below}`)
   }
 }
+
+// `-n` is the one flag that answers before the source is opened at all: a name
+// already there is left as it is, and the copy neither fails nor happens.
+const skippedByNoClobber = (destination, state) =>
+  state.noClobber && lookup(state.ctx.cwd, destination, state.ctx.fs).path !== null
 
 const linkedCopy = (name) => new UnsupportedError('feature', 'symbolic link', `copying a symbolic link is not supported: ${name} (a recursive copy keeps the link, and nothing here makes one)`)
 
@@ -109,8 +119,12 @@ function copyFile(source, destination, state, top = null) {
   const shownTarget = quoteName(destination, ctx)
   // Without `-r` a link operand is read through, which is GNU's default for
   // one it is handed; with it, every link is the link itself to copy, and
-  // this filesystem has nowhere to put one.
-  if (state.recursive && ctx.fs.isLink?.(lookup(ctx.cwd, source, ctx.fs, { follow: false }).path)) throw linkedCopy(source)
+  // this filesystem has nowhere to put one — unless `-n` has left the
+  // destination alone, which is decided before the source is opened.
+  if (state.recursive && ctx.fs.isLink?.(lookup(ctx.cwd, source, ctx.fs, { follow: false }).path)) {
+    if (!skippedByNoClobber(destination, state)) throw linkedCopy(source)
+    return
+  }
   const found = lookupWithNote(ctx, 'cp', source)
   const fail = (message) => report(state, 'cp: ' + message + '\n', true)
   if (found.error) return fail(`cannot stat ${shownSource}: ${found.error}`)
@@ -218,7 +232,7 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
   // destination has answered for itself, since a copy it turns away never
   // reaches the tree, and before anything is made, since a refusal found
   // halfway would leave a copy neither GNU's nor asked for.
-  if (operand) refuseLinkedCopy(source, ctx)
+  if (operand) refuseLinkedCopy(source, destination, state)
   const { dirs, files, links } = ctx.fs.listDir(absolute)
   if (dest.path === null && !makeDirectory(source, destination, named, target, state)) return
   const from = source.replace(/\/+$/u, ''), into = destination.replace(/\/+$/u, '')

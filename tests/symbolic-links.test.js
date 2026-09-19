@@ -613,6 +613,30 @@ describe('what a link cannot change', () => {
     check(made(), 'touch spelled', '', { stderr: "touch: cannot touch 'spelled': Read-only file system\n", exitCode: 1, ...at })
   })
 
+  it('leaves a link alone where -n has left its destination alone', () => {
+    const sources = {
+      file: 'x\n', 'e/f': 'e\n',
+      'e/el': { type: 'link', target: 'f' },
+      out: { type: 'link', target: '/tmp/out' },
+    }
+    const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
+    const at = { cwd: '/repo' }
+    const kept = 'mkdir -p /tmp/dest/e; printf kept > /tmp/dest/e/el; printf kept > /tmp/dest/e/f; '
+    // `-n` answers from the destination before the source is opened, so a
+    // name already there is left as it is and the copy neither fails nor
+    // happens — the link it would have carried is never in question.
+    check(made(), 'printf seed > /tmp/out; cp -rn out /tmp/out; cat /tmp/out', 'seed', at)
+    check(made(), kept + 'cp -rn e /tmp/dest; cat /tmp/dest/e/el /tmp/dest/e/f', 'keptkept', at)
+    check(made(), kept + 'cp -rn e/el /tmp/dest/e/el; cat /tmp/dest/e/el', 'kept', at)
+    // A link the copy would reach is refused as ever, and before it writes.
+    const refusal = 'cp: copying a symbolic link is not supported: e/el (a recursive copy keeps the link, and nothing here makes one)\n'
+    gap(made(), 'cp -rn e /tmp/dest', 'symbolic link', refusal)
+    const partial = made()
+    partial.run('mkdir -p /tmp/dest/e; printf kept > /tmp/dest/e/f')
+    gap(partial, 'cp -rn e /tmp/dest', 'symbolic link', refusal)
+    check(partial, 'find /tmp -type f', '/tmp/dest/e/f\n', at)
+  })
+
   it('patches through a link on the way, and patches no link itself', () => {
     const sources = { file: 'a\n', into: { type: 'link', target: '/tmp' }, out: { type: 'link', target: '/tmp/out' } }
     const made = () => {

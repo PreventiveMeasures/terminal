@@ -33,7 +33,9 @@ them, since nothing else here makes one. A link is the one thing it cannot
 carry over: `-r` keeps every link it meets as the link it is, and the overlay
 holds files and directories alone, so such a copy is refused rather than
 written as the files those links point at. A link handed to `cp` without `-r`
-is read through, which is what GNU reads there too. A destination is read the
+is read through, which is what GNU reads there too, and one `-n` has left
+alone is never in question, since that flag answers from the destination
+before the source is opened. A destination is read the
 way GNU reads one: a regular file can be written through a link and a
 directory cannot, so a file copy follows the destination link and a directory
 copy answers for the name itself, and a destination leading nowhere is refused
