@@ -39,24 +39,7 @@ export function writableFs(base) {
     isDir: (path) => dirs.has(path) || base.isDir(path),
     isLink: (path) => links.has(path) || base.isLink?.(path) === true,
     readLink: (path) => links.get(path) ?? base.readLink?.(path),
-    readFile: (path) => {
-      const inode = files.get(path)
-      observer?.read(inode ?? path)
-      return inode ? textOfFile(inode.bytes, JSON.stringify(path)) : base.readFile(path)
-    },
-    // An overlay file is bytes already — it is written as bytes and read back
-    // as the text they spell — so a reader working in bytes is handed them
-    // whichever side of the boundary the file is on.
-    readBytes: (path, loose = false) => {
-      const inode = files.get(path)
-      observer?.read(inode ?? path)
-      return inode ? inode.bytes : readBytesOf(base, path, loose)
-    },
-    exactBytes: (path) => files.get(path)?.bytes ?? base.exactBytes(path),
-    isEmptyFile: (path) => { const inode = files.get(path); return inode ? inode.bytes.length === 0 : base.isEmptyFile(path) },
-    // An overlay file is written as bytes and read back as the text they
-    // spell, so it is one of the files whose reading may have no answer.
-    isBytes: (path) => files.has(path) || base.isBytes?.(path) === true,
+    ...overlayReads(base, files, (identity) => observer?.read(identity)),
     sameFileContents: (a, b) => sameFileContents(base, files, a, b),
     listDir: (path) => {
       if (path === '/') return rootEntries
@@ -107,6 +90,32 @@ export function writableFs(base) {
     },
   }
   return fs
+}
+
+// What an overlay file can be read as, taken from the inode where there is
+// one and from the sources where there is not. An overlay file is bytes
+// already — it is written as bytes and read back as the text they spell — so
+// a reader working in bytes is handed them whichever side of the boundary the
+// file is on, and one working in text is told where those bytes spell none.
+function overlayReads(base, files, read) {
+  return {
+    readFile: (path) => {
+      const inode = files.get(path)
+      read(inode ?? path)
+      return inode ? textOfFile(inode.bytes, JSON.stringify(path)) : base.readFile(path)
+    },
+    readBytes: (path, loose = false) => {
+      const inode = files.get(path)
+      read(inode ?? path)
+      return inode ? inode.bytes : readBytesOf(base, path, loose)
+    },
+    // What a comparison and a walk may ask without reading anything: the
+    // bytes a file certainly has, whether it holds nothing at all, and
+    // whether reading it as text may have no answer.
+    exactBytes: (path) => files.get(path)?.bytes ?? base.exactBytes(path),
+    isEmptyFile: (path) => { const inode = files.get(path); return inode ? inode.bytes.length === 0 : base.isEmptyFile(path) },
+    isBytes: (path) => files.has(path) || base.isBytes?.(path) === true,
+  }
 }
 
 // `cp -r` is the one thing that makes a directory here, and it makes each one

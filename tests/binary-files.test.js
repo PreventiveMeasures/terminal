@@ -24,6 +24,16 @@ const SOURCES = {
   empty: new Uint8Array(),
 }
 
+// A tree with a file of bytes in it, a link to one, and an empty one, for
+// what a walk reports of each.
+const TREE = {
+  'img.png': PNG,
+  'text.txt': 'text here\n',
+  'link.png': { type: 'link', target: 'img.png' },
+  'dir/inner.png': Uint8Array.of(0, 1, 2),
+  empty: new Uint8Array(),
+}
+
 const terminal = (sources = SOURCES, options = {}) => createTerminal(sources, { mount: '/repo', ...options })
 
 function check(t, command, stdout = '', { stderr = '', exitCode = 0, notes = [], cwd = '/repo' } = {}) {
@@ -164,6 +174,42 @@ describe('what a file of bytes answers without being read as text', () => {
     check(t, 'hexdump -C latin.bin', '00000000  63 61 66 e9 20 6c 61 74  74 65 0a 6d 6f 72 65 0a  |caf. latte.more.|\n00000010\n')
     check(t, 'xxd img.png', '00000000: 8950 4e47 0d0a 1a0a 0000 000d 4948 4452  .PNG........IHDR\n00000010: fffe 0a                                  ...\n')
     check(t, 'hexdump -C empty')
+  })
+
+  it('is weighed by du as the bytes it takes up', () => {
+    const t = terminal(TREE)
+    // A file's size is its bytes; what it takes up on disk is the blocks
+    // holding them, which is what `du` reports without `--apparent-size`.
+    check(t, 'du -b img.png', '19\timg.png\n')
+    check(t, 'du img.png', '4\timg.png\n')
+    check(t, 'du -h img.png', '4.0K\timg.png\n')
+    check(t, 'du --apparent-size img.png', '1\timg.png\n')
+    check(t, 'du -bs .', '39\t.\n')
+    check(t, 'du -s .', '20\t.\n')
+    check(t, 'du dir', '8\tdir\n')
+    check(t, 'du --inodes .', '2\t./dir\n7\t.\n')
+  })
+
+  it('is read through a link to it, and measured apart from one', () => {
+    const t = terminal(TREE)
+    check(t, 'wc -c link.png', '19 link.png\n')
+    check(t, 'base64 link.png', 'iVBORw0KGgoAAAANSUhEUv/+Cg==\n')
+    check(t, 'stat -c "%s" link.png', '7\n')
+    check(t, 'du -b link.png', '7\tlink.png\n')
+    check(t, 'find . -type l', './link.png\n')
+    // The file it leads to is the file that cannot be read as text, and the
+    // one the refusal names.
+    gap(t, 'cat link.png', 'binary file', `cat: ${unreadable('img.png')}`)
+  })
+
+  it('is what a link made by ln -s leads to', () => {
+    const t = () => terminal(TREE, { writable: '/tmp/' })
+    check(t(), 'ln -s /repo/img.png /tmp/l && wc -c /tmp/l', '19 /tmp/l\n')
+    check(t(), 'ln -s /repo/img.png /tmp/l && base64 /tmp/l', 'iVBORw0KGgoAAAANSUhEUv/+Cg==\n')
+    check(t(), 'ln -s /repo/img.png /tmp/l && cp /tmp/l /tmp/copy && wc -c /tmp/copy', '19 /tmp/copy\n')
+    // The link is as long as the path it holds, whatever it leads to.
+    check(t(), 'ln -s /repo/img.png /tmp/l && du -b /tmp/l', '13\t/tmp/l\n')
+    gap(t(), 'ln -s /repo/img.png /tmp/l && cat /tmp/l', 'binary file', `cat: ${unreadable('img.png')}`)
   })
 
   it('compares as the bytes it is, which is what diff does with a binary file', () => {
