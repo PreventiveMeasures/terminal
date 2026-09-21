@@ -211,7 +211,7 @@ export function createFs(sources, mount = '/') {
     let bytes
     try { bytes = content.decode() } catch (e) {
       if (!(e instanceof SyntaxError)) throw e
-      if (surely) return undefined
+      if (surely) return
       throw new UnsupportedError('feature', 'base64 source', `${JSON.stringify(p)} declares base64 that does not decode, so its bytes cannot be read`)
     }
     files.set(p, bytes)
