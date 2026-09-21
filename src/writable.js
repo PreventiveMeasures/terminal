@@ -22,9 +22,12 @@ export function writableFs(base) {
   const rootEntries = { dirs: [...root.dirs, 'tmp'].sort(compareNames), files: root.files, links: root.links ?? [] }
   const listings = overlayListings(dirs, files, links)
   const reshaped = listings.reshaped
+  // A file put at a name takes the name whole, as a rename over it would:
+  // a link there is gone, not left beside the file.
   const put = (path, inode) => {
     if (!path.startsWith('/tmp/')) throw new Error('writable overlay paths must start with /tmp/')
     if (!files.has(path)) reshaped()
+    links.delete(path)
     files.set(path, inode)
   }
   const fs = {
@@ -59,16 +62,7 @@ export function writableFs(base) {
       return writeHandle(absolute, inode, append, () => observer?.write(inode))
     },
     makeWritableDir: (cwd, path) => addDirectory(fs, { dirs, files, links, reshaped }, cwd, path),
-    makeWritableLink(cwd, path, target) {
-      // A link is made at the name itself, never where a link already there
-      // leads, so only the way to the name resolves.
-      const absolute = writeTarget(fs, cwd, path, false)
-      if (!absolute.startsWith('/tmp/')) return false
-      checkNewName(fs, cwd, path)
-      links.set(absolute, target)
-      reshaped()
-      return true
-    },
+    makeWritableLink: (cwd, path, target) => addLink(fs, { links, reshaped }, cwd, path, target),
     removeWritableDir: (cwd, path) => dropDirectory(fs, { dirs, reshaped }, cwd, path),
     copyWritable(cwd, source, target) {
       const absolute = writeTarget(fs, cwd, target)
@@ -115,6 +109,17 @@ function addDirectory(fs, overlay, cwd, path) {
   // a name a directory can take.
   if (overlay.files.has(absolute) || overlay.links.has(absolute)) throw new Error(`${path}: File exists`)
   overlay.dirs.add(absolute)
+  overlay.reshaped()
+  return true
+}
+
+// `ln -s` is what makes a link here. It is made at the name itself, never
+// where a link already there leads, so only the way to the name resolves.
+function addLink(fs, overlay, cwd, path, target) {
+  const absolute = writeTarget(fs, cwd, path, false)
+  if (!absolute.startsWith('/tmp/')) return false
+  checkNewName(fs, cwd, path)
+  overlay.links.set(absolute, target)
   overlay.reshaped()
   return true
 }

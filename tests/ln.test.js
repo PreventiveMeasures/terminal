@@ -109,9 +109,18 @@ describe('ln -s makes a symbolic link in the writable overlay', () => {
     fails(t, 'ln -s x /repo/new', "ln: failed to create symbolic link '/repo/new': Read-only file system\n")
     fails(t, 'ln -s x /repo/file', "ln: failed to create symbolic link '/repo/file': File exists\n")
     fails(t, 'ln -s x /repo/srclink', "ln: failed to create symbolic link '/repo/srclink': File exists\n")
+    // A target of `/` has no last component to name the link by: GNU makes
+    // it by the empty name relative to the directory, which is not there to
+    // make, -f or not; a name written with a trailing slash is a name taken.
+    fails(t, 'ln -s /', "ln: failed to create symbolic link './': No such file or directory\n")
+    fails(t, 'ln -sf /', "ln: failed to create symbolic link './': No such file or directory\n")
+    fails(t, 'mkdir d; ln -s / -t d', "ln: failed to create symbolic link 'd/': No such file or directory\n")
+    fails(t, 'ln -sT x d/', "ln: failed to create symbolic link 'd/': File exists\n")
+    fails(t, 'ln -sT x /', "ln: failed to create symbolic link '/': File exists\n")
+    fails(t, 'ln -s x gone/', "ln: failed to create symbolic link 'gone/': File exists\n")
     fails(t, 'ln -s', 'ln: missing file operand\n')
     fails(t, 'ln', 'ln: missing file operand\n')
-    check(t, 'ls /tmp', 'gone\n')
+    check(t, 'ls /tmp', 'd\ngone\n')
   })
 
   it('is refused without an overlay, and for the hard link it makes without -s', () => {
@@ -151,6 +160,10 @@ describe('a link ln made is a name the rest of the overlay answers for', () => {
     const t = terminal()
     check(t, 'ln -s /repo/file link; sed -i.bak s/plain/edited/ link; cat link /repo/file; test -L link.bak && test -f link && echo split', 'edited\nplain\nsplit\n')
     check(t, 'ln -s /repo/file again; sed -i s/plain/changed/ again; cat again; test -L again || echo file', 'changed\nfile\n')
+    // A backup name a link already holds is replaced by the file, as a rename
+    // over it replaces it, and what the link pointed at is left alone.
+    check(t, "printf 'x\\n' > f; ln -s /repo/file f.bak; sed -i.bak s/x/y/ f; cat f f.bak /repo/file; test -L f.bak || echo file", 'y\nx\nplain\nfile\n')
+    check(t, 'find /tmp -type l | sort', '/tmp/link.bak\n')
   })
 
   it('a copy of a tree holding one is still refused, since cp makes no link', () => {

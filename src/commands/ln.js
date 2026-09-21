@@ -32,7 +32,7 @@ export function ln(_stdin, tokens, ctx) {
   try {
     const pairs = destinations(files, directory, opts, ctx)
     if (pairs.error) return pairs.error
-    for (const [target, dest] of pairs) link(target, dest, opts, state)
+    for (const [target, dest, nameless] of pairs) link(target, dest, opts, state, nameless)
   } catch (e) {
     missingPathNote(ctx, 'ln', e?.path, e?.fsError)
     const result = unsupportedFrom(e, 'ln', 'ln: ' + reason(e))
@@ -54,11 +54,11 @@ function destinations(files, directory, opts, ctx) {
       return { error: err(`ln: failed to access ${shown(directory)}: ${found.error}`) }
     }
     if (!ctx.fs.isDir(found.path)) return { error: err(`ln: target ${shown(directory)} is not a directory`) }
-    return files.map((target) => [target, inside(directory, target)])
+    return files.map((target) => inside(directory, target))
   }
   if (files.length === 1) {
     if (opts.noTargetDirectory) return { error: err(`ln: missing destination file operand after ${shown(files[0])}`) }
-    return [[files[0], inside('.', files[0])]]
+    return [inside('.', files[0])]
   }
   // Two operands name a link outright when the second is not a directory —
   // or, under -n, is a link to one, since -n asks about the name itself.
@@ -74,24 +74,28 @@ function destinations(files, directory, opts, ctx) {
     missingPathNote(ctx, 'ln', last, error)
     return { error: err(`ln: target ${shown(last)}: ${error}`) }
   }
-  return files.slice(0, -1).map((target) => [target, inside(last, target)])
+  return files.slice(0, -1).map((target) => inside(last, target))
 }
 
 // The name a link takes inside a directory: the target's last component, as
-// GNU joins them — a slash only where the directory did not end in one.
+// GNU joins them — a slash only where the directory did not end in one. A
+// target of `/` has no last component, and GNU makes that link by the empty
+// name relative to the directory, which no filesystem has a name for.
 function inside(directory, target) {
   const base = target.replace(/\/+$/u, '').split('/').at(-1)
-  return directory + (directory.endsWith('/') ? '' : '/') + base
+  return [target, directory + (directory.endsWith('/') ? '' : '/') + base, base === '']
 }
 
-function link(target, dest, opts, state) {
+function link(target, dest, opts, state, nameless = false) {
   const { ctx } = state
   const shown = quoteName(dest, ctx)
   const source = opts.relative ? relativeTarget(ctx, target, dest) : target
   const fail = (message) => report(state, `ln: failed to create symbolic link ${shown}${message}\n`)
   // symlink(2) reads the target before the name, and an empty one is a name
-  // it cannot make; GNU shows both halves then.
+  // it cannot make; GNU shows both halves then. An empty name is not there
+  // to make either, -f or not, since -f only replaces what is there.
   if (source === '') return fail(` -> ${quoteName(source, ctx)}: No such file or directory`)
+  if (nameless) return fail(': No such file or directory')
   // -f replaces whatever holds the name, short of a directory.
   if (opts.force) {
     const there = lookup(ctx.cwd, dest, ctx.fs, { follow: false })
