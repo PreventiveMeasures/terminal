@@ -5600,7 +5600,7 @@ describe('createTerminal — complete: corner cases', () => {
     assert.ok(idx('tree') < idx('sort'), 'tree before sort')
     // Path utilities are the tail of what the terminal announces, and the
     // commands it has without announcing them follow, sorted.
-    assert.deepEqual(all.slice(idx('which')), ['which', String.raw`\[`, 'base32', 'basename', 'brotli', 'cp', 'date', 'dirname', 'egrep', 'false', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'ln', 'od', 'patch', 'rm', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'touch', 'true', 'whoami', 'xxd', 'zcat'])
+    assert.deepEqual(all.slice(idx('which')), ['which', String.raw`\[`, 'base32', 'basename', 'brotli', 'cp', 'date', 'dirname', 'egrep', 'false', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'ln', 'mkdir', 'od', 'patch', 'rm', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'touch', 'true', 'whoami', 'xxd', 'zcat'])
   })
 
   it('after `|`, completion only suggests commands that consume stdin', () => {

@@ -28,7 +28,7 @@ const isBuiltin = (name) => Boolean(BUILTIN_COMMANDS[name])
 // and splitting a path, making a link or writing a file is not what they were
 // reaching for. What the list keeps is what someone looking around a tree
 // reaches for.
-const UNANNOUNCED_NAMES = new Set(['basename', 'cp', 'dirname', 'ln', 'patch', 'rm', 'touch'])
+const UNANNOUNCED_NAMES = new Set(['basename', 'cp', 'dirname', 'ln', 'mkdir', 'patch', 'rm', 'touch'])
 const ANNOUNCED = Object.fromEntries(Object.entries(VISIBLE_COMMANDS).filter(([name]) => !UNANNOUNCED_NAMES.has(name)))
 
 // Priority for completion/help; unlisted builtins follow in sorted order.
@@ -36,7 +36,7 @@ const COMMAND_ORDER = [
   'ls', 'cd', 'cat', 'grep', 'rg', 'find',
   'head', 'tail', 'wc', 'tree', 'du', 'stat', 'realpath',
   'sort', 'uniq', 'cut', 'tr', 'awk', 'nl', 'tac', 'hexdump', 'base64',
-  'xargs', 'echo', 'printf', 'test', 'mkdir', 'diff',
+  'xargs', 'echo', 'printf', 'test', 'diff',
   'pwd', 'seq', 'which',
 ]
 // Announced or not, a command is a command to complete: what a terminal

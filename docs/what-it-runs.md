@@ -35,8 +35,13 @@ prints after `Available:`, which is for someone who has just been told a name
 is not a command and is looking for the one that is — so it is the everyday
 commands for reading a tree, and leaves out what that person was not reaching
 for: the compressors, the digests and the dumps above, and `basename`,
-`dirname`, `ln`, `cp`, `rm`, `touch` and `patch`, all of which the terminal
-runs and completes as readily as the rest.
+`dirname`, `ln`, `cp`, `rm`, `mkdir`, `touch` and `patch`, all of which the
+terminal runs and completes as readily as the rest.
+
+The only names it does not complete are the shell's own — `:`, `export`,
+`set`, `unset`, `break`, `continue` and `exit` — which are syntax rather than
+something a terminal hands out, and a wired command given `hidden: true`,
+which is what that flag is for.
 
 A file may be bytes rather than text: a source entry that is a `Uint8Array` is
 the file's own bytes, for what no JS string can spell — an image, a compiled
