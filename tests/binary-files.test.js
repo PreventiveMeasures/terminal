@@ -160,12 +160,17 @@ describe('what a file of bytes answers without being read as text', () => {
     check(t, 'du -bs dir', '9\tdir\n')
   })
 
-  it('counts its lines and words as GNU does, and refuses to guess its characters', () => {
+  it('counts its lines, words and characters as GNU does', () => {
     const t = terminal()
     check(t, 'wc -l img.png', '3 img.png\n')
     check(t, 'wc -w img.png', '2 img.png\n')
     check(t, 'wc -w latin.bin', '3 latin.bin\n')
-    gap(t, 'wc -m img.png', 'binary file', `wc: ${JSON.stringify('/repo/img.png')} holds bytes that spell no text, and counting their characters is not supported\n`)
+    // A byte that spells no character is a byte and not a character, which is
+    // what wc counts of one as well: the PNG holds 19 bytes and 16 characters.
+    check(t, 'wc -mc img.png', '16 19 img.png\n')
+    check(t, 'wc -mc latin.bin', '15 16 latin.bin\n')
+    // A sequence cut short at the end spells no character either.
+    check(terminal({ 'short.bin': Uint8Array.of(0x61, 0x62, 0xe2, 0x81) }), 'wc -mc short.bin', '2 4 short.bin\n')
   })
 
   it('prints its bytes where the printing is text', () => {
@@ -219,6 +224,21 @@ describe('what a file of bytes answers without being read as text', () => {
     check(t, 'diff img.png text.txt', 'Binary files img.png and text.txt differ\n', { exitCode: 1 })
     check(t, 'diff -q img.png text.txt', 'Files img.png and text.txt differ\n', { exitCode: 1 })
     check(t, 'diff -s img.png img.png', 'Files img.png and img.png are identical\n')
+    // Two files GNU reads as text because they hold no NUL, and prints as the
+    // bytes they are: what it says of them without printing them — that they
+    // are the same file, or, under `-q`, that they differ — is said here too.
+    const pair = terminal({
+      'a.bin': LATIN, 'b.bin': LATIN, 'c.bin': Uint8Array.of(0x63, 0x61, 0x66, 0xe9, 0x0a), 'text.txt': 'caf\u00E9 latte\nmore\n',
+    })
+    check(pair, 'diff a.bin b.bin')
+    check(pair, 'diff -s a.bin b.bin', 'Files a.bin and b.bin are identical\n')
+    check(pair, 'diff -q a.bin c.bin', 'Files a.bin and c.bin differ\n', { exitCode: 1 })
+    // The same characters spelled in other bytes are another file.
+    check(pair, 'diff -q a.bin text.txt', 'Files a.bin and text.txt differ\n', { exitCode: 1 })
+    // Printing the difference is printing those bytes, and an option that
+    // reads text more loosely than its bytes answers for neither.
+    gap(pair, 'diff a.bin c.bin', 'binary file', `diff: ${JSON.stringify('a.bin')} holds bytes that spell no text, and reading them as text is not supported\n`)
+    gap(pair, 'diff -q -i a.bin c.bin', 'binary file', `diff: ${JSON.stringify('a.bin')} holds bytes that spell no text, and reading them as text is not supported\n`)
     // `-N` stands the empty file in for a name that is not there, and a file
     // of bytes differs from it as it does from any other.
     check(t, 'diff -N img.png missing.png', 'Binary files img.png and missing.png differ\n', { exitCode: 1 })
@@ -268,6 +288,10 @@ describe('what a file of bytes cannot be read as', () => {
     const t = terminal(SOURCES, { commands })
     check(t, 'probe img.png text.txt missing', 'img.png true 19\ntext.txt false 20\nmissing false undefined\n')
     gap(t, 'show img.png', 'binary file', `show: ${unreadable('img.png')}`)
+    // The bytes are the handler's own copy: this view is read-only, so what
+    // it does with them cannot reach the tree behind it.
+    const poke = terminal(SOURCES, { commands: { poke: (io) => { io.fs.readBytes(io.args[0])[0] = 0x7a; return '' } } })
+    check(poke, 'poke img.png && base64 img.png', 'iVBORw0KGgoAAAANSUhEUv/+Cg==\n')
     // Reading operands the ordinary way reads them as text, which such a file
     // refuses as it refuses every other reader.
     const reader = terminal(SOURCES, { commands: { read: (io) => io.readInputs(io.args).inputs.map((input) => input.content).join('') } })
@@ -332,9 +356,32 @@ describe('searching a tree that holds files of bytes', () => {
       notes: ['rg: skipped 2 hidden entries: "/repo/.git", "/repo/.hidden.bin". Hidden entries are searched with --hidden.'],
     })
     check(t, 'rg hello sub', 'sub/b.txt:hello again\n')
-    // Asked for, it is opened, and then it is a file that cannot be searched.
-    gap(t, 'rg --hidden hello .', 'unreadable bytes', `rg: ${JSON.stringify('.git/index')} holds bytes that are not text, and searching them is not supported\n`)
-    gap(t, 'rg hello .hidden.bin', 'unreadable bytes', `rg: ${JSON.stringify('.hidden.bin')} holds bytes that are not text, and searching them is not supported\n`)
+    // Opened, it is read, and a literal that is not in its bytes is one
+    // ripgrep finds nothing of there either.
+    check(t, 'rg --hidden hello .', './a.txt:hello there\n./sub/b.txt:hello again\n')
+    check(t, 'rg hello .hidden.bin', '', { exitCode: 1 })
+    // One that is in them is a line ripgrep prints as the bytes it is.
+    gap(t, 'rg --hidden caf .', 'unreadable bytes', `rg: ${JSON.stringify('.git/index')} holds bytes that are not text, and searching them is not supported\n`)
+    gap(t, 'rg caf .hidden.bin', 'unreadable bytes', `rg: ${JSON.stringify('.hidden.bin')} holds bytes that are not text, and searching them is not supported\n`)
+  })
+
+  it('is passed over by an rg walk where ripgrep calls it binary', () => {
+    // A NUL is what ripgrep calls binary: it stops there, prints nothing for
+    // the file, and searches the rest of the tree, which is what a walk does
+    // here. `--text` asks for those bytes instead, and a named one draws the
+    // line ripgrep prints about a binary match.
+    const files = { 'img.png': PNG, 'text.txt': 'spelled by a string\n' }
+    const t = terminal(files)
+    const skipped = ['grep: skipped 1 binary file: "/repo/img.png". Binary input is treated as text with -a.']
+    check(t, 'rg spelled .', './text.txt:spelled by a string\n')
+    check(t, 'rg IHDR .', '', { exitCode: 1, notes: skipped })
+    check(t, 'rg -l spelled .', './text.txt\n')
+    check(t, 'rg -c spelled .', './text.txt:1\n')
+    // `--text` reads it as text, where a literal that is in its bytes is a
+    // line ripgrep prints as those bytes, and one that is not changes nothing.
+    check(t, 'rg -a spelled .', './text.txt:spelled by a string\n')
+    gap(t, 'rg -a IHDR .', 'unreadable bytes', `rg: ${JSON.stringify('img.png')} holds bytes that are not text, and searching them is not supported\n`)
+    gap(t, 'rg spelled img.png', 'named binary file', `rg: ${JSON.stringify('img.png')} is binary, and reporting a binary match is not supported\n`)
   })
 
   it('is what rg reads as neither text nor a binary match', () => {
@@ -342,7 +389,14 @@ describe('searching a tree that holds files of bytes', () => {
     // A NUL is what ripgrep calls binary, and an encoding it cannot read is
     // what this terminal cannot search: the two are answered apart.
     gap(t, 'rg spelled img.png', 'named binary file', `rg: ${JSON.stringify('img.png')} is binary, and reporting a binary match is not supported\n`)
-    gap(t, 'rg spelled latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
+    gap(t, 'rg latte latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
+    // Only a literal read as written says a file holds no match: ripgrep
+    // folds case and reads a regex by its own tables, so neither answers here.
+    gap(t, 'rg "l.tte" latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
+    gap(t, 'rg -i SPELLED latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
+    // `-v` selects the lines a pattern does not, which is every line there is.
+    gap(t, 'rg -v zzz latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
+    check(t, 'rg zzz latin.bin', '', { exitCode: 1 })
   })
 })
 

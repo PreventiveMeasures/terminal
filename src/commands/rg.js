@@ -9,6 +9,7 @@ import { parseArgs } from '../args.js'
 import { unsupported, unsupportedNote } from '../unsupported.js'
 import { ARGS, checkPatterns, patternArgs, rgOptions } from './rg-options.js'
 import { grep } from './grep.js'
+import { literalsMissing } from './grep-pattern.js'
 
 const gap = (detail, message) => unsupported('feature', 'rg', detail, `rg: ${message}`, 2)
 
@@ -50,16 +51,8 @@ export function rg(stdin, tokens, ctx) {
   // ripgrep's "binary file matches" line, which this runtime cannot produce.
   const binary = options.text ? null : namedBinary(operands, ctx)
   if (binary) return gap('named binary file', `${JSON.stringify(binary)} is binary, and reporting a binary match is not supported`)
-  // A file whose bytes spell no text is not binary to ripgrep — it looks for
-  // a NUL, not for an encoding — so it searches one and prints the bytes of
-  // any line that matches. This terminal can neither search nor print them,
-  // named or walked alike, and `--text` asks for the same bytes.
-  const unreadable = firstFile(files, ctx, (path) => readTextOrBytes(ctx.fs, path).text === undefined)
-  if (unreadable) return gap('unreadable bytes', `${JSON.stringify(unreadable)} holds bytes that are not text, and searching them is not supported`)
-  // ripgrep drops a leading byte-order mark before matching, so `^` sits after
-  // it; grep matches through it, which would answer differently on both counts.
-  const marked = firstFile(files, ctx, (path) => ctx.fs.readFile(path)?.startsWith('\uFEFF') === true)
-  if (marked) return gap('byte-order mark', `${JSON.stringify(marked)} begins with a byte-order mark, which ripgrep strips before matching`)
+  const refused = refusedFile(files, options, ctx)
+  if (refused) return gap(refused.detail, refused.message)
   // ripgrep treats a run that opened nothing as a mistake rather than a miss,
   // since a filter it applied is the usual cause. Only when it chose the
   // starting point itself: name one, even `.`, and an empty walk is just a miss.
@@ -75,22 +68,46 @@ export function rg(stdin, tokens, ctx) {
 // a hidden file is neither searched nor refused over unless `--hidden` asks
 // for it.
 function openedFiles(operands, targets, options, ctx) {
-  const named = operands.map((operand) => lookup(ctx.cwd, operand, ctx.fs).path).filter(Boolean)
-  const walked = []
+  const files = operands.map((operand) => lookup(ctx.cwd, operand, ctx.fs).path).filter(Boolean).map((path) => ({ path, named: true }))
   for (const root of targets.roots) {
     for (const entry of walkTree(ctx.fs, root)) {
       if (entry.kind !== 'file') continue
       const below = relativeTo(root === '/' ? '/' : root, entry.path).split('/')
-      if (options.hidden || below.every((part) => !part.startsWith('.'))) walked.push(entry.path)
+      if (options.hidden || below.every((part) => !part.startsWith('.'))) files.push({ path: entry.path, named: false })
     }
   }
-  return [...named, ...walked]
+  return files
 }
 
-// The first of them a refusal answers for, named as the caller spelled it.
-function firstFile(files, ctx, refuses) {
-  for (const path of files) {
-    if (!ctx.fs.isDir(path) && refuses(path)) return relativeTo(ctx.cwd === '/' ? '/' : ctx.cwd, path) || path
+// The first of those files this terminal cannot answer for, named as the
+// caller spelled it. A file holding a NUL is binary to ripgrep, which a walk
+// passes over and never reads — so what its bytes spell is never asked there,
+// while `--text` asks it of every file and a named one was answered for
+// above. What is read is refused on two counts: bytes that spell no text,
+// which ripgrep searches and prints as the bytes they are, and neither of
+// which this terminal can do; and a leading byte-order mark, which ripgrep
+// drops before matching, so `^` sits after it where grep matches through it.
+function refusedFile(files, options, ctx) {
+  for (const { path, named } of files) {
+    if (ctx.fs.isDir(path)) continue
+    const { text, bytes } = readTextOrBytes(ctx.fs, path)
+    // Text with nothing in front of it is text ripgrep reads as this terminal
+    // does, and there is nothing to ask of it.
+    if (text !== undefined && !text.startsWith('\uFEFF')) continue
+    const binary = bytes === undefined ? text.includes('\0') : bytes.includes(0)
+    if (binary && !named && !options.text) continue
+    const name = JSON.stringify(relativeTo(ctx.cwd === '/' ? '/' : ctx.cwd, path) || path)
+    if (text === undefined) {
+      // Unless a literal that is nowhere in the bytes is all that was asked
+      // for: ripgrep matches the bytes as they are rather than the text they
+      // fail to spell, so it prints nothing for such a file and there is
+      // nothing to refuse. Only a literal read as written answers — `-i`
+      // folds by ripgrep's own tables — and `-v` selects the lines a pattern
+      // does not, which is every line there is.
+      if (!options.invert && !options.ignoreCase && literalsMissing(bytes, options.patterns, options.literal, ctx.locale)) continue
+      return { detail: 'unreadable bytes', message: `${name} holds bytes that are not text, and searching them is not supported` }
+    }
+    if (text.startsWith('\uFEFF')) return { detail: 'byte-order mark', message: `${name} begins with a byte-order mark, which ripgrep strips before matching` }
   }
   return null
 }

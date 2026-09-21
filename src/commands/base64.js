@@ -21,7 +21,7 @@ export function base64(stdin, tokens, ctx) {
   // The file as it is held: base64 is what bytes look like as text, so a file
   // this terminal cannot spell as text has an encoding all the same, while
   // one held as text is encoded from the text it is rather than read twice.
-  const input = readInputs('base64', positional, stdin, ctx, { read: 'maybe-text' })
+  const input = readInputs('base64', positional, stdin, ctx, { read: 'as-held' })
   if (input.failed) return err(input.stderr)
   const { content, bytes } = input.inputs[0]
   // Decoding reads base64 itself, which is text; a byte that spells no

@@ -52,10 +52,12 @@ export function consumeStdin(ctx, rest = '') {
 // first as the file exactly has them, the second as a command only measuring
 // or slicing them reads a text file holding a lone surrogate — and the entry
 // then carries `bytes` and no `content`, so a command wanting text cannot
-// quietly read an empty string. `maybe-text` hands back the file as it is
-// held: `content` for one held as text, `bytes` for one held as bytes, and
-// `content` for those too where they spell text. Nothing is converted, so a
-// command that can work in either pays for neither.
+// quietly read an empty string. `as-held` hands back the file as it is held —
+// `content` for one held as text, `bytes` for one held as bytes — and
+// `maybe-text` adds the text those bytes spell where they spell one, for the
+// command that has something to say about a file whose bytes spell none.
+// Nothing is converted either way, so a command that can work in either pays
+// for neither.
 export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   const entries = []
   let stderr = ''
@@ -68,13 +70,16 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   const asRead = (text) => bytes ? (read === 'loose-bytes' ? encodeUtf8Loose(text) : encodeUtf8(text)) : text
   const ofFile = (entry, path) => {
     if (bytes) { entry.bytes = readBytesOf(ctx.fs, path, read === 'loose-bytes'); return }
-    if (read !== 'maybe-text') { entry.content = ctx.fs.readFile(path); return }
-    // A file held as bytes carries them, and the text they spell where they
-    // spell one: a command counting or encoding them works in what the file
-    // is, and one that can only read text says so where there is none.
-    const spelled = readTextOrBytes(ctx.fs, path)
-    entry.content = spelled.text
-    if (spelled.bytes !== undefined) entry.bytes = spelled.bytes
+    // A file held as bytes carries them, and a file held as text its text.
+    // Whether those bytes also spell text is a question `maybe-text` asks and
+    // `as-held` leaves alone: a command counting or encoding them has no use
+    // for the answer, and reading it out of a large file is not free.
+    if (read === 'text' || ctx.fs.isBytes?.(path) !== true) { entry.content = ctx.fs.readFile(path); return }
+    entry.bytes = ctx.fs.readBytes(path)
+    // The empty string the entry started as is not the text of a file held as
+    // bytes: `maybe-text` puts the text they spell there, and leaves it unset
+    // where they spell none, which `as-held` leaves unset either way.
+    entry.content = read === 'maybe-text' ? decodeUtf8Maybe(entry.bytes) : undefined
   }
   for (const name of files) {
     const entry = { name, [field]: asRead(''), kind: 'file' }

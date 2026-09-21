@@ -295,7 +295,7 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       re.folded = folded
       re.extendedC = folded && EXTENDED_C.test(pattern)
       re.unicodePattern = /[\u0080-\u{10FFFF}]/u.test(pattern)
-      const literal = flags.has('F') || !/[\\.^$*+?()[\]{}|]/u.test(pattern)
+      const literal = flags.has('F') || !METACHARACTER.test(pattern)
       re.binaryLiteral = !whole && !word && literal
       // Whether the bytes alone can say that a file this terminal cannot read
       // as text holds no match — which only a plain literal answers, and only
@@ -359,6 +359,16 @@ export function cannotHoldMatch(bytes, res) {
   })
 }
 
+// The same question, asked of patterns that were never compiled here: `rg`
+// reads its own dialect and only needs to know whether a plain literal, as
+// written, is anywhere in the bytes at all. Nothing else answers, and a
+// folded one does not either — ripgrep folds case by its own tables.
+export function literalsMissing(bytes, patterns, literal, locale = LOCALE) {
+  const tables = classTables(locale)
+  return patterns.every((pattern) => (literal || !METACHARACTER.test(pattern)) && pattern.isWellFormed() &&
+    !holdsMask(bytes, literalMask({ pattern, tables }, false)))
+}
+
 function holdsMask(haystack, mask) {
   for (let at = 0; at + mask.length <= haystack.length; at++) if (maskAt(haystack, at, mask, 0)) return true
   return false
@@ -368,6 +378,9 @@ function maskAt(haystack, at, mask, i) {
   if (i === mask.length) return true
   return mask[i].some((option) => option.every((byte, k) => haystack[at + k] === byte) && maskAt(haystack, at + option.length, mask, i + 1))
 }
+
+// What makes a pattern more than the characters it spells.
+const METACHARACTER = /[\\.^$*+?()[\]{}|]/u
 
 export function inputGap(inputs, res, invert, forceText = false, locale = LOCALE) {
   if (inputs.length === 0) return null

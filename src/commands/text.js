@@ -5,7 +5,7 @@ import { echo } from './echo.js'
 import { printf } from './printf.js'
 import { parseArgs } from '../args.js'
 import { formatWc } from './wc-format.js'
-import { byteLocale, classTables, consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, textOfFile, utf8CodePoints } from '../util.js'
+import { byteLocale, classTables, consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8CodePoints } from '../util.js'
 import { awk } from '../awk/index.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
@@ -149,8 +149,9 @@ function wc(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c', 'm'] })
   const which = pickWcFlags(flags)
   // Counted in what each file is: the text of one held as text, and the bytes
-  // of one held as bytes, which this terminal may not be able to spell.
-  const r = readInputs('wc', positional, stdin, ctx, { read: 'maybe-text' })
+  // of one held as bytes, which this terminal may not be able to spell — and
+  // need not spell to be counted.
+  const r = readInputs('wc', positional, stdin, ctx, { read: 'as-held' })
   const needsWidth = positional.length > 1 || Object.values(which).filter(Boolean).length > 1
   // GNU aligns multi-column or multi-operand output using file sizes,
   // reserving seven columns when an input is a pipe of unknown size.
@@ -160,7 +161,7 @@ function wc(stdin, tokens, ctx) {
   // beside its error, because the open succeeded. A missing path gets
   // no row at all.
   for (const { name, content, bytes, kind, shared } of r.entries.filter((e) => e.kind !== 'missing')) {
-    const counts = wcCounts(bytes ?? content, ctx, which, needsWidth, () => inputLabel(name, ctx))
+    const counts = wcCounts(bytes ?? content, ctx, which, needsWidth)
     rows.push({ counts, name, kind, shared })
     total.l += counts.l; total.w += counts.w; total.m += counts.m; total.c += counts.c
   }
@@ -193,13 +194,13 @@ function pickWcFlags(flags) {
 // encoded to know; characters are the spelling itself, which bytes that spell
 // no text do not have — the C locale counts them as the bytes they are, and a
 // UTF-8 one says so rather than counting a guess.
-function wcCounts(input, ctx, which, needsWidth, label) {
+function wcCounts(input, ctx, which, needsWidth) {
   const cLocale = byteLocale(ctx)
   const size = which.c || needsWidth || (which.m && cLocale) ? byteLength(input) : 0
   return {
     l: which.l ? countNewlines(input) : 0,
     w: which.w ? wordCount(input, ctx) : 0,
-    m: which.m ? (cLocale ? size : characterCount(input, label)) : 0,
+    m: which.m ? (cLocale ? size : characterCount(input)) : 0,
     c: size,
   }
 }
@@ -210,18 +211,19 @@ const byteLength = (input) => typeof input === 'string' ? encodeUtf8Loose(input)
 // of another, so counting them is counting lines whatever the file holds.
 function countNewlines(input) {
   let lines = 0
-  if (typeof input !== 'string') {
-    for (const byte of input) if (byte === 0x0a) lines++
-    return lines
-  }
-  for (let at = input.indexOf('\n'); at >= 0; at = input.indexOf('\n', at + 1)) lines++
+  const newline = typeof input === 'string' ? '\n' : 0x0a
+  for (let at = input.indexOf(newline); at >= 0; at = input.indexOf(newline, at + 1)) lines++
   return lines
 }
 
 // A character of the text, which a JS string spells in one UTF-16 unit or two.
-function characterCount(input, label) {
-  const text = typeof input === 'string' ? input : textOfFile(input, label(), 'counting their characters')
-  return text.length - (text.match(/[\u{10000}-\u{10FFFF}]/gu) ?? []).length
+// Bytes are counted for the characters they do spell: a byte that spells none
+// is a byte and not a character, which is what wc counts of one as well.
+function characterCount(input) {
+  if (typeof input === 'string') return input.length - (input.match(/[\u{10000}-\u{10FFFF}]/gu) ?? []).length
+  let characters = 0
+  for (const code of utf8CodePoints(input)) if (code >= 0) characters++
+  return characters
 }
 
 // wc's own reading of a word, which is coreutils' loop rather than a rule

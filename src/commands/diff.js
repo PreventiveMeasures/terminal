@@ -100,9 +100,19 @@ export function compareFiles(state, nameA, nameB, inDirectory, listed = null) {
     if (sameSides(sides)) return sameReport(state, nameA, nameB)
     return report(state, `${opts.brief ? 'Files' : 'Binary files'} ${label(0)} and ${label(1)} differ\n`, 1)
   }
-  // What is left is a comparison GNU prints as text. A file whose bytes spell
-  // none is one it would print as those bytes, which this terminal cannot:
-  // the file it could not read is named as the one it is.
+  // What is left is a comparison GNU prints as text, and a file whose bytes
+  // spell none is one it would print as those bytes. What it says of such a
+  // file without printing it, this terminal says too: the same bytes are the
+  // same file, and `-q` says only that two differ. An option that reads text
+  // more loosely than its bytes — case, whitespace, line endings — answers
+  // for neither, since files differing in bytes may be the same text to it.
+  if (sides.some((side) => side.content === undefined)) {
+    if (sameSides(sides)) return sameReport(state, nameA, nameB)
+    if (opts.brief && !opts.ignoreCase && !opts.stripCr && opts.whitespace === 'none') {
+      return report(state, `Files ${label(0)} and ${label(1)} differ\n`, 1)
+    }
+  }
+  // The file it could not read is named as the one it is.
   for (const [i, side] of sides.entries()) if (side.content === undefined) textOfFile(side.bytes, JSON.stringify(label(i)))
   let contents = sides.map((side) => side.content ?? '')
   if (opts.stripCr) contents = contents.map(stripTrailingCr)

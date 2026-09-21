@@ -127,8 +127,10 @@ function fsView(scope) {
     // A file may hold bytes that spell no text at all, which `readFile`
     // refuses as this terminal's own output would: a handler with something
     // to say about such a file asks whether it is one and reads its bytes.
+    // The bytes are copied, as a listing is: this view is read-only, and what
+    // a handler does with what it reads cannot reach the tree behind it.
     isBytes: (path) => scope.fs.isBytes?.(at(path)) === true,
-    readBytes: (path) => readBytesOf(scope.fs, at(path)),
+    readBytes: (path) => readBytesOf(scope.fs, at(path))?.slice(),
     listDir: (path) => {
       const { path: abs, error } = lookupWithNote(scope, scope.command, path)
       // Report the original operand, distinguishing missing files from files
