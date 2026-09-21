@@ -57,6 +57,7 @@
     "src/bytes.js",
     "src/charclass.js",
     "src/commands/base64.js",
+    "src/commands/brotli.js",
     "src/commands/cat.js",
     "src/commands/cp.js",
     "src/commands/diff-dirs.js",

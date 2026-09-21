@@ -1,4 +1,5 @@
 import { gzip } from './gzip.js'
+import { brotli } from './brotli.js'
 import { parseArgs } from '../args.js'
 import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, joinLines, lineRecords, ok, okWith, readInputs, splitLines, usage } from '../util.js'
 import { unsupported } from '../unsupported.js'
@@ -346,4 +347,4 @@ function tzOffset(d, utc) {
 export const EXTRA_COMMANDS = { rg, cut, tac, tr, seq, nl, which: whichCmd, hexdump, base64, ...WRITE_TOOLS }
 // `gzip` is here for the same reason the others are: it answers where it can,
 // and is not one of the commands this terminal offers.
-export const HIDDEN_EXTRAS = { whoami, date, od, xxd, gzip }
+export const HIDDEN_EXTRAS = { whoami, date, od, xxd, gzip, brotli }

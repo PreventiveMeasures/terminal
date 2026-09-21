@@ -2,7 +2,7 @@ import { parseArgs } from '../args.js'
 import { decodeUtf8, encodeUtf8, encodeUtf8Loose, readBytesOf } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
-import { compressionAvailable, decompressionAvailable, deflate, inflate, looksCompressed, named } from '../compression.js'
+import { compressBytes, compressionAvailable, decompressBytes, decompressionAvailable } from '../compression.js'
 
 // gzip, both ways round. The work itself is the runtime's stream rather than
 // this code's (../compression.js), and it answers asynchronously — so the
@@ -13,6 +13,17 @@ import { compressionAvailable, decompressionAvailable, deflate, inflate, looksCo
 // header begins no character. So `-c` reports the gap every byte output here
 // reports, and the file written beside the one it came from — which the
 // overlay is the only place to write — is what compressing is for.
+
+const FORMAT = 'gzip'
+
+// A gzip member starts with these two, whatever follows.
+const MAGIC = Object.freeze([0x1f, 0x8b])
+const looksCompressed = (bytes) => bytes !== undefined && bytes.length >= 2 && bytes[0] === MAGIC[0] && bytes[1] === MAGIC[1]
+
+// What zlib calls what it would not read, and what gzip says of it. Anything
+// else is data that is not the deflate stream the header promised.
+const REPORTS = { __proto__: null, 'unexpected end of file': 'unexpected end of file', 'incorrect data check': 'invalid compressed data--crc error' }
+const reportOf = (error) => REPORTS[error] ?? 'invalid compressed data--format violated'
 
 // The suffixes GNU knows. Decompressing takes one off to name the file it
 // writes, and refuses a name it cannot shorten; compressing reads the same
@@ -49,10 +60,10 @@ export async function gzip(stdin, tokens, ctx) {
 // terminal cannot carry.
 async function fromStdin(stdin, opts, state) {
   if (opts.decompressing) return dataError(state, stdin === '' ? 'stdin: unexpected end of file' : 'stdin: not in gzip format')
-  if (!compressionAvailable()) return refuse(state, opts)
+  if (!compressionAvailable(FORMAT)) return refuse(state, opts)
   // A member of a pipe is the one GNU writes for a pipe: no name, and no
   // moment, because there was no file to take either from.
-  return toStdout(await deflate(encodeUtf8(stdin)), state)
+  return toStdout(await compressBytes(encodeUtf8(stdin), FORMAT), state)
 }
 
 function one(name, opts, state) {
@@ -70,14 +81,35 @@ async function compress(name, path, opts, state) {
   const { ctx } = state
   const suffix = suffixOf(name)
   if (!opts.stdout && suffix !== undefined) return note(state, `${name} already has ${suffix} suffix -- unchanged`)
-  if (!compressionAvailable()) return refuse(state, opts)
-  const member = named(await deflate(readBytesOf(ctx.fs, path)), name.slice(name.lastIndexOf('/') + 1), moment(ctx))
+  if (!compressionAvailable(FORMAT)) return refuse(state, opts)
+  const member = named(await compressBytes(readBytesOf(ctx.fs, path), FORMAT), name.slice(name.lastIndexOf('/') + 1), moment(ctx))
   return opts.stdout ? toStdout(member, state) : toFile(name + SUFFIX, member, name, opts, state)
 }
 
 // The tree has no clock of its own, so the moment it was made stands in — the
 // same one `ls -l` dates every file in it to.
 const moment = (ctx) => Math.floor(ctx.createdAt / 1000)
+
+// GNU records where a member came from: the name the file had, without the
+// directory it stood in, and the moment it carried. A stream writes neither —
+// what it writes is the header of a member that came from no file, which is
+// the very one GNU writes for a pipe. Everything past the header is the
+// member's own and says nothing about either, so the name and the moment go
+// in front of it. A header that is not the plain ten bytes is one this does
+// not know how to add to, and it is left as the runtime wrote it.
+const HEADER = 10, NAME_FLAG = 0x08
+function named(member, name, modified) {
+  const label = encodeUtf8(name)
+  if (member.length < HEADER || member[3] !== 0 || label.includes(0)) return member
+  const out = new Uint8Array(member.length + label.length + 1)
+  out.set(member.subarray(0, HEADER))
+  out[3] = NAME_FLAG
+  for (let i = 0; i < 4; i++) out[4 + i] = modified >>> (8 * i) & 0xff
+  out.set(label, HEADER)
+  // The name is closed by the zero the array already holds there.
+  out.set(member.subarray(HEADER), HEADER + label.length + 1)
+  return out
+}
 
 async function decompress(name, path, opts, state) {
   const { ctx } = state
@@ -86,8 +118,8 @@ async function decompress(name, path, opts, state) {
   // where reading a file to look at its first two bytes would.
   const bytes = ctx.fs.isBytes?.(path) === true ? readBytesOf(ctx.fs, path) : undefined
   if (!looksCompressed(bytes)) return dataError(state, `${name}: ${tooShort(bytes, path, ctx) ? 'unexpected end of file' : 'not in gzip format'}`)
-  if (!decompressionAvailable()) return refuse(state, opts)
-  const inflated = await inflate(bytes)
+  if (!decompressionAvailable(FORMAT)) return refuse(state, opts)
+  const inflated = await decompressBytes(bytes, FORMAT)
   const suffix = suffixOf(name)
   const written = opts.stdout ? toStdout(inflated.bytes, state)
     : suffix === undefined ? fail(state, `${name}: unknown suffix -- ignored`, 2)
@@ -97,7 +129,7 @@ async function decompress(name, path, opts, state) {
   // bytes that failed it and this has not: a stream hands nothing over until
   // it is sure of it, so a file whose data is corrupt reports the same error
   // with nothing written before it.
-  if (written && inflated.error) dataError(state, `${name}: ${inflated.error}`)
+  if (written && inflated.error) dataError(state, `${name}: ${reportOf(inflated.error)}`)
 }
 
 const suffixOf = (name) => Object.keys(SUFFIXES).find((end) => name.length > end.length && name.endsWith(end))
