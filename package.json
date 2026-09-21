@@ -13,7 +13,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/PreventiveMeasures/terminal.git"
+    "url": "git+https://github.com/PreventiveMeasures/terminal.git"
   },
   "bugs": {
     "url": "https://github.com/PreventiveMeasures/terminal/issues"
