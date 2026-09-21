@@ -33,14 +33,18 @@ describe('runAsync runs a line and promises the result', () => {
     assert.deepEqual(gap.unsupported.map((u) => u.command), ['shopt'])
   })
 
-  it('carries the session, and runs in the order the lines were given', async () => {
+  it('carries the session, and runs the lines in the order they were given', async () => {
     const t = terminal()
-    // The line has already run by the time the promise is returned, so a call
-    // made without awaiting the one before it still runs after it.
+    // A terminal is one place: a line handed to it before the one before it
+    // has finished waits its turn rather than overtaking it, so two calls
+    // made without awaiting the first still run in order.
     const first = t.runAsync('cd src; TAG=v2')
-    assert.equal(t.run('pwd; echo $TAG').stdout, '/src\nv2\n')
+    const second = t.runAsync('pwd; echo $TAG')
+    assert.equal((await second).stdout, '/src\nv2\n')
     assert.equal((await first).cwd, '/src')
-    assert.equal((await t.runAsync('pwd')).stdout, '/src\n')
+    // And what they leave behind is there for a line run either way.
+    assert.equal(t.run('pwd').stdout, '/src\n')
+    assert.equal((await t.runAsync('echo $TAG')).stdout, 'v2\n')
   })
 
   it('is on a fork as it is on the terminal it came from', async () => {
