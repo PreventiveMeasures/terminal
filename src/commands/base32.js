@@ -1,5 +1,5 @@
 import { baseCommand } from './base-coding.js'
-import { toBase32 } from '@exodus/bytes/base32.js'
+import { fromBase32, toBase32 } from '@exodus/bytes/base32.js'
 
 // RFC 4648 base32, which is what coreutils' base32 writes and reads: five
 // bytes to eight characters, padded to eight with `=`. Recorded from base32
@@ -12,14 +12,29 @@ const WHOLE = Object.freeze([2, 4, 5, 7, 8])
 
 export const base32 = baseCommand('base32', { encode: (bytes) => toBase32(bytes, { padding: true }), decode: decodeBase32 })
 
+// What base32 wrote is what base32 mostly reads, and the runtime's own decoder
+// reads that: it is asked first, and answers the whole of it. It takes more
+// spellings than coreutils does — a lowercase alphabet, a last group short of
+// eight — so it is only asked about text already in the one shape coreutils
+// accepts, and anything else goes to the reading below, which is coreutils'.
+const PLAIN = /^[A-Z2-7]+={0,6}$/u
+export function decodeBase32(input, ignoreGarbage = false) {
+  const text = input.replace(ignoreGarbage ? /[^A-Z2-7=]/gu : /\n/gu, '')
+  if (text.length % GROUP === 0 && PLAIN.test(text)) {
+    try { return { bytes: fromBase32(text, { padding: true }), valid: true } } catch (e) {
+      if (!(e instanceof SyntaxError)) throw e
+    }
+  }
+  return decodeGroups(text)
+}
+
 // GNU reads a group of eight at a time and writes the whole bytes it spells,
 // so a group that is not its alphabet's stops the reading without taking back
 // what earlier groups wrote. A group short of eight — at the end of the
 // input, or all that a stray `=` leaves — writes nothing and is invalid: what
 // it holds is not a group yet. The bits past the last whole byte are not read
 // at all, so a group spelling them differently spells the same bytes.
-export function decodeBase32(input, ignoreGarbage = false) {
-  const text = input.replace(ignoreGarbage ? /[^A-Z2-7=]/gu : /\n/gu, '')
+function decodeGroups(text) {
   const output = new Uint8Array(Math.ceil(text.length / GROUP) * 5)
   let length = 0, pos = 0, valid = true
   while (pos < text.length) {
