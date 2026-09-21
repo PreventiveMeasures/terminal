@@ -1,5 +1,5 @@
 import { UnsupportedError, markUnsupported, unsupportedNote } from '../unsupported.js'
-import { eventsOf } from './output.js'
+import { eventsOf, writeEvent } from './output.js'
 
 // Readers are streaming by default. These commands either buffer their input
 // before stdout or, in cat's case, validate GNU's input/output offset rules.
@@ -56,7 +56,7 @@ export function createIoGuard(fs) {
         }
         return fn((event, handle) => {
           output.fd = event.fd
-          handle.write(event.text)
+          writeEvent(event, handle)
         })
       } finally { output = previous }
     },

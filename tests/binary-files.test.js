@@ -139,7 +139,10 @@ describe('a source entry can be the bytes of a file spelt in base64', () => {
     await check(t, 'xxd -l 4 img.png', '00000000: 8950 4e47                                .PNG\n')
     await check(t, 'stat -c %s img.png; du -b img.png; find . -empty', '19\n19\timg.png\n./empty\n')
     await check(t, 'cp img.png /tmp/copy.png; diff img.png /tmp/copy.png && echo same', 'same\n')
-    await gap(t, 'cat img.png', 'binary file', `cat: ${unreadable('img.png')}`)
+    // cat hands the bytes on: a pipe and a file take them, and only this
+    // terminal's own output, which is a string, cannot.
+    await check(t, 'cat img.png | base64', 'iVBORw0KGgoAAAANSUhEUv/+Cg==\n')
+    await gap(t, 'cat img.png', 'partial UTF-8 byte sequence', 'cat: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
     await check(t, 'grep -c oak img.png latin.bin', 'img.png:0\nlatin.bin:0\n', { exitCode: 1 })
   })
 
@@ -281,7 +284,7 @@ describe('what a file of bytes answers without being read as text', () => {
     await check(t, 'find . -type l', './link.png\n')
     // The file it leads to is the file that cannot be read as text, and the
     // one the refusal names.
-    gap(t, 'cat link.png', 'binary file', `cat: ${unreadable('img.png')}`)
+    await gap(t, 'cat link.png', 'partial UTF-8 byte sequence', 'cat: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
   })
 
   it('is what a link made by ln -s leads to', async () => {
@@ -291,7 +294,8 @@ describe('what a file of bytes answers without being read as text', () => {
     await check(t(), 'ln -s /repo/img.png /tmp/l && cp /tmp/l /tmp/copy && wc -c /tmp/copy', '19 /tmp/copy\n')
     // The link is as long as the path it holds, whatever it leads to.
     check(t(), 'ln -s /repo/img.png /tmp/l && du -b /tmp/l', '13\t/tmp/l\n')
-    await gap(t(), 'ln -s /repo/img.png /tmp/l && cat /tmp/l', 'binary file', `cat: ${unreadable('img.png')}`)
+    await check(t(), 'ln -s /repo/img.png /tmp/l && cat /tmp/l | base64', 'iVBORw0KGgoAAAANSUhEUv/+Cg==\n')
+    await gap(t(), 'ln -s /repo/img.png /tmp/l && cat /tmp/l', 'partial UTF-8 byte sequence', 'cat: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
   })
 
   it('compares as the bytes it is, which is what diff does with a binary file', async () => {
@@ -336,7 +340,7 @@ describe('what a file of bytes answers without being read as text', () => {
 
 describe('what a file of bytes cannot be read as', () => {
   it('says which file it is, wherever text is what a command reads', async () => {
-    for (const command of ['cat img.png', 'head img.png', 'head -c4 img.png', 'tail img.png', 'tac img.png', 'nl img.png', 'uniq img.png', 'sort img.png', 'cut -c1 img.png', 'sed -n p img.png', 'tr a b < img.png', 'cat img.png text.txt']) {
+    for (const command of ['head img.png', 'head -c4 img.png', 'tail img.png', 'tac img.png', 'nl img.png', 'uniq img.png', 'sort img.png', 'cut -c1 img.png', 'sed -n p img.png', 'tr a b < img.png']) {
       const cmd = command.split(' ')[0]
       const result = await gap(terminal(), command, 'binary file', `${command.includes('<') ? 'error' : cmd}: ${unreadable('img.png')}`)
       assert.equal(result.stdout, '', command)
@@ -348,13 +352,17 @@ describe('what a file of bytes cannot be read as', () => {
     await gap(terminal(), 'wc -c < img.png', 'binary file', `error: ${unreadable('img.png')}`)
   })
 
-  it('keeps the text files of a run readable beside it', async () => {
+  it('carries a file of bytes down a pipe, and refuses only where a string is what is left', async () => {
     const t = terminal()
-    // A pipeline is the gap of the command that met the file; what follows
-    // reads the nothing that command wrote.
-    const result = await t.run('cat img.png | wc -c')
-    assert.deepEqual(result.unsupported.map((u) => u.detail), ['binary file'])
-    assert.equal(result.stdout, '0\n')
+    // A pipe takes the bytes, so what follows reads the file itself.
+    const piped = await t.run('cat img.png | wc -c')
+    assert.deepEqual(piped.unsupported, [])
+    assert.equal(piped.stdout, '19\n')
+    // The gap is this terminal's own output, which is a string: the command
+    // that wrote the bytes is the one that reports it.
+    const printed = await t.run('cat img.png | cat')
+    assert.deepEqual(printed.unsupported.map((u) => u.detail), ['partial UTF-8 byte sequence'])
+    assert.equal(printed.stdout, '')
   })
 
   it('is what a custom command reads as bytes rather than text', async () => {
@@ -488,7 +496,7 @@ describe('a file of bytes and the writable overlay', () => {
     await check(t, 'cat text.txt >> /tmp/copy')
     await check(t, 'wc -c /tmp/copy', '39 /tmp/copy\n')
     // What was written is still bytes that spell no text, and says so.
-    gap(t, 'cat /tmp/copy', 'binary file', `cat: ${JSON.stringify('/tmp/copy')} holds bytes that spell no text, and reading them as text is not supported\n`)
+    await gap(t, 'cat /tmp/copy', 'partial UTF-8 byte sequence', 'cat: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
     await check(t, 'rm /tmp/copy && ls /tmp')
   })
 

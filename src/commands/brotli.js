@@ -1,5 +1,5 @@
 import { parseArgs } from '../args.js'
-import { decodeUtf8, encodeUtf8, readBytesOf } from '../util.js'
+import { encodeUtf8, readBytesOf } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
 import { compressBytes, decompressBytes, formatUsable } from '../compression.js'
@@ -48,14 +48,17 @@ export async function brotli(stdin, tokens, ctx) {
     force: flags.has('f') || flags.has('force'),
   }
   if (opts.stdout && positional.length > 1) return { stdout: USAGE, stderr: '', exitCode: 1 }
-  const state = { ctx, stdout: '', stderr: '', status: 0, gap: null }
+  const state = { ctx, events: [], stderr: '', status: 0, gap: null }
   // A pipe is what it reads with no operand, and `-` is the same thing named.
   for (const name of positional.length === 0 ? ['-'] : positional) {
     // oxlint-disable-next-line no-await-in-loop -- brotli takes one operand after the last, and stops at the first it could not do.
     if (!await one(name, stdin, opts, state)) break
   }
   if (state.gap) return state.gap
-  return { stdout: state.stdout, stderr: state.stderr, exitCode: state.status }
+  // What it wrote, in the order it wrote it: the bytes go to a pipe or a file
+  // as they are, and to a terminal as the text they spell.
+  const events = [...state.events, ...(state.stderr ? [{ fd: 2, text: state.stderr }] : [])]
+  return { stdout: '', stderr: state.stderr, exitCode: state.status, events }
 }
 
 // However a level was asked for, named as it was written.
@@ -69,7 +72,9 @@ function chosen(flags, values) {
 
 function one(name, stdin, opts, state) {
   const { ctx } = state
-  if (name === '-') return through(encodeUtf8(stdin), STDIN, null, opts, state)
+  // A pipe carries text unless a stage upstream wrote bytes into it, and a
+  // brotli stream is bytes: `cat f.br | brotli -d` hands them over.
+  if (name === '-') return through(ctx.stdinBytes ?? encodeUtf8(stdin), STDIN, null, opts, state)
   // The name it writes is the name it was given with the suffix on the end,
   // or with the suffix taken off — and a name too short to take one off of
   // has nothing left to be called.
@@ -98,7 +103,7 @@ async function through(bytes, name, target, opts, state) {
   // Brotli hands over nothing it could not read to the end: a stream that
   // failed leaves the file it was writing unwritten, and says only that.
   if (done.error) return fail(state, `corrupt input [${name}]`)
-  if (target === null) state.stdout += decodeUtf8(done.bytes)
+  if (target === null) state.events.push({ fd: 1, bytes: done.bytes })
   else if (!toFile(target, done.bytes, state)) return false
   // What it read is kept, unless `--rm` says otherwise.
   if (opts.remove && name !== STDIN) ctx.fs.removeWritable(ctx.cwd, name)

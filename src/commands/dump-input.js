@@ -28,7 +28,7 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
     const entry = input.inputs[0]
     const shared = entry && (entry.shared || entry.name === null)
     if (cmd === 'hexdump' && skipping && shared && !ctx.stdinFile) {
-      consumeStdin(ctx, rest)
+      consumeStdin(ctx, rest, true)
       return { error: err('hexdump: standard input: Illegal seek') }
     }
     // xxd seeks from the beginning unless +OFFSET was specified. Linux
@@ -42,7 +42,7 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
     remaining -= taken
     if (shared) {
       rest = decodeUtf8(all.subarray(skipped + taken))
-      consumeStdin(ctx, rest)
+      consumeStdin(ctx, rest, true)
     }
     if (rewind && skipping) { start = skip.value; skipping = 0 }
     if (remaining === 0 && skipping === 0) break
