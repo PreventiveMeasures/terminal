@@ -1,5 +1,4 @@
-import { GZIP } from './gzip.js'
-import { BROTLI } from './brotli.js'
+import { RUNTIME_COMMANDS } from './runtime.js'
 import { parseArgs } from '../args.js'
 import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, joinLines, lineRecords, ok, okWith, readInputs, splitLines, usage } from '../util.js'
 import { unsupported } from '../unsupported.js'
@@ -347,6 +346,7 @@ function tzOffset(d, utc) {
 export const EXTRA_COMMANDS = { rg, cut, tac, tr, seq, nl, which: whichCmd, hexdump, base64, ...WRITE_TOOLS }
 // `gzip` is here for the same reason the others are: it answers where it can,
 // and is not one of the commands this terminal offers.
-// The two compressors are there only where the runtime's streams know their
-// format, and are nothing at all where they do not.
-export const HIDDEN_EXTRAS = { whoami, date, od, xxd, ...GZIP, ...BROTLI }
+// What the runtime does rather than this code — the compressors, the digests
+// — is there only where the runtime can do it, and nothing at all where it
+// cannot.
+export const HIDDEN_EXTRAS = { whoami, date, od, xxd, ...RUNTIME_COMMANDS }

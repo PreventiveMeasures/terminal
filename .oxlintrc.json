@@ -13,6 +13,7 @@
   ],
   "globals": {
     "CompressionStream": "readonly",
+    "crypto": "readonly",
     "DecompressionStream": "readonly",
     "structuredClone": "readonly"
   },
