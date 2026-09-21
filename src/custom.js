@@ -3,7 +3,7 @@
 // explicitly rather than becoming a successful command with missing output.
 
 import { lookup, resolve } from './fs.js'
-import { consumeStdin, ok, readInputs } from './util.js'
+import { consumeStdin, ok, readBytesOf, readInputs } from './util.js'
 import { lookupWithNote } from './notes.js'
 
 // Slash paths are reserved for bin aliases.
@@ -124,6 +124,11 @@ function fsView(scope) {
     isLink: (path) => scope.fs.isLink?.(lookup(scope.cwd, path, scope.fs, { follow: false }).path) === true,
     readLink: (path) => scope.fs.readLink?.(lookup(scope.cwd, path, scope.fs, { follow: false }).path),
     readFile: (path) => scope.fs.readFile(at(path)),
+    // A file may hold bytes that spell no text at all, which `readFile`
+    // refuses as this terminal's own output would: a handler with something
+    // to say about such a file asks whether it is one and reads its bytes.
+    isBytes: (path) => scope.fs.isBytes?.(at(path)) === true,
+    readBytes: (path) => readBytesOf(scope.fs, at(path)),
     listDir: (path) => {
       const { path: abs, error } = lookupWithNote(scope, scope.command, path)
       // Report the original operand, distinguishing missing files from files

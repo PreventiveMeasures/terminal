@@ -179,7 +179,7 @@ describe('stat errors, mounts, and writable metadata', () => {
     const fs = writableFs(createFs({}, '/src'))
     const first = fs.openWritable('/', '/tmp/file'), second = fs.openWritable('/', '/tmp/file')
     first.write('é'); second.write('X')
-    assert.throws(() => fs.readFile('/tmp/file'), /UTF-8/u)
+    assert.throws(() => fs.readFile('/tmp/file'), /spell no text/u)
     const ctx = { fs, cwd: '/', vars: new Map(), notes: new Set(), outputFds: {}, unsupported: { add() {} } }
     assert.equal(stat('', ['-c', '%s %F', '/tmp/file'], ctx).stdout, '2 regular file\n')
   })

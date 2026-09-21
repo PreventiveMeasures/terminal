@@ -1,6 +1,6 @@
 import { MAX_INTERVAL, checkInterval, readPosixClass, validateBracket } from '../charclass.js'
 import { UnsupportedError, unsupported } from '../unsupported.js'
-import { err } from '../util.js'
+import { encodeUtf8, err } from '../util.js'
 import { AwkRegex } from '../awk/regex.js'
 import { parseEre } from '../awk/re-parse.js'
 import { breToEs, validateBackreferences } from '../bre.js'
@@ -295,7 +295,15 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       re.folded = folded
       re.extendedC = folded && EXTENDED_C.test(pattern)
       re.unicodePattern = /[\u0080-\u{10FFFF}]/u.test(pattern)
-      re.binaryLiteral = !whole && !word && (flags.has('F') || !/[\\.^$*+?()[\]{}|]/u.test(pattern))
+      const literal = flags.has('F') || !/[\\.^$*+?()[\]{}|]/u.test(pattern)
+      re.binaryLiteral = !whole && !word && literal
+      // What that literal can be in a file this terminal cannot read as text,
+      // where the bytes alone say whether it is there at all. `-w` and `-x`
+      // only narrow what the bytes being there would select, so they answer
+      // here too. A pattern holding a lone surrogate spells no bytes at all,
+      // so it answers for none, and neither does one PCRE folds by its own
+      // tables rather than the locale's.
+      if (literal && pattern.isWellFormed() && (folded || !flags.has('i'))) re.literalMask = literalMask(pattern, folded, tables)
       if (flags.has('o') && gnu && !whole) {
         if (word || /\\[1-9]|\(\?/u.test(source)) return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: only-matching with backreferences, lookarounds or word constraints is not supported', 2) }
         try { re.extent = new AwkRegex(grepSource(source, true, tables), false, null, tables) } catch {
@@ -327,8 +335,43 @@ function gnuSyntaxGap(source, flags) {
   try { parseEre(grepSource(source, true)); return true } catch (e) { return Boolean(e.gap) }
 }
 
+// The bytes a plain literal can be, character by character: what each one is
+// as written, or the bytes of each character it stands for where `-i` folds
+// it — `s` for `s`, `S` and `ſ`, which are one, one and two bytes.
+function literalMask(pattern, folded, tables) {
+  return [...pattern].map((character) => {
+    const codes = folded ? tables.fold(character.codePointAt(0)) : [character.codePointAt(0)]
+    return codes.map((code) => encodeUtf8(String.fromCodePoint(code)))
+  })
+}
+
+// Whether these bytes can hold no match at all: every pattern is a plain
+// literal that is nowhere in the file, whichever of its spellings is looked
+// for. A search would find nothing there, which is what GNU prints for such
+// a file and all this terminal has to do. Anything else has to be read to
+// know. A character is one byte at least, so nothing can begin past the end.
+export function cannotHoldMatch(bytes, res) {
+  return res.every((re) => re.literalMask && !holdsMask(bytes, re.literalMask))
+}
+
+function holdsMask(haystack, mask) {
+  for (let at = 0; at + mask.length <= haystack.length; at++) if (maskAt(haystack, at, mask, 0)) return true
+  return false
+}
+
+function maskAt(haystack, at, mask, i) {
+  if (i === mask.length) return true
+  return mask[i].some((option) => option.every((byte, k) => haystack[at + k] === byte) && maskAt(haystack, at + option.length, mask, i + 1))
+}
+
 export function inputGap(inputs, res, invert, forceText = false, locale = LOCALE) {
   if (inputs.length === 0) return null
+  // Bytes that spell no text are binary to GNU whatever else they hold, and
+  // searching them is what a terminal working in text cannot do: `-a` asks
+  // for those bytes as the output itself, which it cannot print either.
+  if (inputs.some((inp) => inp.content === undefined)) {
+    return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
+  }
   // A literal absent from a binary file is still safely a non-match.
   // Regex anchors and classes can see NUL boundaries differently in GNU.
   if (!forceText && inputs.some((inp) => inp.content.includes('\0') && (invert || res.some((re) => !re.binaryLiteral || re.test(inp.content))))) return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)

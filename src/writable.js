@@ -1,5 +1,5 @@
-import { compareNames, dirname, lookup, walkPath, walkTree, writeTarget } from './fs.js'
-import { decodeUtf8, encodeUtf8 } from './util.js'
+import { compareNames, dirname, lookup, sameBytes, textOfFile, walkPath, walkTree, writeTarget } from './fs.js'
+import { decodeUtf8, encodeUtf8, readBytesOf } from './util.js'
 
 // The overlay is mounted at /tmp, so what may be written is what falls inside
 // it. Commands ask before acting, where the answer decides more than whether a
@@ -42,8 +42,20 @@ export function writableFs(base) {
     readFile: (path) => {
       const inode = files.get(path)
       observer?.read(inode ?? path)
-      return inode ? decodeUtf8(inode.bytes) : base.readFile(path)
+      return inode ? textOfFile(inode.bytes, JSON.stringify(path)) : base.readFile(path)
     },
+    // An overlay file is bytes already — it is written as bytes and read back
+    // as the text they spell — so a reader working in bytes is handed them
+    // whichever side of the boundary the file is on.
+    readBytes: (path, loose = false) => {
+      const inode = files.get(path)
+      observer?.read(inode ?? path)
+      return inode ? inode.bytes : readBytesOf(base, path, loose)
+    },
+    exactBytes: (path) => files.get(path)?.bytes ?? base.exactBytes(path),
+    // An overlay file is written as bytes and read back as the text they
+    // spell, so it is one of the files whose reading may have no answer.
+    isBytes: (path) => files.has(path) || base.isBytes?.(path) === true,
     sameFileContents: (a, b) => sameFileContents(base, files, a, b),
     listDir: (path) => {
       if (path === '/') return rootEntries
@@ -71,9 +83,11 @@ export function writableFs(base) {
       const inode = files.get(source)
       if (source === absolute || inode && inode === files.get(absolute)) throw new Error('source and destination are the same file')
       observer?.read(inode ?? source)
-      // An overlay may contain byte sequences that have no string equivalent.
-      // Copy them directly while keeping truncation and writes observable.
-      const bytes = inode ? inode.bytes : encodeUtf8(base.readFile(source))
+      // A copy carries bytes, which either side may hold without a string
+      // equivalent: the overlay from a write, the sources from a file
+      // declared as bytes. Copy them directly while keeping truncation and
+      // writes observable.
+      const bytes = inode ? inode.bytes : readBytesOf(base, source)
       fs.openWritable(cwd, target).writeBytes(bytes)
       return true
     },
@@ -192,13 +206,12 @@ function overlayListings(dirs, files, links) {
 function sameFileContents(base, files, a, b) {
   const first = files.get(a), second = files.get(b)
   if (!first && !second) return base.sameFileContents(a, b)
-  const bytes = (path, inode) => {
-    if (inode) return inode.bytes
-    const text = base.readFile(path)
-    return text.isWellFormed() ? encodeUtf8(text) : null
-  }
-  const left = bytes(a, first), right = bytes(b, second)
-  return left !== null && right !== null && left.length === right.length && left.every((byte, i) => byte === right[i])
+  // A file the sources hold is compared as the bytes it certainly has: those
+  // it was declared with, or what its text encodes to where that text has an
+  // encoding. Neither asks it to be read as text, which a file of bytes is
+  // not and which a hint has no business failing on.
+  const bytes = (path, inode) => inode ? inode.bytes : base.exactBytes(path)
+  return sameBytes(bytes(a, first), bytes(b, second))
 }
 
 // What a name can be written as, asked of the walk rather than of the spelling:

@@ -356,7 +356,7 @@ describe('createTerminal — opts.commands: the io.fs view', () => {
 
   it('is read-only: the source tree cannot be written through it', () => {
     const t = createTerminal(SOURCES, { commands: { probe: (io) => Object.keys(io.fs).join(',') + '\n' } })
-    assert.equal(t.run('probe').stdout, 'resolve,isFile,isDir,isLink,readLink,readFile,listDir,walkFiles\n')
+    assert.equal(t.run('probe').stdout, 'resolve,isFile,isDir,isLink,readLink,readFile,isBytes,readBytes,listDir,walkFiles\n')
   })
 })
 

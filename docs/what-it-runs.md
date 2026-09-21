@@ -24,6 +24,25 @@ not.
 `printf` `test` `cp` `rm` `mkdir` `touch` `ln` `diff` `patch` `du` `stat` `realpath`
 `pwd` `seq` `which` `basename` `dirname` — plus your own, via `opts.commands`.
 
+A file may be bytes rather than text: a source entry that is a `Uint8Array` is
+the file's own bytes, for what no JS string can spell — an image, a compiled
+object, an archive. Bytes that do spell text are that text, and read exactly
+as the string would. Where they spell none, what the file is measured, sized,
+listed, copied, encoded or compared as is answered from the bytes themselves:
+`wc -c`, `-l` and `-w`, `stat`, `du`, `ls`, `find`, `cp` and `cp -r` into the
+overlay, `base64`, `hexdump`, `xxd`, and `diff`, which calls two files binary
+and says only whether they differ, exactly where GNU does. What would read
+such a file as text names it and reports an unsupported diagnostic rather
+than mangling it — `cat`, `head`, `sed`, `awk` and the rest, a redirection
+from one, `diff -a`, and `wc -m`, which counts characters the file does not
+have. A search answers where it can do so without reading the file: a plain
+literal that is nowhere in the bytes selects nothing there, so `grep -r`
+passes over such a file as GNU prints nothing for it, while a pattern that
+could be in it, or `-v`, which selects every line a pattern does not, reports
+the binary-input diagnostic `grep` gives for any file it calls binary. `-I`
+passes over one as it passes over any other binary file, and `rg` names what
+it cannot read.
+
 `cp -r` copies a tree into the overlay, making each directory before what goes
 inside it; `-R` and `--recursive` spell the same flag, and `-v` announces a
 directory once, where it is made. A destination inside the source, a

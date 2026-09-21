@@ -5,7 +5,7 @@ import { echo } from './echo.js'
 import { printf } from './printf.js'
 import { parseArgs } from '../args.js'
 import { formatWc } from './wc-format.js'
-import { byteLocale, consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines } from '../util.js'
+import { byteLocale, classTables, consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, textOfFile, utf8CodePoints } from '../util.js'
 import { awk } from '../awk/index.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
@@ -148,7 +148,9 @@ function truncationNote(cmd, content, body, unit, input) {
 function wc(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c', 'm'] })
   const which = pickWcFlags(flags)
-  const r = readInputs('wc', positional, stdin, ctx)
+  // Lines and bytes are counted in the bytes themselves, so a file this
+  // terminal cannot spell as text is still counted.
+  const r = readInputs('wc', positional, stdin, ctx, { read: 'loose-bytes' })
   const needsWidth = positional.length > 1 || Object.values(which).filter(Boolean).length > 1
   // GNU aligns multi-column or multi-operand output using file sizes,
   // reserving seven columns when an input is a pipe of unknown size.
@@ -157,8 +159,8 @@ function wc(stdin, tokens, ctx) {
   // A directory is a row of zeros — GNU's `wc -l dir` prints `0 dir`
   // beside its error, because the open succeeded. A missing path gets
   // no row at all.
-  for (const { name, content, kind, shared } of r.entries.filter((e) => e.kind !== 'missing')) {
-    const counts = wcCounts(content, ctx, which, needsWidth)
+  for (const { name, bytes, kind, shared } of r.entries.filter((e) => e.kind !== 'missing')) {
+    const counts = wcCounts(bytes, ctx, which, needsWidth, () => inputLabel(name, ctx))
     rows.push({ counts, name, kind, shared })
     total.l += counts.l; total.w += counts.w; total.m += counts.m; total.c += counts.c
   }
@@ -184,16 +186,60 @@ function pickWcFlags(flags) {
   return { l: flags.has('l'), w: flags.has('w'), m: flags.has('m'), c: flags.has('c') }
 }
 
-// Character counts use code points in UTF-8 mode and bytes in an explicit C locale.
-function wcCounts(content, ctx, which, needsWidth) {
+// Character counts use code points in UTF-8 mode and bytes in an explicit C
+// locale. Lines and bytes are the bytes' own, so they answer for a file this
+// terminal cannot spell as text, and so do words. Characters are the spelling
+// itself, which those bytes do not have: the C locale counts them as the
+// bytes they are, and a UTF-8 one says so rather than counting a guess.
+function wcCounts(bytes, ctx, which, needsWidth, label) {
   const cLocale = byteLocale(ctx)
-  const bytes = which.c || needsWidth || (which.m && cLocale) ? encodeUtf8Loose(content).length : 0
+  const count = which.c || needsWidth || (which.m && cLocale) ? bytes.length : 0
+  const content = which.m && !cLocale ? textOfFile(bytes, label(), 'counting their characters') : ''
   return {
-    l: which.l ? (content.match(/\n/gu) ?? []).length : 0,
-    w: which.w ? (content.match(cLocale ? /[^\t\n\v\f\r ]+/gu : /[^\t\n\v\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u2060\u3000]+/gu) ?? []).length : 0,
-    m: which.m ? cLocale ? bytes : content.length - (content.match(/[\u{10000}-\u{10FFFF}]/gu) ?? []).length : 0,
-    c: bytes,
+    l: which.l ? countNewlines(bytes) : 0,
+    w: which.w ? wordCount(bytes, ctx) : 0,
+    m: which.m ? cLocale ? count : content.length - (content.match(/[\u{10000}-\u{10FFFF}]/gu) ?? []).length : 0,
+    c: count,
   }
+}
+
+// One pass over the bytes: a newline is one byte and no part of another, so
+// counting them is counting lines whatever else the file holds.
+function countNewlines(bytes) {
+  let lines = 0
+  for (const byte of bytes) if (byte === 0x0a) lines++
+  return lines
+}
+
+// wc's own reading of a word, which is coreutils' loop rather than a rule
+// about blanks: the six blanks ASCII spells always part one, and past them
+// only a printable character is looked at at all. A printable character
+// glibc calls a space parts a word, and so do the four non-breaking spaces
+// wc adds to them itself; any other printable character is a word's own; and
+// everything else — a control, an unassigned code point, a byte that spells
+// no character — passes through without beginning a word or ending one. So
+// `\x01` alone is no word and `abc\x89def` is one, while U+2028, a space
+// glibc does not call printable, joins the two sides of it into one.
+const ASCII_BLANKS = new Set([0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20])
+// wc's iswnbspace: the spaces it parts words on that glibc's own class does
+// not hold. POSIXLY_CORRECT drops them, and nothing may set it here.
+const NO_BREAK_SPACES = new Set([0x00a0, 0x2007, 0x202f, 0x2060])
+
+function wordCount(bytes, ctx) {
+  const tables = classTables(ctx.locale)
+  let words = 0
+  let inWord = false
+  // The C locale reads bytes, where each one is a character of its own; a
+  // UTF-8 one reads the characters the bytes spell, and -1 for a byte that
+  // spells none, which no class holds.
+  for (const code of byteLocale(ctx) ? bytes : utf8CodePoints(bytes)) {
+    const printable = tables.has('print', code)
+    if (ASCII_BLANKS.has(code) || (printable && (tables.has('space', code) || NO_BREAK_SPACES.has(code)))) {
+      if (inWord) words++
+      inWord = false
+    } else if (printable) inWord = true
+  }
+  return inWord ? words + 1 : words
 }
 
 // A skipped field includes its leading blanks, leaving the next field’s blanks

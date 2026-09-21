@@ -1,5 +1,6 @@
 // Shared command I/O and numeric parsing; independent of the command registry.
 
+import { decodeUtf8Maybe, encodeUtf8, encodeUtf8Loose } from './bytes.js'
 import { lookup } from './fs.js'
 import { UINT64_MAX } from './numeric.js'
 import { err } from './result.js'
@@ -7,10 +8,11 @@ import { lookupWithNote } from './notes.js'
 
 // Commands reach the byte codec and the result shape through here, where the
 // rest of their shared helpers already live.
-export { encodeUtf8, encodeUtf8Loose, decodeUtf8 } from './bytes.js'
+export { encodeUtf8, encodeUtf8Loose, decodeUtf8, decodeUtf8Loose, decodeUtf8Maybe, utf8CodePoints } from './bytes.js'
+export { textOfFile } from './fs.js'
 export { err, ok, usage } from './result.js'
 export { discardedNotes, missingPathNote } from './notes.js'
-export { byteLocale } from './locale.js'
+export { byteLocale, classTables } from './locale.js'
 
 // Empty input has no lines; a trailing newline terminates the preceding line.
 export function splitLines(s, delimiter = '\n') {
@@ -44,16 +46,40 @@ export function consumeStdin(ctx, rest = '') {
 // Keep operand order and partial read failures; head/tail need directory entries
 // for banners even though they cannot read them. Repeated '-' shares one stream;
 // /dev/stdin reopens a regular file independently but shares a pipe's offset.
+//
+// `read` says what an operand is read as, for the commands that do not work in
+// text alone. `bytes` and `loose-bytes` hand back the bytes themselves — the
+// first as the file exactly has them, the second as a command only measuring
+// or slicing them reads a text file holding a lone surrogate — and the entry
+// then carries `bytes` and no `content`, so a command wanting text cannot
+// quietly read an empty string. `maybe-text` reads the text and leaves
+// `content` unset where the bytes spell none, for a command that answers for
+// such a file rather than refusing it.
 export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   const entries = []
   let stderr = ''
   let pipe = stdin
+  const read = options.read ?? 'text'
+  const bytes = read === 'bytes' || read === 'loose-bytes'
+  const field = bytes ? 'bytes' : 'content'
+  // Stdin arrives as text, so it raises the same encoding question a file's
+  // text does: strict where the bytes are kept, loose where they are measured.
+  const asRead = (text) => bytes ? (read === 'loose-bytes' ? encodeUtf8Loose(text) : encodeUtf8(text)) : text
+  const ofFile = (entry, path) => {
+    if (bytes) { entry.bytes = readBytesOf(ctx.fs, path, read === 'loose-bytes'); return }
+    if (read !== 'maybe-text') { entry.content = ctx.fs.readFile(path); return }
+    // A file whose bytes spell no text carries them instead, for the command
+    // that has something to say about such a file.
+    const spelled = readTextOrBytes(ctx.fs, path)
+    entry.content = spelled.text
+    if (spelled.text === undefined) entry.bytes = spelled.bytes
+  }
   for (const name of files) {
-    const entry = { name, content: '', kind: 'file' }
+    const entry = { name, [field]: asRead(''), kind: 'file' }
     let error
-    if (name === '/dev/stdin' && ctx.stdinFile) { ctx.io?.read(ctx.stdinHandle?.identity); entry.content = ctx.stdinOrigin }
+    if (name === '/dev/stdin' && ctx.stdinFile) { ctx.io?.read(ctx.stdinHandle?.identity); entry[field] = asRead(ctx.stdinOrigin) }
     else if (name === '-' || name === '/dev/stdin') {
-      entry.content = pipe
+      entry[field] = asRead(pipe)
       entry.shared = true
       pipe = ''
       consumeStdin(ctx)
@@ -63,7 +89,7 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
       else if (ctx.fs.isDir(found.path)) {
         entry.kind = 'dir'
         if (!options.noRead) error = 'Is a directory'
-      } else entry.content = ctx.fs.readFile(found.path)
+      } else ofFile(entry, found.path)
     }
     entries.push(entry)
     if (error) stderr += readFailure(cmd, name, error, entry.kind === 'dir')
@@ -93,10 +119,34 @@ export function readFailure(cmd, name, why, directory = false) {
   return `${cmd}: ${text}\n`
 }
 
+// A filesystem of a caller's own need not answer for bytes; the text it holds
+// is what it has, and what that text encodes to is the file. Nothing is what
+// a path that is no file has either way.
+export function readBytesOf(fs, path, loose = false) {
+  const bytes = fs.readBytes?.(path, loose)
+  if (bytes !== undefined) return bytes
+  const text = fs.readFile(path)
+  if (text !== undefined) return loose ? encodeUtf8Loose(text) : encodeUtf8(text)
+}
+
+// What a command reads when it answers for a file whose bytes spell no text
+// rather than refusing it: the text where there is one, and the bytes either
+// way. Text a file was declared with is its own, even where it has no
+// encoding at all — a lone surrogate is still the text that file holds.
+export function readTextOrBytes(fs, path) {
+  if (fs.isBytes?.(path) !== true) return { text: fs.readFile(path), bytes: undefined }
+  const bytes = fs.readBytes(path)
+  return { text: decodeUtf8Maybe(bytes), bytes }
+}
+
 export function readInputs(cmd, files, stdin, ctx, options) {
   if (files.length === 0) {
     consumeStdin(ctx)
-    const only = [{ name: null, content: stdin, kind: 'file' }]
+    // Stdin is text, so only a reader working in bytes pays for encoding it.
+    const read = options?.read
+    const asBytes = read === 'bytes' || read === 'loose-bytes'
+    const bytes = () => read === 'loose-bytes' ? encodeUtf8Loose(stdin) : encodeUtf8(stdin)
+    const only = [{ name: null, kind: 'file', ...asBytes ? { bytes: bytes() } : { content: stdin } }]
     return { inputs: only, entries: only, stderr: '', failed: false }
   }
   return readFilesFor(cmd, files, ctx, stdin, options)

@@ -4,6 +4,7 @@
 // not model would silently shrink the answer.
 
 import { basename, dirname, lookup, relativeTo, walkTree } from '../fs.js'
+import { readTextOrBytes } from '../util.js'
 import { parseArgs } from '../args.js'
 import { unsupported, unsupportedNote } from '../unsupported.js'
 import { ARGS, checkPatterns, patternArgs, rgOptions } from './rg-options.js'
@@ -46,6 +47,12 @@ export function rg(stdin, tokens, ctx) {
   // ripgrep's "binary file matches" line, which this runtime cannot produce.
   const binary = options.text ? null : namedBinary(operands, ctx)
   if (binary) return gap('named binary file', `${JSON.stringify(binary)} is binary, and reporting a binary match is not supported`)
+  // A file whose bytes spell no text is not binary to ripgrep — it looks for
+  // a NUL, not for an encoding — so it searches one and prints the bytes of
+  // any line that matches. This terminal can neither search nor print them,
+  // named or walked alike, and `--text` asks for the same bytes.
+  const unreadable = unreadableFile(operands, targets.roots, ctx)
+  if (unreadable) return gap('unreadable bytes', `${JSON.stringify(unreadable)} holds bytes that are not text, and searching them is not supported`)
   const marked = markedFile(operands, targets.roots, ctx)
   if (marked) return gap('byte-order mark', `${JSON.stringify(marked)} begins with a byte-order mark, which ripgrep strips before matching`)
   // ripgrep treats a run that opened nothing as a mistake rather than a miss,
@@ -128,14 +135,29 @@ function bites(path, mustBite, ctx) {
   // An ignore file reached through a link is the file that link names, which
   // is what ripgrep opens and reads its rules from.
   const found = lookup('/', path, ctx.fs).path
-  return (ctx.fs.readFile(found ?? path) ?? '').split('\n').some((line) => line.trim() !== '' && !line.trimStart().startsWith('#'))
+  // Rules this terminal cannot read are rules it cannot say change nothing.
+  const { text } = readTextOrBytes(ctx.fs, found ?? path)
+  return (text ?? ' ').split('\n').some((line) => line.trim() !== '' && !line.trimStart().startsWith('#'))
 }
 
 function namedBinary(operands, ctx) {
   for (const operand of operands) {
     const found = lookup(ctx.cwd, operand, ctx.fs)
     if (found.path === null || ctx.fs.isDir(found.path)) continue
-    if (ctx.fs.readFile(found.path)?.includes('\0')) return operand
+    const { text, bytes } = readTextOrBytes(ctx.fs, found.path)
+    if (bytes === undefined ? text?.includes('\0') : bytes.includes(0)) return operand
+  }
+  return null
+}
+
+// The first file, named or below a starting point, whose bytes spell no text.
+function unreadableFile(operands, roots, ctx) {
+  const named = operands.map((operand) => lookup(ctx.cwd, operand, ctx.fs).path).filter(Boolean)
+  const walked = roots.flatMap((root) => [...walkTree(ctx.fs, root)].filter((e) => e.kind === 'file').map((e) => e.path))
+  for (const path of [...named, ...walked]) {
+    if (!ctx.fs.isDir(path) && readTextOrBytes(ctx.fs, path).text === undefined) {
+      return relativeTo(ctx.cwd === '/' ? '/' : ctx.cwd, path) || path
+    }
   }
   return null
 }

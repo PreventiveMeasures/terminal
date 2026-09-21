@@ -1,7 +1,10 @@
 // Read-only source map with a directory index derived from file paths.
 // All internal lookups use normalized absolute paths.
 
-import { encodeUtf8 } from './util.js'
+// The byte codec directly rather than through util.js, which reaches back
+// here for its own lookups.
+import { decodeUtf8Maybe, encodeUtf8, encodeUtf8Loose } from './bytes.js'
+import { UnsupportedError } from './unsupported.js'
 
 export function normalize(path) {
   const absolute = path.startsWith('/')
@@ -197,13 +200,37 @@ export function createFs(sources, mount = '/') {
     isDir: (p) => childMap.has(p),
     isLink: (p) => links.has(p),
     readLink: (p) => links.get(p),
-    readFile: (p) => files.get(p),
+    // A file declared as bytes is read as the text they spell, which is what
+    // every command here works in; one whose bytes spell none is said to be
+    // what it is, rather than read as something it is not.
+    readFile: (p) => {
+      const content = files.get(p)
+      return content === undefined || typeof content === 'string' ? content : textOfFile(content, JSON.stringify(p))
+    },
+    // The file as it is stored, for the commands that work in bytes: what a
+    // copy carries, what a dump prints, and what decides that a search has
+    // met something it cannot read. A file declared as text has the bytes its
+    // text encodes to, and a lone surrogate encodes to none: a caller keeping
+    // those bytes is told so, while one only measuring or slicing them reads
+    // the replacement character each stands for, which is the byte count
+    // `wc -c` and `head -c` have always worked in.
+    readBytes: (p, loose = false) => {
+      const content = files.get(p)
+      if (typeof content !== 'string') return content
+      return loose ? encodeUtf8Loose(content) : encodeUtf8(content)
+    },
     // A link is as long as the path it holds, which is what the disk stores
     // of it and what `ls -l`, `du` and `stat` report for one.
     fileSize: (p) => childMap.has(p) ? undefined
       : links.has(p) ? encodeUtf8(links.get(p)).length
-        : files.has(p) ? encodeUtf8(files.get(p)).length : undefined,
-    sameFileContents: (a, b) => files.get(a) === files.get(b),
+        : files.has(p) ? contentSize(files.get(p)) : undefined,
+    sameFileContents: (a, b) => sameContents(files.get(a), files.get(b)),
+    // What a comparison may read of a file without asking it to be text.
+    exactBytes: (p) => exactBytes(files.get(p)),
+    // Whether a file is held as bytes rather than as text, which is what says
+    // that reading it as text may have no answer. Asking costs nothing, so a
+    // command that answers for such a file need not read one to find out.
+    isBytes: (p) => files.get(p) instanceof Uint8Array,
     listDir: (p) => {
       const entry = childMap.get(p)
       if (!entry) throw new Error(`not a directory: ${p}`)
@@ -214,20 +241,66 @@ export function createFs(sources, mount = '/') {
   return fs
 }
 
+// A file's length in bytes, which is what it is stored as when it was
+// declared as bytes and what its text encodes to when it was declared as one.
+const contentSize = (content) => typeof content === 'string' ? encodeUtf8(content).length : content.length
+
+// The bytes a file certainly has, for comparing one with another without
+// reading either as text: a file declared as bytes has them, and one declared
+// as text has what its text encodes to — unless that text holds a lone
+// surrogate, which encodes to nothing a comparison could be sure of.
+const exactBytes = (content) =>
+  typeof content === 'string' ? (content.isWellFormed() ? encodeUtf8(content) : undefined) : content
+
+// The text a file's bytes spell, where they spell one. A file that holds
+// bytes spelling no text has no reading as text at all: a command that works
+// in bytes asks for those instead, and one that cannot is told which file it
+// is rather than handed a mangling of it. Text cut apart mid-character is the
+// codec's own gap and stays there. `label` names the file as the caller shows
+// one, which is the quoted path here and the operand where a command reads it.
+export function textOfFile(bytes, label, doing = 'reading them as text') {
+  const text = decodeUtf8Maybe(bytes)
+  if (text === undefined) {
+    throw new UnsupportedError('feature', 'binary file', `${label} holds bytes that spell no text, and ${doing} is not supported`)
+  }
+  return text
+}
+
+export const sameBytes = (left, right) =>
+  left !== undefined && right !== undefined && left.length === right.length && left.every((byte, i) => byte === right[i])
+
+// Informational comparisons must not throw, so two files are compared as the
+// bytes they hold rather than as the text they may not spell. Two files of
+// text are still compared as text: one whose text has no bytes is not the
+// same file as one that is bytes, and saying so needs no encoding at all.
+function sameContents(a, b) {
+  if (a === undefined || b === undefined) return false
+  if (typeof a === 'string' && typeof b === 'string') return a === b
+  return sameBytes(exactBytes(a), exactBytes(b))
+}
+
 function sourceEntries(sources) {
   // A Map from another realm has the same internal storage but fails instanceof.
   try { return Map.prototype.entries.call(sources) } catch { return Object.entries(sources ?? {}) }
 }
 
-// A source value is the file's contents, or an object saying what the entry is
-// where a string cannot spell it — today a symbolic link, `{ type: 'link',
-// target }`. A value that declares neither stays ignored, as every non-string
-// value was before links existed; one that says `type` or `target` is a
-// deliberate declaration, so a misspelled one is refused rather than dropped
-// into a tree where the entry would simply not be there.
+// A source value is the file's contents — text, or the bytes of one a string
+// cannot spell — or an object saying what the entry is where neither can:
+// today a symbolic link, `{ type: 'link', target }`. A value that declares
+// neither stays ignored, as every non-string value was before links existed;
+// one that says `type` or `target` is a deliberate declaration, so a
+// misspelled one is refused rather than dropped into a tree where the entry
+// would simply not be there.
 function sourceEntry(value, key) {
   if (typeof value === 'string') return { content: value }
+  // A `Uint8Array` — or any other one-byte view, `Buffer` among them — is the
+  // file's bytes. They are copied, so the tree a terminal was made with is
+  // the tree it keeps however the caller goes on to use the array.
+  if (ArrayBuffer.isView(value)) return { content: byteContent(value, key) }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+  if (value instanceof ArrayBuffer) {
+    throw new TypeError(`createTerminal: source ${JSON.stringify(key)} is an ArrayBuffer; declare a file's bytes as a Uint8Array over it`)
+  }
   if (value.type === undefined && value.target === undefined) return null
   const name = JSON.stringify(key)
   if (value.type !== 'link') {
@@ -238,6 +311,16 @@ function sourceEntry(value, key) {
     throw new TypeError(`createTerminal: link ${name} must declare a non-empty target without NUL characters`)
   }
   return { link: target }
+}
+
+// Only a view of single bytes says what a file holds: a wider one would be
+// element order, not file order, and which of the two was meant is not this
+// map's to guess.
+function byteContent(value, key) {
+  if (value.BYTES_PER_ELEMENT !== 1) {
+    throw new TypeError(`createTerminal: source ${JSON.stringify(key)} is a ${value[Symbol.toStringTag] ?? 'view'}; declare a file's bytes as a Uint8Array`)
+  }
+  return new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice()
 }
 
 // Iterative depth-first traversal. Yield before consulting shouldDescend so
