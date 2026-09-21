@@ -23,13 +23,21 @@ const BUILTIN_COMMANDS = { __proto__: null, sed, egrep: grepAlias('egrep', '-E')
 const SHELL_ONLY = new Set(['cd', ':', ...Object.keys(SHELL_BUILTINS)])
 const isBuiltin = (name) => Boolean(BUILTIN_COMMANDS[name])
 
+// Registered with the announced commands, and announced with the unannounced
+// ones: a hint is for someone who has just been told a name is not a command,
+// and splitting a path, making a link or writing a file is not what they were
+// reaching for. What the list keeps is what someone looking around a tree
+// reaches for.
+const UNANNOUNCED_NAMES = new Set(['basename', 'cp', 'dirname', 'ln', 'patch', 'rm', 'touch'])
+const ANNOUNCED = Object.fromEntries(Object.entries(VISIBLE_COMMANDS).filter(([name]) => !UNANNOUNCED_NAMES.has(name)))
+
 // Priority for completion/help; unlisted builtins follow in sorted order.
 const COMMAND_ORDER = [
   'ls', 'cd', 'cat', 'grep', 'rg', 'find',
   'head', 'tail', 'wc', 'tree', 'du', 'stat', 'realpath',
   'sort', 'uniq', 'cut', 'tr', 'awk', 'nl', 'tac', 'hexdump', 'base64',
-  'xargs', 'echo', 'printf', 'test', 'cp', 'rm', 'mkdir', 'touch', 'ln', 'diff', 'patch',
-  'pwd', 'seq', 'which', 'basename', 'dirname',
+  'xargs', 'echo', 'printf', 'test', 'mkdir', 'diff',
+  'pwd', 'seq', 'which',
 ]
 // Announced or not, a command is a command to complete: what a terminal
 // offers is what it has, and the list in `command not found` is the shorter
@@ -37,9 +45,9 @@ const COMMAND_ORDER = [
 // so a prefix both answer to offers the everyday one first. The shell's own
 // builtins stay out of it: `cd` is announced with the rest, and the others
 // are the shell's syntax rather than something a terminal hands out.
-const UNANNOUNCED = Object.keys(BUILTIN_COMMANDS).filter((name) => !SHELL_ONLY.has(name) && !Object.hasOwn(VISIBLE_COMMANDS, name)).sort()
+const UNANNOUNCED = Object.keys(BUILTIN_COMMANDS).filter((name) => !SHELL_ONLY.has(name) && !Object.hasOwn(ANNOUNCED, name)).sort()
 // The unannounced readers, which belong after a pipe as the announced ones do.
-const UNANNOUNCED_PIPE = new Set(['base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat'])
+const UNANNOUNCED_PIPE = new Set(['base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat'])
 const BUILTIN_NAMES = orderedCommandNames()
 
 // Only commands that consume stdin are offered after a pipe.
@@ -50,7 +58,7 @@ const PIPE_NAMES = [
 ]
 
 function orderedCommandNames() {
-  const remaining = new Set(Object.keys(VISIBLE_COMMANDS))
+  const remaining = new Set(Object.keys(ANNOUNCED))
   const out = []
   for (const name of COMMAND_ORDER) {
     if (remaining.delete(name)) out.push(name)

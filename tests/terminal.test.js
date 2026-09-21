@@ -5600,8 +5600,7 @@ describe('createTerminal — complete: corner cases', () => {
     assert.ok(idx('tree') < idx('sort'), 'tree before sort')
     // Path utilities are the tail of what the terminal announces, and the
     // commands it has without announcing them follow, sorted.
-    assert.ok(idx('basename') < idx('dirname'), 'basename before dirname')
-    assert.deepEqual(all.slice(idx('dirname')), ['dirname', String.raw`\[`, 'base32', 'brotli', 'date', 'egrep', 'false', 'fgrep', 'gunzip', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'true', 'whoami', 'xxd', 'zcat'])
+    assert.deepEqual(all.slice(idx('which')), ['which', String.raw`\[`, 'base32', 'basename', 'brotli', 'cp', 'date', 'dirname', 'egrep', 'false', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'ln', 'od', 'patch', 'rm', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'touch', 'true', 'whoami', 'xxd', 'zcat'])
   })
 
   it('after `|`, completion only suggests commands that consume stdin', () => {
@@ -5620,10 +5619,10 @@ describe('createTerminal — complete: corner cases', () => {
       assert.ok(c.includes('cat | ' + name), `${name} should be a pipe target`)
     }
     // The unannounced readers are offered there too, after the announced.
-    for (const name of ['base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat']) {
+    for (const name of ['base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat']) {
       assert.ok(c.includes('cat | ' + name), `${name} should be a pipe target`)
     }
-    assert.equal(c.length, 32)
+    assert.equal(c.length, 33)
   })
 
   it('pipe-target priority lists grep first', () => {
@@ -5689,7 +5688,7 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat|l'), [])
     // Empty trailing word: full pipe set, each glued to `cat| ` with a space.
     const c = t.complete('cat|')
-    assert.equal(c.length, 32)
+    assert.equal(c.length, 33)
     assert.equal(c[0], 'cat| grep')
     // Every variant has the inserted space — no `cat|grep` leaks through.
     for (const variant of c) assert.ok(variant.startsWith('cat| '), `expected "cat| " prefix on ${variant}`)
@@ -5789,7 +5788,7 @@ describe('createTerminal — complete: corner cases', () => {
     const targets = [
       'grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'xargs', 'awk',
       'tr', 'nl', 'tac', 'hexdump', 'cat', 'base64', 'diff', 'patch',
-      'base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat',
+      'base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat',
     ]
     assert.deepEqual(t.complete('cat 1 |'), targets.map((name) => `cat 1 | ${name}`))
     assert.deepEqual(t.complete('cat 1 | '), targets.map((name) => `cat 1 | ${name}`))

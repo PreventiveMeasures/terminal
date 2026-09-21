@@ -16,17 +16,20 @@ import { compressBytes, decompressBytes, formatUsable } from '../compression.js'
 
 const FORMAT = 'gzip'
 
-// GNU ships one program under three names: `gunzip` is it decompressing and
-// `zcat` is it decompressing to stdout, which is why both say `gzip:` of what
-// they cannot read. They are here the same way — the same command, reached by
-// the name that says what it is for.
+// One program under several names, which is what GNU ships: `gunzip` is it
+// decompressing — `exec gzip -d` — and `zcat` is it decompressing to stdout,
+// `exec gzip -cd`, which is why both say `gzip:` of what they cannot read.
+// `gzcat` is the name the BSDs give what GNU calls `zcat`, theirs having kept
+// `zcat` for the older `.Z`; it is the same thing, and it is that here. They
+// are all here the same way — one command, reached by the name that says what
+// it is for.
 const gunzip = (stdin, tokens, ctx) => gzip(stdin, ['-d', ...tokens], ctx)
 const zcat = (stdin, tokens, ctx) => gzip(stdin, ['-d', '-c', ...tokens], ctx)
 
 // Only where the runtime's streams know the format: a terminal whose streams
 // do not is a terminal without the command, which is what it was before this
 // one was written.
-export const GZIP = formatUsable(FORMAT) ? { gzip, gunzip, zcat } : {}
+export const GZIP = formatUsable(FORMAT) ? { gzip, gunzip, zcat, gzcat: zcat } : {}
 
 // A gzip member starts with these two, whatever follows.
 const MAGIC = Object.freeze([0x1f, 0x8b])

@@ -63,7 +63,7 @@ describe('gzip decompresses what a runtime inflated for it', () => {
     assert.match(missing.stderr, /command not found\. Available: /u)
     assert.doesNotMatch(missing.stderr, /gzip/u)
     assert.deepEqual(t.complete('gzi'), ['gzip'])
-    assert.deepEqual(t.complete('cat data.gz | gz'), ['cat data.gz | gzip'])
+    assert.deepEqual(t.complete('cat data.gz | gz'), ['cat data.gz | gzcat', 'cat data.gz | gzip'])
   })
 
   it('says what GNU says of what is not a member', async () => {
@@ -238,14 +238,16 @@ describe('gunzip and zcat are gzip under the names it also answers to', () => {
     const t = terminal()
     assert.deepEqual(t.complete('gun'), ['gunzip'])
     assert.deepEqual(t.complete('zc'), ['zcat'])
-    assert.deepEqual(t.complete('gz'), ['gzip'])
+    // `gzcat` sorts before `gzip`, both after `gunzip`.
+    assert.deepEqual(t.complete('gz'), ['gzcat', 'gzip'])
+    assert.deepEqual(t.complete('gzc'), ['gzcat'])
     // Readers, so pipe targets, as gzip is.
-    for (const name of ['gzip', 'gunzip', 'zcat']) {
+    for (const name of ['gzip', 'gunzip', 'zcat', 'gzcat']) {
       assert.ok(t.complete('cat | ').includes(`cat | ${name}`), name)
     }
-    // None of the three is announced: the hint stays the everyday list.
+    // None of the four is announced: the hint stays the everyday list.
     const hint = (await t.run('nope')).unsupported[0].message
-    for (const name of ['gzip', 'gunzip', 'zcat']) {
+    for (const name of ['gzip', 'gunzip', 'zcat', 'gzcat']) {
       assert.ok(!hint.includes(name), name)
     }
   })
