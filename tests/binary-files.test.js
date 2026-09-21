@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 import { createFs } from '../src/fs.js'
 import { encodeUtf8 } from '../src/util.js'
+import { toBase64 } from '@exodus/bytes/base64.js'
 
 // A file need not be text: a source value that is a `Uint8Array` is the bytes
 // themselves, for the files no JS string can spell — an image, a compiled
@@ -120,6 +121,82 @@ describe('a source entry can be the bytes of a file', () => {
   it('takes a Map of sources as readily as an object', () => {
     const t = terminal(new Map([['img.png', PNG], ['a/b.txt', 'x\n']]))
     check(t, 'wc -c img.png a/b.txt', '19 img.png\n 2 a/b.txt\n21 total\n')
+  })
+})
+
+// The same file, spelt in base64: what a tree serialized as text carries. It
+// is checked for its spelling when the terminal is made and decoded the first
+// time it is read, and from then on it is the bytes it spells.
+describe('a source entry can be the bytes of a file spelt in base64', () => {
+  const encoded = (bytes) => ({ format: 'base64', data: toBase64(bytes) })
+  const B64 = { 'img.png': encoded(PNG), 'latin.bin': encoded(LATIN), 'bytes.txt': encoded(encodeUtf8('spelled by bytes\n')), empty: encoded(new Uint8Array()) }
+
+  it('is the file its bytes are, to everything that reads, measures or copies one', () => {
+    const t = terminal(B64, { writable: '/tmp/' })
+    check(t, 'base64 img.png', 'iVBORw0KGgoAAAANSUhEUv/+Cg==\n')
+    check(t, 'wc -c img.png latin.bin bytes.txt empty', '19 img.png\n16 latin.bin\n17 bytes.txt\n 0 empty\n52 total\n')
+    check(t, 'cat bytes.txt', 'spelled by bytes\n')
+    check(t, 'xxd -l 4 img.png', '00000000: 8950 4e47                                .PNG\n')
+    check(t, 'stat -c %s img.png; du -b img.png; find . -empty', '19\n19\timg.png\n./empty\n')
+    check(t, 'cp img.png /tmp/copy.png; diff img.png /tmp/copy.png && echo same', 'same\n')
+    gap(t, 'cat img.png', 'binary file', `cat: ${unreadable('img.png')}`)
+    check(t, 'grep -c oak img.png latin.bin', 'img.png:0\nlatin.bin:0\n', { exitCode: 1 })
+  })
+
+  it('is the same file as the bytes, and as the string, that spell it', () => {
+    const t = createTerminal({ 'a.png': PNG, 'b.png': encoded(PNG), 'c.txt': 'spelled\n', 'd.txt': encoded(encodeUtf8('spelled\n')) }, { mount: '/repo' })
+    check(t, 'diff a.png b.png && diff c.txt d.txt && echo same', 'same\n')
+    check(t, 'cp b.png b.png', '', { stderr: "cp: 'b.png' and 'b.png' are the same file\n", exitCode: 1 })
+    assert.equal(createFs({ b: encoded(PNG) }).sameFileContents('/b', '/b'), true)
+  })
+
+  it('is sized by its spelling, padded or not, before it is ever decoded', () => {
+    const fs = createFs({ one: { format: 'base64', data: 'AQ==' }, bare: { format: 'base64', data: 'AQI' }, three: { format: 'base64', data: 'AQID' }, none: { format: 'base64', data: '' } })
+    assert.deepEqual(['/one', '/bare', '/three', '/none'].map((p) => fs.fileSize(p)), [1, 2, 3, 0])
+    assert.deepEqual(['/one', '/none'].map((p) => fs.isEmptyFile(p)), [false, true])
+    assert.equal(fs.isBytes('/one'), true)
+    assert.deepEqual(Array.from(fs.readBytes('/bare')), [1, 2])
+    assert.deepEqual(Array.from(fs.readBytes('/one')), [1])
+  })
+
+  it('takes a Map of sources, and reads through a link', () => {
+    const t = createTerminal(new Map([['img.png', encoded(PNG)], ['link.png', { type: 'link', target: 'img.png' }]]), { mount: '/repo' })
+    check(t, 'wc -c link.png; base64 link.png', '19 link.png\niVBORw0KGgoAAAANSUhEUv/+Cg==\n')
+  })
+
+  it('reports a spelling that does not decode to the first reader, not when the terminal is made', () => {
+    // Checking a spelling costs more than decoding it, so nothing is checked
+    // until a reader needs the bytes; what needs none — the listing, the size
+    // from the spelling's length — is answered as ever, and a reader is told
+    // which file it is, on stderr and on the feed, as for a binary file.
+    for (const data of ['AQ ID', 'AQID\n', 'AQ=D', 'AR==', 'AQI=x', '!!!!', 'AQID====', 'A']) {
+      const t = terminal({ f: { format: 'base64', data }, 'ok.txt': 'fine\n' }, { writable: '/tmp/' })
+      check(t, 'ls; cat ok.txt', 'f\nok.txt\nfine\n')
+      const message = '"/repo/f" declares base64 that does not decode, so its bytes cannot be read'
+      gap(t, 'cat f', 'base64 source', `cat: ${message}\n`)
+      for (const command of ['base64 f', 'wc -c f', 'cp f /tmp/copy', 'diff f ok.txt', 'grep -c x f']) {
+        const result = t.run(command)
+        assert.deepEqual(result.unsupported.map((u) => u.detail), ['base64 source'], `${command} for ${JSON.stringify(data)}`)
+        assert.match(result.stderr, /declares base64 that does not decode/u, command)
+        assert.notEqual(result.exitCode, 0, command)
+      }
+      check(t, 'ls /tmp')
+    }
+    assert.throws(() => terminal({ f: { format: 'hex', data: '01' } }), /source "f" declares format "hex"; the only format is \{ format: 'base64', data \}/u)
+    // A comparison never throws: where a hint weighs two paths a missing name
+    // could have meant, a spelling that does not decode is a file no other is
+    // the same as, and the command's own error is the one reported.
+    const weighed = { file: { format: 'base64', data: '!!!!' }, 'home/file': 'x\n', 'sub/keep': '' }
+    const note = 'cat: relative path "file" was not found from cwd "/repo/sub". Both of "/repo/file" and "/repo/home/file" exist, and they differ in contents.'
+    for (const writable of [undefined, '/tmp/']) {
+      const t = createTerminal(weighed, { mount: '/repo', home: '/repo/home', cwd: '/repo/sub', writable })
+      check(t, 'cat file', '', { stderr: 'cat: file: No such file or directory\n', exitCode: 1, cwd: '/repo/sub', notes: [note] })
+    }
+    // `data` alone is a declaration with its format left off, not a value to
+    // pass over: the file would otherwise simply not be there.
+    assert.throws(() => terminal({ f: { data: 'AQ==' } }), /source "f" declares format null; the only format is \{ format: 'base64', data \}/u)
+    assert.throws(() => terminal({ f: { format: 'base64', data: PNG } }), /source "f" must declare its base64 as a string in `data`/u)
+    assert.throws(() => terminal({ f: { format: 'base64' } }), /source "f" must declare its base64 as a string in `data`/u)
   })
 })
 
