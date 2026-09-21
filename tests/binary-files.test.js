@@ -84,6 +84,33 @@ describe('a source entry can be the bytes of a file', () => {
     check(t, 'wc bytes.txt', ' 1  3 17 bytes.txt\n')
     check(t, 'diff bytes.txt bytes.txt')
   })
+
+  it('is read by every filter as the text it spells', () => {
+    const t = terminal({ 'lines.bin': encodeUtf8('beta\nalpha\nbeta\n') })
+    check(t, 'head -c4 lines.bin', 'beta', { notes: ['head: selected 4 of 16 bytes from "/repo/lines.bin".'] })
+    check(t, 'sort lines.bin', 'alpha\nbeta\nbeta\n')
+    check(t, 'sort -u lines.bin', 'alpha\nbeta\n')
+    check(t, 'uniq lines.bin', 'beta\nalpha\nbeta\n')
+    check(t, 'cut -c1-3 lines.bin', 'bet\nalp\nbet\n')
+    check(t, 'tr a-z A-Z < lines.bin', 'BETA\nALPHA\nBETA\n')
+    check(t, 'sed s/beta/BETA/ lines.bin', 'BETA\nalpha\nBETA\n')
+    check(t, 'nl lines.bin', '     1\tbeta\n     2\talpha\n     3\tbeta\n')
+    check(t, 'tac lines.bin', 'beta\nalpha\nbeta\n')
+    check(t, 'awk "{ print NR }" lines.bin', '1\n2\n3\n')
+    check(t, 'wc -m lines.bin', '16 lines.bin\n')
+  })
+
+  it('is the same file as the string that spells it', () => {
+    const t = terminal({ 'same.txt': 'twinned\n', 'twin.bin': encodeUtf8('twinned\n') })
+    check(t, 'cat twin.bin', 'twinned\n')
+    check(t, 'diff same.txt twin.bin')
+    check(t, 'diff -s same.txt twin.bin', 'Files same.txt and twin.bin are identical\n')
+  })
+
+  it('takes a Map of sources as readily as an object', () => {
+    const t = terminal(new Map([['img.png', PNG], ['a/b.txt', 'x\n']]))
+    check(t, 'wc -c img.png a/b.txt', '19 img.png\n 2 a/b.txt\n21 total\n')
+  })
 })
 
 describe('what a file of bytes answers without being read as text', () => {
@@ -95,7 +122,32 @@ describe('what a file of bytes answers without being read as text', () => {
     check(t, 'du -b img.png', '19\timg.png\n')
     check(t, 'find . -empty', './empty\n')
     check(t, 'test -e img.png && echo yes', 'yes\n')
+    check(t, 'test -f img.png && echo yes', 'yes\n')
     check(t, 'ls', 'bytes.txt\nempty\nimg.png\nlatin.bin\ntext.txt\n')
+    check(t, 'stat -c "%s %n" img.png empty', '19 img.png\n0 empty\n')
+    check(t, 'find . -type f -name "*.bin"', './latin.bin\n')
+    check(t, 'wc -c img.png text.txt empty', '19 img.png\n20 text.txt\n 0 empty\n39 total\n')
+  })
+
+  it('slices its bytes for a dump and wraps them for base64', () => {
+    const t = terminal()
+    check(t, 'xxd -s 4 -l 4 img.png', '00000004: 0d0a 1a0a                                ....\n')
+    check(t, 'xxd -l 3 img.png', '00000000: 8950 4e                                  .PN\n')
+    check(t, 'hexdump -n 4 -C img.png', '00000000  89 50 4e 47                                       |.PNG|\n00000004\n')
+    check(t, 'hexdump -s 16 -C img.png', '00000010  ff fe 0a                                          |...|\n00000013\n')
+    check(t, 'base64 -w 8 img.png', 'iVBORw0K\nGgoAAAAN\nSUhEUv/+\nCg==\n')
+    check(t, 'base64 empty')
+  })
+
+  it('answers a walk of a tree that holds one', () => {
+    const t = terminal({
+      'dir/inner.png': Uint8Array.of(0, 1, 2), 'dir/inner.txt': 'inner\n',
+      'other/inner.png': Uint8Array.of(0, 1, 3), 'other/inner.txt': 'inner\n',
+    })
+    check(t, 'diff -r dir other', 'Binary files dir/inner.png and other/inner.png differ\n', { exitCode: 1 })
+    check(t, 'diff -q -r dir other', 'Files dir/inner.png and other/inner.png differ\n', { exitCode: 1 })
+    check(t, 'du -b .', '9\t./dir\n9\t./other\n18\t.\n')
+    check(t, 'du -bs dir', '9\tdir\n')
   })
 
   it('counts its lines and words as GNU does, and refuses to guess its characters', () => {
@@ -121,6 +173,9 @@ describe('what a file of bytes answers without being read as text', () => {
     check(t, 'diff img.png text.txt', 'Binary files img.png and text.txt differ\n', { exitCode: 1 })
     check(t, 'diff -q img.png text.txt', 'Files img.png and text.txt differ\n', { exitCode: 1 })
     check(t, 'diff -s img.png img.png', 'Files img.png and img.png are identical\n')
+    // `-N` stands the empty file in for a name that is not there, and a file
+    // of bytes differs from it as it does from any other.
+    check(t, 'diff -N img.png missing.png', 'Binary files img.png and missing.png differ\n', { exitCode: 1 })
     // `-a` asks for the bytes themselves as the diff, which is the printing
     // this terminal cannot do.
     gap(t, 'diff -a img.png text.txt', 'binary file', `diff: ${JSON.stringify('img.png')} holds bytes that spell no text, and reading them as text is not supported\n`)
@@ -167,6 +222,11 @@ describe('what a file of bytes cannot be read as', () => {
     const t = terminal(SOURCES, { commands })
     check(t, 'probe img.png text.txt missing', 'img.png true 19\ntext.txt false 20\nmissing false undefined\n')
     gap(t, 'show img.png', 'binary file', `show: ${unreadable('img.png')}`)
+    // Reading operands the ordinary way reads them as text, which such a file
+    // refuses as it refuses every other reader.
+    const reader = terminal(SOURCES, { commands: { read: (io) => io.readInputs(io.args).inputs.map((input) => input.content).join('') } })
+    check(reader, 'read text.txt', 'spelled by a string\n')
+    gap(reader, 'read img.png', 'binary file', `read: ${unreadable('img.png')}`)
   })
 })
 
@@ -183,6 +243,20 @@ describe('searching a tree that holds files of bytes', () => {
     check(t, 'grep -i SPELLED text.txt img.png', 'text.txt:spelled by a string\n')
     check(t, 'grep -w spelled text.txt img.png', 'text.txt:spelled by a string\n')
     check(t, 'grep -x spelled text.txt img.png', '', { exitCode: 1 })
+  })
+
+  it('answers every output mode for a file a literal cannot be in', () => {
+    const t = terminal()
+    check(t, 'grep -q spelled text.txt img.png')
+    check(t, 'grep -o spelled text.txt img.png', 'text.txt:spelled\n')
+    check(t, 'grep -m1 spelled text.txt img.png', 'text.txt:spelled by a string\n')
+    check(t, 'grep -A1 spelled text.txt img.png', 'text.txt:spelled by a string\n')
+    check(t, 'grep -e spelled -e zzz text.txt img.png', 'text.txt:spelled by a string\n')
+    check(t, 'grep -h spelled text.txt img.png', 'spelled by a string\n')
+    check(t, 'grep -rc spelled .', './bytes.txt:1\n./empty:0\n./img.png:0\n./latin.bin:0\n./text.txt:1\n')
+    const excluded = (n, ...paths) => [`grep: excluded ${n} entries by --include/--exclude/--exclude-dir rules: ${paths.map((path) => JSON.stringify('/repo/' + path)).join(', ')}.`]
+    check(t, "grep --include='*.txt' -r spelled .", './bytes.txt:spelled by bytes\n./text.txt:spelled by a string\n', { notes: excluded(3, 'empty', 'img.png', 'latin.bin') })
+    check(t, "grep -rn --exclude='*.png' --exclude='*.bin' spelled .", './bytes.txt:1:spelled by bytes\n./text.txt:1:spelled by a string\n', { notes: excluded(2, 'img.png', 'latin.bin') })
   })
 
   it('refuses where the bytes could hold what was asked for', () => {
@@ -203,11 +277,71 @@ describe('searching a tree that holds files of bytes', () => {
     check(t, 'grep -Ic IHDR img.png text.txt', 'img.png:0\ntext.txt:0\n', { exitCode: 1, notes: skipped })
   })
 
+  it('is left out of an rg walk where ripgrep would not open it', () => {
+    // A hidden file is neither searched nor refused over: ripgrep never opens
+    // one without `--hidden`, and what it never opens it never answers for.
+    const files = { '.hidden.bin': LATIN, '.git/index': LATIN, 'a.txt': 'hello there\n', 'sub/b.txt': 'hello again\n' }
+    const t = terminal(files)
+    check(t, 'rg hello .', './a.txt:hello there\n./sub/b.txt:hello again\n', {
+      notes: ['rg: skipped 2 hidden entries: "/repo/.git", "/repo/.hidden.bin". Hidden entries are searched with --hidden.'],
+    })
+    check(t, 'rg hello sub', 'sub/b.txt:hello again\n')
+    // Asked for, it is opened, and then it is a file that cannot be searched.
+    gap(t, 'rg --hidden hello .', 'unreadable bytes', `rg: ${JSON.stringify('.git/index')} holds bytes that are not text, and searching them is not supported\n`)
+    gap(t, 'rg hello .hidden.bin', 'unreadable bytes', `rg: ${JSON.stringify('.hidden.bin')} holds bytes that are not text, and searching them is not supported\n`)
+  })
+
   it('is what rg reads as neither text nor a binary match', () => {
     const t = terminal()
     // A NUL is what ripgrep calls binary, and an encoding it cannot read is
     // what this terminal cannot search: the two are answered apart.
     gap(t, 'rg spelled img.png', 'named binary file', `rg: ${JSON.stringify('img.png')} is binary, and reporting a binary match is not supported\n`)
     gap(t, 'rg spelled latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
+  })
+})
+
+describe('a file of bytes and the writable overlay', () => {
+  const overlay = () => terminal(SOURCES, { writable: '/tmp/' })
+
+  it('copies its bytes in, and takes writes on top of them', () => {
+    const t = overlay()
+    check(t, 'cp img.png /tmp/copy')
+    check(t, 'wc -c /tmp/copy', '19 /tmp/copy\n')
+    check(t, 'base64 /tmp/copy', 'iVBORw0KGgoAAAANSUhEUv/+Cg==\n')
+    check(t, 'cat text.txt >> /tmp/copy')
+    check(t, 'wc -c /tmp/copy', '39 /tmp/copy\n')
+    // What was written is still bytes that spell no text, and says so.
+    gap(t, 'cat /tmp/copy', 'binary file', `cat: ${JSON.stringify('/tmp/copy')} holds bytes that spell no text, and reading them as text is not supported\n`)
+    check(t, 'rm /tmp/copy && ls /tmp')
+  })
+
+  it('replaces what a name held, and refuses to copy a file onto itself', () => {
+    const t = overlay()
+    check(t, 'cp text.txt /tmp/one && wc -c /tmp/one', '20 /tmp/one\n')
+    check(t, 'cp img.png /tmp/one && wc -c /tmp/one', '19 /tmp/one\n')
+    check(t, 'cp -n bytes.txt /tmp/one && wc -c /tmp/one', '19 /tmp/one\n')
+    check(t, 'cp img.png img.png', '', { stderr: "cp: 'img.png' and 'img.png' are the same file\n", exitCode: 1 })
+  })
+
+  it('is text again in the overlay where its bytes spell text', () => {
+    const t = overlay()
+    check(t, 'cp bytes.txt /tmp/b && cat /tmp/b', 'spelled by bytes\n')
+    check(t, 'cp bytes.txt /tmp/c && sed -i s/bytes/BYTES/ /tmp/c && cat /tmp/c', 'spelled by BYTES\n')
+  })
+
+  it('is compared by its bytes where a hint weighs two paths', () => {
+    // The hint that names both paths says whether they differ, which it must
+    // answer without reading either as text — a file of bytes has none.
+    const note = (differ) => [`cat: relative path "tmp/file" was not found from cwd "/repo/sub". Both of "/repo/tmp/file" and "/tmp/file" exist${differ ? ', and they differ in contents' : ''}.`]
+    for (const [mounted, copied, differ] of [
+      [PNG, PNG, false],
+      [PNG, LATIN, true],
+      [encodeUtf8('same\n'), 'same\n', false],
+      [encodeUtf8('same\n'), 'other\n', true],
+    ]) {
+      const t = createTerminal({ 'tmp/file': mounted, 'sub/keep': '', overlay: copied }, { mount: '/repo', cwd: '/repo/sub', writable: '/tmp/' })
+      assert.equal(t.run('cp /repo/overlay /tmp/file').exitCode, 0)
+      assert.deepEqual(t.run('cat tmp/file').notes, note(differ))
+    }
   })
 })
