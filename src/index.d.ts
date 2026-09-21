@@ -1,5 +1,3 @@
-import type { ParseResult, Summary } from './parse.js'
-
 /**
  * What a source entry is where a string cannot say it. Today that is a
  * symbolic link: `{ type: 'link', target }` holds the path the link carries,
@@ -321,9 +319,10 @@ export interface RunResult {
 }
 
 /**
- * The parser's own vocabulary, shared with the `@preventive/terminal/parse.js`
- * entry point: what {@link Terminal.parse} hands back, and the nodes it is
- * made of.
+ * The parser's own vocabulary, re-exported from the
+ * `@preventive/terminal/parse.js` entry point: what `parse(line)` hands back,
+ * and the nodes it is made of. Reading a line is that entry point's alone — a
+ * terminal runs one.
  */
 export type {
   ArithmeticPart,
@@ -445,44 +444,6 @@ export interface Terminal {
    * @throws if `opts.cwd` does not resolve to an existing directory.
    */
   fork(opts?: ForkOptions): Terminal
-  /**
-   * Read a command line without running any of it: whether it parses, whether
-   * it is merely unfinished, the diagnostic if it is neither, and the commands
-   * it holds — enough to read its arguments, render it, or run it elsewhere.
-   * Nothing is executed and nothing changes: not the working directory, the
-   * variables, or the `/tmp/` overlay.
-   *
-   * The same reading as the `@preventive/terminal/parse.js` entry point, which
-   * needs no terminal, plus the one thing only a terminal knows: a redirect
-   * this filesystem would refuse is reported here as the gap `run()` reports.
-   */
-  parse(line: string): ParseResult
-  /**
-   * What the line runs, at a glance: one {@link Chain} per command, each
-   * holding its pipeline stages' `argv` and its redirects as written, with
-   * `&&` and `||` standing between the chains they gate and `&` after the one
-   * it hands to the background. It reports what the
-   * line does rather than how it was spelled, so whatever feeds a command is
-   * the command that feeds it: `wc < 1.txt` summarizes as
-   * `[['cat', '1.txt'], ['wc']]`, and `cat > notes.md <<EOF … EOF` as
-   * `[['echo', '…'], ['>', 'notes.md']]`, the pass-through `cat` left out.
-   *
-   * A token is text, a {@link PatternPart} or {@link VariablePart}, the
-   * {@link ShellToken} whose output a word will be, the {@link TokenParts}
-   * those join into — a `~` among them, which reads as the `$HOME` it names —
-   * or the {@link AssignmentsToken} a command carries. It
-   * throws rather than summarize what it cannot: a line
-   * that does not parse (including a redirect this filesystem would refuse),
-   * an `if` or `[[ … ]]`, a `!`, a
-   * here-document whose delimiter leaves its body to expand, an operand or a
-   * sum that would run a command behind a reader, a stage reading
-   * its own input from inside a pipeline, or a word a command has to run before
-   * its text is known.
-   * {@link Terminal.parse} reads those.
-   *
-   * @throws if the line does not parse, or holds anything but simple chains.
-   */
-  summarize(line: string): Summary
 }
 
 /**

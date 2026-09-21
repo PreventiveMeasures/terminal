@@ -1,10 +1,15 @@
 # The parser
 
-Every line a terminal runs it reads first, and the reading is available on its
+Every line a terminal runs it reads first, and that reading is published on its
 own: `parse(line)` hands back the commands a line holds and runs none of them,
-`summarize(line)` is the short answer for a line that stays simple, and
-`@preventive/terminal/parse.js` publishes both for a caller with no terminal at
-all.
+and `summarize(line)` is the short answer for a line that stays simple. Both
+come from `@preventive/terminal/parse.js`, which needs no terminal — no source
+tree, no mount, no commands. Reading a line is that entry point's; running one
+is a terminal's.
+
+```js
+import { parse, summarize } from '@preventive/terminal/parse.js'
+```
 
 ## Reading a line before running it
 
@@ -13,16 +18,16 @@ working directory, the variables, or the overlay — and you get back the
 commands the line holds.
 
 ```js
-terminal.parse('sort input | uniq -c')
+parse('sort input | uniq -c')
 // { ok: true, incomplete: false, error: null, unsupported: [], list: [
 //   { type: 'pipeline', stages: [
 //     { type: 'command', argv: ['sort', 'input'] },
 //     { type: 'command', argv: ['uniq', '-c'] },
 //   ] } ] }
 
-terminal.parse('for f in src/*.js; do').incomplete   // true — ask for another line
-terminal.parse('echo )').error                       // 'unexpected `)`'
-terminal.parse('while :; do echo x; done').unsupported[0].detail  // 'while'
+parse('for f in src/*.js; do').incomplete   // true — ask for another line
+parse('echo )').error                       // 'unexpected `)`'
+parse('while :; do echo x; done').unsupported[0].detail  // 'while'
 ```
 
 `list` is the whole line: each command carries the `op` that joins it to the
@@ -39,7 +44,7 @@ where expansion still decides it — so reading arguments takes no knowledge of
 quoting:
 
 ```js
-terminal.parse('grep -rn "$pattern" src/*.js').list[0].argv
+parse('grep -rn "$pattern" src/*.js').list[0].argv
 // [ 'grep', '-rn',
 //   { type: 'variable', name: 'pattern', multi: false },
 //   { type: 'pattern', pattern: 'src/*.js', multi: true } ]
@@ -61,7 +66,7 @@ Where the shell splits nothing it matches nothing either, so an assignment
 value, a here-string and a `[[ … ]]` operand are expanded and then left alone:
 
 ```js
-terminal.parse('x=*.js y=$z ls').list[0].assignments
+parse('x=*.js y=$z ls').list[0].assignments
 // [ { name: 'x', value: '*.js' },
 //   { name: 'y', value: { type: 'variable', name: 'z', multi: false } } ]
 ```
@@ -75,10 +80,10 @@ is not text to compare but the pattern to compare by, so it stands where a
 pattern's text would:
 
 ```js
-terminal.parse('[[ $f == $pat ]]').list[0].expression.right
+parse('[[ $f == $pat ]]').list[0].expression.right
 // { type: 'pattern', pattern: { type: 'variable', name: 'pat', multi: false }, multi: false }
 
-terminal.parse('[[ $f == "$pat" ]]').list[0].expression.right
+parse('[[ $f == "$pat" ]]').list[0].expression.right
 // { type: 'variable', name: 'pat', multi: false }
 ```
 
@@ -91,7 +96,7 @@ shares: `~/bin` is `"$HOME/bin"`, one word because tilde expansion is no more
 split into fields or matched as a pattern than a quoted reference is.
 
 ```js
-terminal.parse('ls ~/bin').list[0].argv
+parse('ls ~/bin').list[0].argv
 // [ 'ls', { type: 'parts', parts: [
 //   { type: 'variable', name: 'HOME', multi: false }, '/bin' ] } ]
 ```
@@ -104,7 +109,7 @@ word holding one is refused rather than read as the text bash would have
 expanded:
 
 ```js
-terminal.parse('ls ~alice/bin').error
+parse('ls ~alice/bin').error
 // 'named-user and directory-stack tilde prefixes are not supported'
 ```
 
@@ -113,7 +118,7 @@ reads as `['ls', 'ab', 'ac']`, exactly as bash reads it before anything else
 happens. A substitution holds the commands it runs, parsed the same way:
 
 ```js
-terminal.parse('foo `bar a b c`').list[0].argv[1]
+parse('foo `bar a b c`').list[0].argv[1]
 // { type: 'substitution', list: [ { type: 'command', argv: ['bar', 'a', 'b', 'c'] } ] }
 ```
 
@@ -121,7 +126,7 @@ So does a `<( … )`, whose word is the path its output arrives on rather than
 the output itself:
 
 ```js
-terminal.parse('cat <(ls)').list[0].argv[1]
+parse('cat <(ls)').list[0].argv[1]
 // { type: 'process', op: '<', list: [ { type: 'command', argv: ['ls'] } ] }
 ```
 
@@ -129,25 +134,23 @@ terminal.parse('cat <(ls)').list[0].argv[1]
 takes no descriptors; opening one does, and this shell has none — so `run()`
 reports that gap where reading the line reports the commands.
 
-## Without a terminal
+## What it does not know
 
-The parser is published separately, for a caller with no source tree to mount:
+The entry point loads the parser and its lexers and nothing else — no commands,
+no filesystem, no expansion:
 
 ```js
-import { parse } from '@preventive/terminal/parse.js'
-
 parse('rg foo | wc -l').list[0].stages.map((stage) => stage.argv[0])  // ['rg', 'wc']
 ```
 
-That entry point loads the parser and its lexers and nothing else — no
-commands, no filesystem, no expansion — and answers as `terminal.parse()` does
-but for one thing: it never refuses a redirect. Where a line may write is a
-property of a terminal, so `echo a > out` parses here and is refused by a
-terminal whose filesystem is read-only.
+So it never refuses a redirect. Where a line may write is a property of a
+terminal's filesystem rather than of the line: `echo a > out` reads here, and
+`createTerminal(sources).run('echo a > out')` is what refuses it when nothing
+may be written.
 
-Either way, only parsing happens, so only parsing's answers come back. Whether
-a command exists, what an option means, and what an expansion produces are
-`run()`'s to find.
+Only parsing happens, so only parsing's answers come back. Whether a command
+exists, what an option means, and what an expansion produces are `run()`'s to
+find.
 
 ## The short answer
 
@@ -280,6 +283,3 @@ group, `for`, `if` or `[[ … ]]`, a `!`, a here-document whose delimiter leaves
 its body to expand, and any word that would hide a command inside text a
 summary keeps as written — `${x:-$(id)}`, `$(( $(id -u) ))` — or the braces of
 an ambiguous redirect. `parse()` reads those.
-
-A terminal has the same method, under its own write policy: `summarize('ls >
-out')` throws there when nothing may be written.

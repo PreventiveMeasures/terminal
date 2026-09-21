@@ -10,7 +10,6 @@ import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
 import { discardedNotes, err, missingPathNote, reason } from './util.js'
 import { complete } from './complete.js'
-import { reading } from './reading.js'
 import { commandSubstitution } from './shell/capture.js'
 import { BindingMap, isolated, withState } from './shell/state.js'
 import { commandWriteError, createIoGuard, routeExternalOutput, runSteps } from './shell/run.js'
@@ -83,7 +82,6 @@ function terminal(ctx, label) {
     cwd: () => ctx.cwd,
     complete: (line) => complete(line, ctx, ctx.registry),
     fork: (opts) => fork(ctx, opts),
-    ...reading(ctx),
   }
 }
 

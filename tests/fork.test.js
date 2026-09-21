@@ -276,11 +276,11 @@ describe('fork — the sources, the mount and the wired commands are the parent 
     check(t, 'cat /repo/README.md', 'readme\n')
   })
 
-  it('reads a line against the same write policy', () => {
+  it('runs a line against the same write policy', () => {
     const t = terminal({ writable: false })
-    assert.deepEqual(t.fork().parse('printf x >/tmp/out').ok, false)
-    assert.deepEqual(t.fork().parse('printf x').ok, true)
-    assert.deepEqual(t.fork().summarize('printf x >/dev/null'), [[['printf', 'x'], ['>', '/dev/null']]])
+    assert.deepEqual(t.fork().run('printf x >/tmp/out').unsupported.map((gap) => gap.detail), ['>'])
+    assert.equal(t.fork().run('printf x').stdout, 'x')
+    assert.equal(t.fork().run('printf x >/dev/null').exitCode, 0)
   })
 })
 
@@ -364,7 +364,7 @@ describe('fork — every terminal answers for its own line', () => {
     assert.deepEqual(child.complete('cat a'), ['cat a.js'])
     assert.deepEqual(t.complete('cat a'), [])
     assert.deepEqual(t.complete('cat src/a'), ['cat src/a.js'])
-    assert.deepEqual(child.parse('cat a.js').ok, true)
+    check(child, 'cat a.js', 'alpha\n')
   })
 })
 

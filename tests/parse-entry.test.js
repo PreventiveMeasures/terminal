@@ -86,7 +86,7 @@ describe('the parse entry point reads a line with no terminal at all', () => {
     it(`reads rather than refuses ${JSON.stringify(line)}`, () => {
       assert.deepEqual(parse(line).unsupported, [])
       assert.equal(parse(line).ok, true)
-      assert.equal(createTerminal({}).parse(line).ok, false, 'a read-only terminal still refuses it')
+      assert.ok(createTerminal({}).run(line).unsupported.length > 0, 'a read-only terminal still refuses it')
     })
   }
 
@@ -97,26 +97,6 @@ describe('the parse entry point reads a line with no terminal at all', () => {
     assert.deepEqual(result.list[0].stages.map((stage) => stage.argv[0]), ['jq', 'wc'])
     assert.equal(createTerminal({}).run('jq foo | wc -l').unsupported[0].kind, 'command')
   })
-
-  for (const line of [
-    'ls -l | grep x',
-    '! grep -q x a.txt && cat a.txt',
-    'for f in *.js; do wc -l "$f"; done',
-    'if [[ -f a ]]; then cat <<EOF\nbody\nEOF\nfi',
-    '{ cd dir; (ls); }',
-    "x=1 y='a b' printf '%s\\n' \"$x\"",
-    'cat < a.txt 2>&1 | tr a-z A-Z',
-    'echo $(date) `uname` ${x:-fallback} $((1 + 2))',
-    'ls\ncat a.txt\n# comment',
-    'echo )',
-    'for f in a; do',
-    'while read -r f; do wc -l "$f"; done',
-    'echo ${x@Q}',
-  ]) {
-    it(`agrees with a terminal's own parse of ${JSON.stringify(line)}`, () => {
-      assert.deepEqual(parse(line), createTerminal({}, { writable: '/tmp/', mount: '/src' }).parse(line))
-    })
-  }
 
   it('reports unfinished input, a syntax error and a refused construct apart', () => {
     assert.deepEqual(pick(parse('for f in a; do')), { ok: false, incomplete: true, error: 'for: missing `done`', gaps: [] })

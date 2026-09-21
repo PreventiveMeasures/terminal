@@ -22,14 +22,14 @@ const terminal = createTerminal({
 
 terminal.run('grep -rn oak src').stdout  // 'src/app.js:1:export const name = "oak"\n'
 terminal.complete('cat src/a')           // ['cat src/app.js']
-terminal.parse('wc -l src/app.js')       // { ok: true, list: [ { type: 'command', argv: [ … ] } ], … }
 terminal.run('cd src; wc -l app.js')     // { stdout: '1 app.js\n', exitCode: 0, cwd: '/src', … }
 ```
 
 `run(line)` is synchronous and returns `{ stdout, stderr, exitCode, cwd,
 unsupported, notes }`. Variables and the working directory persist across calls.
-`complete(line)` returns full-line replacements, ready to drop in. `parse(line)`
-reads a line and runs none of it.
+`complete(line)` returns full-line replacements, ready to drop in. Reading a
+line without running it is a separate entry point,
+[`@preventive/terminal/parse.js`](docs/parser.md), which needs no terminal.
 
 ## Three channels, because a wrong answer is the one failure that matters
 

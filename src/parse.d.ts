@@ -595,9 +595,8 @@ export type Summary = Array<Chain | '&&' | '||' | '&'>
  * This entry point is the parser alone: it has no commands, no filesystem and
  * no variables, so it never reports that a command is missing and never
  * refuses a redirect — where a line may write is a property of a terminal, not
- * of the line. `createTerminal(…).parse(line)` answers the same way, except
- * that a write its filesystem would refuse is reported there as the gap
- * `run()` would report.
+ * of the line, and `createTerminal(…).run(line)` is what reports the gap for a
+ * write its filesystem cannot take.
  */
 export function parse(line: string): ParseResult
 

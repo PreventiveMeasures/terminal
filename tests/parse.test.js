@@ -3,15 +3,15 @@ import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { URL } from 'node:url'
 import { createTerminal } from '@preventive/terminal'
+import { parse, summarize } from '@preventive/terminal/parse.js'
 
 const CORPUS = JSON.parse(readFileSync(new URL('./fixtures/source-tree-commands.json', import.meta.url), 'utf8'))
 
 const SOURCES = { 'a.txt': 'A\n', 'dir/b.txt': 'B\n' }
-const terminal = (opts = {}) => createTerminal(SOURCES, { mount: '/src', writable: '/tmp/', ...opts })
-const parse = (line, opts) => terminal(opts).parse(line)
-const list = (line, opts) => parse(line, opts).list
-const verdict = (line, opts) => {
-  const { ok, incomplete, error } = parse(line, opts)
+const terminal = () => createTerminal(SOURCES, { mount: '/src', writable: '/tmp/' })
+const list = (line) => parse(line).list
+const verdict = (line) => {
+  const { ok, incomplete, error } = parse(line)
   return { ok, incomplete, error }
 }
 
@@ -56,14 +56,14 @@ function writtenBack(summary) {
   return parts.map((part, i) => (i === 0 || part === '&&' || part === '||' || parts[i - 1] === '&&' || parts[i - 1] === '||' ? part : '; ' + part)).join(' ').replaceAll(' ; ', '; ')
 }
 
-const named = (line, opts) => commandNames(list(line, opts))
+const named = (line) => commandNames(list(line))
 const parts = (...pieces) => pieces.length === 1 ? pieces[0] : { type: 'parts', parts: pieces }
 const pattern = (source, multi = true) => ({ type: 'pattern', pattern: source, multi })
 const home = () => ({ type: 'variable', name: 'HOME', multi: false })
 
 describe('parse() hands back the line as the parser read it', () => {
   it('describes a simple command as its argv', () => {
-    assert.deepEqual(terminal().parse('wc -l a.txt'), {
+    assert.deepEqual(parse('wc -l a.txt'), {
       ok: true,
       incomplete: false,
       error: null,
@@ -220,10 +220,9 @@ describe('parse() hands back the line as the parser read it', () => {
   })
 
   it('gives the caller a tree of its own, not shared state', () => {
-    const t = terminal()
-    t.parse('wc -l a.txt').list[0].argv[1] = '-c'
-    assert.deepEqual(t.parse('wc -l a.txt').list[0].argv, ['wc', '-l', 'a.txt'])
-    assert.equal(t.run('wc -l a.txt').stdout, '1 a.txt\n')
+    parse('wc -l a.txt').list[0].argv[1] = '-c'
+    assert.deepEqual(parse('wc -l a.txt').list[0].argv, ['wc', '-l', 'a.txt'])
+    assert.equal(terminal().run('wc -l a.txt').stdout, '1 a.txt\n')
   })
 
   for (const line of ['', '   ', '\n\n', '# just a comment']) {
@@ -365,7 +364,7 @@ describe('parse() spells a value out only when expansion still decides it', () =
       assert.deepEqual(verdict(line), { ok: false, incomplete: false, error: message }, line)
     }
     // The summary cannot say what a conditional answers, so it says so.
-    assert.throws(() => terminal().summarize('f() { [[ -f x ]]; }; f'), { message: 'summarize: `[[ … ]]` is not a simple chain' })
+    assert.throws(() => summarize('f() { [[ -f x ]]; }; f'), { message: 'summarize: `[[ … ]]` is not a simple chain' })
   })
 
   // `<( … )` runs commands and the word is the path their output arrives on,
@@ -382,7 +381,7 @@ describe('parse() spells a value out only when expansion still decides it', () =
     assert.deepEqual(list('echo <(ls) > /tmp/out')[0].redirects, [{ fd: 1, op: '>', target: '/tmp/out' }])
     // Quoting settles it as the text it spells, as it settles a pattern.
     assert.deepEqual(list('echo "<(ls)" \'<(ls)\'')[0].argv, ['echo', '<(ls)', '<(ls)'])
-    assert.deepEqual(terminal().summarize('cat <(ls)'), [[['cat', { type: 'process', op: '<', summary: [[['ls']]] }]]])
+    assert.deepEqual(summarize('cat <(ls)'), [[['cat', { type: 'process', op: '<', summary: [[['ls']]] }]]])
   })
 
   // `>(` opens a process substitution wherever a word may start, and what
@@ -451,7 +450,7 @@ describe('parse() spells a value out only when expansion still decides it', () =
     assert.deepEqual(right('[[ a -eq $b ]]'), { type: 'variable', name: 'b', multi: false })
     assert.deepEqual(list('[[ -f $b ]]')[0].expression.word, { type: 'variable', name: 'b', multi: false })
     assert.deepEqual(list('ls a*')[0].argv[1], pattern('a*'))
-    assert.throws(() => terminal().summarize('[[ a == $b ]]'), { message: 'summarize: `[[ … ]]` is not a simple chain' })
+    assert.throws(() => summarize('[[ a == $b ]]'), { message: 'summarize: `[[ … ]]` is not a simple chain' })
   })
 
   // Quotes settle how many words come back, and `"$@"` is the one they do not.
@@ -503,7 +502,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['ls | wc -l > /tmp/out &', [[['ls'], ['wc', '-l'], ['>', '/tmp/out']], '&']],
   ]) {
     it(`summarizes ${JSON.stringify(line)}`, () => {
-      assert.deepEqual(terminal().summarize(line), summary)
+      assert.deepEqual(summarize(line), summary)
     })
   }
 
@@ -528,7 +527,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['# comment', []],
   ]) {
     it(`summarizes ${JSON.stringify(line)}`, () => {
-      assert.deepEqual(terminal().summarize(line), chains)
+      assert.deepEqual(summarize(line), chains)
     })
   }
 
@@ -548,7 +547,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['ls; if a; then b; fi', 'summarize: `if` is not a simple chain'],
   ]) {
     it(`refuses ${JSON.stringify(line)}`, () => {
-      assert.throws(() => terminal().summarize(line), { message })
+      assert.throws(() => summarize(line), { message })
     })
   }
 
@@ -559,7 +558,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['ls ~user', 'named-user and directory-stack tilde prefixes are not supported'],
   ]) {
     it(`throws the parse diagnostic for ${JSON.stringify(line)}`, () => {
-      assert.throws(() => terminal().summarize(line), { message })
+      assert.throws(() => summarize(line), { message })
     })
   }
 
@@ -567,8 +566,8 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   const HERE = (body, delimiter = "'EOF'", quote = '"') => `echo ${quote}$(cat <<${delimiter}\n${body}\nEOF\n)${quote}`
 
   it('reads a quoted here-document substitution as the text it produces', () => {
-    assert.deepEqual(terminal().summarize(HERE('multiline text\nover two lines')), [[['echo', 'multiline text\nover two lines']]])
-    assert.deepEqual(terminal().summarize('echo "prefix $(cat <<\'EOF\'\nx\nEOF\n) suffix"'), [[['echo', 'prefix x suffix']]])
+    assert.deepEqual(summarize(HERE('multiline text\nover two lines')), [[['echo', 'multiline text\nover two lines']]])
+    assert.deepEqual(summarize('echo "prefix $(cat <<\'EOF\'\nx\nEOF\n) suffix"'), [[['echo', 'prefix x suffix']]])
   })
 
   // Only a here-document nothing else touches is the text it holds. The rest
@@ -582,69 +581,69 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     ['a second command after it', 'echo "$(cat <<\'EOF\'\nx\nEOF\nls)"', shell([[['echo', 'x']], [['ls']]], false)],
   ]) {
     it(`says the shell it runs for ${label}`, () => {
-      assert.deepEqual(terminal().summarize(line), [[['echo', token]]])
+      assert.deepEqual(summarize(line), [[['echo', token]]])
     })
   }
 
   it('refuses a delimiter that lets the body expand, inside a substitution as out', () => {
-    assert.throws(() => terminal().summarize(HERE('$x', 'EOF')), { message: 'summarize: a here-document its delimiter leaves to expand is not a simple chain' })
+    assert.throws(() => summarize(HERE('$x', 'EOF')), { message: 'summarize: a here-document its delimiter leaves to expand is not a simple chain' })
   })
 
   // A substitution runs commands, and what a summary has to say about commands
   // is a summary. Quoting decides only whether its output stays one word.
   it('says the shell a word waits on, and how many words it may come back as', () => {
-    assert.deepEqual(terminal().summarize('echo "`a;b`"'), [[['echo', shell([[['a']], [['b']]], false)]]])
-    assert.deepEqual(terminal().summarize('echo `a;b`'), [[['echo', shell([[['a']], [['b']]], true)]]])
-    assert.deepEqual(terminal().summarize('echo "`a|b`"'), [[['echo', shell([[['a'], ['b']]], false)]]])
-    assert.deepEqual(terminal().summarize('echo `a|b`'), [[['echo', shell([[['a'], ['b']]], true)]]])
-    assert.deepEqual(terminal().summarize('echo "`a`"'), [[['echo', shell([[['a']]], false)]]])
-    assert.deepEqual(terminal().summarize('echo `a`'), [[['echo', shell([[['a']]], true)]]])
-    assert.deepEqual(terminal().summarize('x=$(date) ls'), [[[{ type: 'assignments', assignments: [{ name: 'x', value: shell([[['date']]], false) }] }, 'ls']]])
-    assert.deepEqual(terminal().summarize('ls $(cat f)/x'), [[['ls', parts(shell([[['cat', 'f']]], true), '/x')]]])
-    assert.throws(() => terminal().summarize('echo `echo )`'), { message: 'unexpected `)`' })
+    assert.deepEqual(summarize('echo "`a;b`"'), [[['echo', shell([[['a']], [['b']]], false)]]])
+    assert.deepEqual(summarize('echo `a;b`'), [[['echo', shell([[['a']], [['b']]], true)]]])
+    assert.deepEqual(summarize('echo "`a|b`"'), [[['echo', shell([[['a'], ['b']]], false)]]])
+    assert.deepEqual(summarize('echo `a|b`'), [[['echo', shell([[['a'], ['b']]], true)]]])
+    assert.deepEqual(summarize('echo "`a`"'), [[['echo', shell([[['a']]], false)]]])
+    assert.deepEqual(summarize('echo `a`'), [[['echo', shell([[['a']]], true)]]])
+    assert.deepEqual(summarize('x=$(date) ls'), [[[{ type: 'assignments', assignments: [{ name: 'x', value: shell([[['date']]], false) }] }, 'ls']]])
+    assert.deepEqual(summarize('ls $(cat f)/x'), [[['ls', parts(shell([[['cat', 'f']]], true), '/x')]]])
+    assert.throws(() => summarize('echo `echo )`'), { message: 'unexpected `)`' })
   })
 
   // A definition runs nothing, so it says nothing; the body stands where the
   // name is called, and a body of one command reads as that command.
   it('stands a function where it is called, and says nothing where it is defined', () => {
-    assert.deepEqual(terminal().summarize("bench() { wc -l a.txt; }; LABEL=after bench; ls; LABEL=before bench"), [
+    assert.deepEqual(summarize("bench() { wc -l a.txt; }; LABEL=after bench; ls; LABEL=before bench"), [
       [[{ type: 'assignments', assignments: [{ name: 'LABEL', value: 'after' }] }, 'wc', '-l', 'a.txt']],
       [['ls']],
       [[{ type: 'assignments', assignments: [{ name: 'LABEL', value: 'before' }] }, 'wc', '-l', 'a.txt']],
     ])
-    assert.deepEqual(terminal().summarize('f() { ls; }'), [])
-    assert.deepEqual(terminal().summarize('f() { ls; }; f | wc'), [[['ls'], ['wc']]])
-    assert.deepEqual(terminal().summarize('f() { ls; }; f > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
-    assert.deepEqual(terminal().summarize('f() { a; b; }; f | wc'), [[{ type: 'braces', summary: [[['a']], [['b']]] }, ['wc']]])
-    assert.deepEqual(terminal().summarize('f() { date; }; echo "$(f)"'), [[['echo', { type: 'shell', summary: [[['date']]], multi: false }]]])
-    assert.throws(() => terminal().summarize('f() { f; }; f'), { message: 'summarize: a function that calls itself is not a simple chain' })
-    assert.throws(() => terminal().summarize('f() { ls; } | cat'), { message: 'summarize: a function defined in a pipeline is not a simple chain' })
+    assert.deepEqual(summarize('f() { ls; }'), [])
+    assert.deepEqual(summarize('f() { ls; }; f | wc'), [[['ls'], ['wc']]])
+    assert.deepEqual(summarize('f() { ls; }; f > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
+    assert.deepEqual(summarize('f() { a; b; }; f | wc'), [[{ type: 'braces', summary: [[['a']], [['b']]] }, ['wc']]])
+    assert.deepEqual(summarize('f() { date; }; echo "$(f)"'), [[['echo', { type: 'shell', summary: [[['date']]], multi: false }]]])
+    assert.throws(() => summarize('f() { f; }; f'), { message: 'summarize: a function that calls itself is not a simple chain' })
+    assert.throws(() => summarize('f() { ls; } | cat'), { message: 'summarize: a function defined in a pipeline is not a simple chain' })
   })
 
   // What a subshell defines belongs to it, so a summary must not stand a body
   // where a call of it would not have reached one — and a call inside a
   // subshell reaches the definitions the line around it made.
   it('keeps a definition inside the brackets that keep it', () => {
-    assert.deepEqual(terminal().summarize('(f() { ls; }); f'), [[{ type: 'parens', summary: [] }], [['f']]])
-    assert.deepEqual(terminal().summarize('f() { ls; }; (f)'), [[{ type: 'parens', summary: [[['ls']]] }]])
+    assert.deepEqual(summarize('(f() { ls; }); f'), [[{ type: 'parens', summary: [] }], [['f']]])
+    assert.deepEqual(summarize('f() { ls; }; (f)'), [[{ type: 'parens', summary: [[['ls']]] }]])
     // Parentheses a body would need keeping are kept: `f` is whatever it holds.
-    assert.deepEqual(terminal().summarize('f() { cd dir; }; (f)'), [[{ type: 'parens', summary: [[['cd', 'dir']]] }]])
-    assert.deepEqual(terminal().summarize('f() { cd dir; }; f'), [[['cd', 'dir']]])
+    assert.deepEqual(summarize('f() { cd dir; }; (f)'), [[{ type: 'parens', summary: [[['cd', 'dir']]] }]])
+    assert.deepEqual(summarize('f() { cd dir; }; f'), [[['cd', 'dir']]])
   })
 
   // A call carries its own assignments, and a row that holds a list has
   // nowhere to put them: two calls that differ only there would read alike.
   it('keeps what a call sets, or says it cannot', () => {
     const set = { type: 'assignments', assignments: [{ name: 'X', value: '1' }] }
-    assert.deepEqual(terminal().summarize('f() { ls; }; X=1 f'), [[[set, 'ls']]])
-    assert.deepEqual(terminal().summarize('f() { ls; }; X=1 f > /tmp/o'), [[[set, 'ls'], ['>', '/tmp/o']]])
-    assert.deepEqual(terminal().summarize('f() { a; b; }; f'), [[{ type: 'braces', summary: [[['a']], [['b']]] }]])
+    assert.deepEqual(summarize('f() { ls; }; X=1 f'), [[[set, 'ls']]])
+    assert.deepEqual(summarize('f() { ls; }; X=1 f > /tmp/o'), [[[set, 'ls'], ['>', '/tmp/o']]])
+    assert.deepEqual(summarize('f() { a; b; }; f'), [[{ type: 'braces', summary: [[['a']], [['b']]] }]])
     const message = 'summarize: an assignment on a call of more than one command is not a simple chain'
-    assert.throws(() => terminal().summarize('f() { a; b; }; X=1 f'), { message })
-    assert.throws(() => terminal().summarize('f() { a; b; }; X=1 f > /tmp/o'), { message })
+    assert.throws(() => summarize('f() { a; b; }; X=1 f'), { message })
+    assert.throws(() => summarize('f() { a; b; }; X=1 f > /tmp/o'), { message })
     // A definition behind a gate may never happen, so nothing may stand for it.
     for (const line of ['a && f() { ls; }', 'a || f() { ls; }']) {
-      assert.throws(() => terminal().summarize(line), { message: 'summarize: a function defined behind a gate is not a simple chain' }, line)
+      assert.throws(() => summarize(line), { message: 'summarize: a function defined behind a gate is not a simple chain' }, line)
     }
   })
 
@@ -652,15 +651,15 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   // so a command that changes one of those keeps the brackets that hold it in.
   it('drops brackets that keep nothing in, and keeps the rest', () => {
     for (const name of ['ls', 'echo hi', 'true', 'wc -l a.txt']) {
-      assert.deepEqual(terminal().summarize(`(${name})`), [[name.split(' ')]], name)
+      assert.deepEqual(summarize(`(${name})`), [[name.split(' ')]], name)
     }
     for (const line of ['cd x', 'export X=1', 'unset X', 'eval x', 'read x', 'exit 1', 'source f']) {
-      assert.deepEqual(terminal().summarize(`(${line})`), [[{ type: 'parens', summary: [[line.split(' ')]] }]], line)
+      assert.deepEqual(summarize(`(${line})`), [[{ type: 'parens', summary: [[line.split(' ')]] }]], line)
     }
     // Braces keep nothing in, so they come off wherever parentheses would not.
-    assert.deepEqual(terminal().summarize('{ cd x; }'), [[['cd', 'x']]])
+    assert.deepEqual(summarize('{ cd x; }'), [[['cd', 'x']]])
     // An assignment is one of the things parentheses keep.
-    assert.deepEqual(terminal().summarize('(X=1 ls)'), [[{
+    assert.deepEqual(summarize('(X=1 ls)'), [[{
       type: 'parens',
       summary: [[[{ type: 'assignments', assignments: [{ name: 'X', value: '1' }] }, 'ls']]],
     }]])
@@ -669,15 +668,15 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   // Whatever feeds a command is the command that feeds it, and where `echo`
   // would say something else than the text holds, `printf` says it exactly.
   it('writes the text a command is fed as the command that writes it', () => {
-    assert.deepEqual(terminal().summarize("cat > /tmp/f <<'EOF'\nbody\nEOF"), [[['echo', 'body'], ['>', '/tmp/f']]])
-    assert.deepEqual(terminal().summarize("cat > /tmp/f <<'EOF'\n-dash\nEOF"), [[['printf', '%s', '-dash\n'], ['>', '/tmp/f']]])
-    assert.deepEqual(terminal().summarize("cat > /tmp/f <<'EOF'\na\nb\nEOF"), [[['echo', 'a\nb'], ['>', '/tmp/f']]])
-    assert.deepEqual(terminal().summarize('cat <<< plain'), [[['echo', 'plain']]])
-    assert.deepEqual(terminal().summarize('cat <<< -dash'), [[['printf', '%s', '-dash\n']]])
-    assert.deepEqual(terminal().summarize('cat <<< $x'), [[['printf', '%s\\n', { type: 'variable', name: 'x', multi: false }]]])
+    assert.deepEqual(summarize("cat > /tmp/f <<'EOF'\nbody\nEOF"), [[['echo', 'body'], ['>', '/tmp/f']]])
+    assert.deepEqual(summarize("cat > /tmp/f <<'EOF'\n-dash\nEOF"), [[['printf', '%s', '-dash\n'], ['>', '/tmp/f']]])
+    assert.deepEqual(summarize("cat > /tmp/f <<'EOF'\na\nb\nEOF"), [[['echo', 'a\nb'], ['>', '/tmp/f']]])
+    assert.deepEqual(summarize('cat <<< plain'), [[['echo', 'plain']]])
+    assert.deepEqual(summarize('cat <<< -dash'), [[['printf', '%s', '-dash\n']]])
+    assert.deepEqual(summarize('cat <<< $x'), [[['printf', '%s\\n', { type: 'variable', name: 'x', multi: false }]]])
     // A `cat` with nothing of its own passes what feeds it straight on.
-    assert.deepEqual(terminal().summarize('echo x | cat > /tmp/f'), [[['echo', 'x'], ['>', '/tmp/f']]])
-    assert.deepEqual(terminal().summarize('echo x | cat -n > /tmp/f'), [[['echo', 'x'], ['cat', '-n'], ['>', '/tmp/f']]])
+    assert.deepEqual(summarize('echo x | cat > /tmp/f'), [[['echo', 'x'], ['>', '/tmp/f']]])
+    assert.deepEqual(summarize('echo x | cat -n > /tmp/f'), [[['echo', 'x'], ['cat', '-n'], ['>', '/tmp/f']]])
   })
 
   // Every rewrite above is a claim that the line and the summary do the same
@@ -726,19 +725,19 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
       ['ls 2>&-', ['2>&-']],
       ['ls >&-', ['>&-']],
     ]) {
-      assert.deepEqual(terminal().summarize(line), [[['ls'], tokens]], line)
+      assert.deepEqual(summarize(line), [[['ls'], tokens]], line)
     }
   })
 
   // A `while` asks before every turn, and `until` reads the answer the other
   // way round. Both are a list run more than once, so both are a row.
   it('summarizes a while loop as the list it repeats and the list it asks', () => {
-    assert.deepEqual(terminal().summarize('while test -e lock; do ls; done'), [[{
+    assert.deepEqual(summarize('while test -e lock; do ls; done'), [[{
       type: 'while',
       condition: [[['test', '-e', 'lock']]],
       summary: [[['ls']]],
     }]])
-    assert.deepEqual(terminal().summarize('until a; do b; done | wc'), [[
+    assert.deepEqual(summarize('until a; do b; done | wc'), [[
       { type: 'until', condition: [[['a']]], summary: [[['b']]] },
       ['wc'],
     ]])
@@ -760,7 +759,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
       ['a | b &', [['a'], ['b']]],
     ]
     for (const [line, chain] of backgrounded) {
-      assert.deepEqual(terminal().summarize(line), [chain, '&'], line)
+      assert.deepEqual(summarize(line), [chain, '&'], line)
     }
   })
 
@@ -768,11 +767,11 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   // word is the commands behind it wherever a word may stand.
   it('says what a process substitution runs, whichever slot holds it', () => {
     const process = (op, chains) => ({ type: 'process', op, summary: chains })
-    assert.deepEqual(terminal().summarize('diff <(a) <(b)'), [[['diff', process('<', [[['a']]]), process('<', [[['b']]])]]])
-    assert.deepEqual(terminal().summarize('ls > >(tee -a log)'), [[['ls'], ['>', process('>', [[['tee', '-a', 'log']]])]]])
-    assert.deepEqual(terminal().summarize('cat < <(ls)'), [[['cat', process('<', [[['ls']]])]]])
-    assert.deepEqual(terminal().summarize('tee >(wc -l) < a.txt'), [[['cat', 'a.txt'], ['tee', process('>', [[['wc', '-l']]])]]])
-    assert.deepEqual(terminal().summarize('x=<(ls) ls'), [[[
+    assert.deepEqual(summarize('diff <(a) <(b)'), [[['diff', process('<', [[['a']]]), process('<', [[['b']]])]]])
+    assert.deepEqual(summarize('ls > >(tee -a log)'), [[['ls'], ['>', process('>', [[['tee', '-a', 'log']]])]]])
+    assert.deepEqual(summarize('cat < <(ls)'), [[['cat', process('<', [[['ls']]])]]])
+    assert.deepEqual(summarize('tee >(wc -l) < a.txt'), [[['cat', 'a.txt'], ['tee', process('>', [[['wc', '-l']]])]]])
+    assert.deepEqual(summarize('x=<(ls) ls'), [[[
       { type: 'assignments', assignments: [{ name: 'x', value: process('<', [[['ls']]]) }] },
       'ls',
     ]]])
@@ -781,126 +780,129 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   // A row that holds a block holds whatever the block holds, however deep.
   it('nests a loop in the brackets that hold it', () => {
     const loop = { type: 'while', condition: [[['a']]], summary: [[['b']]] }
-    assert.deepEqual(terminal().summarize('(while a; do b; done)'), [[{ type: 'parens', summary: [[loop]] }]])
-    assert.deepEqual(terminal().summarize('f() { while a; do b; done; }; f'), [[{ type: 'braces', summary: [[loop]] }]])
-    assert.deepEqual(terminal().summarize('until a; do b; done > /tmp/out'), [[{ ...loop, type: 'until' }, ['>', '/tmp/out']]])
-    assert.deepEqual(terminal().summarize('{ for i in a b; do c; done; }'), [[{
+    assert.deepEqual(summarize('(while a; do b; done)'), [[{ type: 'parens', summary: [[loop]] }]])
+    assert.deepEqual(summarize('f() { while a; do b; done; }; f'), [[{ type: 'braces', summary: [[loop]] }]])
+    assert.deepEqual(summarize('until a; do b; done > /tmp/out'), [[{ ...loop, type: 'until' }, ['>', '/tmp/out']]])
+    assert.deepEqual(summarize('{ for i in a b; do c; done; }'), [[{
       type: 'braces',
       summary: [[{ type: 'for', name: 'i', words: ['a', 'b'], summary: [[['c']]] }]],
     }]])
   })
 
   it('summarizes a for loop as the list it repeats', () => {
-    assert.deepEqual(terminal().summarize('for d in a-*; do echo "$d"; done'), [[{
+    assert.deepEqual(summarize('for d in a-*; do echo "$d"; done'), [[{
       type: 'for',
       name: 'd',
       words: [pattern('a-*')],
       summary: [[['echo', { type: 'variable', name: 'd', multi: false }]]],
     }]])
-    assert.deepEqual(terminal().summarize('for f in {1..3}; do wc -l; done | sort'), [[
+    assert.deepEqual(summarize('for f in {1..3}; do wc -l; done | sort'), [[
       { type: 'for', name: 'f', words: ['1', '2', '3'], summary: [[['wc', '-l']]] },
       ['sort'],
     ]])
-    assert.deepEqual(terminal().summarize('for f in; do ls; done > /tmp/out'), [[
+    assert.deepEqual(summarize('for f in; do ls; done > /tmp/out'), [[
       { type: 'for', name: 'f', words: [], summary: [[['ls']]] },
       ['>', '/tmp/out'],
     ]])
-    assert.throws(() => terminal().summarize('for f in a; do if a; then b; fi; done'), { message: 'summarize: `if` is not a simple chain' })
+    assert.throws(() => summarize('for f in a; do if a; then b; fi; done'), { message: 'summarize: `if` is not a simple chain' })
   })
 
   // `( … )` is a list of its own, and a summary of a list is a summary.
   it('summarizes a subshell as the line it runs, and drops what it keeps from nothing', () => {
     const parens = (chains) => ({ type: 'parens', summary: chains })
-    assert.deepEqual(terminal().summarize('(ls)'), [[['ls']]])
-    assert.deepEqual(terminal().summarize('(ls -a) | wc'), [[['ls', '-a'], ['wc']]])
-    assert.deepEqual(terminal().summarize('(ls) > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
-    assert.deepEqual(terminal().summarize('echo x | (cat) > /tmp/f'), [[['echo', 'x'], ['>', '/tmp/f']]])
-    assert.deepEqual(terminal().summarize('(cd dir; ls)'), [[parens([[['cd', 'dir']], [['ls']]])]])
-    assert.deepEqual(terminal().summarize('(cd dir)'), [[parens([[['cd', 'dir']]])]])
-    assert.deepEqual(terminal().summarize('(a && b &)'), [[parens([[['a']], '&&', [['b']], '&'])]])
-    assert.deepEqual(terminal().summarize('(ls; cd x) | wc -l > /tmp/out'), [[parens([[['ls']], [['cd', 'x']]]), ['wc', '-l'], ['>', '/tmp/out']]])
-    assert.deepEqual(terminal().summarize('(ls > /tmp/a) > /tmp/b'), [[parens([[['ls'], ['>', '/tmp/a']]]), ['>', '/tmp/b']]])
-    assert.deepEqual(terminal().summarize('(x=1)'), [[parens([[[{ type: 'assignments', assignments: [{ name: 'x', value: '1' }] }]]])]])
+    assert.deepEqual(summarize('(ls)'), [[['ls']]])
+    assert.deepEqual(summarize('(ls -a) | wc'), [[['ls', '-a'], ['wc']]])
+    assert.deepEqual(summarize('(ls) > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
+    assert.deepEqual(summarize('echo x | (cat) > /tmp/f'), [[['echo', 'x'], ['>', '/tmp/f']]])
+    assert.deepEqual(summarize('(cd dir; ls)'), [[parens([[['cd', 'dir']], [['ls']]])]])
+    assert.deepEqual(summarize('(cd dir)'), [[parens([[['cd', 'dir']]])]])
+    assert.deepEqual(summarize('(a && b &)'), [[parens([[['a']], '&&', [['b']], '&'])]])
+    assert.deepEqual(summarize('(ls; cd x) | wc -l > /tmp/out'), [[parens([[['ls']], [['cd', 'x']]]), ['wc', '-l'], ['>', '/tmp/out']]])
+    assert.deepEqual(summarize('(ls > /tmp/a) > /tmp/b'), [[parens([[['ls'], ['>', '/tmp/a']]]), ['>', '/tmp/b']]])
+    assert.deepEqual(summarize('(x=1)'), [[parens([[[{ type: 'assignments', assignments: [{ name: 'x', value: '1' }] }]]])]])
   })
 
   // `{ …; }` is the same list, run where it stands rather than beside it —
   // which is the one thing the brackets decide, and all they are told apart by.
   it('summarizes a brace group as the line it runs, in the shell it runs in', () => {
     const braces = (chains) => ({ type: 'braces', summary: chains })
-    assert.deepEqual(terminal().summarize('a || { b; c; }'), [[['a']], '||', [braces([[['b']], [['c']]])]])
-    assert.deepEqual(terminal().summarize('{ cd dir; ls; }'), [[braces([[['cd', 'dir']], [['ls']]])]])
-    assert.deepEqual(terminal().summarize('{ a | b; } > /tmp/out'), [[braces([[['a'], ['b']]]), ['>', '/tmp/out']]])
+    assert.deepEqual(summarize('a || { b; c; }'), [[['a']], '||', [braces([[['b']], [['c']]])]])
+    assert.deepEqual(summarize('{ cd dir; ls; }'), [[braces([[['cd', 'dir']], [['ls']]])]])
+    assert.deepEqual(summarize('{ a | b; } > /tmp/out'), [[braces([[['a'], ['b']]]), ['>', '/tmp/out']]])
     // Braces keep nothing to itself, so one command inside is that command —
     // where parentheses keep the `cd` they hold, and stay.
-    assert.deepEqual(terminal().summarize('{ ls; }'), [[['ls']]])
-    assert.deepEqual(terminal().summarize('{ cd dir; }'), [[['cd', 'dir']]])
-    assert.deepEqual(terminal().summarize('{ ls; } > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
-    assert.deepEqual(terminal().summarize('{ ls > /tmp/a; } > /tmp/b'), [[braces([[['ls'], ['>', '/tmp/a']]]), ['>', '/tmp/b']]])
+    assert.deepEqual(summarize('{ ls; }'), [[['ls']]])
+    assert.deepEqual(summarize('{ cd dir; }'), [[['cd', 'dir']]])
+    assert.deepEqual(summarize('{ ls; } > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
+    assert.deepEqual(summarize('{ ls > /tmp/a; } > /tmp/b'), [[braces([[['ls'], ['>', '/tmp/a']]]), ['>', '/tmp/b']]])
   })
 
   // Whatever feeds a command is the command that feeds it, and text is written
   // by the command that writes text.
   it('reads a here-document as the command that writes it', () => {
-    assert.deepEqual(terminal().summarize('cat > /tmp/notes.md <<EOF\nhello\nEOF\n'), [[['echo', 'hello'], ['>', '/tmp/notes.md']]])
-    assert.deepEqual(terminal().summarize("wc -l <<'EOF'\nline one\nline two\nEOF\n"), [[['echo', 'line one\nline two'], ['wc', '-l']]])
-    assert.deepEqual(terminal().summarize('sort <<<here'), [[['echo', 'here'], ['sort']]])
+    assert.deepEqual(summarize('cat > /tmp/notes.md <<EOF\nhello\nEOF\n'), [[['echo', 'hello'], ['>', '/tmp/notes.md']]])
+    assert.deepEqual(summarize("wc -l <<'EOF'\nline one\nline two\nEOF\n"), [[['echo', 'line one\nline two'], ['wc', '-l']]])
+    assert.deepEqual(summarize('sort <<<here'), [[['echo', 'here'], ['sort']]])
   })
 
   // `echo` writes a newline of its own, and reads a leading `-` as an option,
   // so a body it would not say exactly is written by `printf` instead.
   it('writes with printf what echo would not say exactly', () => {
-    assert.deepEqual(terminal().summarize('wc <<EOF\n-n\nEOF\n'), [[['printf', '%s', '-n\n'], ['wc']]])
-    assert.deepEqual(terminal().summarize('cat <<EOF\nEOF\n'), [[['printf', '%s', '']]])
+    assert.deepEqual(summarize('wc <<EOF\n-n\nEOF\n'), [[['printf', '%s', '-n\n'], ['wc']]])
+    assert.deepEqual(summarize('cat <<EOF\nEOF\n'), [[['printf', '%s', '']]])
   })
 
   // A pattern says what it looks for as plainly as a name does, whether it is
   // the whole argument or one piece of a word joined from several.
   it('keeps a pattern, a variable and the word they join as what they are', () => {
-    assert.deepEqual(terminal().summarize('ls *.js | head'), [[['ls', pattern('*.js')], ['head']]])
-    assert.deepEqual(terminal().summarize('ls ~/bin'), [[['ls', parts(home(), '/bin')]]])
-    assert.deepEqual(terminal().summarize('ls a*"b" a$x'), [[['ls', parts(pattern('a*'), 'b'), parts('a', { type: 'variable', name: 'x', multi: true })]]])
-    assert.deepEqual(terminal().summarize('ls $x "$y"'), [[['ls', { type: 'variable', name: 'x', multi: true }, { type: 'variable', name: 'y', multi: false }]]])
-    assert.deepEqual(terminal().summarize('ls ${x:-a}'), [[['ls', { type: 'variable', name: 'x', operator: ':-', operand: 'a', multi: true }]]])
+    assert.deepEqual(summarize('ls *.js | head'), [[['ls', pattern('*.js')], ['head']]])
+    assert.deepEqual(summarize('ls ~/bin'), [[['ls', parts(home(), '/bin')]]])
+    assert.deepEqual(summarize('ls a*"b" a$x'), [[['ls', parts(pattern('a*'), 'b'), parts('a', { type: 'variable', name: 'x', multi: true })]]])
+    assert.deepEqual(summarize('ls $x "$y"'), [[['ls', { type: 'variable', name: 'x', multi: true }, { type: 'variable', name: 'y', multi: false }]]])
+    assert.deepEqual(summarize('ls ${x:-a}'), [[['ls', { type: 'variable', name: 'x', operator: ':-', operand: 'a', multi: true }]]])
     // An operand is text, and text is all it may hold: `${x:-$y}` reads a
     // name in front of a reader, where `${x:-$(id)}` would run `id` behind one.
-    assert.deepEqual(terminal().summarize('ls ${x:-$y}'), [[['ls', { type: 'variable', name: 'x', operator: ':-', operand: '$y', multi: true }]]])
+    assert.deepEqual(summarize('ls ${x:-$y}'), [[['ls', { type: 'variable', name: 'x', operator: ':-', operand: '$y', multi: true }]]])
     // A sum is an expression, said as it was written, under the same rule.
-    assert.deepEqual(terminal().summarize('echo $((1 + 2)) $((i++))'), [[['echo', { type: 'arithmetic', source: '1 + 2' }, { type: 'arithmetic', source: 'i++' }]]])
-    assert.deepEqual(terminal().summarize('x=$((n * 2)) ls'), [[[{ type: 'assignments', assignments: [{ name: 'x', value: { type: 'arithmetic', source: 'n * 2' } }] }, 'ls']]])
-    assert.deepEqual(terminal().summarize('echo a > $out'), [[['echo', 'a'], ['>', { type: 'variable', name: 'out', multi: true }]]])
-    assert.deepEqual(terminal().summarize('ls a{b,c} {1..3}'), [[['ls', 'ab', 'ac', '1', '2', '3']]])
-    assert.deepEqual(terminal().summarize('wc < *.txt'), [[['cat', pattern('*.txt')], ['wc']]])
-    assert.deepEqual(terminal().summarize('cat x > /tmp/out*'), [[['cat', 'x'], ['>', pattern('/tmp/out*')]]])
-    assert.deepEqual(terminal().summarize('ls "*"'), [[['ls', '*']]])
+    assert.deepEqual(summarize('echo $((1 + 2)) $((i++))'), [[['echo', { type: 'arithmetic', source: '1 + 2' }, { type: 'arithmetic', source: 'i++' }]]])
+    assert.deepEqual(summarize('x=$((n * 2)) ls'), [[[{ type: 'assignments', assignments: [{ name: 'x', value: { type: 'arithmetic', source: 'n * 2' } }] }, 'ls']]])
+    assert.deepEqual(summarize('echo a > $out'), [[['echo', 'a'], ['>', { type: 'variable', name: 'out', multi: true }]]])
+    assert.deepEqual(summarize('ls a{b,c} {1..3}'), [[['ls', 'ab', 'ac', '1', '2', '3']]])
+    assert.deepEqual(summarize('wc < *.txt'), [[['cat', pattern('*.txt')], ['wc']]])
+    assert.deepEqual(summarize('cat x > /tmp/out*'), [[['cat', 'x'], ['>', pattern('/tmp/out*')]]])
+    assert.deepEqual(summarize('ls "*"'), [[['ls', '*']]])
   })
 
   // `A=1 cmd` sets them for that command and `A=1` on its own sets them for
   // the shell, so they stand at the head of the row, where they were written.
   it('keeps the assignments a command carries, in front of its name', () => {
     const assigned = (...assignments) => ({ type: 'assignments', assignments })
-    assert.deepEqual(terminal().summarize('A=1 B=2 ls -l'), [[[assigned({ name: 'A', value: '1' }, { name: 'B', value: '2' }), 'ls', '-l']]])
-    assert.deepEqual(terminal().summarize('x=1; y=2'), [[[assigned({ name: 'x', value: '1' })]], [[assigned({ name: 'y', value: '2' })]]])
-    assert.deepEqual(terminal().summarize('x=1 > /tmp/out'), [[[assigned({ name: 'x', value: '1' })], ['>', '/tmp/out']]])
-    assert.deepEqual(terminal().summarize('A=1 ls | B=2 wc'), [[[assigned({ name: 'A', value: '1' }), 'ls'], [assigned({ name: 'B', value: '2' }), 'wc']]])
-    assert.deepEqual(terminal().summarize('x=*.js y=~/a ls'), [[[assigned({ name: 'x', value: '*.js' }, { name: 'y', value: parts(home(), '/a') }), 'ls']]])
-    assert.throws(() => terminal().summarize('x=${y:-$(id)} ls'), { message: 'summarize: ${y:-$(id)} is not a literal word' })
+    assert.deepEqual(summarize('A=1 B=2 ls -l'), [[[assigned({ name: 'A', value: '1' }, { name: 'B', value: '2' }), 'ls', '-l']]])
+    assert.deepEqual(summarize('x=1; y=2'), [[[assigned({ name: 'x', value: '1' })]], [[assigned({ name: 'y', value: '2' })]]])
+    assert.deepEqual(summarize('x=1 > /tmp/out'), [[[assigned({ name: 'x', value: '1' })], ['>', '/tmp/out']]])
+    assert.deepEqual(summarize('A=1 ls | B=2 wc'), [[[assigned({ name: 'A', value: '1' }), 'ls'], [assigned({ name: 'B', value: '2' }), 'wc']]])
+    assert.deepEqual(summarize('x=*.js y=~/a ls'), [[[assigned({ name: 'x', value: '*.js' }, { name: 'y', value: parts(home(), '/a') }), 'ls']]])
+    assert.throws(() => summarize('x=${y:-$(id)} ls'), { message: 'summarize: ${y:-$(id)} is not a literal word' })
   })
 
   // A here-string is its word and a newline, whoever settles the word.
   it('feeds a here-string as the command that writes it', () => {
-    assert.deepEqual(terminal().summarize('wc <<< *.js'), [[['echo', '*.js'], ['wc']]])
-    assert.deepEqual(terminal().summarize('wc <<< $x'), [[['printf', '%s\\n', { type: 'variable', name: 'x', multi: false }], ['wc']]])
+    assert.deepEqual(summarize('wc <<< *.js'), [[['echo', '*.js'], ['wc']]])
+    assert.deepEqual(summarize('wc <<< $x'), [[['printf', '%s\\n', { type: 'variable', name: 'x', multi: false }], ['wc']]])
   })
 
-  it("refuses a write the terminal's filesystem would, as parse() does", () => {
+  // Where a line may write belongs to a terminal's filesystem rather than to
+  // the line, and a reader has no filesystem to ask: `run()` is what refuses.
+  it('reads a write a read-only terminal would refuse', () => {
+    assert.deepEqual(summarize('ls > out'), [[['ls'], ['>', 'out']]])
+    assert.deepEqual(parse('ls > out').unsupported, [])
     const readOnly = createTerminal(SOURCES, { mount: '/src' })
-    assert.throws(() => readOnly.summarize('ls > out'), { message: '`>` cannot write to `out`: the filesystem is read-only' })
-    assert.deepEqual(terminal().summarize('ls > /tmp/out'), [[['ls'], ['>', '/tmp/out']]])
+    assert.deepEqual(readOnly.run('ls > out').unsupported.map((gap) => gap.detail), ['>'])
   })
 
   it('runs none of it', () => {
     const t = terminal()
-    assert.deepEqual(t.summarize('cd dir; printf x > /tmp/file'), [[['cd', 'dir']], [['printf', 'x'], ['>', '/tmp/file']]])
+    assert.deepEqual(summarize('cd dir; printf x > /tmp/file'), [[['cd', 'dir']], [['printf', 'x'], ['>', '/tmp/file']]])
     assert.equal(t.cwd(), '/src')
     assert.equal(t.run('test -e /tmp/file').exitCode, 1)
   })
@@ -996,7 +998,7 @@ describe('parse() reports the gaps parsing itself finds', () => {
     '[[ a =~ b ]]',
   ]) {
     it(`matches run() on ${JSON.stringify(line)}`, () => {
-      const parsed = terminal().parse(line)
+      const parsed = parse(line)
       const run = terminal().run(line)
       assert.equal(parsed.ok, false)
       assert.deepEqual(parsed.unsupported, run.unsupported)
@@ -1026,12 +1028,15 @@ describe('parse() reports the gaps parsing itself finds', () => {
     })
   }
 
-  it("applies the terminal's own write policy, as run() does", () => {
+  // A write policy is a filesystem's, so the one reading is never asked for
+  // it: the line reads here, and the terminal that cannot take the write says
+  // so where it would have done it.
+  it("leaves the terminal's own write policy to run()", () => {
     const readOnly = createTerminal(SOURCES, { mount: '/src' })
-    const parsed = readOnly.parse('echo a > out')
-    assert.equal(parsed.ok, false)
-    assert.deepEqual(parsed.unsupported, [{ kind: 'feature', command: null, detail: '>', message: '`>` cannot write to `out`: the filesystem is read-only' }])
-    assert.deepEqual(readOnly.parse('echo a > /dev/null').unsupported, [])
+    assert.equal(parse('echo a > out').ok, true)
+    assert.deepEqual(parse('echo a > out').unsupported, [])
+    assert.deepEqual(readOnly.run('echo a > out').unsupported, [{ kind: 'feature', command: null, detail: '>', message: '`>` cannot write to `out`: the filesystem is read-only' }])
+    assert.deepEqual(readOnly.run('echo a > /dev/null').unsupported, [])
     assert.equal(parse('echo a > /tmp/out').ok, true)
   })
 })
@@ -1041,7 +1046,7 @@ describe('parse() changes nothing', () => {
     const t = terminal()
     t.run('value=kept')
     const line = 'cd dir; value=changed; printf written > /tmp/file; rm a.txt'
-    assert.equal(t.parse(line).ok, true)
+    assert.equal(parse(line).ok, true)
     assert.equal(t.cwd(), '/src')
     assert.equal(t.run('printf "%s" "$value"').stdout, 'kept')
     assert.equal(t.run('test -e /tmp/file').exitCode, 1)
@@ -1050,24 +1055,24 @@ describe('parse() changes nothing', () => {
 
   it('reads a line that would have ended the shell', () => {
     const t = terminal()
-    assert.deepEqual(commandNames(t.parse('exit 7').list), ['exit'])
+    assert.deepEqual(commandNames(parse('exit 7').list), ['exit'])
     assert.equal(t.run('echo still here').stdout, 'still here\n')
   })
 
   it('reports the same verdict however often it is asked', () => {
     const t = terminal()
-    const first = t.parse('for f in a; do cat "$f"; done')
-    assert.deepEqual(t.parse('for f in a; do cat "$f"; done'), first)
+    const first = parse('for f in a; do cat "$f"; done')
+    assert.deepEqual(parse('for f in a; do cat "$f"; done'), first)
     t.run('cd dir')
-    assert.deepEqual(t.parse('for f in a; do cat "$f"; done'), first)
+    assert.deepEqual(parse('for f in a; do cat "$f"; done'), first)
   })
 
   // A definition read is not a definition made: reading a line that would
   // name a body leaves the shell with no name it did not already have.
   it('defines nothing by reading a definition', () => {
     const t = terminal()
-    t.parse('bench() { ls; }; bench')
-    t.summarize('other() { ls; }; other')
+    parse('bench() { ls; }; bench')
+    summarize('other() { ls; }; other')
     assert.deepEqual(t.complete('be'), [])
     assert.deepEqual(t.complete('oth'), [])
     for (const name of ['bench', 'other']) {
@@ -1082,13 +1087,13 @@ describe('parse() changes nothing', () => {
   it('runs none of a line it summarizes either', () => {
     const t = terminal()
     t.run('value=kept')
-    assert.deepEqual(t.summarize('cd dir; value=changed; rm a.txt'), [
+    assert.deepEqual(summarize('cd dir; value=changed; rm a.txt'), [
       [['cd', 'dir']],
       [[{ type: 'assignments', assignments: [{ name: 'value', value: 'changed' }] }]],
       [['rm', 'a.txt']],
     ])
-    t.summarize('while true; do rm a.txt; done')
-    t.summarize('for f in a.txt; do rm "$f"; done')
+    summarize('while true; do rm a.txt; done')
+    summarize('for f in a.txt; do rm "$f"; done')
     assert.equal(t.cwd(), '/src')
     assert.equal(t.run('printf "%s" "$value"').stdout, 'kept')
     assert.equal(t.run('test -e a.txt').exitCode, 0)
@@ -1106,7 +1111,7 @@ describe('summarize() says what the line it read would do', () => {
     let checked = 0
     for (const { command } of CORPUS) {
       let summary
-      try { summary = terminal().summarize(command) } catch { continue }
+      try { summary = summarize(command) } catch { continue }
       const rebuilt = writtenBack(summary)
       if (rebuilt === null) continue
       checked++
@@ -1141,7 +1146,7 @@ describe('summarize() says what the line it read would do', () => {
     ["echo 'a b' | cat -n", "echo 'a b' | cat -n"],
   ]) {
     it(`writes ${JSON.stringify(command)} back as the line it runs`, () => {
-      const rebuilt = writtenBack(terminal().summarize(command))
+      const rebuilt = writtenBack(summarize(command))
       assert.equal(rebuilt, expected)
       const written = terminal().run(command)
       const said = terminal().run(rebuilt)
@@ -1153,7 +1158,7 @@ describe('summarize() says what the line it read would do', () => {
 describe('parse() settles every command in the source-analysis corpus', () => {
   for (const { id, purpose, command } of CORPUS) {
     it(`${id}. ${purpose}`, () => {
-      const parsed = terminal().parse(command)
+      const parsed = parse(command)
       assert.deepEqual({ ok: parsed.ok, error: parsed.error, unsupported: parsed.unsupported }, { ok: true, error: null, unsupported: [] }, command)
       const names = commandNames(parsed.list)
       assert.ok(names.length > 0, command)

@@ -131,7 +131,6 @@
     "src/parse.js",
     "src/summarize.js",
     "src/result.js",
-    "src/reading.js",
     "src/regex-fold.js",
     "src/registry.js",
     "src/shell/aliases.js",
