@@ -408,6 +408,16 @@ export interface Terminal {
    * working directory persist across calls.
    */
   run(line: string): RunResult
+  /**
+   * {@link Terminal.run}, handed back as a promise: the same line, run the
+   * same way, for a caller who would rather await a result than take one.
+   *
+   * Nothing here waits for anything, so the line has already run by the time
+   * the promise is returned — two calls made without awaiting the first still
+   * run in the order they were made — and what `run` would throw, this
+   * rejects with.
+   */
+  runAsync(line: string): Promise<RunResult>
   /** Current working directory. */
   cwd(): string
   /**
