@@ -297,13 +297,14 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       re.unicodePattern = /[\u0080-\u{10FFFF}]/u.test(pattern)
       const literal = flags.has('F') || !/[\\.^$*+?()[\]{}|]/u.test(pattern)
       re.binaryLiteral = !whole && !word && literal
-      // What that literal can be in a file this terminal cannot read as text,
-      // where the bytes alone say whether it is there at all. `-w` and `-x`
-      // only narrow what the bytes being there would select, so they answer
-      // here too. A pattern holding a lone surrogate spells no bytes at all,
-      // so it answers for none, and neither does one PCRE folds by its own
-      // tables rather than the locale's.
-      if (literal && pattern.isWellFormed() && (folded || !flags.has('i'))) re.literalMask = literalMask(pattern, folded, tables)
+      // Whether the bytes alone can say that a file this terminal cannot read
+      // as text holds no match — which only a plain literal answers, and only
+      // one read as written or folded by the locale's own tables, never by
+      // PCRE's. `-w` and `-x` narrow what the bytes being there would select,
+      // so they answer here too, and a pattern holding a lone surrogate spells
+      // no bytes at all. What that literal can be is spelled out on the first
+      // such file, since most runs never meet one.
+      if (literal && pattern.isWellFormed() && (folded || !flags.has('i'))) re.literal = { pattern, tables }
       if (flags.has('o') && gnu && !whole) {
         if (word || /\\[1-9]|\(\?/u.test(source)) return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: only-matching with backreferences, lookarounds or word constraints is not supported', 2) }
         try { re.extent = new AwkRegex(grepSource(source, true, tables), false, null, tables) } catch {
@@ -338,7 +339,7 @@ function gnuSyntaxGap(source, flags) {
 // The bytes a plain literal can be, character by character: what each one is
 // as written, or the bytes of each character it stands for where `-i` folds
 // it — `s` for `s`, `S` and `ſ`, which are one, one and two bytes.
-function literalMask(pattern, folded, tables) {
+function literalMask({ pattern, tables }, folded) {
   return [...pattern].map((character) => {
     const codes = folded ? tables.fold(character.codePointAt(0)) : [character.codePointAt(0)]
     return codes.map((code) => encodeUtf8(String.fromCodePoint(code)))
@@ -351,7 +352,11 @@ function literalMask(pattern, folded, tables) {
 // a file and all this terminal has to do. Anything else has to be read to
 // know. A character is one byte at least, so nothing can begin past the end.
 export function cannotHoldMatch(bytes, res) {
-  return res.every((re) => re.literalMask && !holdsMask(bytes, re.literalMask))
+  return res.every((re) => {
+    if (!re.literal) return false
+    re.literalMask ??= literalMask(re.literal, re.folded)
+    return !holdsMask(bytes, re.literalMask)
+  })
 }
 
 function holdsMask(haystack, mask) {

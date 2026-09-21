@@ -52,9 +52,10 @@ export function consumeStdin(ctx, rest = '') {
 // first as the file exactly has them, the second as a command only measuring
 // or slicing them reads a text file holding a lone surrogate — and the entry
 // then carries `bytes` and no `content`, so a command wanting text cannot
-// quietly read an empty string. `maybe-text` reads the text and leaves
-// `content` unset where the bytes spell none, for a command that answers for
-// such a file rather than refusing it.
+// quietly read an empty string. `maybe-text` hands back the file as it is
+// held: `content` for one held as text, `bytes` for one held as bytes, and
+// `content` for those too where they spell text. Nothing is converted, so a
+// command that can work in either pays for neither.
 export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   const entries = []
   let stderr = ''
@@ -68,11 +69,12 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   const ofFile = (entry, path) => {
     if (bytes) { entry.bytes = readBytesOf(ctx.fs, path, read === 'loose-bytes'); return }
     if (read !== 'maybe-text') { entry.content = ctx.fs.readFile(path); return }
-    // A file whose bytes spell no text carries them instead, for the command
-    // that has something to say about such a file.
+    // A file held as bytes carries them, and the text they spell where they
+    // spell one: a command counting or encoding them works in what the file
+    // is, and one that can only read text says so where there is none.
     const spelled = readTextOrBytes(ctx.fs, path)
     entry.content = spelled.text
-    if (spelled.text === undefined) entry.bytes = spelled.bytes
+    if (spelled.bytes !== undefined) entry.bytes = spelled.bytes
   }
   for (const name of files) {
     const entry = { name, [field]: asRead(''), kind: 'file' }

@@ -231,6 +231,10 @@ export function createFs(sources, mount = '/') {
     // that reading it as text may have no answer. Asking costs nothing, so a
     // command that answers for such a file need not read one to find out.
     isBytes: (p) => files.get(p) instanceof Uint8Array,
+    // Whether a file holds nothing at all, which `find -empty` asks of every
+    // file it walks: a question about its length, answered without encoding
+    // the text it holds or spelling out the bytes.
+    isEmptyFile: (p) => { const content = files.get(p); return typeof content === 'string' ? content === '' : content?.length === 0 },
     listDir: (p) => {
       const entry = childMap.get(p)
       if (!entry) throw new Error(`not a directory: ${p}`)

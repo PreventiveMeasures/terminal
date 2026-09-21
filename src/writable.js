@@ -53,6 +53,7 @@ export function writableFs(base) {
       return inode ? inode.bytes : readBytesOf(base, path, loose)
     },
     exactBytes: (path) => files.get(path)?.bytes ?? base.exactBytes(path),
+    isEmptyFile: (path) => { const inode = files.get(path); return inode ? inode.bytes.length === 0 : base.isEmptyFile(path) },
     // An overlay file is written as bytes and read back as the text they
     // spell, so it is one of the files whose reading may have no answer.
     isBytes: (path) => files.has(path) || base.isBytes?.(path) === true,

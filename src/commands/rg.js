@@ -43,6 +43,9 @@ export function rg(stdin, tokens, ctx) {
     const found = ignoreFileIn(targets.roots, ctx)
     if (found) return gap('ignore rules', `${JSON.stringify(found)} would change which files are searched, and its rules are not implemented`)
   }
+  // What this run would read, which is what it can be refused over: a file a
+  // walk never opens is one ripgrep never answers for either.
+  const files = openedFiles(operands, targets, options, ctx)
   // A walk skips binary files, which `grep -I` also does; a named one draws
   // ripgrep's "binary file matches" line, which this runtime cannot produce.
   const binary = options.text ? null : namedBinary(operands, ctx)
@@ -51,32 +54,45 @@ export function rg(stdin, tokens, ctx) {
   // a NUL, not for an encoding — so it searches one and prints the bytes of
   // any line that matches. This terminal can neither search nor print them,
   // named or walked alike, and `--text` asks for the same bytes.
-  const unreadable = unreadableFile(operands, targets.roots, ctx)
+  const unreadable = firstFile(files, ctx, (path) => readTextOrBytes(ctx.fs, path).text === undefined)
   if (unreadable) return gap('unreadable bytes', `${JSON.stringify(unreadable)} holds bytes that are not text, and searching them is not supported`)
-  const marked = markedFile(operands, targets.roots, ctx)
+  // ripgrep drops a leading byte-order mark before matching, so `^` sits after
+  // it; grep matches through it, which would answer differently on both counts.
+  const marked = firstFile(files, ctx, (path) => ctx.fs.readFile(path)?.startsWith('\uFEFF') === true)
   if (marked) return gap('byte-order mark', `${JSON.stringify(marked)} begins with a byte-order mark, which ripgrep strips before matching`)
   // ripgrep treats a run that opened nothing as a mistake rather than a miss,
   // since a filter it applied is the usual cause. Only when it chose the
   // starting point itself: name one, even `.`, and an empty walk is just a miss.
-  const opened = targets.stdin || operands.length ? 1 : searchedCount(targets, options, ctx)
+  const opened = targets.stdin || operands.length ? 1 : files.length
   if (opened === 0) {
     return { stdout: '', exitCode: 2, stderr: 'rg: No files were searched, which means ripgrep probably applied a filter you didn\'t expect.\nRunning with --debug will show why files are being skipped.\n' }
   }
   return runGrep(stdin, options, operands, targets, ctx)
 }
 
-// What a walk would open: files discovered below the starting point, unless a
-// dot-prefixed component keeps them out.
-function searchedCount(targets, options, ctx) {
-  let count = 0
+// What a run would open: the paths it was given, and the files a walk finds
+// below each starting point, unless a dot-prefixed component keeps them out —
+// a hidden file is neither searched nor refused over unless `--hidden` asks
+// for it.
+function openedFiles(operands, targets, options, ctx) {
+  const named = operands.map((operand) => lookup(ctx.cwd, operand, ctx.fs).path).filter(Boolean)
+  const walked = []
   for (const root of targets.roots) {
     for (const entry of walkTree(ctx.fs, root)) {
       if (entry.kind !== 'file') continue
       const below = relativeTo(root === '/' ? '/' : root, entry.path).split('/')
-      if (options.hidden || below.every((part) => !part.startsWith('.'))) count++
+      if (options.hidden || below.every((part) => !part.startsWith('.'))) walked.push(entry.path)
     }
   }
-  return count
+  return [...named, ...walked]
+}
+
+// The first of them a refusal answers for, named as the caller spelled it.
+function firstFile(files, ctx, refuses) {
+  for (const path of files) {
+    if (!ctx.fs.isDir(path) && refuses(path)) return relativeTo(ctx.cwd === '/' ? '/' : ctx.cwd, path) || path
+  }
+  return null
 }
 
 // rg filters only what it discovers by walking; an operand named on the command
@@ -146,29 +162,6 @@ function namedBinary(operands, ctx) {
     if (found.path === null || ctx.fs.isDir(found.path)) continue
     const { text, bytes } = readTextOrBytes(ctx.fs, found.path)
     if (bytes === undefined ? text?.includes('\0') : bytes.includes(0)) return operand
-  }
-  return null
-}
-
-// The first file, named or below a starting point, whose bytes spell no text.
-function unreadableFile(operands, roots, ctx) {
-  const named = operands.map((operand) => lookup(ctx.cwd, operand, ctx.fs).path).filter(Boolean)
-  const walked = roots.flatMap((root) => [...walkTree(ctx.fs, root)].filter((e) => e.kind === 'file').map((e) => e.path))
-  for (const path of [...named, ...walked]) {
-    if (!ctx.fs.isDir(path) && readTextOrBytes(ctx.fs, path).text === undefined) {
-      return relativeTo(ctx.cwd === '/' ? '/' : ctx.cwd, path) || path
-    }
-  }
-  return null
-}
-
-// ripgrep drops a leading byte-order mark before matching, so `^` sits after it;
-// grep matches through it, which would answer differently on both counts.
-function markedFile(operands, roots, ctx) {
-  const named = operands.map((operand) => lookup(ctx.cwd, operand, ctx.fs).path).filter(Boolean)
-  const walked = roots.flatMap((root) => [...walkTree(ctx.fs, root)].filter((e) => e.kind === 'file').map((e) => e.path))
-  for (const path of [...named, ...walked]) {
-    if (!ctx.fs.isDir(path) && ctx.fs.readFile(path)?.startsWith('\uFEFF')) return relativeTo(ctx.cwd === '/' ? '/' : ctx.cwd, path) || path
   }
   return null
 }
