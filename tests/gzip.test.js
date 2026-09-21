@@ -250,3 +250,33 @@ describe('gunzip and zcat are gzip under the names it also answers to', () => {
     }
   })
 })
+
+// A pipe carries bytes, so compressing reads one as readily as decompressing
+// does: what `gzip | gzip` is handed is a member, and no text spells one.
+// And taking the pipe is taking it — the next command in the list finds it
+// where this one left it, which is the end. Recorded from gzip 1.12.
+describe('gzip reads the pipe it is given, whichever way it is going', () => {
+  it('compresses the member a pipe carried, so the round trip is exact', async () => {
+    const t = terminal()
+    // `gzip | gzip | gzip -d` is one member of another, unwrapped once.
+    assert.deepEqual(await t.run('cat plain.txt | gzip | wc -c'), result('35\n'))
+    assert.deepEqual(await t.run('cat plain.txt | gzip | gzip | gzip -d | wc -c'), result('35\n'))
+    assert.deepEqual(await t.run('cat plain.txt | gzip | gzip | gzip -d | gzip -d'), result('not compressed\n'))
+    // Unwrapped twice, there is no member left to unwrap.
+    assert.deepEqual(await t.run('cat plain.txt | gzip | gzip -d | gzip -d'), result('', { stderr: '\ngzip: stdin: not in gzip format\n', exitCode: 1 }))
+  })
+
+  it('compresses a member whose bytes spell no text', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('cat img.gz | gzip | gzip -d | gzip -d | hexdump -C'), result('00000000  89 50 4e 47 ff 0a                                 |.PNG..|\n00000006\n'))
+    assert.deepEqual(await t.run('cat img.gz | gzip | gzip -d | base64'), result('H4sIAAAAAAACA+sM8HP/zwUAX4uBzQYAAAA=\n'))
+  })
+
+  it('leaves the pipe where it read it, so the next command finds its end', async () => {
+    const t = terminal()
+    // The second reader is handed nothing, and says what GNU says of nothing.
+    assert.deepEqual(await t.run('cat data.gz | { gzip -d; gzip -d; }'), result('alpha\nbeta\n', { stderr: '\ngzip: stdin: unexpected end of file\n', exitCode: 1 }))
+    // Compressing nothing is a member all the same, and GNU writes 20 bytes of it.
+    assert.deepEqual(await t.run('cat plain.txt | { gzip | wc -c; gzip | wc -c; }'), result('35\n20\n'))
+  })
+})

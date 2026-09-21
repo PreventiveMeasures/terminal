@@ -1,5 +1,5 @@
 import { parseArgs } from '../args.js'
-import { encodeUtf8, encodeUtf8Loose, readBytesOf } from '../util.js'
+import { consumeStdin, encodeUtf8, encodeUtf8Loose, readBytesOf } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
 import { compressBytes, decompressBytes, formatUsable } from '../compression.js'
@@ -72,16 +72,20 @@ export async function gzip(stdin, tokens, ctx) {
 // A pipe carries text unless a stage upstream wrote bytes into it, and a
 // member is bytes: `cat f.gz | gzip -d` hands them over, where a pipe of text
 // is read the way GNU reads one carrying anything else and always finds the
-// same thing.
+// same thing. Compressing reads that pipe as readily as decompressing does —
+// a member is what `gzip | gzip` is handed, and no text spells one.
 async function fromStdin(stdin, opts, state) {
   const piped = state.ctx.stdinBytes
+  // Taking the pipe is taking it: the next command in the list finds it
+  // empty, as it would a stdin this one had read to the end.
+  consumeStdin(state.ctx, '', true)
   // What a pipe hands over has no name to write a file beside, so it is
   // read out where GNU reads it: stdout.
   if (opts.decompressing && piped !== null) return decompress('stdin', piped, { ...opts, stdout: true }, state)
   if (opts.decompressing) return dataError(state, stdin === '' ? 'stdin: unexpected end of file' : 'stdin: not in gzip format')
   // A member of a pipe is the one GNU writes for a pipe: no name, and no
   // moment, because there was no file to take either from.
-  return toStdout(await compressBytes(encodeUtf8(stdin), FORMAT), state)
+  return toStdout(await compressBytes(piped ?? encodeUtf8(stdin), FORMAT), state)
 }
 
 function one(name, opts, state) {

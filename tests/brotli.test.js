@@ -198,3 +198,21 @@ describe('a compressor is there only where the runtime can do its format', () =>
     assert.deepEqual(answers['brotli -dc a.txt'], { exitCode: 1, head: 'corrupt input [a.txt]\n', listed: false, gaps: [] })
   })
 })
+
+// Taking the pipe is taking it: a second `-`, and the next command in the
+// list, both find it where this one left it, which is the end. Recorded from
+// brotli 1.1.0, whose member of nothing is one byte.
+describe('brotli leaves the pipe where it read it', () => {
+  it('hands the next reader the end of it, not the whole of it again', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('cat plain.txt | { brotli | wc -c; brotli | wc -c; }'), result('19\n1\n'))
+    assert.deepEqual(await t.run('cat data.br | { brotli -d; brotli -d; }'), result('alpha\nbeta\n', { stderr: 'corrupt input [con]\n', exitCode: 1 }))
+  })
+
+  it('compresses the member a pipe carried, so the round trip is exact', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('cat plain.txt | brotli | wc -c'), result('19\n'))
+    assert.deepEqual(await t.run('cat plain.txt | brotli | brotli | brotli -d | wc -c'), result('19\n'))
+    assert.deepEqual(await t.run('cat plain.txt | brotli | brotli | brotli -d | brotli -d'), result('not compressed\n'))
+  })
+})

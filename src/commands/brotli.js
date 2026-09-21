@@ -1,5 +1,5 @@
 import { parseArgs } from '../args.js'
-import { encodeUtf8, readBytesOf } from '../util.js'
+import { consumeStdin, encodeUtf8, readBytesOf } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
 import { compressBytes, decompressBytes, formatUsable } from '../compression.js'
@@ -73,8 +73,15 @@ function chosen(flags, values) {
 function one(name, stdin, opts, state) {
   const { ctx } = state
   // A pipe carries text unless a stage upstream wrote bytes into it, and a
-  // brotli stream is bytes: `cat f.br | brotli -d` hands them over.
-  if (name === '-') return through(ctx.stdinBytes ?? encodeUtf8(stdin), STDIN, null, opts, state)
+  // brotli stream is bytes: `cat f.br | brotli -d` hands them over. Taking it
+  // is taking it — what is read here is read, so a second `-` and the next
+  // command in the list both find the pipe at its end, as they would a file's.
+  if (name === '-') {
+    const piped = ctx.stdinBytes
+    const text = ctx.stdinLeft
+    consumeStdin(ctx, '', true)
+    return through(piped ?? encodeUtf8(text), STDIN, null, opts, state)
+  }
   // The name it writes is the name it was given with the suffix on the end,
   // or with the suffix taken off — and a name too short to take one off of
   // has nothing left to be called.
