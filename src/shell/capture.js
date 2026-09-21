@@ -33,7 +33,7 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
     const stage = steps.length === 1 && !steps[0].negate && steps[0].stages.length === 1 ? steps[0].stages[0] : null
     // Bash's $(<file) shorthand reads the file without a command name.
     if (stage && !stage.group && !stage.loop && !stage.conditional && !stage.test && stage.words.length === 0 && stage.assigns.length === 0 && stage.redirs.length === 1 && stage.redirs[0].op === 'read') stage.words.push({ value: 'cat', mask: null })
-    return runSteps(steps, ctx, { text: ctx.stdinLeft })
+    return runSteps(steps, ctx, { text: ctx.stdinLeft, bytes: ctx.stdinBytes })
   }))
   ctx.lastExit = ctx.substitutionExit = result.exitCode
   let value = result.stdout

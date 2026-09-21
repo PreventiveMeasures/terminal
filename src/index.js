@@ -66,7 +66,7 @@ function context({ fs, io, mount, writable, registry, createdAt, lock }, session
     unsupported: createUnsupportedFeed(), notes: new Set(),
   }
   // find -exec and xargs dispatch externally in isolated shell state.
-  ctx.dispatch = (name, tokens, stdin) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null },
+  ctx.dispatch = (name, tokens, stdin) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinBytes: ctx.stdinBytes, stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null },
     () => isolated(ctx, () => dispatch(name, tokens, stdin, ctx, true)))
   ctx.flushOutput = (result) => routeExternalOutput(result, ctx)
   ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)

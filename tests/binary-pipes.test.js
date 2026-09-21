@@ -19,6 +19,7 @@ const SOURCES = { 'img.png': PNG, 'text.gz': TEXT_MEMBER, 'img.gz': BYTE_MEMBER,
 const terminal = () => createTerminal(SOURCES, { mount: '/repo', writable: '/tmp/' })
 const result = (stdout = '', { stderr = '', exitCode = 0, notes = [], unsupported = [] } = {}) =>
   ({ stdout, stderr, exitCode, cwd: '/repo', notes, unsupported })
+const PNG_DUMP = '00000000  89 50 4e 47 ff 0a                                 |.PNG..|\n00000006\n'
 const NOT_TEXT = (cmd) => `${cmd}: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n`
 const unreadable = (cmd) => `${cmd}: standard input holds bytes that spell no text, and reading them as text is not supported\n`
 
@@ -78,6 +79,44 @@ describe('a pipe carries the bytes a stage wrote', () => {
     // A file takes them, so a redirect is not that.
     assert.deepEqual(await t.run('cat img.png > /tmp/copy && base64 /tmp/copy'), result('iVBOR/8K\n'))
     assert.deepEqual(await t.run('cat img.gz | gzip -d > /tmp/out && wc -c /tmp/out'), result('6 /tmp/out\n'))
+  })
+
+  // A `{ }`, a `( )`, an `if` or a loop stands where a command would, and
+  // reads what a command there would read. The input a list holds is one
+  // input: what a command in it takes, it takes, and the next reads what is
+  // left rather than the same bytes over again.
+  it('hands the bytes to a compound stage as it hands them to a command', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('cat img.png | { cat; } | hexdump -C'), result(PNG_DUMP))
+    assert.deepEqual(await t.run('cat img.png | ( cat ) | base64'), result('iVBOR/8K\n'))
+    assert.deepEqual(await t.run('cat img.png | { hexdump -C; }'), result(PNG_DUMP))
+    assert.deepEqual(await t.run('cat img.png | ( xxd )'), result('00000000: 8950 4e47 ff0a                           .PNG..\n'))
+    assert.deepEqual(await t.run('cat img.png | if true; then base64; fi'), result('iVBOR/8K\n'))
+    assert.deepEqual(await t.run('cat img.png | for i in 1; do wc -c; done'), result('6\n'))
+    assert.deepEqual(await t.run('cat img.gz | { gzip -d; } | base64'), result('iVBOR/8K\n'))
+  })
+
+  it('shares that input between the commands of the compound, as a list does', async () => {
+    const t = terminal()
+    // The first reader takes them; the second reads what is left, which is none.
+    assert.deepEqual(await t.run('cat img.png | { base64; base64; }'), result('iVBOR/8K\n'))
+    // A command that does not read stdin leaves the bytes where they were.
+    assert.deepEqual(await t.run('cat img.png | { echo first; cat; } | hexdump -C'), result('00000000  66 69 72 73 74 0a 89 50  4e 47 ff 0a              |first..PNG..|\n0000000c\n'))
+    // A dump that stops short hands back the bytes it stopped short of, as
+    // the bytes they are rather than the text they would spell.
+    assert.deepEqual(await t.run('cat img.png | { xxd -s 0 -l 2; base64; }'), result('00000000: 8950                                     .P\nTkf/Cg==\n'))
+    // A substitution reads that one input too, so what it takes is gone.
+    assert.deepEqual(await t.run('cat a.txt | { echo "[$(cat)]"; cat; }'), result('[alpha]\n'))
+  })
+
+  it('tells a reader of text in a compound what it tells one outside', async () => {
+    const t = terminal()
+    const r = await t.run('cat img.png | { tr a b; }')
+    assert.deepEqual(r.unsupported.map((u) => u.detail), ['binary file'])
+    assert.equal(r.stderr, unreadable('tr'))
+    assert.equal(r.stdout, '')
+    // The terminal's own answer is a string wherever the command stands.
+    assert.equal((await t.run('cat img.png | ( cat )')).stderr, NOT_TEXT('cat'))
   })
 
   it('leaves a pipe of text exactly as it was', async () => {

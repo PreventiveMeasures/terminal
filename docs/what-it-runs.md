@@ -40,7 +40,11 @@ exactly where GNU does. `cat` hands them on: a pipe and a file both take
 bytes, so `cat img.png | hexdump -C`, `cat f.gz | gzip -d | base64` and
 `cat img.png > /tmp/copy` all read the file itself, and only this terminal's
 own output — a string — cannot carry them, which the command writing them
-there reports. What reads such bytes as text names the input and reports an
+there reports. A `{ }`, a `( )`, an `if` or a loop standing in a pipeline
+reads what a command standing there would, and the commands inside it share
+that one input as the commands of any list do: `cat f.tgz | { gzip -d; }`
+reads the member, and what one command in the braces takes is not there for
+the next to take again. What reads such bytes as text names the input and reports an
 unsupported diagnostic rather than mangling it — `head`, `sed`, `awk` and the
 rest, whether the bytes came from a file, a redirection or a pipe, and
 `diff -a`. A search

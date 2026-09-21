@@ -27,7 +27,7 @@ const TURN_LIMIT = 10_000
 const TURN_GAP = { kind: 'feature', command: null, detail: 'loop limit', message: `a loop running more than ${TURN_LIMIT} times is not supported` }
 async function runWhile(loop, ctx, runSteps) {
   const result = emptyOutput()
-  const stream = { text: ctx.stdinLeft }
+  const stream = { text: ctx.stdinLeft, bytes: ctx.stdinBytes }
   ctx.loopDepth++
   try {
     for (let turn = 0; ; turn++) {
@@ -68,7 +68,7 @@ const FOR_KEYWORD = { value: 'for', mask: null }
 async function runLoop(loop, ctx, runSteps) {
   const expanded = await expandWords([FOR_KEYWORD, ...loop.words], ctx)
   const result = emptyOutput()
-  const stream = { text: ctx.stdinLeft }
+  const stream = { text: ctx.stdinLeft, bytes: ctx.stdinBytes }
   ctx.loopDepth++
   try {
     for (const value of expanded.argv.slice(1)) {
@@ -89,7 +89,7 @@ async function runLoop(loop, ctx, runSteps) {
 
 async function runConditional(conditional, ctx, stdin, runSteps) {
   const result = emptyOutput()
-  const stream = { text: stdin }
+  const stream = { text: stdin, bytes: ctx.stdinBytes }
   for (const branch of conditional.branches) {
     // oxlint-disable-next-line no-await-in-loop -- a branch is read only where the ones before it failed.
     const test = await runSteps(branch.condition, ctx, stream, true)
@@ -109,7 +109,7 @@ async function runConditional(conditional, ctx, stdin, runSteps) {
 
 
 async function runGroup(stage, ctx, stdin, runSteps) {
-  const stream = { text: stdin }
+  const stream = { text: stdin, bytes: ctx.stdinBytes }
   if (!stage.isolate) return runSteps(stage.group, ctx, stream)
   const r = await isolated(ctx, () => runSteps(stage.group, ctx, stream))
   // A subshell is the one compound bash still exits on: what `set -e` ignored

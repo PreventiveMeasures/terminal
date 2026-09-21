@@ -42,10 +42,15 @@ export function lineRecords(text, delimiter = '\n') {
 // no text, a command reading it as text is told which input it is, the way it
 // is told which file a file of such bytes is; a command working in bytes says
 // so here and reads them.
-export function consumeStdin(ctx, rest = '', asBytes = false) {
+export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null) {
   ctx.io?.read(ctx.stdinHandle?.identity)
   if (!asBytes && ctx.stdinBytes) textOfFile(ctx.stdinBytes, inputLabel(null, ctx))
   ctx.stdinLeft = rest
+  // Taking stdin takes the bytes it held with it: what a reader stopped short
+  // of it hands back, and the next command in the group reads that and no
+  // more. A reader that took the lot leaves none, so there are none to read
+  // twice — which is what a shared input is.
+  ctx.stdinBytes = bytesLeft
 }
 
 // Keep operand order and partial read failures; head/tail need directory entries
