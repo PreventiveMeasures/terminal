@@ -62,11 +62,11 @@ function fork(parent, opts = {}) {
 function context({ fs, io, mount, writable, registry, createdAt, lock }, session) {
   const ctx = {
     fs, io, mount, writable, registry, createdAt, lock, ...session, calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
-    loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '',
+    loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '', stdinBytes: null,
     unsupported: createUnsupportedFeed(), notes: new Set(),
   }
   // find -exec and xargs dispatch externally in isolated shell state.
-  ctx.dispatch = (name, tokens, stdin) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null },
+  ctx.dispatch = (name, tokens, stdin) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinBytes: ctx.stdinBytes, stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null },
     () => isolated(ctx, () => dispatch(name, tokens, stdin, ctx, true)))
   ctx.flushOutput = (result) => routeExternalOutput(result, ctx)
   ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)
@@ -149,7 +149,7 @@ function queued(ctx, line) {
 // Syntax errors exit 2; unsupported constructs exit 1.
 function safeRun(line, ctx) {
   const feed = createUnsupportedFeed()
-  return withState(ctx, { unsupported: feed, notes: new Set(), discarded: new Set(), stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, async () => {
+  return withState(ctx, { unsupported: feed, notes: new Set(), discarded: new Set(), stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null, stdinBytes: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, async () => {
     const result = { stdout: '', stderr: '', exitCode: 0 }
     const stream = { text: '' }
     try {

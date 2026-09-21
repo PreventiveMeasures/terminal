@@ -138,14 +138,22 @@ describe('base64 input and diagnostic errors', () => {
       assert.deepEqual(await t.run(`base64 ${option} input 2>/dev/null | cat`), expected('', 0, '', unsupported))
     })
   }
-  for (const encoded of ['/w==', 'w6k=8A==', '7aCA', 'Yf8=']) {
+  // Each of these decodes to bytes that spell no text, and to this many of them.
+  for (const [encoded, length] of [['/w==', 1], ['w6k=8A==', 3], ['7aCA', 3], ['Yf8=', 2]]) {
     it(`reports unrepresentable UTF-8 from ${encoded}`, async () => {
       const t = createTerminal({ encoded })
       const result = await t.run('base64 -d encoded')
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 1)
       assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['partial UTF-8 byte sequence'])
-      assert.deepEqual(await t.run('base64 -d encoded 2>/dev/null | cat'), expected('', 0, '', result.unsupported))
+      // The bytes are what was decoded, so a pipe carries them: `cat` reads
+      // them and is then the one writing to a terminal that holds a string.
+      const piped = await t.run('base64 -d encoded 2>/dev/null | cat')
+      assert.equal(piped.stdout, '')
+      assert.equal(piped.exitCode, 1)
+      assert.deepEqual(piped.unsupported.map(({ command }) => command), ['cat'])
+      // Where something reads bytes, they arrive as the bytes they are.
+      assert.deepEqual(await t.run('base64 -d encoded | wc -c'), expected(`${length}\n`))
     })
   }
   it('completes a UTF-8 character across separately padded blocks', async () => {

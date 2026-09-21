@@ -77,10 +77,16 @@ describe('cp preserves file bytes without weakening shared write guards', () => 
     assert.deepEqual(await terminal.run('{ printf é >/tmp/raw; printf X; } >/tmp/raw'), success)
     assert.deepEqual(await terminal.run('cp /tmp/raw /tmp/copy'), success)
     assert.deepEqual(await terminal.run('printf changed >/tmp/raw'), success)
+    // The bytes travel: the pipe takes them, and a reader of bytes reads the
+    // copy the shell made.
+    assert.equal((await terminal.run('cat /tmp/copy | base64')).stdout, 'WKk=\n')
+    assert.equal((await terminal.run('cat /tmp/copy | wc -c')).stdout, '2\n')
+    // It is the terminal's own output, a string, that cannot carry them — so
+    // the command writing them there is the one that says so.
     const result = await terminal.run('cat /tmp/copy 2>/dev/null | cat')
     assert.equal(result.stdout, '')
-    assert.equal(result.stderr, '')
-    assert.equal(result.exitCode, 0)
-    assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['binary file'])
+    assert.equal(result.stderr, 'cat: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
+    assert.equal(result.exitCode, 1)
+    assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['partial UTF-8 byte sequence'])
   })
 })

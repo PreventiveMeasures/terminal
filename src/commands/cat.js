@@ -1,7 +1,7 @@
 import { UnsupportedError } from '../unsupported.js'
 import { lookup } from '../fs.js'
 import { parseArgs } from '../args.js'
-import { encodeUtf8Loose, lineRecords, okWith, readContent } from '../util.js'
+import { encodeUtf8, encodeUtf8Loose, joinBytes, lineRecords, okWith, readInputs } from '../util.js'
 
 // cat displays actual UTF-8 bytes with -v; numbering uses the original
 // lines so marking an empty line with -E never makes -b count it.
@@ -9,14 +9,38 @@ export function cat(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['n', 'b', 's', 'v', 'E', 'T', 'A', 'e', 't'] })
   const format = (content) => formatCat(content, flags)
   const r = readCatContent(positional, stdin, ctx, format, flags.size !== 0)
-  return okWith(format(r.content), r)
+  if (r.bytes === undefined) return okWith(format(r.content), r)
+  // A file whose bytes spell no text is written as those bytes, which a pipe
+  // and a file both take and a terminal carrying a string does not. What GNU
+  // makes of such bytes under `-v` is a rendering this does not do, so a
+  // formatting flag over them refuses rather than mangling them.
+  if (flags.size) throw new UnsupportedError('feature', 'binary file', 'cat: formatting bytes that spell no text is not supported')
+  return {
+    stdout: '', stderr: r.stderr, exitCode: r.failed ? 1 : 0,
+    events: [{ fd: 1, bytes: r.bytes }, ...(r.stderr ? [{ fd: 2, text: r.stderr }] : [])],
+  }
 }
+
+// What the operands hold: the text of all of them where each spells text, and
+// the bytes of all of them where one does not.
+function readCatParts(files, stdin, ctx) {
+  const r = readInputs('cat', files, stdin, ctx, { read: 'maybe-text' })
+  return { parts: r.inputs.map((input) => input.content ?? input.bytes), stderr: r.stderr, failed: r.failed }
+}
+
+const joinParts = (parts) => (parts.every((part) => typeof part === 'string')
+  ? { content: parts.join('') }
+  : { bytes: joinBytes([...parts.map((part) => (typeof part === 'string' ? encodeUtf8(part) : part)), new Uint8Array()]) })
 
 // GNU compares the unread input offset with stdout's offset (or file end
 // for append). Earlier operands advance stdout before the next input opens.
 function readCatContent(files, stdin, ctx, format, transforms) {
   const output = ctx.outputFds[1]
-  if (!output?.path && !ctx.outputFds[2]?.path) return readContent('cat', files, stdin, ctx)
+  if (!output?.path && !ctx.outputFds[2]?.path) {
+    const r = readCatParts(files, stdin, ctx)
+    return { ...joinParts(r.parts), stderr: r.stderr, failed: r.failed }
+  }
+  const parts = []
   let content = '', pipe = stdin, stderr = ''
   for (const name of files.length ? files : ['-']) {
     const shared = name === '-'
@@ -26,20 +50,28 @@ function readCatContent(files, stdin, ctx, format, transforms) {
     if (stderr && sameFile(path, identity, ctx.outputFds[2])) throw new UnsupportedError('feature', 'cat input modified by diagnostics', 'cat: reading an input after writing diagnostics to the same file is not supported')
     if (sameFile(path, identity, output)) {
       const position = shared ? encodeUtf8Loose(ctx.stdinHandle.content).length - encodeUtf8Loose(pipe).length : 0
-      if (position < output.position + encodeUtf8Loose(format(content)).length) {
+      if (position < output.position + writtenLength(parts, content, format)) {
         stderr += `cat: ${name}: input file is output file\n`
         continue
       }
       const unread = shared ? pipe : redirected ? ctx.stdinOrigin : ctx.fs.readFile(path)
       if (transforms && unread !== '') throw new UnsupportedError('feature', 'cat transforms its input file', 'cat: transforming an input file through its own output descriptor is not supported')
     }
-    const r = readContent('cat', [name], pipe, ctx)
-    content += r.content
+    const r = readCatParts([name], pipe, ctx)
+    parts.push(...r.parts)
+    content += r.parts.filter((part) => typeof part === 'string').join('')
     stderr += r.stderr
     if (shared || name === '/dev/stdin' && !ctx.stdinFile) pipe = ''
   }
-  return { content, stderr, failed: stderr !== '' }
+  return { ...joinParts(parts), stderr, failed: stderr !== '' }
 }
+
+// What has gone to the output file so far, which is what GNU compares an
+// input's unread offset with. Bytes that spell no text are never formatted,
+// so there they are the length themselves.
+const writtenLength = (parts, content, format) => (parts.every((part) => typeof part === 'string')
+  ? encodeUtf8Loose(format(content)).length
+  : parts.reduce((n, part) => n + (typeof part === 'string' ? encodeUtf8Loose(part).length : part.length), 0))
 
 // A replacement or unlink leaves open descriptors on the old inode, which
 // may now be reachable through a backup name rather than the original path.

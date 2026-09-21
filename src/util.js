@@ -1,14 +1,14 @@
 // Shared command I/O and numeric parsing; independent of the command registry.
 
 import { decodeUtf8Maybe, encodeUtf8, encodeUtf8Loose } from './bytes.js'
-import { lookup } from './fs.js'
+import { lookup, textOfFile } from './fs.js'
 import { UINT64_MAX } from './numeric.js'
 import { err } from './result.js'
 import { lookupWithNote } from './notes.js'
 
 // Commands reach the byte codec and the result shape through here, where the
 // rest of their shared helpers already live.
-export { encodeUtf8, encodeUtf8Loose, decodeUtf8, decodeUtf8Loose, decodeUtf8Maybe, utf8CodePoints } from './bytes.js'
+export { encodeUtf8, encodeUtf8Loose, decodeUtf8, decodeUtf8Loose, decodeUtf8Maybe, joinBytes, utf8CodePoints } from './bytes.js'
 export { textOfFile } from './fs.js'
 export { err, ok, usage } from './result.js'
 export { discardedNotes, missingPathNote } from './notes.js'
@@ -38,9 +38,19 @@ export function lineRecords(text, delimiter = '\n') {
 }
 
 // Readers record unconsumed stdin so later commands in a group share its offset.
-export function consumeStdin(ctx, rest = '') {
+// Taking stdin is taking what it holds. Where a pipe carried bytes that spell
+// no text, a command reading it as text is told which input it is, the way it
+// is told which file a file of such bytes is; a command working in bytes says
+// so here and reads them.
+export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null) {
   ctx.io?.read(ctx.stdinHandle?.identity)
+  if (!asBytes && ctx.stdinBytes) textOfFile(ctx.stdinBytes, inputLabel(null, ctx))
   ctx.stdinLeft = rest
+  // Taking stdin takes the bytes it held with it: what a reader stopped short
+  // of it hands back, and the next command in the group reads that and no
+  // more. A reader that took the lot leaves none, so there are none to read
+  // twice — which is what a shared input is.
+  ctx.stdinBytes = bytesLeft
 }
 
 // Keep operand order and partial read failures; head/tail need directory entries
@@ -86,10 +96,12 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
     let error
     if (name === '/dev/stdin' && ctx.stdinFile) { ctx.io?.read(ctx.stdinHandle?.identity); entry[field] = asRead(ctx.stdinOrigin) }
     else if (name === '-' || name === '/dev/stdin') {
-      entry[field] = asRead(pipe)
+      // What the pipe carried is what `-` names, bytes and all.
+      const piped = pipe === stdin ? ctx.stdinBytes ?? null : null
+      Object.assign(entry, piped === null ? textInput(pipe, read, bytes) : bytesInput(piped, read, bytes, cmd, ctx))
       entry.shared = true
       pipe = ''
-      consumeStdin(ctx)
+      consumeStdin(ctx, '', true)
     } else if (name !== '/dev/null') {
       const found = lookupWithNote(ctx, cmd, name)
       if (found.error) { entry.kind = 'missing'; error = found.error }
@@ -116,6 +128,7 @@ const READ_FAILURES = {
   sort: ['cannot read: %s: %r', 'read failed: %s: Is a directory'],
   sed: ["can't read %s: %r", 'read error on %s: Is a directory'],
   tac: ["failed to open '%s' for reading: %r", '%s: read error: Invalid argument'],
+  base32: [null, 'read error: Is a directory'],
   base64: [null, 'read error: Is a directory'],
   uniq: [null, "error reading '%s': Is a directory"],
 }
@@ -148,15 +161,29 @@ export function readTextOrBytes(fs, path) {
 
 export function readInputs(cmd, files, stdin, ctx, options) {
   if (files.length === 0) {
-    consumeStdin(ctx)
-    // Stdin is text, so only a reader working in bytes pays for encoding it.
+    const piped = ctx.stdinBytes ?? null
+    // The question this reader answers for itself, just below.
+    consumeStdin(ctx, '', true)
+    // Stdin is text unless a stage upstream wrote bytes into the pipe, and
+    // then it is those bytes: read as they are where a reader works in them,
+    // as the text they spell where one does not, and refused where they spell
+    // none — the same answer a file of such bytes gives.
     const read = options?.read
     const asBytes = read === 'bytes' || read === 'loose-bytes'
-    const bytes = () => read === 'loose-bytes' ? encodeUtf8Loose(stdin) : encodeUtf8(stdin)
-    const only = [{ name: null, kind: 'file', ...asBytes ? { bytes: bytes() } : { content: stdin } }]
+    const only = [{ name: null, kind: 'file', ...piped === null ? textInput(stdin, read, asBytes) : bytesInput(piped, read, asBytes, cmd, ctx) }]
     return { inputs: only, entries: only, stderr: '', failed: false }
   }
   return readFilesFor(cmd, files, ctx, stdin, options)
+}
+
+// Stdin is text, so only a reader working in bytes pays for encoding it.
+const textInput = (stdin, read, asBytes) =>
+  (asBytes ? { bytes: read === 'loose-bytes' ? encodeUtf8Loose(stdin) : encodeUtf8(stdin) } : { content: stdin })
+
+function bytesInput(bytes, read, asBytes, cmd, ctx) {
+  if (asBytes || read === 'as-held') return { bytes }
+  if (read === 'maybe-text') return { bytes, content: decodeUtf8Maybe(bytes) }
+  return { content: textOfFile(bytes, inputLabel(null, ctx)) }
 }
 
 export function inputLabel(name, ctx) {

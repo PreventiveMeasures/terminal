@@ -23,6 +23,25 @@ not.
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
 `printf` `test` `cp` `rm` `mkdir` `touch` `ln` `diff` `patch` `du` `stat` `realpath`
 `pwd` `seq` `which` `basename` `dirname` — plus your own, via `opts.commands`.
+It has more besides: `gzip`, `gunzip`, `zcat` and `gzcat`, `brotli`, `base32`,
+`od`, `xxd`, `sha1sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shasum`,
+`whoami`, `date`, `true` and `false`. The compressors and the digests are
+there only where the runtime can do the work — a format its streams do not
+know, or a crypto it does not have, is a command this terminal does not have
+either.
+
+Every one of them completes. The shorter list is the one a `command not found`
+prints after `Available:`, which is for someone who has just been told a name
+is not a command and is looking for the one that is — so it is the everyday
+commands for reading a tree, and leaves out what that person was not reaching
+for: the compressors, the digests and the dumps above, and `basename`,
+`dirname`, `ln`, `cp`, `rm`, `mkdir`, `touch` and `patch`, all of which the
+terminal runs and completes as readily as the rest.
+
+The only names it does not complete are the shell's own — `:`, `export`,
+`set`, `unset`, `break`, `continue` and `exit` — which are syntax rather than
+something a terminal hands out, and a wired command given `hidden: true`,
+which is what that flag is for.
 
 A file may be bytes rather than text: a source entry that is a `Uint8Array` is
 the file's own bytes, for what no JS string can spell — an image, a compiled
@@ -36,9 +55,18 @@ listed, copied, encoded or compared as is answered from the bytes themselves:
 `wc`, whose characters are the ones those bytes do spell, `stat`, `du`, `ls`,
 `find`, `cp` and `cp -r` into the overlay, `base64`, `hexdump`, `xxd`, and
 `diff`, which calls two files binary and says only whether they differ,
-exactly where GNU does. What would read such a file as text names it and
-reports an unsupported diagnostic rather than mangling it — `cat`, `head`,
-`sed`, `awk` and the rest, a redirection from one, and `diff -a`. A search
+exactly where GNU does. `cat` hands them on: a pipe and a file both take
+bytes, so `cat img.png | hexdump -C`, `cat f.gz | gzip -d | base64` and
+`cat img.png > /tmp/copy` all read the file itself, and only this terminal's
+own output — a string — cannot carry them, which the command writing them
+there reports. A `{ }`, a `( )`, an `if` or a loop standing in a pipeline
+reads what a command standing there would, and the commands inside it share
+that one input as the commands of any list do: `cat f.tgz | { gzip -d; }`
+reads the member, and what one command in the braces takes is not there for
+the next to take again. What reads such bytes as text names the input and reports an
+unsupported diagnostic rather than mangling it — `head`, `sed`, `awk` and the
+rest, whether the bytes came from a file, a redirection or a pipe, and
+`diff -a`. A search
 answers where it can do so without printing what it cannot: a plain literal
 that is nowhere in the bytes selects nothing there, so `grep -r` and `rg`
 pass over such a file as the real tools print nothing for it, while a pattern

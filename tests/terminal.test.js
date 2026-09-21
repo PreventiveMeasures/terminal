@@ -4820,8 +4820,8 @@ describe('createTerminal — xxd (hidden hexdump variant)', () => {
   })
 })
 
-describe('createTerminal — od / xxd are hidden, hexdump is surfaced', () => {
-  it('od / xxd dispatch and resolve via which, but stay out of completion and the hint', async () => {
+describe('createTerminal — od / xxd are unannounced, hexdump is surfaced', () => {
+  it('od / xxd dispatch, resolve via which and complete, but stay out of the hint', async () => {
     const t = createTerminal({ 'hello.txt': 'hello\n' })
     // Dispatchable standalone and inside a pipeline.
     assert.equal((await t.run('od hello.txt')).exitCode, 0)
@@ -4830,16 +4830,17 @@ describe('createTerminal — od / xxd are hidden, hexdump is surfaced', () => {
     // which resolves them (hasCommand consults the hidden registry).
     assert.equal((await t.run('which od')).stdout, '/usr/bin/od\n')
     assert.equal((await t.run('which xxd')).stdout, '/usr/bin/xxd\n')
-    // Invisible to completion — command position and as pipe targets.
-    assert.deepEqual(t.complete('od'), [])
-    assert.deepEqual(t.complete('xxd'), [])
-    assert.deepEqual(t.complete('cat | od'), [])
-    assert.deepEqual(t.complete('cat | xxd'), [])
-    assert.ok(!t.complete('').includes('od'))
-    assert.ok(!t.complete('').includes('xxd'))
-    // `xxd` doesn't leak through the `x` prefix — only `xargs` surfaces.
-    assert.ok(!t.complete('x').includes('xxd'))
-    assert.ok(t.complete('x').includes('xargs'))
+    // Completed like any other command it has — in command position and, as
+    // readers of stdin, after a pipe — since what a terminal offers is what
+    // it has, whatever it announces.
+    assert.deepEqual(t.complete('od'), ['od'])
+    assert.deepEqual(t.complete('xxd'), ['xxd'])
+    assert.deepEqual(t.complete('cat | od'), ['cat | od'])
+    assert.deepEqual(t.complete('cat | xxd'), ['cat | xxd'])
+    assert.ok(t.complete('').includes('od'))
+    assert.ok(t.complete('').includes('xxd'))
+    // The announced command of a shared prefix comes first.
+    assert.deepEqual(t.complete('x'), ['xargs', 'xxd'])
     // Absent from the unknown-command "Available: …" hint (hexdump is present).
     const hint = (await t.run('frobnicate')).stderr
     assert.match(hint, /Available: /u)
@@ -5232,7 +5233,7 @@ describe('createTerminal — whoami / date (hidden, chain-friendly)', () => {
 })
 
 describe('createTerminal — complete', () => {
-  it('empty input lists every public command', () => {
+  it('empty input lists every command it has', async () => {
     const t = createTerminal(SOURCES)
     const c = t.complete('')
     // Sample a handful from both registries; full membership check
@@ -5240,9 +5241,10 @@ describe('createTerminal — complete', () => {
     for (const name of ['cat', 'grep', 'pwd', 'cd', 'ls', 'find', 'echo']) {
       assert.ok(c.includes(name), `expected ${name} in completions`)
     }
-    // HIDDEN commands (sed) are intentionally excluded — matches the
-    // "Available: …" hint surfaced by unknownCommand().
-    assert.ok(!c.includes('sed'))
+    // What the terminal has, it completes: the unannounced ones follow the
+    // announced, where the "Available: …" hint stops.
+    assert.ok(c.includes('sed'))
+    assert.doesNotMatch((await createTerminal(SOURCES).run('frobnicate')).stderr, /\bsed\b/u)
   })
 
   it('command-name prefix narrows to commands starting with it', () => {
@@ -5554,22 +5556,25 @@ describe('createTerminal — complete: corner cases', () => {
     assert.ok(t.complete('cat ./.').includes('cat ./.hidden'))
   })
 
-  it('hidden commands (sed, true, false, :) are invisible to completion', async () => {
+  it('unannounced commands complete; the shell\'s own builtins do not', async () => {
     const t = createTerminal(SOURCES)
-    // Each name dispatches but isn't surfaced by the completion API.
-    for (const name of ['sed', 'true', 'false', ':']) {
-      assert.deepEqual(t.complete(name), [], `${name} should be hidden`)
-      assert.ok(!t.complete('/usr/bin/').includes('/usr/bin/' + name))
-      assert.deepEqual(t.complete('/usr/bin/' + name), [])
+    // A command the terminal has is a command to complete, announced or not.
+    for (const name of ['sed', 'true', 'false']) {
+      assert.deepEqual(t.complete(name), [name], `${name} should complete`)
+      assert.deepEqual(t.complete('/usr/bin/' + name), ['/usr/bin/' + name])
     }
-    // Empty completion (the full command list) doesn't include any of them.
     const all = t.complete('')
-    for (const name of ['sed', 'true', 'false', ':']) {
-      assert.ok(!all.includes(name), `${name} should be absent from empty completion`)
+    for (const name of ['sed', 'true', 'false']) {
+      assert.ok(all.includes(name), `${name} should be in the full list`)
     }
-    // Sampled prefix `se` doesn't surface sed either.
-    assert.ok(!t.complete('se').includes('sed'))
-    // Dispatch still works — these are HIDDEN, not removed.
+    assert.ok(t.complete('se').includes('sed'))
+    // `:` is the shell's, not a command the terminal hands out.
+    assert.deepEqual(t.complete(':'), [])
+    assert.ok(!all.includes(':'))
+    // None of them is announced in the hint.
+    const hint = (await t.run('frobnicate')).stderr
+    for (const name of ['sed', 'true', 'false', ':']) assert.doesNotMatch(hint, new RegExp(`\\b${name}\\b`, 'u'))
+    // Dispatch is unchanged.
     assert.equal((await t.run('true')).exitCode, 0)
     assert.equal((await t.run('false')).exitCode, 1)
     assert.equal((await t.run(':')).exitCode, 0)
@@ -5593,9 +5598,9 @@ describe('createTerminal — complete: corner cases', () => {
     // tree sits near the listing tools, not at the very end.
     assert.ok(idx('wc') < idx('tree'), 'wc before tree')
     assert.ok(idx('tree') < idx('sort'), 'tree before sort')
-    // Path utilities are the tail.
-    assert.ok(idx('basename') < idx('dirname'), 'basename before dirname')
-    assert.equal(idx('dirname'), all.length - 1, 'dirname is last')
+    // Path utilities are the tail of what the terminal announces, and the
+    // commands it has without announcing them follow, sorted.
+    assert.deepEqual(all.slice(idx('which')), ['which', String.raw`\[`, 'base32', 'basename', 'brotli', 'cp', 'date', 'dirname', 'egrep', 'false', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'ln', 'mkdir', 'od', 'patch', 'rm', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'touch', 'true', 'whoami', 'xxd', 'zcat'])
   })
 
   it('after `|`, completion only suggests commands that consume stdin', () => {
@@ -5613,7 +5618,11 @@ describe('createTerminal — complete: corner cases', () => {
     for (const name of ['grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'xargs', 'awk', 'tr', 'nl', 'tac', 'hexdump', 'cat', 'base64', 'diff', 'patch']) {
       assert.ok(c.includes('cat | ' + name), `${name} should be a pipe target`)
     }
-    assert.equal(c.length, 17)
+    // The unannounced readers are offered there too, after the announced.
+    for (const name of ['base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat']) {
+      assert.ok(c.includes('cat | ' + name), `${name} should be a pipe target`)
+    }
+    assert.equal(c.length, 33)
   })
 
   it('pipe-target priority lists grep first', () => {
@@ -5679,7 +5688,7 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat|l'), [])
     // Empty trailing word: full pipe set, each glued to `cat| ` with a space.
     const c = t.complete('cat|')
-    assert.equal(c.length, 17)
+    assert.equal(c.length, 33)
     assert.equal(c[0], 'cat| grep')
     // Every variant has the inserted space — no `cat|grep` leaks through.
     for (const variant of c) assert.ok(variant.startsWith('cat| '), `expected "cat| " prefix on ${variant}`)
@@ -5741,13 +5750,12 @@ describe('createTerminal — complete: corner cases', () => {
     assert.ok(c.includes('cat || grep PATT README.md'))
   })
 
-  it('HIDDEN pipeable command (sed) stays invisible after `|`', () => {
+  it('an unannounced reader (sed) is a pipe target like any other', () => {
     const t = createTerminal(SOURCES)
-    // sed reads stdin but is HIDDEN, so absent from PIPE_NAMES.
-    assert.deepEqual(t.complete('cat | sed'), [])
-    assert.deepEqual(t.complete('cat | /usr/bin/sed'), [])
-    // `s` prefix matches the public pipeable `sort`, not the hidden `sed`.
-    assert.deepEqual(t.complete('cat | s'), ['cat | sort'])
+    assert.deepEqual(t.complete('cat | sed'), ['cat | sed'])
+    assert.deepEqual(t.complete('cat | /usr/bin/sed'), ['cat | /usr/bin/sed'])
+    // The announced `sort` leads the prefix the two share.
+    assert.deepEqual(t.complete('cat | s'), ['cat | sort', 'cat | sed', 'cat | sha1sum', 'cat | sha256sum', 'cat | sha384sum', 'cat | sha512sum', 'cat | shasum'])
   })
 
   it('non-pipeable public commands (seq, which, tree) are absent from pipe completion', () => {
@@ -5777,18 +5785,13 @@ describe('createTerminal — complete: corner cases', () => {
   it('inserts a space after a bare `|` but preserves a typed target', () => {
     const t = createTerminal({})
     // An empty target may add a separating space.
-    assert.deepEqual(t.complete('cat 1 |'), [
-      'cat 1 | grep', 'cat 1 | head', 'cat 1 | tail', 'cat 1 | wc',
-      'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs', 'cat 1 | awk',
-      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | hexdump', 'cat 1 | cat', 'cat 1 | base64',
-      'cat 1 | diff', 'cat 1 | patch',
-    ])
-    assert.deepEqual(t.complete('cat 1 | '), [
-      'cat 1 | grep', 'cat 1 | head', 'cat 1 | tail', 'cat 1 | wc',
-      'cat 1 | sort', 'cat 1 | uniq', 'cat 1 | cut', 'cat 1 | xargs', 'cat 1 | awk',
-      'cat 1 | tr', 'cat 1 | nl', 'cat 1 | tac', 'cat 1 | hexdump', 'cat 1 | cat', 'cat 1 | base64',
-      'cat 1 | diff', 'cat 1 | patch',
-    ])
+    const targets = [
+      'grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'xargs', 'awk',
+      'tr', 'nl', 'tac', 'hexdump', 'cat', 'base64', 'diff', 'patch',
+      'base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat',
+    ]
+    assert.deepEqual(t.complete('cat 1 |'), targets.map((name) => `cat 1 | ${name}`))
+    assert.deepEqual(t.complete('cat 1 | '), targets.map((name) => `cat 1 | ${name}`))
     // A partial target is extended without inserting text before it.
     assert.deepEqual(t.complete('cat |gre'), ['cat |grep'])
     assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])

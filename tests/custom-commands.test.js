@@ -1,5 +1,5 @@
 // Embedders provide additional commands through opts.commands. These tests
-// supply sha256sum using host crypto and verify that the shell applies its
+// supply md5sum using host crypto and verify that the shell applies its
 // normal expansion, piping, redirection, dispatch, and completion rules.
 
 import assert from 'node:assert/strict'
@@ -15,89 +15,89 @@ const SOURCES = {
   'src/y.js': 'const y = 2\n',
 }
 
-const sha256 = (s) => createHash('sha256').update(s).digest('hex')
-// `printf 'hello\n' | sha256sum` on a real system. Hardcoded so the
+const md5 = (s) => createHash('md5').update(s).digest('hex')
+// `printf 'hello\n' | md5sum` on a real system. Hardcoded so the
 // test pins the actual bytes rather than agreeing with itself.
-const HELLO_SHA = '5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03'
+const HELLO_MD5 = 'b1946ac92492d2347c6235b4d2611184'
 
 // The wiring an embedder would write: `readInputs` supplies the
 // coreutils file/stdin model (including the `-` name for stdin and
 // per-operand errors), leaving the handler with just the hashing.
-const sha256sum = {
+const md5sum = {
   pipe: true,
   run: ({ args, readInputs }) => {
     const r = readInputs(args)
-    const lines = r.inputs.map((i) => `${sha256(i.content)}  ${i.name ?? '-'}\n`)
+    const lines = r.inputs.map((i) => `${md5(i.content)}  ${i.name ?? '-'}\n`)
     return { stdout: lines.join(''), stderr: r.stderr, exitCode: r.failed ? 1 : 0 }
   },
 }
 
-const withSha = (opts = {}) => createTerminal(SOURCES, { commands: { sha256sum }, ...opts })
+const withSha = (opts = {}) => createTerminal(SOURCES, { commands: { md5sum }, ...opts })
 
-describe('createTerminal — opts.commands: a wired sha256sum', () => {
+describe('createTerminal — opts.commands: a wired md5sum', () => {
   it('hashes file operands, one `HASH  NAME` line each', async () => {
     const t = withSha()
-    assert.equal((await t.run('sha256sum a.txt')).stdout, `${HELLO_SHA}  a.txt\n`)
-    assert.equal((await t.run('sha256sum a.txt')).exitCode, 0)
+    assert.equal((await t.run('md5sum a.txt')).stdout, `${HELLO_MD5}  a.txt\n`)
+    assert.equal((await t.run('md5sum a.txt')).exitCode, 0)
     assert.equal(
-      (await t.run('sha256sum a.txt b.txt')).stdout,
-      `${HELLO_SHA}  a.txt\n${sha256('world\n')}  b.txt\n`,
+      (await t.run('md5sum a.txt b.txt')).stdout,
+      `${HELLO_MD5}  a.txt\n${md5('world\n')}  b.txt\n`,
     )
   })
 
   it('reads stdin when it has no operands, naming the input `-`', async () => {
     const t = withSha()
-    assert.equal((await t.run('cat a.txt | sha256sum')).stdout, `${HELLO_SHA}  -\n`)
-    // Bare `sha256sum` at the head of a pipeline gets empty stdin,
+    assert.equal((await t.run('cat a.txt | md5sum')).stdout, `${HELLO_MD5}  -\n`)
+    // Bare `md5sum` at the head of a pipeline gets empty stdin,
     // and hashing the empty string is a real answer, not an error.
-    assert.equal((await t.run('sha256sum')).stdout, `${sha256('')}  -\n`)
-    assert.equal((await t.run('sha256sum')).exitCode, 0)
+    assert.equal((await t.run('md5sum')).stdout, `${md5('')}  -\n`)
+    assert.equal((await t.run('md5sum')).exitCode, 0)
   })
 
   it('operands arrive expanded: globs and braces resolve before the handler sees them', async () => {
     const t = withSha()
-    assert.equal((await t.run('sha256sum *.txt')).stdout, (await t.run('sha256sum a.txt b.txt')).stdout)
-    assert.equal((await t.run('sha256sum {a,b}.txt')).stdout, (await t.run('sha256sum a.txt b.txt')).stdout)
-    assert.equal((await t.run('sha256sum src/*.js')).stdout, (await t.run('sha256sum src/x.js src/y.js')).stdout)
+    assert.equal((await t.run('md5sum *.txt')).stdout, (await t.run('md5sum a.txt b.txt')).stdout)
+    assert.equal((await t.run('md5sum {a,b}.txt')).stdout, (await t.run('md5sum a.txt b.txt')).stdout)
+    assert.equal((await t.run('md5sum src/*.js')).stdout, (await t.run('md5sum src/x.js src/y.js')).stdout)
   })
 
   it('honors the cwd, including inside a subshell', async () => {
     const t = withSha({ cwd: '/src' })
-    assert.equal((await t.run('sha256sum x.js')).stdout, `${sha256('const x = 1\n')}  x.js\n`)
-    assert.equal((await t.run('sha256sum /a.txt')).stdout, `${HELLO_SHA}  /a.txt\n`)
+    assert.equal((await t.run('md5sum x.js')).stdout, `${md5('const x = 1\n')}  x.js\n`)
+    assert.equal((await t.run('md5sum /a.txt')).stdout, `${HELLO_MD5}  /a.txt\n`)
     // The subshell's cwd change reaches the handler and is then rolled back.
-    assert.equal((await t.run('(cd /; sha256sum a.txt)')).stdout, `${HELLO_SHA}  a.txt\n`)
+    assert.equal((await t.run('(cd /; md5sum a.txt)')).stdout, `${HELLO_MD5}  a.txt\n`)
     assert.equal(t.cwd(), '/src')
   })
 
   it('partial failure: reads what it can, one stderr line per miss, exit 1', async () => {
     const t = withSha()
-    const r = await t.run('sha256sum a.txt nope.txt src')
-    assert.equal(r.stdout, `${HELLO_SHA}  a.txt\n`)
-    assert.equal(r.stderr, 'sha256sum: nope.txt: No such file or directory\nsha256sum: src: Is a directory\n')
+    const r = await t.run('md5sum a.txt nope.txt src')
+    assert.equal(r.stdout, `${HELLO_MD5}  a.txt\n`)
+    assert.equal(r.stderr, 'md5sum: nope.txt: No such file or directory\nmd5sum: src: Is a directory\n')
     assert.equal(r.exitCode, 1)
   })
 
   it('composes downstream, upstream, and through the shell forms', async () => {
     const t = withSha()
     // Downstream of a pipe.
-    assert.equal((await t.run('sha256sum a.txt | cut -d " " -f 1')).stdout, `${HELLO_SHA}\n`)
-    assert.equal((await t.run('sha256sum *.txt | wc -l')).stdout, '2\n')
+    assert.equal((await t.run('md5sum a.txt | cut -d " " -f 1')).stdout, `${HELLO_MD5}\n`)
+    assert.equal((await t.run('md5sum *.txt | wc -l')).stdout, '2\n')
     // Dispatched by xargs, which goes through the same registry.
-    assert.equal((await t.run('echo a.txt | xargs sha256sum')).stdout, `${HELLO_SHA}  a.txt\n`)
+    assert.equal((await t.run('echo a.txt | xargs md5sum')).stdout, `${HELLO_MD5}  a.txt\n`)
     // find -exec, the other command-dispatching surface.
-    assert.equal((await t.run("find . -name a.txt -exec sha256sum {} ';'")).stdout, `${HELLO_SHA}  ./a.txt\n`)
+    assert.equal((await t.run("find . -name a.txt -exec md5sum {} ';'")).stdout, `${HELLO_MD5}  ./a.txt\n`)
     // Exit status gates `&&` / `||` like any other command's.
-    assert.equal((await t.run('sha256sum a.txt >/dev/null && echo ok')).stdout, 'ok\n')
-    assert.equal((await t.run('sha256sum nope 2>/dev/null || echo failed')).stdout, 'failed\n')
+    assert.equal((await t.run('md5sum a.txt >/dev/null && echo ok')).stdout, 'ok\n')
+    assert.equal((await t.run('md5sum nope 2>/dev/null || echo failed')).stdout, 'failed\n')
     // Redirects apply to a wired command's streams too.
-    assert.equal((await t.run('sha256sum nope 2>&1 | wc -l')).stdout, '1\n')
+    assert.equal((await t.run('md5sum nope 2>&1 | wc -l')).stdout, '1\n')
   })
 
   it('is reachable under the bin prefixes, like a built-in', async () => {
     const t = withSha()
-    assert.equal((await t.run('/usr/bin/sha256sum a.txt')).stdout, `${HELLO_SHA}  a.txt\n`)
-    assert.equal((await t.run('/bin/sha256sum a.txt')).exitCode, 0)
+    assert.equal((await t.run('/usr/bin/md5sum a.txt')).stdout, `${HELLO_MD5}  a.txt\n`)
+    assert.equal((await t.run('/bin/md5sum a.txt')).exitCode, 0)
   })
 })
 
@@ -363,23 +363,23 @@ describe('createTerminal — opts.commands: the io.fs view', () => {
 
 describe('createTerminal — opts.commands: registry integration', () => {
   it('completes in command position, after the builtins, in registration order', () => {
-    const t = createTerminal(SOURCES, { commands: { sha256sum, shasum: sha256sum.run, zzz: () => '' } })
-    assert.deepEqual(t.complete('sha'), ['sha256sum', 'shasum'])
-    assert.deepEqual(t.complete('sha256'), ['sha256sum'])
-    assert.deepEqual(t.complete('/usr/bin/sha2'), ['/usr/bin/sha256sum'])
+    const t = createTerminal(SOURCES, { commands: { md5sum, md5: md5sum.run, zzz: () => '' } })
+    assert.deepEqual(t.complete('md5'), ['md5sum', 'md5'])
+    assert.deepEqual(t.complete('md5s'), ['md5sum'])
+    assert.deepEqual(t.complete('/usr/bin/md5s'), ['/usr/bin/md5sum'])
     // The built-in ordering is untouched — `ls` still leads, and the
     // three wired names are appended as a contiguous tail.
     const all = t.complete('')
     assert.equal(all[0], 'ls')
-    assert.deepEqual(all.slice(-3), ['sha256sum', 'shasum', 'zzz'])
-    assert.equal(all.indexOf('sha256sum'), all.length - 3)
+    assert.deepEqual(all.slice(-3), ['md5sum', 'md5', 'zzz'])
+    assert.equal(all.indexOf('md5sum'), all.length - 3)
   })
 
   it('`pipe: true` offers the command as a pipe target; without it, it stays out', async () => {
     const t = createTerminal(SOURCES, {
-      commands: { sha256sum, standalone: () => '' },
+      commands: { md5sum, standalone: () => '' },
     })
-    assert.deepEqual(t.complete('cat a.txt | sha'), ['cat a.txt | sha256sum'])
+    assert.deepEqual(t.complete('cat a.txt | md5'), ['cat a.txt | md5sum'])
     assert.deepEqual(t.complete('cat a.txt | stand'), [])
     // Still dispatchable in a pipeline — `pipe` is a completion hint,
     // not an access control.
@@ -388,13 +388,13 @@ describe('createTerminal — opts.commands: registry integration', () => {
 
   it('which resolves wired commands', async () => {
     const t = withSha()
-    assert.equal((await t.run('which sha256sum')).stdout, '/usr/bin/sha256sum\n')
-    assert.equal((await t.run('which sha256sum cat')).exitCode, 0)
+    assert.equal((await t.run('which md5sum')).stdout, '/usr/bin/md5sum\n')
+    assert.equal((await t.run('which md5sum cat')).exitCode, 0)
   })
 
   it('appears in the "Available: …" hint, after the builtins', async () => {
     const hint = (await withSha().run('frobnicate')).stderr
-    assert.equal(hint.trimEnd().endsWith(', sha256sum'), true, hint)
+    assert.equal(hint.trimEnd().endsWith(', md5sum'), true, hint)
     assert.match(hint, /^frobnicate: command not found\. Available: ls, cd, cat/u)
   })
 
@@ -411,27 +411,27 @@ describe('createTerminal — opts.commands: registry integration', () => {
   })
 
   it('accepts a Map, like `sources` does', async () => {
-    const t = createTerminal(SOURCES, { commands: new Map([['sha256sum', sha256sum]]) })
-    assert.equal((await t.run('sha256sum a.txt')).stdout, `${HELLO_SHA}  a.txt\n`)
+    const t = createTerminal(SOURCES, { commands: new Map([['md5sum', md5sum]]) })
+    assert.equal((await t.run('md5sum a.txt')).stdout, `${HELLO_MD5}  a.txt\n`)
   })
 
   it('wiring is per terminal — nothing leaks into other instances', async () => {
     const wired = withSha()
     const plain = createTerminal(SOURCES)
-    assert.equal((await wired.run('sha256sum a.txt')).exitCode, 0)
-    assert.equal((await plain.run('sha256sum a.txt')).exitCode, 127)
-    assert.match((await plain.run('sha256sum a.txt')).stderr, /command not found/u)
-    assert.deepEqual(plain.complete('sha'), [])
-    assert.equal((await plain.run('which sha256sum')).stdout, 'sha256sum not found\n')
+    assert.equal((await wired.run('md5sum a.txt')).exitCode, 0)
+    assert.equal((await plain.run('md5sum a.txt')).exitCode, 127)
+    assert.match((await plain.run('md5sum a.txt')).stderr, /command not found/u)
+    assert.deepEqual(plain.complete('md5'), [])
+    assert.equal((await plain.run('which md5sum')).stdout, 'md5sum not found\n')
     // …and the shared default registry is not mutated by either.
-    assert.equal((await createTerminal(SOURCES).run('sha256sum')).exitCode, 127)
+    assert.equal((await createTerminal(SOURCES).run('md5sum')).exitCode, 127)
   })
 
   it('a name is only reachable as itself: no PATH lookup, no partial match', async () => {
     const t = withSha()
-    assert.equal((await t.run('sha256')).exitCode, 127)
-    assert.equal((await t.run('sha256sum2')).exitCode, 127)
-    assert.equal((await t.run('./sha256sum a.txt')).exitCode, 127)
+    assert.equal((await t.run('md5')).exitCode, 127)
+    assert.equal((await t.run('md5sum2')).exitCode, 127)
+    assert.equal((await t.run('./md5sum a.txt')).exitCode, 127)
   })
 })
 
@@ -454,7 +454,7 @@ describe('createTerminal — opts.commands: wiring errors throw at construction'
       assert.throws(build({ [name]: () => '' }), /invalid command name/u, JSON.stringify(name))
     }
     // …while the shapes real tools use are fine.
-    assert.doesNotThrow(build({ sha256sum: () => '', 'my-tool': () => '', 'tool.js': () => '', b3sum: () => '', '7z': () => '' }))
+    assert.doesNotThrow(build({ md5sum: () => '', 'my-tool': () => '', 'tool.js': () => '', b3sum: () => '', '7z': () => '' }))
   })
 
   it('refuses a descriptor that is not a function or a { run } object', () => {
@@ -470,12 +470,12 @@ describe('createTerminal — opts.commands: wiring errors throw at construction'
   })
 
   it('refuses a `commands` that is not a plain object or a Map', async () => {
-    assert.throws(build('sha256sum'), /opts\.commands must be an object or a Map \(got string\)/u)
+    assert.throws(build('md5sum'), /opts\.commands must be an object or a Map \(got string\)/u)
     assert.throws(build(() => ''), /opts\.commands must be an object or a Map \(got function\)/u)
     // An array's keys are indices, and `0` is a legal command name
     // (`7z` is why a name may start with a digit) — so this would
     // otherwise register a working command called `0`.
-    assert.throws(build([sha256sum]), /opts\.commands must be an object or a Map \(got an array\)/u)
+    assert.throws(build([md5sum]), /opts\.commands must be an object or a Map \(got an array\)/u)
     // A class instance or an Object.create() keeps its handlers on the
     // prototype, where Object.entries sees nothing: silently a terminal
     // with no wired commands at all.
@@ -484,7 +484,7 @@ describe('createTerminal — opts.commands: wiring errors throw at construction'
     assert.throws(build(Object.create({ probe: () => 'x\n' })), /must be a plain object or a Map/u)
     // A Set has `entries()` too, but its pairs are [value, value], so
     // the name check catches it rather than the shape check.
-    assert.throws(build(new Set([sha256sum])), /command names must be strings \(got object\)/u)
+    assert.throws(build(new Set([md5sum])), /command names must be strings \(got object\)/u)
     // Omitted / empty is fine and leaves the builtins alone.
     assert.doesNotThrow(build())
     assert.doesNotThrow(build({}))
@@ -496,9 +496,9 @@ describe('createTerminal — opts.commands: wiring errors throw at construction'
     // bundle fails `instanceof Map`, and `Object.entries` of a Map is
     // empty — so an instanceof test would hand back a terminal with
     // nothing wired and no diagnostic.
-    const foreign = { entries: () => new Map([['sha256sum', sha256sum]]).entries() }
+    const foreign = { entries: () => new Map([['md5sum', md5sum]]).entries() }
     const t = createTerminal(SOURCES, { commands: foreign })
-    assert.equal((await t.run('sha256sum a.txt')).stdout, `${HELLO_SHA}  a.txt\n`)
+    assert.equal((await t.run('md5sum a.txt')).stdout, `${HELLO_MD5}  a.txt\n`)
   })
 
   it('refuses a non-string command name, which completion could not handle', () => {

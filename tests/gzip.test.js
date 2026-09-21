@@ -56,12 +56,14 @@ describe('gzip decompresses what a runtime inflated for it', () => {
     const bins = ['/usr/bin/gzip', '/bin/gzip', '/usr/local/bin/gzip']
     const answers = await Promise.all(bins.map(async (name) => await t.run(`${name} -dc data.gz`)))
     for (const answer of answers) assert.deepEqual(answer, result('alpha\nbeta\n'))
-    // It is not one of the commands this terminal offers, so it is not in the
-    // list of them either.
+    // It is not one of the commands this terminal announces, so it is not in
+    // the list of them — and is completed all the same, in command position
+    // and after a pipe, since the terminal has it.
     const missing = await t.run('nosuchcommand')
     assert.match(missing.stderr, /command not found\. Available: /u)
     assert.doesNotMatch(missing.stderr, /gzip/u)
-    assert.deepEqual(t.complete('gzi'), [])
+    assert.deepEqual(t.complete('gzi'), ['gzip'])
+    assert.deepEqual(t.complete('cat data.gz | gz'), ['cat data.gz | gzcat', 'cat data.gz | gzip'])
   })
 
   it('says what GNU says of what is not a member', async () => {
@@ -197,5 +199,86 @@ describe('gzip compresses with the stream the runtime has', () => {
       'gzip: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
     assert.deepEqual(await t.run('cp plain.txt /tmp/t && cp plain.txt /tmp/t.gz && gzip /tmp/t'),
       result('', { stderr: 'gzip: /tmp/t.gz already exists;\tnot overwritten\n', exitCode: 2 }))
+  })
+})
+
+// GNU ships one program under three names: `gunzip` is gzip decompressing and
+// `zcat` is gzip decompressing to stdout. Both say `gzip:` of what they cannot
+// read, because that is the program saying it. Recorded from gzip 1.12, whose
+// gunzip and zcat are that binary reached by another name.
+describe('gunzip and zcat are gzip under the names it also answers to', () => {
+  it('decompresses a member to stdout under either name', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('gunzip -c data.gz'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('zcat data.gz'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('cat data.gz | gunzip'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('cat data.gz | zcat'), result('alpha\nbeta\n'))
+    // zcat takes the operands gzip does, one after another.
+    assert.deepEqual(await t.run('zcat data.gz data.gz'), result('alpha\nbeta\n'.repeat(2)))
+    assert.deepEqual(await t.run('zcat data.gz | wc -c'), result('11\n'))
+  })
+
+  it('hands the bytes of a member on, as gzip does', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('zcat img.gz | hexdump -C'), result('00000000  89 50 4e 47 ff 0a                                 |.PNG..|\n00000006\n'))
+    assert.deepEqual(await t.run('cat img.gz | gunzip | base64'), result('iVBOR/8K\n'))
+  })
+
+  it('reports as the program it is, which is gzip', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('gunzip -c missing.gz'), result('', { stderr: 'gzip: missing.gz: No such file or directory\n', exitCode: 1 }))
+    assert.deepEqual(await t.run('zcat missing.gz'), result('', { stderr: 'gzip: missing.gz: No such file or directory\n', exitCode: 1 }))
+    // The blank line before those two is GNU's own, and so is theirs.
+    assert.deepEqual(await t.run('zcat plain.txt'), result('', { stderr: '\ngzip: plain.txt: not in gzip format\n', exitCode: 1 }))
+    // GNU writes what it inflated before it ran out, and then says so.
+    assert.deepEqual(await t.run('zcat trunc.gz'), result('alpha\nbeta\n', { stderr: '\ngzip: trunc.gz: unexpected end of file\n', exitCode: 1 }))
+  })
+
+  it('completes as gzip does, and is announced as little as gzip is', async () => {
+    const t = terminal()
+    assert.deepEqual(t.complete('gun'), ['gunzip'])
+    assert.deepEqual(t.complete('zc'), ['zcat'])
+    // `gzcat` sorts before `gzip`, both after `gunzip`.
+    assert.deepEqual(t.complete('gz'), ['gzcat', 'gzip'])
+    assert.deepEqual(t.complete('gzc'), ['gzcat'])
+    // Readers, so pipe targets, as gzip is.
+    for (const name of ['gzip', 'gunzip', 'zcat', 'gzcat']) {
+      assert.ok(t.complete('cat | ').includes(`cat | ${name}`), name)
+    }
+    // None of the four is announced: the hint stays the everyday list.
+    const hint = (await t.run('nope')).unsupported[0].message
+    for (const name of ['gzip', 'gunzip', 'zcat', 'gzcat']) {
+      assert.ok(!hint.includes(name), name)
+    }
+  })
+})
+
+// A pipe carries bytes, so compressing reads one as readily as decompressing
+// does: what `gzip | gzip` is handed is a member, and no text spells one.
+// And taking the pipe is taking it — the next command in the list finds it
+// where this one left it, which is the end. Recorded from gzip 1.12.
+describe('gzip reads the pipe it is given, whichever way it is going', () => {
+  it('compresses the member a pipe carried, so the round trip is exact', async () => {
+    const t = terminal()
+    // `gzip | gzip | gzip -d` is one member of another, unwrapped once.
+    assert.deepEqual(await t.run('cat plain.txt | gzip | wc -c'), result('35\n'))
+    assert.deepEqual(await t.run('cat plain.txt | gzip | gzip | gzip -d | wc -c'), result('35\n'))
+    assert.deepEqual(await t.run('cat plain.txt | gzip | gzip | gzip -d | gzip -d'), result('not compressed\n'))
+    // Unwrapped twice, there is no member left to unwrap.
+    assert.deepEqual(await t.run('cat plain.txt | gzip | gzip -d | gzip -d'), result('', { stderr: '\ngzip: stdin: not in gzip format\n', exitCode: 1 }))
+  })
+
+  it('compresses a member whose bytes spell no text', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('cat img.gz | gzip | gzip -d | gzip -d | hexdump -C'), result('00000000  89 50 4e 47 ff 0a                                 |.PNG..|\n00000006\n'))
+    assert.deepEqual(await t.run('cat img.gz | gzip | gzip -d | base64'), result('H4sIAAAAAAACA+sM8HP/zwUAX4uBzQYAAAA=\n'))
+  })
+
+  it('leaves the pipe where it read it, so the next command finds its end', async () => {
+    const t = terminal()
+    // The second reader is handed nothing, and says what GNU says of nothing.
+    assert.deepEqual(await t.run('cat data.gz | { gzip -d; gzip -d; }'), result('alpha\nbeta\n', { stderr: '\ngzip: stdin: unexpected end of file\n', exitCode: 1 }))
+    // Compressing nothing is a member all the same, and GNU writes 20 bytes of it.
+    assert.deepEqual(await t.run('cat plain.txt | { gzip | wc -c; gzip | wc -c; }'), result('35\n20\n'))
   })
 })

@@ -49,5 +49,5 @@ export const FILESYSTEM_WORKFLOWS = [
   unavailable('Compare sorted name lists', 'comm -23 data/declared-names.txt data/used-names.txt', 'comm'),
   unavailable('Save a listing while passing it down a pipeline', 'find src -type f | tee data/paths.txt', 'tee'),
   unavailable('Identify a source file format', 'file src/index.js', 'file'),
-  unavailable('Hash an entry point to detect changes', 'sha256sum src/index.js', 'sha256sum'),
+  unavailable('Hash an entry point with a digest no runtime here does', 'md5sum src/index.js', 'md5sum'),
 ]

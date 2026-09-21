@@ -65,6 +65,16 @@ export function decodeUtf8Maybe(bytes) {
   return text
 }
 
+// One run of bytes out of several, which is what a pipe carrying both text
+// and bytes ends up holding.
+export function joinBytes(parts) {
+  if (parts.length === 1) return parts[0]
+  const out = new Uint8Array(parts.reduce((n, part) => n + part.length, 0))
+  let at = 0
+  for (const part of parts) { out.set(part, at); at += part.length }
+  return out
+}
+
 export function decodeUtf8(bytes) {
   try { return utf8toString(bytes) } catch {
     throw new UnsupportedError('feature', 'partial UTF-8 byte sequence', 'byte output that is not valid UTF-8 cannot be represented by this string-based terminal')

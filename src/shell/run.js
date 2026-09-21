@@ -4,7 +4,7 @@ import { refusedWrite } from './parse.js'
 import { BindingMap } from './bindings.js'
 import { gateBlame, gateTracker, lookupWithNote, missingPathNote } from '../notes.js'
 import { UnsupportedError, unsupported, unsupportedNote } from '../unsupported.js'
-import { err, reason } from '../util.js'
+import { decodeUtf8Maybe, encodeUtf8, err, joinBytes, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
 import { runBlock } from './blocks.js'
@@ -12,15 +12,26 @@ import { runBlock } from './blocks.js'
 export { createIoGuard } from './io.js'
 export { commandWriteError } from './output.js'
 
-// Commands flush files before a subsequent command reads them.
-// Other streams stay in the enclosing handler's result for routing.
+// Commands flush files before a subsequent command reads them. Other streams
+// stay in the enclosing handler's result for routing, and bytes bound for one
+// of those stay bytes until it writes them: only this terminal's own output
+// is a string, and only what is going there has to spell text. A pipe takes
+// bytes, and a descriptor that is closed or /dev/null takes them the way it
+// takes everything — so asking any of the three for text asks the wrong
+// question, and would answer with a gap where there is no trouble at all.
 export function routeExternalOutput(result, ctx) {
   const fds = {
     1: ctx.outputFds[1]?.path ? ctx.outputFds[1] : 'out',
     2: ctx.outputFds[2]?.path ? ctx.outputFds[2] : 'err',
   }
-  return routeOutput(result, { fds }, ctx)
+  const deferred = { 1: elsewhere(ctx.outputFds[1]), 2: elsewhere(ctx.outputFds[2]) }
+  return routeOutput(result, { fds, deferred }, ctx)
 }
+
+// A descriptor the enclosing router will deal with: a pipe, a closed one or
+// /dev/null — anything but a file, which is an object with a path and is
+// written here, and the terminal's own two streams, which are the string.
+const elsewhere = (fd) => fd !== 'out' && fd !== 'err' && !fd?.path
 
 // A list shares stdin across its steps: { cat; cat; } consumes it once.
 // `exit` bypasses pipeline negation; break/continue still carry its status.
@@ -65,6 +76,7 @@ export async function runSteps(steps, ctx, stream, condition = false) {
   }
   gate?.flush(ctx.notes)
   ctx.stdinLeft = stream.text
+  ctx.stdinBytes = stream.bytes ?? null
   return Object.assign(result, { blame })
 }
 
@@ -77,21 +89,30 @@ const continues = (steps, index) => ['and', 'or'].includes(steps[index + 1]?.gat
 async function runPipeline(stages, ctx, stream) {
   const output = emptyOutput()
   let input = stream.text
+  // What a pipe carries: the text a stage wrote, or the bytes it wrote where
+  // no text spells them. A list holds one input between its commands, so a
+  // pipeline standing in one starts at the bytes left in it as at the text.
+  let inputBytes = stream.bytes ?? null
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]
     const first = i === 0
-    let piped = ''
+    const sink = i < stages.length - 1 ? pipeSink() : null
     const fds = { ...ctx.outputFds }
-    if (i < stages.length - 1) fds[1] = { write(text) { piped += text } }
-    const stageInput = input
-    const run = () => pipelineStage(stage, ctx, stageInput, first && ctx.stdinFile, fds, first ? ctx.stdinPiped : true)
+    if (sink) fds[1] = sink
+    const stageBytes = inputBytes, stageInput = input
+    const run = () => pipelineStage(stage, ctx, { stdin: stageInput, stdinBytes: stageBytes, stdinFile: first && ctx.stdinFile, fds, stdinPiped: first ? ctx.stdinPiped : true })
     // Every stage of a real pipeline is its own process, and what `set -e`
     // ignored in there is as much its own business as the rest of its state.
     // oxlint-disable-next-line no-await-in-loop -- a stage reads what the one before it wrote, so it runs after it.
     const routed = stages.length > 1 ? { ...await isolated(ctx, run), ignored: false } : await run()
-    if (first) stream.text = routed.inputLeft
+    if (first) { stream.text = routed.inputLeft; stream.bytes = routed.bytesLeft ?? null }
     appendOutput(output, routed)
-    input = piped
+    const carried = sink?.carried() ?? { text: '' }
+    // Bytes that spell text are that text to a stage reading text, and the
+    // bytes themselves to one reading bytes; bytes that spell none are read
+    // as bytes or not at all, which is what taking stdin says.
+    inputBytes = carried.bytes ?? null
+    input = carried.text ?? decodeUtf8Maybe(carried.bytes) ?? ''
     // A pipeline's status is its last stage's, so its blame is too.
     output.blame = routed.blame
     if (stages.length === 1) { output.halt = routed.halt; output.control = routed.control }
@@ -99,10 +120,29 @@ async function runPipeline(stages, ctx, stream) {
   return output
 }
 
+// A pipe holds text until a stage writes bytes into it, and holds bytes from
+// then on: one `cat` reading a file of text and a file of bytes writes both,
+// in that order, and the stage after it reads what was written.
+function pipeSink() {
+  let text = ''
+  let parts = null
+  return {
+    write(chunk) {
+      if (parts === null) text += chunk
+      else if (chunk !== '') parts.push(encodeUtf8(chunk))
+    },
+    writeBytes(chunk) {
+      if (parts === null) { parts = text === '' ? [] : [encodeUtf8(text)]; text = '' }
+      parts.push(chunk)
+    },
+    carried: () => (parts === null ? { text } : { bytes: joinBytes([...parts, new Uint8Array()]) }),
+  }
+}
+
 // Simple-command arguments expand before redirects. All expansion diagnostics
 // follow the descriptors active at their expansion site.
-function pipelineStage(stage, ctx, stdin, stdinFile, fds, stdinPiped) {
-  const initial = { fds, stdin, stdinFile, stdinPiped, stdinOrigin: stdinFile ? ctx.stdinOrigin : null, stdinHandle: stdinFile ? ctx.stdinHandle : null }
+function pipelineStage(stage, ctx, { stdin, stdinBytes, stdinFile, fds, stdinPiped }) {
+  const initial = { fds, stdin, stdinBytes, stdinFile, stdinPiped, stdinOrigin: stdinFile ? ctx.stdinOrigin : null, stdinHandle: stdinFile ? ctx.stdinHandle : null }
   return withState(ctx, { substitutionExit: null, expansionOutput: emptyOutput(), expansionFds: fds }, () => withStreams(initial, ctx, async () => {
     const simple = !stage.group && !stage.loop && !stage.conditional && !stage.test && !stage.define
     let expanded, expansionError
@@ -117,7 +157,7 @@ function pipelineStage(stage, ctx, stdin, stdinFile, fds, stdinPiped) {
     }
     if (expansionError) {
       appendOutput(ctx.expansionOutput, routeStageOutput(expansionError, initial, ctx))
-      return { ...ctx.expansionOutput, inputLeft: ctx.stdinLeft, halt: expansionError.halt }
+      return { ...ctx.expansionOutput, inputLeft: ctx.stdinLeft, bytesLeft: ctx.stdinBytes, halt: expansionError.halt }
     }
     const io = await resolveRedirs(stage, ctx, ctx.stdinLeft, stdinFile, fds)
     ctx.expansionFds = io.fds
@@ -152,15 +192,16 @@ function pipelineStage(stage, ctx, stdin, stdinFile, fds, stdinPiped) {
         // line the body was defined on was.
         // A call reports the body's status as its own, and no more: bash
         // exits on it even where the body ended on a `!` it was ignoring.
-        try { return await withState(ctx, { loopDepth: 0 }, async () => ({ ...await withTemporaries(expanded.temps, ctx, () => runSteps(body, ctx, { text: io.stdin })), ignored: false })) } finally { ctx.calling.delete(name) }
+        try { return await withState(ctx, { loopDepth: 0 }, async () => ({ ...await withTemporaries(expanded.temps, ctx, () => runSteps(body, ctx, { text: io.stdin, bytes: io.stdinBytes })), ignored: false })) } finally { ctx.calling.delete(name) }
       }
       const r = await runStage(ctx, expanded)
       if (expanded.argv.length) blame = gateBlame(ctx.registry.chainRole(expanded.argv), expanded.argv[0])
       return r
     }))
     const inputLeft = io.inherited ? ctx.stdinLeft : io.parentLeft
+    const bytesLeft = io.inherited ? ctx.stdinBytes : io.parentBytes
     appendOutput(ctx.expansionOutput, routed ? result : routeStageOutput(result, io, ctx))
-    return { ...ctx.expansionOutput, inputLeft, halt: result.halt, control: result.control, blame }
+    return { ...ctx.expansionOutput, inputLeft, bytesLeft, halt: result.halt, control: result.control, blame }
   }))
 }
 
@@ -179,11 +220,18 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
   let inherited = true
   let parentLeft = stdin
   let redirected = false
-  const done = (error) => ({ error, fds, stdin: input, stdinFile: file, stdinPiped: redirected || ctx.stdinPiped, stdinOrigin: file ? origin : null, stdinHandle: file ? handle : null, inherited, parentLeft })
+  // Bytes a pipe carried are this stage's input until a redirect puts
+  // something else there, which leaves them nowhere to be read from. They
+  // advance as the text does: a substitution expanded here reads the input
+  // the list shares, and what it takes it takes out of both halves of it.
+  let piped = ctx.stdinBytes
+  let parentBytes = piped
+  let replaced = false
+  const done = (error) => ({ error, fds, stdin: input, stdinBytes: replaced ? null : piped, stdinFile: file, stdinPiped: redirected || ctx.stdinPiped, stdinOrigin: file ? origin : null, stdinHandle: file ? handle : null, inherited, parentLeft, parentBytes })
   const expand = async (fn) => {
-    const value = await withState(ctx, { expansionFds: fds }, () => withStreams({ fds, stdin: input, stdinFile: file, stdinOrigin: origin, stdinHandle: handle }, ctx, fn))
-    input = ctx.stdinLeft
-    if (inherited) parentLeft = input
+    const value = await withState(ctx, { expansionFds: fds }, () => withStreams({ fds, stdin: input, stdinBytes: piped, stdinFile: file, stdinOrigin: origin, stdinHandle: handle }, ctx, fn))
+    input = ctx.stdinLeft; piped = ctx.stdinBytes
+    if (inherited) { parentLeft = input; parentBytes = piped }
     return value
   }
   try {
@@ -207,14 +255,15 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
         if (dest === 'closed') return done(err(`error: ${t.value}: No such file or directory`))
         fds[r.fd] = dest
         if (r.both) fds[2] = dest
-      } else if (r.op === 'text') { input = r.expand ? await expand(() => expandScalar(heredocWord(r.body), ctx)) : r.body; file = false; inherited = false }
+      } else if (r.op === 'text') { input = r.expand ? await expand(() => expandScalar(heredocWord(r.body), ctx)) : r.body; file = false; inherited = false; replaced = true }
       // A here-string is expanded but neither split nor globbed (bash).
-      else if (r.op === 'herestring') { input = await expand(() => expandScalar(r.word, ctx)) + '\n'; file = false; inherited = false }
+      else if (r.op === 'herestring') { input = await expand(() => expandScalar(r.word, ctx)) + '\n'; file = false; inherited = false; replaced = true }
       else {
         const t = await expand(() => expandRedirect(r.word, ctx))
         const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, file ? origin : input)
         if (read.error) return done(read.error)
         input = read.content
+        replaced = t.value !== '/dev/stdin'
         // A pipe's /dev/stdin shares the current stream. A regular file
         // is reopened from its original start with an independent offset.
         if (t.value !== '/dev/stdin' || file) inherited = false
@@ -248,11 +297,13 @@ async function shellResult(ctx, fn) {
   try { return await fn() } catch (e) { return shellFailure(ctx, e) }
 }
 
-// Closed descriptors propagate from enclosing groups. Leave stdinLeft
-// available to the enclosing list while restoring the other stream state.
+// Closed descriptors propagate from enclosing groups. What the enclosing list
+// shares is one input — the text left in it and the bytes left in it — so both
+// stay available to it, while the rest of the stream state is restored.
 function withStreams(io, ctx, fn) {
   const state = { outputFds: io.fds, closed: { out: io.fds[1] === 'closed', err: io.fds[2] === 'closed' }, stdinFile: Boolean(io.stdinFile), stdinPiped: io.stdinPiped ?? ctx.stdinPiped, stdinOrigin: io.stdinOrigin, stdinHandle: io.stdinHandle }
   ctx.stdinLeft = io.stdin
+  ctx.stdinBytes = io.stdinBytes ?? null
   return withState(ctx, state, fn)
 }
 

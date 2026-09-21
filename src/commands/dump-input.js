@@ -1,6 +1,6 @@
 // Dump readers open operands lazily: a byte limit must neither consume the
 // next reader's input nor report errors from files it never opens.
-import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, readInputs, scaledCount } from '../util.js'
+import { consumeStdin, decodeUtf8, decodeUtf8Maybe, encodeUtf8Loose, err, readInputs, scaledCount } from '../util.js'
 import { unsupported } from '../unsupported.js'
 
 const EMPTY = new Uint8Array()
@@ -13,6 +13,10 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
   let skipping = skip.value
   let start = 0
   let rest = stdin
+  // The bytes a pipe carried, held before the first read takes them: what a
+  // reader stops short of is handed back as the bytes it stopped short of,
+  // rather than as the text they would spell, which for a dump is the point.
+  const piped = ctx.stdinBytes
   const chunks = []
   const r = { stderr: '', failed: false }
   for (const file of files.length ? files : [null]) {
@@ -28,7 +32,7 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
     const entry = input.inputs[0]
     const shared = entry && (entry.shared || entry.name === null)
     if (cmd === 'hexdump' && skipping && shared && !ctx.stdinFile) {
-      consumeStdin(ctx, rest)
+      consumeStdin(ctx, rest, true, piped)
       return { error: err('hexdump: standard input: Illegal seek') }
     }
     // xxd seeks from the beginning unless +OFFSET was specified. Linux
@@ -41,8 +45,15 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
     chunks.push(all.subarray(skipped, skipped + taken))
     remaining -= taken
     if (shared) {
-      rest = decodeUtf8(all.subarray(skipped + taken))
-      consumeStdin(ctx, rest)
+      const left = all.subarray(skipped + taken)
+      // Bytes came in, so bytes are what is left: handed back as they are,
+      // and as the text they spell for a reader of text, which may be none.
+      // Where text came in, text is what is left — and a read that stopped
+      // inside a character has half of one to hand on, which is the same
+      // limitation it was before any input here was bytes.
+      const handed = piped !== null && !rewind && left.length > 0 ? left : null
+      rest = handed === null ? decodeUtf8(left) : decodeUtf8Maybe(left) ?? ''
+      consumeStdin(ctx, rest, true, handed)
     }
     if (rewind && skipping) { start = skip.value; skipping = 0 }
     if (remaining === 0 && skipping === 0) break

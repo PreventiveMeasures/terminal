@@ -1,5 +1,5 @@
 import { parseArgs } from '../args.js'
-import { decodeUtf8, encodeUtf8, encodeUtf8Loose, readBytesOf } from '../util.js'
+import { consumeStdin, encodeUtf8, encodeUtf8Loose, readBytesOf } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
 import { compressBytes, decompressBytes, formatUsable } from '../compression.js'
@@ -16,10 +16,20 @@ import { compressBytes, decompressBytes, formatUsable } from '../compression.js'
 
 const FORMAT = 'gzip'
 
+// One program under several names, which is what GNU ships: `gunzip` is it
+// decompressing — `exec gzip -d` — and `zcat` is it decompressing to stdout,
+// `exec gzip -cd`, which is why both say `gzip:` of what they cannot read.
+// `gzcat` is the name the BSDs give what GNU calls `zcat`, theirs having kept
+// `zcat` for the older `.Z`; it is the same thing, and it is that here. They
+// are all here the same way — one command, reached by the name that says what
+// it is for.
+const gunzip = (stdin, tokens, ctx) => gzip(stdin, ['-d', ...tokens], ctx)
+const zcat = (stdin, tokens, ctx) => gzip(stdin, ['-d', '-c', ...tokens], ctx)
+
 // Only where the runtime's streams know the format: a terminal whose streams
 // do not is a terminal without the command, which is what it was before this
 // one was written.
-export const GZIP = formatUsable(FORMAT) ? { gzip } : {}
+export const GZIP = formatUsable(FORMAT) ? { gzip, gunzip, zcat, gzcat: zcat } : {}
 
 // A gzip member starts with these two, whatever follows.
 const MAGIC = Object.freeze([0x1f, 0x8b])
@@ -51,23 +61,34 @@ export async function gzip(stdin, tokens, ctx) {
     stdout: ['c', 'stdout', 'to-stdout'].some((name) => flags.has(name)),
     keep: flags.has('k') || flags.has('keep'),
   }
-  const state = { ctx, stdout: '', stderr: '', status: 0, gap: null }
+  const state = { ctx, events: [], stderr: '', status: 0, gap: null }
   if (positional.length === 0) await fromStdin(stdin, opts, state)
   // oxlint-disable-next-line no-await-in-loop -- one operand after the last, as gzip takes them.
   else for (const name of positional) await one(name, opts, state)
   if (state.gap) return state.gap
-  return { stdout: state.stdout, stderr: state.stderr, exitCode: state.status }
+  // What it wrote, in the order it wrote it: the bytes go to a pipe or a file
+  // as they are, and to a terminal as the text they spell.
+  const events = [...state.events, ...(state.stderr ? [{ fd: 2, text: state.stderr }] : [])]
+  return { stdout: '', stderr: state.stderr, exitCode: state.status, events }
 }
 
-// A pipe carries text, and no text spells a member — so decompressing one is
-// read the way GNU reads a pipe carrying anything else, and always finds the
-// same thing. Compressing one is the work itself, and then the output this
-// terminal cannot carry.
+// A pipe carries text unless a stage upstream wrote bytes into it, and a
+// member is bytes: `cat f.gz | gzip -d` hands them over, where a pipe of text
+// is read the way GNU reads one carrying anything else and always finds the
+// same thing. Compressing reads that pipe as readily as decompressing does —
+// a member is what `gzip | gzip` is handed, and no text spells one.
 async function fromStdin(stdin, opts, state) {
+  const piped = state.ctx.stdinBytes
+  // Taking the pipe is taking it: the next command in the list finds it
+  // empty, as it would a stdin this one had read to the end.
+  consumeStdin(state.ctx, '', true)
+  // What a pipe hands over has no name to write a file beside, so it is
+  // read out where GNU reads it: stdout.
+  if (opts.decompressing && piped !== null) return decompress('stdin', piped, { ...opts, stdout: true }, state)
   if (opts.decompressing) return dataError(state, stdin === '' ? 'stdin: unexpected end of file' : 'stdin: not in gzip format')
   // A member of a pipe is the one GNU writes for a pipe: no name, and no
   // moment, because there was no file to take either from.
-  return toStdout(await compressBytes(encodeUtf8(stdin), FORMAT), state)
+  return toStdout(await compressBytes(piped ?? encodeUtf8(stdin), FORMAT), state)
 }
 
 function one(name, opts, state) {
@@ -75,7 +96,7 @@ function one(name, opts, state) {
   const found = lookupWithNote(ctx, 'gzip', name)
   if (found.error) return fail(state, `${name}: ${found.error}`, 1)
   if (ctx.fs.isDir(found.path)) return fail(state, `${name} is a directory -- ignored`, 2)
-  return opts.decompressing ? decompress(name, found.path, opts, state) : compress(name, found.path, opts, state)
+  return opts.decompressing ? decompressFile(name, found.path, opts, state) : compress(name, found.path, opts, state)
 }
 
 // The name it writes is the name it was given with a suffix on the end, and a
@@ -114,13 +135,19 @@ function named(member, name, modified) {
   return out
 }
 
-async function decompress(name, path, opts, state) {
+function decompressFile(name, path, opts, state) {
   const { ctx } = state
   // Only a file held as bytes can be a member: no text spells one, since the
   // second byte of the header begins no character. Asking costs nothing,
   // where reading a file to look at its first two bytes would.
   const bytes = ctx.fs.isBytes?.(path) === true ? readBytesOf(ctx.fs, path) : undefined
+  return decompress(name, bytes, opts, state, path)
+}
+
+async function decompress(name, bytes, opts, state, path = null) {
+  const { ctx } = state
   if (!looksCompressed(bytes)) return dataError(state, `${name}: ${tooShort(bytes, path, ctx) ? 'unexpected end of file' : 'not in gzip format'}`)
+
   const inflated = await decompressBytes(bytes, FORMAT)
   const suffix = suffixOf(name)
   const written = opts.stdout ? toStdout(inflated.bytes, state)
@@ -146,7 +173,10 @@ function tooShort(bytes, path, ctx) {
   return text.length < 2 && encodeUtf8Loose(text).length < 2
 }
 
-const toStdout = (bytes, state) => { state.stdout += decodeUtf8(bytes); return true }
+// What goes to stdout goes as the bytes it is: a pipe and a file take them,
+// and a terminal carrying its output as a string takes the text they spell,
+// or reports that they spell none.
+const toStdout = (bytes, state) => { state.events.push({ fd: 1, bytes }); return true }
 
 // Beside the file it came from, which the overlay is the only place to do.
 function toFile(target, bytes, source, opts, state) {
