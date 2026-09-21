@@ -82,8 +82,11 @@ as its size, and that path named after it.
 `du -b` measures UTF-8 content bytes recursively, including hidden files;
 `du -bs src` reports a directory total. `--apparent-size` (also accepted as the
 BSD `-A`) supports block and human-readable units, and `--inodes` counts
-entries. Allocated disk sizes are unavailable, so plain `du` and `du -sh`
-report an unsupported diagnostic. A link is measured as the link it is, which
+entries. Plain `du`, `du -sh` and the rest report what ext4 would allocate for
+the same tree — the model `ls -l` reads its `total` from: 4 KiB blocks, a
+directory taking one, an empty file none, and a link whose target is under 60
+bytes none — so a total reads as it would from a disk holding the tree, block
+size and all. A link is measured as the link it is, which
 is what `-P` asks for and what `du` does without being asked; `-D` and `-H`
 measure what an operand points at, and `-L`, which would measure what every
 link in a walk points at, reports an unsupported diagnostic where it meets one.

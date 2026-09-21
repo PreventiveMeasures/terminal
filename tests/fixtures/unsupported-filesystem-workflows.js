@@ -34,7 +34,7 @@ export const FILESYSTEM_WORKFLOWS = [
 
   gap('Exclude dependencies and build artifacts from a tree', "tree -I 'node_modules|dist' .", 'tree', '-I'),
   gap('Honor gitignore while showing a shallow tree', 'tree -L2 --gitignore .', 'tree', '--gitignore'),
-  gap('Measure the disk usage of source files', 'du -sh src', 'du', 'allocated disk size', 'feature'),
+  gap('Measure the disk usage of source files with their times', 'du -sh --time src', 'du', '--time', 'option'),
   gap('Inspect the permissions of an entry point', "stat -c '%a %n' src/index.js", 'stat', '%a', 'feature'),
   unavailable('Inspect every component of a source path', 'namei -l src/index.js', 'namei'),
 

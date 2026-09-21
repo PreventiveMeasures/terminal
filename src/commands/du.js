@@ -2,15 +2,17 @@ import { compareNames, joinPath } from '../fs.js'
 import { lookupWithNote } from '../notes.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { err, reason } from '../util.js'
-import { UnsupportedError, unsupported, unsupportedNote } from '../unsupported.js'
+import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
-import { duOptions, duSize } from './du-options.js'
+import { allocated, duOptions, duSize } from './du-options.js'
 
+// Sizes come in the two readings GNU's do: `--apparent-size` (`-b`) counts
+// the bytes a file holds, and plain `du` the space the tree takes on disk —
+// which no map of paths to contents keeps, so it is what ext4 would allocate
+// for the same tree, the model `ls -l` reads its `total` from (see allocated
+// in ./du-options.js). `--inodes` counts entries instead.
 export function du(_stdin, tokens, ctx) {
   const options = duOptions(tokens, ctx)
-  if (!options.flags.has('A') && !options.flags.has('inodes')) {
-    return unsupported('feature', 'du', 'allocated disk size', 'du: allocated disk sizes are not available')
-  }
   const state = { ctx, options, seen: new Set(), result: emptyOutput(), total: 0n, failed: false }
   if (options.stderr) appendOutput(state.result, ctx.flushOutput(emptyOutput(options.stderr)))
   for (const operand of options.operands) {
@@ -64,7 +66,9 @@ function measure(path, name, state) {
     const identity = isDir ? item.path : ctx.fs.fileIdentity?.(item.path) ?? item.path
     if (!options.flags.has('l') && state.seen.has(identity)) continue
     state.seen.add(identity)
-    const own = options.flags.has('inodes') ? 1n : isDir ? 0n : BigInt(ctx.fs.fileSize(item.path))
+    const kind = isDir ? 'dir' : ctx.fs.isLink?.(item.path) ? 'link' : 'file'
+    const bytes = isDir ? 0 : ctx.fs.fileSize(item.path)
+    const own = options.flags.has('inodes') ? 1n : options.flags.has('A') ? BigInt(bytes) : BigInt(allocated(bytes, kind))
     state.total += own
     if (isDir) {
       item.total = own
