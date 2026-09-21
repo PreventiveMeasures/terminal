@@ -164,10 +164,23 @@ describe('a source entry can be the bytes of a file spelt in base64', () => {
     check(t, 'wc -c link.png; base64 link.png', '19 link.png\niVBORw0KGgoAAAANSUhEUv/+Cg==\n')
   })
 
-  it('refuses a spelling that does not decode when the terminal is made', () => {
-    const undecodable = /source "f" declares base64 that does not decode/u
-    for (const data of ['AQ ID', 'AQID\n', 'AQ=D', 'AR==', 'AQI=x', '!!!!', 'AQID====', 'A', 'AQ=']) {
-      assert.throws(() => terminal({ f: { format: 'base64', data } }), undecodable, JSON.stringify(data))
+  it('reports a spelling that does not decode to the first reader, not when the terminal is made', () => {
+    // Checking a spelling costs more than decoding it, so nothing is checked
+    // until a reader needs the bytes; what needs none — the listing, the size
+    // from the spelling's length — is answered as ever, and a reader is told
+    // which file it is, on stderr and on the feed, as for a binary file.
+    for (const data of ['AQ ID', 'AQID\n', 'AQ=D', 'AR==', 'AQI=x', '!!!!', 'AQID====', 'A']) {
+      const t = terminal({ f: { format: 'base64', data }, 'ok.txt': 'fine\n' }, { writable: '/tmp/' })
+      check(t, 'ls; cat ok.txt', 'f\nok.txt\nfine\n')
+      const message = '"/repo/f" declares base64 that does not decode, so its bytes cannot be read'
+      gap(t, 'cat f', 'base64 source', `cat: ${message}\n`)
+      for (const command of ['base64 f', 'wc -c f', 'cp f /tmp/copy', 'diff f ok.txt', 'grep -c x f']) {
+        const result = t.run(command)
+        assert.deepEqual(result.unsupported.map((u) => u.detail), ['base64 source'], `${command} for ${JSON.stringify(data)}`)
+        assert.match(result.stderr, /declares base64 that does not decode/u, command)
+        assert.notEqual(result.exitCode, 0, command)
+      }
+      check(t, 'ls /tmp')
     }
     assert.throws(() => terminal({ f: { format: 'hex', data: '01' } }), /source "f" declares format "hex"; the only format is \{ format: 'base64', data \}/u)
     // `data` alone is a declaration with its format left off, not a value to

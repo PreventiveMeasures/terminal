@@ -199,11 +199,18 @@ export function createFs(sources, mount = '/') {
   // A file declared in base64 is decoded the first time its bytes are asked
   // for, and is those bytes from then on; what can be answered without them
   // — its size, whether it is empty, whether it is bytes at all — reads the
-  // map as it is.
+  // map as it is. The decoder is strict, and is the one check the spelling
+  // gets: over a hundred mebibytes any check of its own costs more than the
+  // decoding does, so a spelling that does not decode is reported here, to
+  // the reader, as a file of bytes that spell no text is.
   const held = (p) => {
     const content = files.get(p)
     if (!(content instanceof Base64Bytes)) return content
-    const bytes = content.decode()
+    let bytes
+    try { bytes = content.decode() } catch (e) {
+      if (!(e instanceof SyntaxError)) throw e
+      throw new UnsupportedError('feature', 'base64 source', `${JSON.stringify(p)} declares base64 that does not decode, so its bytes cannot be read`)
+    }
     files.set(p, bytes)
     return bytes
   }
@@ -332,26 +339,24 @@ function sourceEntry(value, key) {
   return { link: target }
 }
 
-// Bytes spelt in base64: RFC 4648's alphabet in whole groups of four, a last
-// group of two or three that spells whole bytes and nothing past them, and
-// the `=` padding present or left off. The spelling is checked here, where
-// every other declaration is, in one pass that allocates nothing; decoding
-// it, which allocates the file, waits for the first reader.
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw](?:==)?|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=?)?$/u
-
+// Bytes spelt in base64: RFC 4648's alphabet, the `=` padding present or
+// left off. What the declaration says is checked here, where every other
+// declaration is; what the string spells is left to the decoder, at the
+// first read, since reading it twice would cost more than the file.
 function encodedContent(value, key) {
   const name = JSON.stringify(key)
   if (value.format !== 'base64') {
     throw new TypeError(`createTerminal: source ${name} declares format ${JSON.stringify(value.format ?? null)}; the only format is { format: 'base64', data }`)
   }
   if (typeof value.data !== 'string') throw new TypeError(`createTerminal: source ${name} must declare its base64 as a string in \`data\``)
-  if (!BASE64.test(value.data)) throw new TypeError(`createTerminal: source ${name} declares base64 that does not decode`)
   return new Base64Bytes(value.data)
 }
 
 // The base64 of a file, and the length of the bytes it spells — three for
 // every four characters, less what the padding stands for — which is what a
-// listing, a size and `find -empty` ask without the bytes themselves.
+// listing, a size and `find -empty` ask without the bytes themselves. A
+// spelling that does not decode has no true length, and no reader of it
+// gets past the decoding to care.
 class Base64Bytes {
   constructor(text) {
     this.text = text

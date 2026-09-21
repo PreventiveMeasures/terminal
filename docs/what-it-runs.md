@@ -27,10 +27,11 @@ not.
 A file may be bytes rather than text: a source entry that is a `Uint8Array` is
 the file's own bytes, for what no JS string can spell — an image, a compiled
 object, an archive — and `{ format: 'base64', data }` is the same file spelt
-in base64, for a tree that arrives serialized as text: its spelling is checked
-when the terminal is made and decoded the first time the file is read, so a
-tree of many such files costs nothing until one is opened. Bytes that do spell
-text are that text, and read exactly as the string would. Where they spell none, what the file is measured, sized,
+in base64, for a tree that arrives serialized as text: it is decoded the first
+time the file is read, so a tree of many such files costs nothing until one is
+opened, and a spelling that does not decode is reported by that first reader,
+as a binary file read as text is. Bytes that do spell text are that text, and
+read exactly as the string would. Where they spell none, what the file is measured, sized,
 listed, copied, encoded or compared as is answered from the bytes themselves:
 `wc`, whose characters are the ones those bytes do spell, `stat`, `du`, `ls`,
 `find`, `cp` and `cp -r` into the overlay, `base64`, `hexdump`, `xxd`, and

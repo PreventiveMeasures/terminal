@@ -6,10 +6,12 @@
  * `find -type l` and `ls -l` say so — and an absolute target names a path in
  * the terminal's own filesystem rather than one inside the mount. Bytes spelt
  * in base64, `{ format: 'base64', data }`, are the file a `Uint8Array` of the
- * same bytes would be, for a tree that arrives serialized as text: the
- * spelling is checked when the terminal is created (RFC 4648, padded or
- * not), and decoded the first time the file is read, so a tree of many such
- * files costs nothing until one is opened.
+ * same bytes would be, for a tree that arrives serialized as text: it is
+ * decoded (RFC 4648, padded or not) the first time the file is read, so a
+ * tree of many such files costs nothing until one is opened. That reading is
+ * where a spelling that does not decode is reported, as reading a binary
+ * file as text is: the command names the file, and the diagnostic feed
+ * carries it under the detail `base64 source`.
  */
 export type SourceEntry = { type: 'link'; target: string } | { format: 'base64'; data: string }
 
