@@ -17,8 +17,8 @@ describe('printf floating-point representation boundaries', () => {
     ["printf '%g' 0x0." + '0'.repeat(300) + '8p1204', '8'],
   ]
   for (const [command, stdout] of supported) {
-    it(command, () => {
-      assert.deepEqual(createTerminal({}).run(command), {
+    it(command, async () => {
+      assert.deepEqual(await createTerminal({}).run(command), {
         stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
       })
     })
@@ -38,14 +38,14 @@ describe('printf floating-point representation boundaries', () => {
     ["printf '%g' 0x0.ep-2000", 'floating-point range'],
   ]
   for (const [command, detail] of unsupported) {
-    it(command + ' reports precision loss through redirected stderr', () => {
+    it(command + ' reports precision loss through redirected stderr', async () => {
       const terminal = createTerminal({})
-      const plain = terminal.run(command)
+      const plain = await terminal.run(command)
       assert.equal(plain.stdout, '')
       assert.notEqual(plain.exitCode, 0)
       assert.equal(plain.unsupported.length, 1)
       assert.equal(plain.unsupported[0].detail, detail)
-      const hidden = terminal.run(command + ' 2>/dev/null | cat')
+      const hidden = await terminal.run(command + ' 2>/dev/null | cat')
       assert.deepEqual(hidden, {
         stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: plain.unsupported,
       })
@@ -54,19 +54,19 @@ describe('printf floating-point representation boundaries', () => {
 })
 
 describe('printf missing and empty numeric operands', () => {
-  it('fills missing numeric operands with zero without reporting an error', () => {
-    assert.deepEqual(createTerminal({}).run("printf '%d %u %f'"), {
+  it('fills missing numeric operands with zero without reporting an error', async () => {
+    assert.deepEqual(await createTerminal({}).run("printf '%d %u %f'"), {
       stdout: '0 0 0.000000', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 
   // An operand with nothing in it is zero, as strtoimax makes it, and says
   // nothing. An operand of blanks is a number GNU could not read.
-  it('reads an empty numeric operand as zero, and blanks as no number at all', () => {
-    assert.deepEqual(createTerminal({}).run("printf '%d %f' '' ''"), {
+  it('reads an empty numeric operand as zero, and blanks as no number at all', async () => {
+    assert.deepEqual(await createTerminal({}).run("printf '%d %f' '' ''"), {
       stdout: '0 0.000000', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
-    assert.deepEqual(createTerminal({}).run("printf '%d' '   '"), {
+    assert.deepEqual(await createTerminal({}).run("printf '%d' '   '"), {
       stdout: '0', stderr: "printf: '   ': expected a numeric value\n", exitCode: 1, cwd: '/', notes: [], unsupported: [],
     })
   })

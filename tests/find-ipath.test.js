@@ -14,8 +14,8 @@ const FILES = {
 const TYPESCRIPT = 'APP/Alpha.TS\nAPP/[x].TS\nAPP/deep/Beta.ts\nAPP/node_modules/dep.TS\nAPP/space name.ts\n'
 const SOURCES = 'APP/Alpha.TS\nAPP/[x].TS\nAPP/deep/Beta.ts\nAPP/space name.ts\n'
 
-function check(command, stdout, files = FILES) {
-  const result = createTerminal(files).run(command)
+async function check(command, stdout, files = FILES) {
+  const result = await createTerminal(files).run(command)
   assert.deepEqual([result.stdout, result.stderr, result.exitCode, result.unsupported], [stdout, '', 0, []], command)
 }
 
@@ -46,21 +46,21 @@ describe('find -ipath case-insensitive full paths', () => {
     it(command, () => check(command, stdout))
   }
 
-  it('combines pruning, basename matching, and negation', () => {
-    check('find APP -ipath "*/NODE_MODULES" -prune -o -type f -iname "*.ts" -print | sort', SOURCES)
-    check('find APP -type f -iname "*.ts" ! -ipath "*/NODE_MODULES/*" | sort', SOURCES)
-    check('find APP -type f -iname "*.ts" -not -ipath "*/NODE_MODULES/*" | sort', SOURCES)
+  it('combines pruning, basename matching, and negation', async () => {
+    await check('find APP -ipath "*/NODE_MODULES" -prune -o -type f -iname "*.ts" -print | sort', SOURCES)
+    await check('find APP -type f -iname "*.ts" ! -ipath "*/NODE_MODULES/*" | sort', SOURCES)
+    await check('find APP -type f -iname "*.ts" -not -ipath "*/NODE_MODULES/*" | sort', SOURCES)
   })
 
-  it('composes grouped predicates and execution actions', () => {
-    check(String.raw`find APP -type f \( -ipath '*/ALPHA.TS' -o -ipath '*/BETA.TS' \)`, 'APP/Alpha.TS\nAPP/deep/Beta.ts\n')
-    check('find APP -ipath "*/ALPHA.TS" -exec cat {} +', 'alpha\n')
-    check('find APP -ipath "*/ALPHA.TS" -print0 | xargs -0 cat', 'alpha\n')
+  it('composes grouped predicates and execution actions', async () => {
+    await check(String.raw`find APP -type f \( -ipath '*/ALPHA.TS' -o -ipath '*/BETA.TS' \)`, 'APP/Alpha.TS\nAPP/deep/Beta.ts\n')
+    await check('find APP -ipath "*/ALPHA.TS" -exec cat {} +', 'alpha\n')
+    await check('find APP -ipath "*/ALPHA.TS" -print0 | xargs -0 cat', 'alpha\n')
   })
 
-  it('validates roots case-sensitively and missing values as ordinary errors', () => {
+  it('validates roots case-sensitively and missing values as ordinary errors', async () => {
     for (const command of ['find app -ipath "*.ts"', 'find APP -ipath', 'find APP ! -ipath']) {
-      const result = createTerminal(FILES).run(command)
+      const result = await createTerminal(FILES).run(command)
       assert.notEqual(result.exitCode, 0)
       assert.notEqual(result.stderr, '')
       assert.deepEqual(result.unsupported, [])
@@ -75,9 +75,9 @@ describe('find -ipath unavailable glob semantics stay diagnostic', () => {
     ["find APP -ipath '*[[=a=]]*'", FILES, 'glob collating or equivalence class'],
     ["find APP -ipath '*[[.a.]]*'", FILES, 'glob collating or equivalence class'],
   ]) {
-    it(command, () => {
-      const direct = createTerminal(files).run(command)
-      const hidden = createTerminal(files).run(command + ' 2>/dev/null | cat')
+    it(command, async () => {
+      const direct = await createTerminal(files).run(command)
+      const hidden = await createTerminal(files).run(command + ' 2>/dev/null | cat')
       assert.notEqual(direct.exitCode, 0)
       assert.notEqual(direct.stderr, '')
       assert.deepEqual(direct.unsupported.map((note) => [note.command, note.detail]), [['find', detail]])
@@ -86,8 +86,8 @@ describe('find -ipath unavailable glob semantics stay diagnostic', () => {
     })
   }
 
-  it('does not evaluate unsupported matching in an unreached predicate', () => {
-    check('find . -prune -o -ipath "*É*"', '.\n', { 'café/Alpha.TS': '' })
-    check('find . -ipath "*/SKIP" -prune -o -type f -iname "*.ts" -print', '', { 'skip/café.TS': '' })
+  it('does not evaluate unsupported matching in an unreached predicate', async () => {
+    await check('find . -prune -o -ipath "*É*"', '.\n', { 'café/Alpha.TS': '' })
+    await check('find . -ipath "*/SKIP" -prune -o -type f -iname "*.ts" -print', '', { 'skip/café.TS': '' })
   })
 })

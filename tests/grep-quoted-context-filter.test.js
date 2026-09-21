@@ -46,25 +46,25 @@ describe('grep quoted context-line filter from agent logs', () => {
     `${command} input`,
     `cat input | ${command} 2>/dev/null | cat`,
   ]) {
-    it(shell, () => assert.deepEqual(createTerminal({ input }).run(shell), result(expected)))
+    it(shell, async () => assert.deepEqual(await createTerminal({ input }).run(shell), result(expected)))
   }
 
   for (const line of excluded) {
-    it(`filters ${JSON.stringify(line)} with status 1 when nothing remains`, () => {
-      assert.deepEqual(createTerminal({ input: line + '\n' }).run(`${command} input`), result('', 1))
+    it(`filters ${JSON.stringify(line)} with status 1 when nothing remains`, async () => {
+      assert.deepEqual(await createTerminal({ input: line + '\n' }).run(`${command} input`), result('', 1))
     })
   }
 
-  it('handles empty input without quote or unsupported errors', () => {
-    assert.deepEqual(createTerminal({ input: '' }).run(`${command} input`), result('', 1))
-    assert.deepEqual(createTerminal({}).run(command), result('', 1))
+  it('handles empty input without quote or unsupported errors', async () => {
+    assert.deepEqual(await createTerminal({ input: '' }).run(`${command} input`), result('', 1))
+    assert.deepEqual(await createTerminal({}).run(command), result('', 1))
   })
 
-  it('keeps a final retained line without a newline and supplies grep output termination', () => {
-    assert.deepEqual(createTerminal({ input: 'keep this' }).run(`${command} input`), result('keep this\n'))
+  it('keeps a final retained line without a newline and supplies grep output termination', async () => {
+    assert.deepEqual(await createTerminal({ input: 'keep this' }).run(`${command} input`), result('keep this\n'))
   })
 
-  it('reads Unicode whitespace before the quote as GNU\'s \\s does in C.UTF-8', () => {
-    assert.deepEqual(createTerminal({ input: 'src/file.js-12-\u2003"/route"\n' }).run(`${command} input`), result('', 1))
+  it('reads Unicode whitespace before the quote as GNU\'s \\s does in C.UTF-8', async () => {
+    assert.deepEqual(await createTerminal({ input: 'src/file.js-12-\u2003"/route"\n' }).run(`${command} input`), result('', 1))
   })
 })

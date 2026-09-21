@@ -10,9 +10,9 @@ const prefix = 'cat: relative path "tmp/file" was not found from cwd "/repo/sub"
 const both = 'Both of "/repo/tmp/file" and "/tmp/file" exist'
 const expected = (ending) => ({ stdout: '', stderr: 'cat: tmp/file: No such file or directory\n', exitCode: 1, cwd: '/repo/sub', unsupported: [], notes: [prefix + ending] })
 
-function terminalWithFiles(mounted, overlay) {
+async function terminalWithFiles(mounted, overlay) {
   const terminal = createTerminal({ 'tmp/file': mounted, 'sub/keep': '', overlay }, options)
-  assert.equal(terminal.run('cp /repo/overlay /tmp/file').exitCode, 0)
+  assert.equal((await terminal.run('cp /repo/overlay /tmp/file')).exitCode, 0)
   return terminal
 }
 
@@ -30,11 +30,11 @@ describe('missing-path notes describe alternative file kinds and contents', () =
     ['different Unicode', 'é😀', 'é😁', true],
     ['different Unicode normalization', 'é', 'e\u0301', true],
   ]) {
-    it(label, () => {
-      const terminal = terminalWithFiles(mounted, overlay)
-      assert.deepEqual(terminal.run('cat tmp/file'), expected(both + (differ ? ', and they differ in contents.' : '.')))
-      assert.equal(terminal.run('cat /repo/tmp/file').stdout, mounted)
-      assert.equal(terminal.run('cat /tmp/file').stdout, overlay)
+    it(label, async () => {
+      const terminal = await terminalWithFiles(mounted, overlay)
+      assert.deepEqual(await terminal.run('cat tmp/file'), expected(both + (differ ? ', and they differ in contents.' : '.')))
+      assert.equal((await terminal.run('cat /repo/tmp/file')).stdout, mounted)
+      assert.equal((await terminal.run('cat /tmp/file')).stdout, overlay)
     })
   }
 
@@ -43,8 +43,8 @@ describe('missing-path notes describe alternative file kinds and contents', () =
     [{ 'dir/keep': '' }, 'dir', 'dir', '/repo/dir'],
     [{}, 'tmp', 'dir', '/tmp'],
   ]) {
-    it(`describes a single ${kind} alternative at ${absolute}`, () => {
-      const result = createTerminal({ ...sources, 'sub/keep': '' }, options).run('cat ' + path)
+    it(`describes a single ${kind} alternative at ${absolute}`, async () => {
+      const result = await createTerminal({ ...sources, 'sub/keep': '' }, options).run('cat ' + path)
       assert.equal(result.exitCode, 1)
       assert.deepEqual(result.unsupported, [])
       assert.deepEqual(result.notes, [`cat: relative path "${path}" was not found from cwd "/repo/sub". A ${kind} exists at "${absolute}".`])
@@ -55,24 +55,24 @@ describe('missing-path notes describe alternative file kinds and contents', () =
     ['two directories with different entries', { 'tmp/only-in-mount': 'contents' }],
     ['one file and one directory', { tmp: 'contents' }],
   ]) {
-    it(`does not claim a content difference for ${name}`, () => {
+    it(`does not claim a content difference for ${name}`, async () => {
       const terminal = createTerminal({ ...sources, 'sub/keep': '' }, options)
-      const result = terminal.run('cat tmp')
+      const result = await terminal.run('cat tmp')
       assert.equal(result.exitCode, 1)
       assert.deepEqual(result.unsupported, [])
       assert.deepEqual(result.notes, ['cat: relative path "tmp" was not found from cwd "/repo/sub". Both of "/repo/tmp" and "/tmp" exist.'])
     })
   }
 
-  it('describes root-mounted paths only once', () => {
+  it('describes root-mounted paths only once', async () => {
     const terminal = createTerminal({ file: '', 'sub/keep': '' }, { cwd: '/sub' })
-    assert.deepEqual(terminal.run('cat file').notes, ['cat: relative path "file" was not found from cwd "/sub". A file exists at "/file".'])
+    assert.deepEqual((await terminal.run('cat file')).notes, ['cat: relative path "file" was not found from cwd "/sub". A file exists at "/file".'])
   })
 
   for (const [root, mounted, differ] of [['same', 'same', false], ['first', 'other', true], ['\uD800', '\uD800', false]]) {
-    it('compares two mounted source files without an overlay', () => {
+    it('compares two mounted source files without an overlay', async () => {
       const terminal = createTerminal({ file: root, 'repo/file': mounted, 'sub/keep': '' }, { mount: '/repo', cwd: '/repo/sub' })
-      const result = terminal.run('cat repo/file')
+      const result = await terminal.run('cat repo/file')
       assert.equal(result.exitCode, 1)
       assert.deepEqual(result.unsupported, [])
       assert.deepEqual(result.notes, [`cat: relative path "repo/file" was not found from cwd "/repo/sub". Both of "/repo/file" and "/repo/repo/file" exist${differ ? ', and they differ in contents' : ''}.`])
@@ -85,11 +85,11 @@ describe('alternative comparisons are observational', () => {
     ['cat tmp/file 2>>/tmp/file', '', '', 'overlay\ncat: tmp/file: No such file or directory\n'],
     ['cat tmp/file /repo/overlay >>/tmp/file', '', 'cat: tmp/file: No such file or directory\n', 'overlay\noverlay\n'],
   ]) {
-    it(`preserves output behavior for ${line}`, () => {
-      const terminal = terminalWithFiles('mounted\n', 'overlay\n')
-      const result = terminal.run(line)
+    it(`preserves output behavior for ${line}`, async () => {
+      const terminal = await terminalWithFiles('mounted\n', 'overlay\n')
+      const result = await terminal.run(line)
       assert.deepEqual(result, { ...expected(both + ', and they differ in contents.'), stdout: output, stderr })
-      assert.equal(terminal.run('cat /tmp/file').stdout, fileContent)
+      assert.equal((await terminal.run('cat /tmp/file')).stdout, fileContent)
     })
   }
 

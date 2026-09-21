@@ -36,16 +36,16 @@ const CASES = [
 
 describe('sed address and regex boundaries', () => {
   for (const [command, input, stdout] of CASES) {
-    it(command, () => {
+    it(command, async () => {
       const terminal = createTerminal({ input })
       const expected = { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }
-      assert.deepEqual(terminal.run(command), expected)
-      assert.deepEqual(terminal.run(command), expected, 'range state resets between invocations')
+      assert.deepEqual(await terminal.run(command), expected)
+      assert.deepEqual(await terminal.run(command), expected, 'range state resets between invocations')
     })
   }
 
-  it('retains read errors while a regex range spans surviving input files', () => {
-    const result = createTerminal({ first: 'start\n', last: 'body\nend' }).run("sed -n '/start/,/end/p' first missing last")
+  it('retains read errors while a regex range spans surviving input files', async () => {
+    const result = await createTerminal({ first: 'start\n', last: 'body\nend' }).run("sed -n '/start/,/end/p' first missing last")
     assert.equal(result.stdout, 'start\nbody\nend')
     assert.match(result.stderr, /missing: No such file/u)
     assert.equal(result.exitCode, 2)
@@ -72,37 +72,37 @@ describe('sed unsupported features retain diagnostics', () => {
     ["sed -n '/в/Ip' extended", 'case folding of Cyrillic Extended-C letters'],
   ]
   for (const [command, detail] of gaps) {
-    it(command, () => {
+    it(command, async () => {
       const terminal = createTerminal({ input: 'aa\n', extended: '\u1C80\n' })
-      const result = terminal.run(command)
+      const result = await terminal.run(command)
       assert.notEqual(result.exitCode, 0)
       assert.notEqual(result.stderr, '')
       assert.deepEqual(result.unsupported.map(({ kind, command: name, detail: gap }) => [kind, name, gap]), [['feature', 'sed', detail]])
-      const hidden = terminal.run(`${command} 2>/dev/null | cat`)
+      const hidden = await terminal.run(`${command} 2>/dev/null | cat`)
       assert.equal(hidden.stderr, '')
       assert.equal(hidden.exitCode, 0)
       assert.deepEqual(hidden.unsupported, result.unsupported)
     })
   }
 
-  it('preserves earlier output and its diagnostic when a later line cannot be folded reliably', () => {
+  it('preserves earlier output and its diagnostic when a later line cannot be folded reliably', async () => {
     const terminal = createTerminal({ input: 'a\n\u1C80\n' })
     for (const command of ["sed -n '/^[[:alpha:]]$/Ip' input", "sed -E 's/[[:alpha:]]/x/I' input"]) {
-      const result = terminal.run(`${command} 2>/dev/null | cat`)
+      const result = await terminal.run(`${command} 2>/dev/null | cat`)
       assert.equal(result.stdout, command.includes('-n') ? 'a\n' : 'x\n')
       assert.equal(result.stderr, '')
       assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['case folding of Cyrillic Extended-C letters'])
     }
   })
 
-  it('reports malformed addresses and replacement references as ordinary errors', () => {
+  it('reports malformed addresses and replacement references as ordinary errors', async () => {
     const terminal = createTerminal({ input: 'a\n' })
     for (const command of ["sed -n '0p' input", "sed -n '0,2p' input", "sed -n '//p' input",
       "sed -n '/unterminated' input", "sed -n '1,p' input", String.raw`sed -E 's/(a)/\2/' input`,
       ...[String.raw`a\)`, String.raw`a\(`, String.raw`a\{`].flatMap(pattern => [
         `sed -n '/${pattern}/p' input`, `sed 's/${pattern}/x/' input`,
       ])]) {
-      const result = terminal.run(command)
+      const result = await terminal.run(command)
       assert.notEqual(result.exitCode, 0, command)
       assert.notEqual(result.stderr, '', command)
       assert.deepEqual(result.unsupported, [], command)
@@ -114,8 +114,8 @@ describe('sed unsupported features retain diagnostics', () => {
   // https://github.com/mirror/sed/blob/0c1fe22ccacf4887e0be6c11deb4e9c83acc287d/sed/regexp.c
   for (const script of ['//Ip', '//Mp', '//IMp', '// I p', '// M p', '/a/p;//Ip', String.raw`\%%Ip`]) {
     for (const input of ['', 'a\n']) {
-      it(`empty address modifiers fail before reading ${input ? 'nonempty' : 'empty'} input: ${script}`, () => {
-        assert.deepEqual(createTerminal({ input }).run(`sed -n '${script}' input`), {
+      it(`empty address modifiers fail before reading ${input ? 'nonempty' : 'empty'} input: ${script}`, async () => {
+        assert.deepEqual(await createTerminal({ input }).run(`sed -n '${script}' input`), {
           stdout: '', stderr: 'sed: cannot specify modifiers on empty regexp\n',
           exitCode: 1, cwd: '/', notes: [], unsupported: [],
         })

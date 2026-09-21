@@ -5,8 +5,8 @@ import { createTerminal } from '@preventive/terminal'
 const FILES = { 'a.txt': 'hello\n', empty: '', 'src/main.js': '', 'src/name with spaces.js': '', 'src/[x].js': '' }
 const run = (command) => createTerminal(FILES).run(command)
 
-function check(command, code) {
-  const result = run(command)
+async function check(command, code) {
+  const result = await run(command)
   assert.deepEqual([result.stdout, result.stderr, result.exitCode, result.unsupported], ['', '', code, []], command)
 }
 
@@ -23,36 +23,36 @@ describe('test and [ file predicates', () => {
     ['-f /dev/null', 1], ['-e /dev/null', 0], ['-d /dev/null', 1],
     ['-f /dev/./null', 1], ['-f /dev/null/../empty', 1], ['-e /dev/null/', 1],
   ]) {
-    it(expression, () => {
-      check('test ' + expression, code)
-      check('[ ' + expression + ' ]', code)
+    it(expression, async () => {
+      await check('test ' + expression, code)
+      await check('[ ' + expression + ' ]', code)
     })
   }
 
-  it('resolves relative paths from cwd and reports the status to control flow', () => {
-    assert.equal(run('cd src && test -f main.js && echo yes').stdout, 'yes\n')
-    assert.equal(run('test -f missing || echo absent').stdout, 'absent\n')
-    assert.equal(run('[ -f a.txt ] && cat a.txt').stdout, FILES['a.txt'])
-    assert.equal(run('test -f missing; echo $?').stdout, '1\n')
+  it('resolves relative paths from cwd and reports the status to control flow', async () => {
+    assert.equal((await run('cd src && test -f main.js && echo yes')).stdout, 'yes\n')
+    assert.equal((await run('test -f missing || echo absent')).stdout, 'absent\n')
+    assert.equal((await run('[ -f a.txt ] && cat a.txt')).stdout, FILES['a.txt'])
+    assert.equal((await run('test -f missing; echo $?')).stdout, '1\n')
   })
 
-  it('leaves shared input untouched', () => {
-    const result = run('{ test -f a.txt; [ -f missing ]; cat; } < a.txt')
+  it('leaves shared input untouched', async () => {
+    const result = await run('{ test -f a.txt; [ -f missing ]; cat; } < a.txt')
     assert.deepEqual([result.stdout, result.stderr, result.exitCode, result.unsupported], [FILES['a.txt'], '', 0, []])
   })
 
-  it('works through executable aliases and nested dispatch', () => {
-    check('/usr/bin/test -f a.txt', 0)
-    check('/bin/[ -f a.txt ]', 0)
-    check('echo a.txt | xargs test -f', 0)
-    assert.equal(run(String.raw`find . -type f -exec test -f {} \; -print`).stdout, './a.txt\n./empty\n./src/[x].js\n./src/main.js\n./src/name with spaces.js\n')
+  it('works through executable aliases and nested dispatch', async () => {
+    await check('/usr/bin/test -f a.txt', 0)
+    await check('/bin/[ -f a.txt ]', 0)
+    await check('echo a.txt | xargs test -f', 0)
+    assert.equal((await run(String.raw`find . -type f -exec test -f {} \; -print`)).stdout, './a.txt\n./empty\n./src/[x].js\n./src/main.js\n./src/name with spaces.js\n')
   })
 
-  it('is discoverable as a command while [ stays hidden', () => {
+  it('is discoverable as a command while [ stays hidden', async () => {
     const terminal = createTerminal(FILES)
     assert.deepEqual(terminal.complete('tes'), ['test'])
     assert.deepEqual(terminal.complete('['), [])
-    assert.equal(terminal.run('which test').stdout, '/usr/bin/test\n')
+    assert.equal((await terminal.run('which test')).stdout, '/usr/bin/test\n')
   })
 })
 
@@ -64,15 +64,15 @@ describe('test expression argument rules', () => {
     ['a != b', 0], ['a = b', 1], ['! = !', 0], ['! a = b', 0],
     [String.raw`\( value \)`, 0], [String.raw`\( -f a.txt \)`, 0],
   ]) {
-    it(expression || 'no expression', () => {
-      check('test ' + expression, code)
-      check('[ ' + expression + ' ]', code)
+    it(expression || 'no expression', async () => {
+      await check('test ' + expression, code)
+      await check('[ ' + expression + ' ]', code)
     })
   }
 
   for (const command of ['[', '[ -f a.txt', '[ -f a.txt ] extra', 'test -- -f a.txt', 'test -f a.txt extra', 'test a b', 'test -Q a.txt']) {
-    it(command + ' reports an ordinary syntax error', () => {
-      const result = run(command)
+    it(command + ' reports an ordinary syntax error', async () => {
+      const result = await run(command)
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 2)
       assert.notEqual(result.stderr, '')
@@ -93,9 +93,9 @@ describe('test unavailable predicates remain diagnostic', () => {
   ]) {
     for (const [prefix, suffix] of [['test ', ''], ['[ ', ' ]']]) {
       const command = prefix + expression + suffix
-      it(command, () => {
-        const direct = run(command)
-        const hidden = run(command + ' 2>/dev/null | cat')
+      it(command, async () => {
+        const direct = await run(command)
+        const hidden = await run(command + ' 2>/dev/null | cat')
         assert.equal(direct.exitCode, 2)
         assert.notEqual(direct.stderr, '')
         assert.deepEqual(direct.unsupported.map((note) => note.detail), [detail])

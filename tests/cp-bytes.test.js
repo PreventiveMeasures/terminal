@@ -43,13 +43,13 @@ describe('cp preserves file bytes without weakening shared write guards', () => 
   })
 
   for (const target of ['/tmp/args', '/tmp/./args']) {
-    it(`cannot truncate an ancestor's active input at ${target}`, () => {
+    it(`cannot truncate an ancestor's active input at ${target}`, async () => {
       const fs = setup()
       fs.openWritable('/', '/tmp/args').write('arguments')
       const io = createIoGuard(fs)
-      assert.throws(() => io.run('future-reader', () => {
+      await assert.rejects(() => io.run('future-reader', async () => {
         fs.readFile('/tmp/args')
-        io.run('cp', () => fs.copyWritable('/', '/repo/source', target))
+        await io.run('cp', () => fs.copyWritable('/', '/repo/source', target))
       }), (error) => {
         assert.equal(unsupportedNote(error).command, 'future-reader')
         assert.equal(unsupportedNote(error).detail, 'streaming self-output')
@@ -59,25 +59,25 @@ describe('cp preserves file bytes without weakening shared write guards', () => 
     })
   }
 
-  it('keeps byte writes guarded even when the descriptor predates the read', () => {
+  it('keeps byte writes guarded even when the descriptor predates the read', async () => {
     const fs = setup()
     const handle = fs.openWritable('/', '/tmp/source', true)
     handle.write('unchanged')
     const io = createIoGuard(fs)
-    assert.throws(() => io.run('future-reader', () => {
+    await assert.rejects(() => io.run('future-reader', () => {
       fs.readFile('/tmp/source')
       handle.writeBytes(Uint8Array.of(255))
     }), /actively read input/u)
     assert.equal(fs.readFile('/tmp/source'), 'unchanged')
   })
 
-  it('copies an invalid byte sequence created through shell descriptors successfully', () => {
+  it('copies an invalid byte sequence created through shell descriptors successfully', async () => {
     const terminal = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
     const success = { stdout: '', stderr: '', exitCode: 0, cwd: '/repo', notes: [], unsupported: [] }
-    assert.deepEqual(terminal.run('{ printf é >/tmp/raw; printf X; } >/tmp/raw'), success)
-    assert.deepEqual(terminal.run('cp /tmp/raw /tmp/copy'), success)
-    assert.deepEqual(terminal.run('printf changed >/tmp/raw'), success)
-    const result = terminal.run('cat /tmp/copy 2>/dev/null | cat')
+    assert.deepEqual(await terminal.run('{ printf é >/tmp/raw; printf X; } >/tmp/raw'), success)
+    assert.deepEqual(await terminal.run('cp /tmp/raw /tmp/copy'), success)
+    assert.deepEqual(await terminal.run('printf changed >/tmp/raw'), success)
+    const result = await terminal.run('cat /tmp/copy 2>/dev/null | cat')
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)

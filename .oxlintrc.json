@@ -12,6 +12,7 @@
     "unicorn"
   ],
   "globals": {
+    "CompressionStream": "readonly",
     "DecompressionStream": "readonly",
     "structuredClone": "readonly"
   },
@@ -70,7 +71,8 @@
       ],
       "rules": {
         "max-lines-per-function": "off",
-        "max-lines": "off"
+        "max-lines": "off",
+        "no-await-in-loop": "off"
       }
     }
   ]

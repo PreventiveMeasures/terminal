@@ -7,10 +7,10 @@ import { unsupportedNote } from '../src/unsupported.js'
 
 // Expectations follow Bash's Shell Parameter Expansion manual and the
 // parameter_brace_expand/remove_pattern implementations in Bash 5.2 subst.c.
-function evaluate(content, bindings = {}, expansion) {
+async function evaluate(content, bindings = {}, expansion) {
   const ctx = { vars: new Map(Object.entries(bindings)) }
   const expanded = []
-  const result = evaluateParameter(parseParameter(content), ctx, {
+  const result = await evaluateParameter(parseParameter(content), ctx, {
     lookup: (name) => ({ value: ctx.vars.get(name) ?? '', set: ctx.vars.has(name) }),
     expand: (word, options) => {
       expanded.push([word, options])
@@ -73,8 +73,8 @@ describe('conditional parameter evaluation', () => {
       const missing = colon ? nullness : unset
       for (const operator of ['-', '+', '=']) {
         const content = 'x' + colon + operator + 'fallback'
-        it(`${JSON.stringify(bindings)} ${content}`, () => {
-          const { result, vars, expanded } = evaluate(content, bindings)
+        it(`${JSON.stringify(bindings)} ${content}`, async () => {
+          const { result, vars, expanded } = await evaluate(content, bindings)
           const useWord = operator === '+' ? !missing : missing
           assert.equal(result.value, useWord ? 'fallback' : operator === '+' ? '' : bindings.x)
           assert.equal(expanded.length, Number(useWord))
@@ -84,25 +84,25 @@ describe('conditional parameter evaluation', () => {
     }
   }
 
-  it('does not evaluate unselected nested expressions', () => {
+  it('does not evaluate unselected nested expressions', async () => {
     const forbidden = () => { throw new Error('unexpected evaluation') }
     for (const content of ['x-default', 'x:-default', 'x=default', 'x:=default', 'x?error', 'x:?error']) {
-      assert.equal(evaluate(content, { x: 'value' }, forbidden).result.value, 'value')
+      assert.equal((await evaluate(content, { x: 'value' }, forbidden)).result.value, 'value')
     }
-    assert.equal(evaluate('x+alternate', {}, forbidden).result.value, '')
-    assert.equal(evaluate('x:+alternate', { x: '' }, forbidden).result.value, '')
+    assert.equal((await evaluate('x+alternate', {}, forbidden)).result.value, '')
+    assert.equal((await evaluate('x:+alternate', { x: '' }, forbidden)).result.value, '')
   })
 
-  it('assignment returns the stored scalar without the operand quote mask', () => {
+  it('assignment returns the stored scalar without the operand quote mask', async () => {
     const word = { value: 'a b*c', mask: '12210', q: true }
-    const { result, vars, expanded } = evaluate('x:=ignored', {}, () => word)
+    const { result, vars, expanded } = await evaluate('x:=ignored', {}, () => word)
     assert.deepEqual(result, { value: 'a b*c' })
     assert.equal(vars.get('x'), 'a b*c')
     assert.deepEqual(expanded, [['ignored', { assignment: true }]])
   })
 
-  it('rejects assigning an absent positional parameter before expanding its operand', () => {
-    assert.throws(() => evaluate('1:=value', {}, () => { throw new Error('unexpected evaluation') }), (error) => {
+  it('rejects assigning an absent positional parameter before expanding its operand', async () => {
+    await assert.rejects(() => evaluate('1:=value', {}, () => { throw new Error('unexpected evaluation') }), (error) => {
       assert.equal(error.message, '$1: cannot assign in this way')
       assert.equal(unsupportedNote(error), null)
       return true
@@ -114,8 +114,8 @@ describe('conditional parameter evaluation', () => {
     ['x:?', { x: '' }, 'x: parameter null or not set'],
     ['x:?missing value', {}, 'x: missing value'],
     ['x:?  missing \n value \t ', {}, 'x: missing value'],
-  ]) {it(`ordinary required-value error: ${content}`, () => {
-    assert.throws(() => evaluate(content, bindings), (error) => {
+  ]) {it(`ordinary required-value error: ${content}`, async () => {
+    await assert.rejects(() => evaluate(content, bindings), (error) => {
       assert.equal(error.message, message)
       assert.equal(error.exitCode, 1)
       assert.equal(error.halt, true)
@@ -124,16 +124,16 @@ describe('conditional parameter evaluation', () => {
     })
   })}
 
-  it('keeps quoted spaces in a required-value message', () => {
-    assert.throws(() => evaluate('x:?word', {}, () => ({ value: ' a  b ', mask: '222222' })), { message: 'x:  a  b ' })
+  it('keeps quoted spaces in a required-value message', async () => {
+    await assert.rejects(() => evaluate('x:?word', {}, () => ({ value: ' a  b ', mask: '222222' })), { message: 'x:  a  b ' })
   })
 
-  it('expands a provided error word to empty without inventing a default message', () => {
-    assert.throws(() => evaluate('x:?word', {}, () => ({ value: '' })), { message: 'x: ' })
+  it('expands a provided error word to empty without inventing a default message', async () => {
+    await assert.rejects(() => evaluate('x:?word', {}, () => ({ value: '' })), { message: 'x: ' })
   })
 
-  it('empty quoted message fields survive joining', () => {
-    assert.throws(() => evaluate('x:?word', {}, () => ({ value: '  x ', mask: '0000', empty: [0, 1, 4] })), { message: 'x:   x ' })
+  it('empty quoted message fields survive joining', async () => {
+    await assert.rejects(() => evaluate('x:?word', {}, () => ({ value: '  x ', mask: '0000', empty: [0, 1, 4] })), { message: 'x:   x ' })
   })
 })
 
@@ -154,42 +154,42 @@ describe('parameter length and pattern removal', () => {
     ['x#é', { x: 'é😀' }, '😀'], ['x%😀', { x: 'é😀' }, 'é'],
     ['x##*é', { x: '😀é🦄' }, '🦄'], ['x%é*', { x: '😀é🦄' }, '😀'],
     ['x#\\*', { x: '*a' }, 'a'], ['x#\\', { x: '\\a' }, 'a'],
-  ]) {it(`${content} on ${JSON.stringify(bindings.x)}`, () => {
-    assert.equal(evaluate(content, bindings).result.value, expected)
+  ]) {it(`${content} on ${JSON.stringify(bindings.x)}`, async () => {
+    assert.equal((await evaluate(content, bindings)).result.value, expected)
   })}
 
-  it('a quote mask makes wildcard and bracket syntax literal', () => {
+  it('a quote mask makes wildcard and bracket syntax literal', async () => {
     for (const literal of ['*', '?', '[ab]', '[[:digit:]]', '\\']) {
-      const result = evaluate('x#pattern', { x: literal + 'rest' }, () => ({ value: literal, mask: '1'.repeat(literal.length) }))
+      const result = await evaluate('x#pattern', { x: literal + 'rest' }, () => ({ value: literal, mask: '1'.repeat(literal.length) }))
       assert.equal(result.result.value, 'rest')
     }
   })
 
-  it('skips pattern expansion when the source or raw pattern is empty', () => {
+  it('skips pattern expansion when the source or raw pattern is empty', async () => {
     for (const [content, bindings] of [['x#word', {}], ['x%%word', { x: '' }], ['x##', { x: 'abc' }]]) {
-      assert.equal(evaluate(content, bindings, () => { throw new Error('unexpected expansion') }).expanded.length, 0)
+      assert.equal((await evaluate(content, bindings, () => { throw new Error('unexpected expansion') })).expanded.length, 0)
     }
   })
 
-  it('reports locale-dependent non-ASCII length', () => {
-    assert.throws(() => evaluate('#x', { x: 'é' }), (error) => unsupportedNote(error)?.detail === '${')
+  it('reports locale-dependent non-ASCII length', async () => {
+    await assert.rejects(() => evaluate('#x', { x: 'é' }), (error) => unsupportedNote(error)?.detail === '${')
   })
 
   for (const pattern of ['@(a|b)', '+(a)', '*(a)', '?(a)', '!(a)', '[@(a)', '[[:alpha:]]@(a)', '[]]@(a)']) {
-    it(`reports dynamically produced extglob ${pattern}`, () => {
-      assert.throws(() => evaluate('x#word', { x: 'abc' }, () => ({ value: pattern })), (error) => unsupportedNote(error)?.detail === '${')
+    it(`reports dynamically produced extglob ${pattern}`, async () => {
+      await assert.rejects(() => evaluate('x#word', { x: 'abc' }, () => ({ value: pattern })), (error) => unsupportedNote(error)?.detail === '${')
     })
   }
 
-  it('literal and quoted parentheses are supported', () => {
-    assert.equal(evaluate('x#(a)', { x: '(a)b' }).result.value, 'b')
-    assert.equal(evaluate('x#word', { x: '@(a)b' }, () => ({ value: '@(a)', mask: '1111' })).result.value, 'b')
-    assert.equal(evaluate('x#[+(]', { x: '+a' }).result.value, 'a')
-    assert.equal(evaluate('x#[[:alpha:]+(]', { x: '+a' }).result.value, 'a')
+  it('literal and quoted parentheses are supported', async () => {
+    assert.equal((await evaluate('x#(a)', { x: '(a)b' })).result.value, 'b')
+    assert.equal((await evaluate('x#word', { x: '@(a)b' }, () => ({ value: '@(a)', mask: '1111' }))).result.value, 'b')
+    assert.equal((await evaluate('x#[+(]', { x: '+a' })).result.value, 'a')
+    assert.equal((await evaluate('x#[[:alpha:]+(]', { x: '+a' })).result.value, 'a')
   })
 
-  it('bounds an expensive unmatched removal rather than returning an approximation', () => {
-    assert.throws(() => evaluate('x#?z', { x: 'a'.repeat(10_000) }), (error) => unsupportedNote(error)?.detail === '${')
+  it('bounds an expensive unmatched removal rather than returning an approximation', async () => {
+    await assert.rejects(() => evaluate('x#?z', { x: 'a'.repeat(10_000) }), (error) => unsupportedNote(error)?.detail === '${')
   })
 })
 
@@ -220,8 +220,8 @@ describe('shell parameter integration', () => {
     ['HOME=/home/agent; printf "<%s>" ${x:=~/a:~/b} "$x"', '</home/agent/a:~/b></home/agent/a:~/b>'],
     ['HOME=/home/agent; printf "<%s>" ${x:=NAME=~/a} "$x"', '<NAME=~/a><NAME=~/a>'],
     ['HOME=/home/agent; printf "<%s>" ${x:-NAME=~/a}', '<NAME=~/a>'],
-  ]) {it(command, () => {
-    const result = createTerminal({}).run(command)
+  ]) {it(command, async () => {
+    const result = await createTerminal({}).run(command)
     assert.equal(result.stdout, stdout)
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)
@@ -258,9 +258,9 @@ describe('parameter quote masks and empty field boundaries', () => {
     ["na\\\nme=ok; argv ${na\\\nme}",["ok"]],
     ["argv ${x:\\\n-fallback}",["fallback"]],
   ]) {
-    it(command, () => {
+    it(command, async () => {
       const terminal = createTerminal({}, { commands: { argv: (io) => JSON.stringify(io.args) } })
-      const result = terminal.run(command)
+      const result = await terminal.run(command)
       assert.equal(result.stdout, JSON.stringify(expected))
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
@@ -275,9 +275,9 @@ describe('parameter pathname expansion and failures', () => {
     ["x=\"*.txt\"; p=\"*\"; argv ${x#\"$p\"} \"${x#\"$p\"}\" ${x#$p}",[".txt",".txt","a.txt","b.txt"]],
     ["x=\"*.txt\"; argv \"${x:-*.txt}\" ${x:+*.txt}",["*.txt","a.txt","b.txt"]],
   ]) {
-    it(command, () => {
+    it(command, async () => {
       const terminal = createTerminal({ 'a.txt': '', 'b.txt': '' }, { commands: { argv: (io) => JSON.stringify(io.args) } })
-      const result = terminal.run(command)
+      const result = await terminal.run(command)
       assert.equal(result.stdout, JSON.stringify(expected))
       assert.equal(result.stderr, '')
       assert.deepEqual(result.unsupported, [])
@@ -285,8 +285,8 @@ describe('parameter pathname expansion and failures', () => {
   }
 
   for (const content of ['x^^', 'x@Q', '!x', 'x[@]', '#x:-word', '']) {
-    it(`diagnoses unsupported ${content} through the public shell`, () => {
-      const result = createTerminal({}).run('echo "${' + content + '}" 2>/dev/null | cat')
+    it(`diagnoses unsupported ${content} through the public shell`, async () => {
+      const result = await createTerminal({}).run('echo "${' + content + '}" 2>/dev/null | cat')
       assert.equal(result.stdout, '')
       assert.equal(result.unsupported[0]?.kind, 'feature')
       assert.equal(result.unsupported[0]?.detail, '${')
@@ -294,8 +294,8 @@ describe('parameter pathname expansion and failures', () => {
   }
 
   for (const command of ['echo "${x:?required}"; echo unexpected', 'echo "${1:=value}"; echo unexpected']) {
-    it(`ordinary expansion failures stop the command list: ${command}`, () => {
-      const result = createTerminal({}).run(command)
+    it(`ordinary expansion failures stop the command list: ${command}`, async () => {
+      const result = await createTerminal({}).run(command)
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 1)
       assert.notEqual(result.stderr, '')

@@ -99,25 +99,25 @@ describe('loose encoding and strict file bytes retain their distinct contracts',
     })
   }
 
-  it('preserves existing loose byte-reader behavior while strict encoders diagnose it', () => {
+  it('preserves existing loose byte-reader behavior while strict encoders diagnose it', async () => {
     const t = createTerminal({ input: '\uD800x' })
-    assert.deepEqual(t.run('head -c3 input'), result('\uFFFD', 0, '', [], ['head: selected 3 of 4 bytes from "/input".']))
-    assert.deepEqual(t.run('wc -c input'), result('4 input\n'))
-    const failed = t.run('base64 input')
+    assert.deepEqual(await t.run('head -c3 input'), result('\uFFFD', 0, '', [], ['head: selected 3 of 4 bytes from "/input".']))
+    assert.deepEqual(await t.run('wc -c input'), result('4 input\n'))
+    const failed = await t.run('base64 input')
     assert.equal(failed.stdout, '')
     assert.equal(failed.exitCode, 1)
     assert.deepEqual(failed.unsupported.map(({ detail }) => detail), ['unpaired surrogate'])
   })
 
-  it('does not corrupt a writable file when strict encoding rejects an append', () => {
+  it('does not corrupt a writable file when strict encoding rejects an append', async () => {
     const t = createTerminal({ valid: '\uFEFFé😀', bad: '\uD800' }, { mount: '/repo', writable: '/tmp/' })
-    assert.deepEqual(t.run('cat /repo/valid >/tmp/file'), mounted())
-    const failed = t.run('cat /repo/bad >>/tmp/file 2>/dev/null | cat')
+    assert.deepEqual(await t.run('cat /repo/valid >/tmp/file'), mounted())
+    const failed = await t.run('cat /repo/bad >>/tmp/file 2>/dev/null | cat')
     assert.equal(failed.stdout, '')
     assert.equal(failed.stderr, '')
     assert.equal(failed.exitCode, 0)
     assert.deepEqual(failed.unsupported.map(({ detail }) => detail), ['unpaired surrogate'])
-    assert.deepEqual(t.run('cat /tmp/file'), mounted('\uFEFFé😀'))
+    assert.deepEqual(await t.run('cat /tmp/file'), mounted('\uFEFFé😀'))
   })
 })
 
@@ -136,9 +136,9 @@ describe('shell byte operations retain BOMs and UTF-8 diagnostics', () => {
     [String.raw`awk 'BEGIN {printf "\357\273\277"}'`, '\uFEFF'],
     [String.raw`printf x | sed 'y/x/\xEF\xBB\xBF/'`, '\uFEFF'],
   ]) {
-    it(command, () => {
+    it(command, async () => {
       const t = createTerminal({ input: text, encoded: '77u/QcOp8J+YgAA=' })
-      assert.deepEqual(t.run(command), result(stdout, 0, '', [], notes))
+      assert.deepEqual(await t.run(command), result(stdout, 0, '', [], notes))
     })
   }
 
@@ -147,9 +147,9 @@ describe('shell byte operations retain BOMs and UTF-8 diagnostics', () => {
     String.raw`printf '\377'`, String.raw`echo -en '\xFF'`,
     String.raw`awk 'BEGIN {printf "\377"}'`, String.raw`printf x | sed 'y/x/\xFF/'`,
   ]) {
-    it(`keeps the diagnostic after stderr suppression: ${command}`, () => {
+    it(`keeps the diagnostic after stderr suppression: ${command}`, async () => {
       const t = createTerminal({ input: text, invalid: '/w==' })
-      const failed = t.run(command + ' 2>/dev/null | cat')
+      const failed = await t.run(command + ' 2>/dev/null | cat')
       assert.equal(failed.stdout, '')
       assert.equal(failed.stderr, '')
       assert.equal(failed.exitCode, 0)

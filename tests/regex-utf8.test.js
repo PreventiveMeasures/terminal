@@ -33,7 +33,7 @@ describe('a dot reads one character over non-ASCII text, as it does in C.UTF-8',
     ["sed -n '/^.$/p' one", 'é\n'],
     ["sed 's/./X/2' sel", 'éXz\n'],
   ]) {
-    it(line, () => assert.deepEqual(run(line), expected(stdout, exitCode)))
+    it(line, async () => assert.deepEqual(await run(line), expected(stdout, exitCode)))
   }
 })
 
@@ -49,7 +49,7 @@ describe('awk reads the same tables: classes, words, spaces and IGNORECASE', () 
     ['BEGIN {IGNORECASE = 1; s = "Σςσ"; n = gsub(/σ/, "X", s); print n, s, toupper("x")}', '3 XXX X\n'],
     ['BEGIN {IGNORECASE = 1; print "É" ~ /[[:lower:]]/, "é" ~ /[^é]/, match("CAFÉ", /é/), RLENGTH}', '1 0 4 1\n'],
   ]) {
-    it(program, () => assert.deepEqual(createTerminal({}).run(`awk '${program}'`), expected(stdout)))
+    it(program, async () => assert.deepEqual(await createTerminal({}).run(`awk '${program}'`), expected(stdout)))
   }
 })
 
@@ -70,8 +70,8 @@ describe('what still needs more than the tables is refused', () => {
     // ripgrep matches Unicode the same way everywhere, and that engine is not modelled.
     ['rg . one', 'rg', 'non-ASCII matching'],
   ]) {
-    it(line, () => {
-      const r = run(line)
+    it(line, async () => {
+      const r = await run(line)
       assert.equal(r.stdout, '', line)
       assert.notEqual(r.exitCode, 0, line)
       assert.deepEqual(r.unsupported.map((u) => [u.command, u.detail]), [[command, detail]], line)

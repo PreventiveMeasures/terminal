@@ -31,23 +31,23 @@ const CASES = [
   ['find . ! -prune -o -print', '.\n'],
 ]
 
-function virtual(command) {
-  const r = createTerminal(FILES).run(command)
+async function virtual(command) {
+  const r = await createTerminal(FILES).run(command)
   assert.deepEqual(r.unsupported, [], command)
   return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }
 }
 
 describe('find -prune — source-tree exclusion regressions', () => {
   for (const [command, stdout] of CASES) {
-    it(command, () => assert.deepEqual(virtual(command), { stdout, stderr: '', exitCode: 0 }))
+    it(command, async () => assert.deepEqual(await virtual(command), { stdout, stderr: '', exitCode: 0 }))
   }
-  it('does not execute or diagnose commands behind a successful prune branch', () => {
+  it('does not execute or diagnose commands behind a successful prune branch', async () => {
     const command = String.raw`find node_modules -prune -o -exec jq . {} \;`
-    assert.deepEqual(virtual(command), { stdout: '', stderr: '', exitCode: 0 })
+    assert.deepEqual(await virtual(command), { stdout: '', stderr: '', exitCode: 0 })
   })
-  it('preserves diagnostics from commands reached in the unpruned branch', () => {
+  it('preserves diagnostics from commands reached in the unpruned branch', async () => {
     const command = 'find . ' + EXCLUDE + String.raw` -o -type f -exec jq . {} \; 2>/dev/null | true`
-    const r = createTerminal(FILES).run(command)
+    const r = await createTerminal(FILES).run(command)
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)
     assert.deepEqual(r.unsupported.map(({ kind, command: owner, detail }) => ({ kind, command: owner, detail })), [

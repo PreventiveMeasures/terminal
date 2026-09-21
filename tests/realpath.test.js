@@ -9,12 +9,12 @@ const FILES = { file: 'value', input: 'unconsumed\n', 'dir/child': '', 'dir/sub/
 const terminal = () => createTerminal(FILES)
 const result = (stdout = '', cwd = '/') => ({ stdout, stderr: '', exitCode: 0, cwd, notes: [], unsupported: [] })
 
-function success(command, stdout, t = terminal(), cwd = '/') {
-  assert.deepEqual(t.run(command), result(stdout, cwd), command)
+async function success(command, stdout, t = terminal(), cwd = '/') {
+  assert.deepEqual(await t.run(command), result(stdout, cwd), command)
 }
 
-function failure(command, reason, t = terminal()) {
-  const actual = t.run(command)
+async function failure(command, reason, t = terminal()) {
+  const actual = await t.run(command)
   assert.equal(actual.stdout, '', command)
   assert.equal(actual.exitCode, 1, command)
   assert.match(actual.stderr, reason, command)
@@ -34,25 +34,25 @@ describe('realpath canonical names', () => {
   ]) it(args, () => success('realpath ' + args, stdout))
 
   for (const options of ['-e', '--canonicalize-existing', '-m', '--canonicalize-missing', '-L', '--logical', '-P', '--physical', '-s', '--strip', '--no-symlinks', '-q', '--quiet', '-eLPs', '-sPL']) {
-    it(options + ' preserves existing canonical names', () => success(`realpath ${options} dir//./sub/../child`, '/dir/child\n'))
+    it(options + ' preserves existing canonical names', async () => await success(`realpath ${options} dir//./sub/../child`, '/dir/child\n'))
   }
 
-  it('uses the current directory and does not change it', () => {
-    success('cd dir/sub; realpath . ../child ../../file /other/leaf; pwd', '/dir/sub\n/dir/child\n/file\n/other/leaf\n/dir/sub\n', terminal(), '/dir/sub')
+  it('uses the current directory and does not change it', async () => {
+    await success('cd dir/sub; realpath . ../child ../../file /other/leaf; pwd', '/dir/sub\n/dir/child\n/file\n/other/leaf\n/dir/sub\n', terminal(), '/dir/sub')
   })
 
-  it('keeps unusual file names literal in output', () => {
+  it('keeps unusual file names literal in output', async () => {
     const names = ['space name', 'a[b]', 'a?b', 'a*b', 'a\\b', "a'b", 'line\nname', 'é😀']
     const t = createTerminal(Object.fromEntries(names.map((name) => [name, ''])))
-    for (const name of names) success("realpath '" + name.replaceAll("'", "'\\''") + "'", '/' + name + '\n', t)
+    for (const name of names) await success("realpath '" + name.replaceAll("'", "'\\''") + "'", '/' + name + '\n', t)
   })
 
-  it('treats dash as a file name and supports the option terminator', () => {
-    success('realpath - -- -e --relative-to=x', '/-\n/-e\n/--relative-to=x\n')
+  it('treats dash as a file name and supports the option terminator', async () => {
+    await success('realpath - -- -e --relative-to=x', '/-\n/-e\n/--relative-to=x\n')
   })
 
   for (const options of ['-z', '--zero', '-ez']) {
-    it(options + ' terminates every path with NUL', () => success(`realpath ${options} dir file`, '/dir\0/file\0'))
+    it(options + ' terminates every path with NUL', async () => await success(`realpath ${options} dir file`, '/dir\0/file\0'))
   }
 })
 
@@ -65,13 +65,13 @@ describe('realpath existence checks precede dot-dot collapse', () => {
       ['missing/..', /no such file or directory/iu], ['missing/../file', /no such file or directory/iu],
     ]) {
       if (option === '-s' && path === 'missing/child') continue
-      it(`${option} ${path}`, () => failure(`realpath ${option} ${path}`, reason))
+      it(`${option} ${path}`, async () => await failure(`realpath ${option} ${path}`, reason))
     }
   }
 
   for (const option of ['-e', '--canonicalize-existing', '-se', '-Le']) {
     for (const path of ['missing', 'missing/', 'dir/missing']) {
-      it(`${option} requires ${path}`, () => failure(`realpath ${option} ${path}`, /no such file or directory/iu))
+      it(`${option} requires ${path}`, async () => await failure(`realpath ${option} ${path}`, /no such file or directory/iu))
     }
   }
 
@@ -80,25 +80,25 @@ describe('realpath existence checks precede dot-dot collapse', () => {
       ['missing/child', '/missing/child'], ['missing/../file', '/file'], ['missing/.', '/missing'],
       ['file/child', '/file/child'], ['file/../dir', '/dir'], ['file/', '/file'],
       ['file/child/../../other/leaf', '/other/leaf'], ['missing/../../..', '/'],
-    ]) it(`${option} canonicalizes ${path} without requiring directories`, () => success(`realpath ${option} ${path}`, canonical + '\n'))
+    ]) it(`${option} canonicalizes ${path} without requiring directories`, async () => await success(`realpath ${option} ${path}`, canonical + '\n'))
   }
 
   for (const option of ['', '-m', '-s', '-L', '-e']) {
-    it(`${option} still rejects an empty path`, () => failure(`realpath ${option} ''`, /no such file or directory/iu))
+    it(`${option} still rejects an empty path`, async () => await failure(`realpath ${option} ''`, /no such file or directory/iu))
   }
 
   for (const options of ['-em', '-e -m', '--canonicalize-existing --canonicalize-missing']) {
-    it(options + ' uses the final existence mode', () => success(`realpath ${options} file/child`, '/file/child\n'))
+    it(options + ' uses the final existence mode', async () => await success(`realpath ${options} file/child`, '/file/child\n'))
   }
   for (const options of ['-me', '-m -e', '--canonicalize-missing --canonicalize-existing']) {
-    it(options + ' restores required existence', () => failure(`realpath ${options} missing`, /no such file or directory/iu))
+    it(options + ' restores required existence', async () => await failure(`realpath ${options} missing`, /no such file or directory/iu))
   }
   // GNU has no flag for the default mode, so once -e or -m is given there is no
   // way back to it; a run that never names one is the only way to ask for it.
   for (const options of ['', '-L']) {
-    it(JSON.stringify(options) + ' is the only way to ask for the default mode', () => {
-      success(`realpath ${options} missing`, '/missing\n')
-      failure(`realpath ${options} missing/child`, /no such file or directory/iu)
+    it(JSON.stringify(options) + ' is the only way to ask for the default mode', async () => {
+      await success(`realpath ${options} missing`, '/missing\n')
+      await failure(`realpath ${options} missing/child`, /no such file or directory/iu)
     })
   }
 })
@@ -108,16 +108,16 @@ describe('realpath strip mode defers ordinary intermediate existence checks', ()
   // directory traversal (notably /..) or the final lookup forces a check.
   for (const option of ['-s', '--strip', '--no-symlinks', '-Ls']) {
     for (const path of ['missing/child', 'missing/./child', 'missing/child/']) {
-      it(`${option} permits ${path} in the default existence mode`, () => success(`realpath ${option} ${path}`, '/missing/child\n'))
+      it(`${option} permits ${path} in the default existence mode`, async () => await success(`realpath ${option} ${path}`, '/missing/child\n'))
     }
-    it(option + ' still catches an existing file in a parent component', () => failure(`realpath ${option} file/missing/child`, /not a directory/iu))
-    it(option + ' still validates a component before dot-dot', () => failure(`realpath ${option} missing/sub/../file`, /no such file or directory/iu))
+    it(option + ' still catches an existing file in a parent component', async () => await failure(`realpath ${option} file/missing/child`, /not a directory/iu))
+    it(option + ' still validates a component before dot-dot', async () => await failure(`realpath ${option} missing/sub/../file`, /no such file or directory/iu))
   }
   for (const option of ['-sL', '-sP', '-se']) {
-    it(option + ' restores missing-intermediate rejection', () => failure(`realpath ${option} missing/child`, /no such file or directory/iu))
+    it(option + ' restores missing-intermediate rejection', async () => await failure(`realpath ${option} missing/child`, /no such file or directory/iu))
   }
-  it('uses the same strip canonicalization for a relative-to base', () => {
-    success('realpath -s --relative-to=missing/child file', '../../file\n')
+  it('uses the same strip canonicalization for a relative-to base', async () => {
+    await success('realpath -s --relative-to=missing/child file', '../../file\n')
   })
 })
 
@@ -155,11 +155,11 @@ describe('realpath relative output', () => {
       ['-eq', 'file', /not a directory/iu],
       ['', 'file/child', /not a directory/iu],
       ['', "''", /no such file or directory/iu],
-    ]) it(`${prefix} ${option}=${path} fails before processing operands`, () => failure(`realpath ${prefix} ${option}=${path} dir file`, reason))
+    ]) it(`${prefix} ${option}=${path} fails before processing operands`, async () => await failure(`realpath ${prefix} ${option}=${path} dir file`, reason))
   }
 
-  it('checks the base even when a separate relative-to would disable relative output', () => {
-    failure('realpath --relative-to=other --relative-base=missing/child file', /no such file or directory/iu)
+  it('checks the base even when a separate relative-to would disable relative output', async () => {
+    await failure('realpath --relative-to=other --relative-base=missing/child file', /no such file or directory/iu)
   })
 })
 
@@ -170,20 +170,20 @@ describe('realpath failures, input ownership and unsupported options', () => {
     ['file missing dir', '/file\nrealpath: missing: No such file or directory\n/dir\n'],
     ['missing file', 'realpath: missing: No such file or directory\n/file\n'],
   ]) {
-    it(`preserves merged output order for ${operands}`, () => {
-      assert.deepEqual(terminal().run(`realpath -e ${operands} 2>&1`), { ...result(stdout), exitCode: 1 })
+    it(`preserves merged output order for ${operands}`, async () => {
+      assert.deepEqual(await terminal().run(`realpath -e ${operands} 2>&1`), { ...result(stdout), exitCode: 1 })
     })
   }
 
-  it('retains merged output in a writable file without an ordering diagnostic', () => {
+  it('retains merged output in a writable file without an ordering diagnostic', async () => {
     const t = createTerminal({ file: 'data' }, { mount: '/repo', writable: '/tmp/' })
-    const actual = t.run('realpath -e file missing file >/tmp/out 2>&1')
+    const actual = await t.run('realpath -e file missing file >/tmp/out 2>&1')
     assert.deepEqual(actual, { ...result('', '/repo'), exitCode: 1 })
-    success('cat /tmp/out', '/repo/file\nrealpath: missing: No such file or directory\n/repo/file\n', t, '/repo')
+    await success('cat /tmp/out', '/repo/file\nrealpath: missing: No such file or directory\n/repo/file\n', t, '/repo')
   })
 
-  it('keeps successful operand output around ordinary failures', () => {
-    const r = terminal().run('realpath -e dir missing file missing/child')
+  it('keeps successful operand output around ordinary failures', async () => {
+    const r = await terminal().run('realpath -e dir missing file missing/child')
     assert.equal(r.stdout, '/dir\n/file\n')
     assert.equal(r.exitCode, 1)
     assert.equal(r.stderr.split('\n').filter(Boolean).length, 2)
@@ -191,8 +191,8 @@ describe('realpath failures, input ownership and unsupported options', () => {
   })
 
   for (const flag of ['-q', '--quiet']) {
-    it(flag + ' suppresses operand errors without suppressing failure status', () => {
-      const r = terminal().run(`realpath -e ${flag} missing file missing/child`)
+    it(flag + ' suppresses operand errors without suppressing failure status', async () => {
+      const r = await terminal().run(`realpath -e ${flag} missing file missing/child`)
       assert.equal(r.stdout, '/file\n')
       assert.equal(r.stderr, '')
       assert.equal(r.exitCode, 1)
@@ -205,8 +205,8 @@ describe('realpath failures, input ownership and unsupported options', () => {
   }
 
   for (const command of ['realpath --relative-to', 'realpath --relative-base', 'realpath --zero=yes file', 'realpath --quiet= file']) {
-    it(command + ' reports malformed supported options', () => {
-      const r = terminal().run(command)
+    it(command + ' reports malformed supported options', async () => {
+      const r = await terminal().run(command)
       assert.notEqual(r.exitCode, 0)
       assert.equal(r.stdout, '')
       assert.notEqual(r.stderr, '')
@@ -217,8 +217,8 @@ describe('realpath failures, input ownership and unsupported options', () => {
   // -E and --canonicalize are not GNU realpath options: GNU rejects the first
   // outright and calls the second an ambiguous prefix.
   for (const flag of ['-f', '-n', '-r', '-E', '--canonicalize', '--unknown', '--relative', '--relative-t=dir', '--canonicalize-exis', '--strip-slashes']) {
-    it(flag + ' remains diagnosed when stderr is hidden', () => {
-      const r = terminal().run(`realpath ${flag} file 2>/dev/null | cat`)
+    it(flag + ' remains diagnosed when stderr is hidden', async () => {
+      const r = await terminal().run(`realpath ${flag} file 2>/dev/null | cat`)
       assert.equal(r.stdout, '')
       assert.equal(r.stderr, '')
       assert.equal(r.unsupported.length, 1)
@@ -229,89 +229,89 @@ describe('realpath failures, input ownership and unsupported options', () => {
   }
 
   for (const command of ['realpath file', 'x=$(realpath file); echo "$x"', 'realpath -', 'realpath --relative-to=dir file']) {
-    it(command + ' leaves inherited input available to the next reader', () => {
+    it(command + ' leaves inherited input available to the next reader', async () => {
       const path = command.endsWith(' -') ? '/-' : command.includes('--relative-to') ? '../file' : '/file'
-      success(`{ ${command}; cat; } <input`, path + '\nunconsumed\n')
+      await success(`{ ${command}; cat; } <input`, path + '\nunconsumed\n')
     })
   }
 
-  it('does not consume input when an operand fails', () => {
-    const r = terminal().run('{ realpath -e missing; cat; } <input')
+  it('does not consume input when an operand fails', async () => {
+    const r = await terminal().run('{ realpath -e missing; cat; } <input')
     assert.equal(r.stdout, 'unconsumed\n')
     assert.equal(r.exitCode, 0)
     assert.match(r.stderr, /no such file or directory/iu)
   })
 
-  it('preserves the enclosing xargs read guard when output would modify its arguments', () => {
+  it('preserves the enclosing xargs read guard when output would modify its arguments', async () => {
     const t = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
-    t.run("printf '/tmp/args\\n' >/tmp/args")
-    const actual = t.run('xargs realpath </tmp/args >>/tmp/args 2>/dev/null | cat')
+    await t.run("printf '/tmp/args\\n' >/tmp/args")
+    const actual = await t.run('xargs realpath </tmp/args >>/tmp/args 2>/dev/null | cat')
     assert.equal(actual.stdout, '')
     assert.equal(actual.stderr, '')
     assert.equal(actual.exitCode, 0)
     assert.equal(actual.unsupported.length, 1)
     assert.equal(actual.unsupported[0].command, 'xargs')
     assert.equal(actual.unsupported[0].detail, 'streaming self-output')
-    success('cat /tmp/args', '/tmp/args\n', t, '/repo')
+    await success('cat /tmp/args', '/tmp/args\n', t, '/repo')
   })
 })
 
 describe('realpath mount paths and missing-path narration', () => {
   const mounted = () => createTerminal({ file: '', 'dir/child': '', 'sub/keep': '' }, { mount: '/repo', cwd: '/repo/sub', home: '/repo/dir', writable: '/tmp/' })
 
-  it('uses configured cwd and shell tilde expansion', () => {
-    success('realpath . ../file ~ ~/child /repo/file', '/repo/sub\n/repo/file\n/repo/dir\n/repo/dir/child\n/repo/file\n', mounted(), '/repo/sub')
+  it('uses configured cwd and shell tilde expansion', async () => {
+    await success('realpath . ../file ~ ~/child /repo/file', '/repo/sub\n/repo/file\n/repo/dir\n/repo/dir/child\n/repo/file\n', mounted(), '/repo/sub')
   })
 
-  it('does not expand a quoted tilde a second time', () => {
-    success("realpath '~'", '/repo/sub/~\n', mounted(), '/repo/sub')
+  it('does not expand a quoted tilde a second time', async () => {
+    await success("realpath '~'", '/repo/sub/~\n', mounted(), '/repo/sub')
   })
 
-  it('accepts newly written overlay paths', () => {
+  it('accepts newly written overlay paths', async () => {
     const t = mounted()
-    t.run('printf text >/tmp/file')
-    success('realpath -e /tmp/file /tmp', '/tmp/file\n/tmp\n', t, '/repo/sub')
+    await t.run('printf text >/tmp/file')
+    await success('realpath -e /tmp/file /tmp', '/tmp/file\n/tmp\n', t, '/repo/sub')
   })
 
-  it('does not decode file contents to resolve binary overlay paths', () => {
+  it('does not decode file contents to resolve binary overlay paths', async () => {
     const t = mounted()
-    t.run("printf '/w==' | base64 -d >/tmp/binary")
-    success('realpath -e /tmp/binary', '/tmp/binary\n', t, '/repo/sub')
+    await t.run("printf '/w==' | base64 -d >/tmp/binary")
+    await success('realpath -e /tmp/binary', '/tmp/binary\n', t, '/repo/sub')
   })
 
   for (const option of ['-e', '-eq']) {
-    it(option + ' narrates a relative path that exists under the mount', () => {
-      const r = mounted().run(`realpath ${option} file`)
+    it(option + ' narrates a relative path that exists under the mount', async () => {
+      const r = await mounted().run(`realpath ${option} file`)
       assert.equal(r.exitCode, 1)
       assert.deepEqual(r.unsupported, [])
       assert.deepEqual(r.notes, ['realpath: relative path "file" was not found from cwd "/repo/sub". A file exists at "/repo/file".'])
     })
   }
 
-  it('narrates a failed intermediate directory lookup', () => {
-    const r = mounted().run('realpath dir/child')
+  it('narrates a failed intermediate directory lookup', async () => {
+    const r = await mounted().run('realpath dir/child')
     assert.equal(r.exitCode, 1)
     assert.deepEqual(r.notes, ['realpath: relative path "dir/child" was not found from cwd "/repo/sub". A file exists at "/repo/dir/child".'])
   })
 
-  it('does not narrate a successful missing final component', () => {
-    success('realpath file', '/repo/sub/file\n', mounted(), '/repo/sub')
+  it('does not narrate a successful missing final component', async () => {
+    await success('realpath file', '/repo/sub/file\n', mounted(), '/repo/sub')
   })
 
-  it('narrates failed relative-to setup', () => {
-    const r = mounted().run('realpath -e --relative-to=dir keep')
+  it('narrates failed relative-to setup', async () => {
+    const r = await mounted().run('realpath -e --relative-to=dir keep')
     assert.equal(r.exitCode, 1)
     assert.deepEqual(r.notes, ['realpath: relative path "dir" was not found from cwd "/repo/sub". A dir exists at "/repo/dir".'])
   })
 
-  it('narrates the mounted alternative for an absolute operand, without naming a cwd it did not use', () => {
-    const r = mounted().run('realpath -e /file')
+  it('narrates the mounted alternative for an absolute operand, without naming a cwd it did not use', async () => {
+    const r = await mounted().run('realpath -e /file')
     assert.equal(r.exitCode, 1)
     assert.deepEqual(r.notes, ['realpath: absolute path "/file" was not found. A file exists at "/repo/file".'])
   })
 
-  it('narrates the home alternative for an absolute operand', () => {
-    const r = mounted().run('realpath -e /child')
+  it('narrates the home alternative for an absolute operand', async () => {
+    const r = await mounted().run('realpath -e /child')
     assert.equal(r.exitCode, 1)
     assert.deepEqual(r.notes, ['realpath: absolute path "/child" was not found. A file exists at "/repo/dir/child".'])
   })
@@ -328,16 +328,16 @@ describe('realpath quotes an operand only where a shell would need it', () => {
     ['a|b', "'a|b'"], ['a$b', "'a$b'"], ['a*b', "'a*b'"], ['a[b', "'a[b'"], ['a\\b', "'a\\b'"],
     ["a'b", '"a\'b"'],
   ]) {
-    it(JSON.stringify(name), () => {
-      const r = terminal().run(`realpath -e -- '${name.replaceAll("'", "'\\''")}'`)
+    it(JSON.stringify(name), async () => {
+      const r = await terminal().run(`realpath -e -- '${name.replaceAll("'", "'\\''")}'`)
       assert.equal(r.stderr, `realpath: ${shown}: No such file or directory\n`)
       assert.equal(r.exitCode, 1)
       assert.deepEqual(r.unsupported, [])
     })
   }
 
-  it('refuses the C locale rather than escape a name in bytes', () => {
-    const r = terminal().run("LC_ALL=C realpath -e -- 'a\u00E9b'")
+  it('refuses the C locale rather than escape a name in bytes', async () => {
+    const r = await terminal().run("LC_ALL=C realpath -e -- 'a\u00E9b'")
     assert.deepEqual([r.stderr, r.exitCode, r.unsupported.map((u) => u.detail)], ['error: LC_ALL: only the C.UTF-8 locale is supported\n', 1, ['LC_ALL']])
   })
 })

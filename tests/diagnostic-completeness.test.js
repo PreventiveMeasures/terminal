@@ -16,9 +16,9 @@ const registered = { ...DEFAULT_REGISTRY.commands, ...DEFAULT_REGISTRY.hidden }
 
 describe('diagnostic completeness — command dispatch', () => {
   for (const name of Object.keys(registered).filter((key) => !NO_OPTIONS.has(key))) {
-    it(name + ': unavailable options survive redirects and nested dispatch', () => {
+    it(name + ': unavailable options survive redirects and nested dispatch', async () => {
       const command = name + ' --audit-missing-option'
-      const direct = run(command)
+      const direct = await run(command)
       assert.notEqual(direct.exitCode, 0)
       assert.notEqual(direct.stderr, '')
       assert.equal(direct.unsupported.length, 1)
@@ -34,7 +34,7 @@ describe('diagnostic completeness — command dispatch', () => {
         "find src -type f -exec " + command + " {} ';' 2>/dev/null | true",
         'echo item | xargs ' + command + ' 2>/dev/null | true',
       ]) {
-        const result = run(wrapped)
+        const result = await run(wrapped)
         const external = DEFAULT_REGISTRY.shellOnly(name) && (wrapped.startsWith('find ') || wrapped.startsWith('echo '))
         assert.deepEqual(identity(result), external ? [{ kind: 'command', command: name, detail: name }] : identity(direct), wrapped)
         assert.equal(result.stderr, '', wrapped)
@@ -42,26 +42,26 @@ describe('diagnostic completeness — command dispatch', () => {
     })
   }
   for (const name of SHELL_GAPS.keys()) {
-    it(name + ': unavailable shell builtin cannot disappear in a pipeline', () => {
-      const r = run(name + ' 2>/dev/null | true')
+    it(name + ': unavailable shell builtin cannot disappear in a pipeline', async () => {
+      const r = await run(name + ' 2>/dev/null | true')
       assert.equal(r.exitCode, 0)
       assert.equal(r.stderr, '')
       assert.deepEqual(r.unsupported.map((u) => u.detail), [name])
     })
   }
-  it('ignores arguments only where the real builtin does', () => {
+  it('ignores arguments only where the real builtin does', async () => {
     for (const name of ['echo', 'true', 'false', ':']) {
-      const r = run(name + ' --audit-missing-option')
+      const r = await run(name + ' --audit-missing-option')
       assert.deepEqual(r.unsupported, [])
       assert.equal(r.stdout, name === 'echo' ? '--audit-missing-option\n' : '')
     }
     for (const name of ['exit', 'break', 'continue']) {
-      const r = run(name + ' --audit-missing-option')
+      const r = await run(name + ' --audit-missing-option')
       assert.deepEqual(r.unsupported, [])
       assert.notEqual(r.exitCode, 0)
     }
     for (const command of ['test --audit-missing-option', '[ --audit-missing-option ]']) {
-      const r = run(command)
+      const r = await run(command)
       assert.equal(r.exitCode, 0)
       assert.equal(r.stdout, '')
       assert.equal(r.stderr, '')
@@ -119,12 +119,12 @@ const COMMAND_GAPS = [
 
 describe('diagnostic completeness — runtime and parser limitations', () => {
   for (const [command, detail] of COMMAND_GAPS) {
-    it(command, () => {
-      const direct = run(command)
+    it(command, async () => {
+      const direct = await run(command)
       assert.notEqual(direct.exitCode, 0)
       assert.notEqual(direct.stderr, '')
       assert.deepEqual(direct.unsupported.map((u) => u.detail), [detail])
-      const hidden = run(command + ' 2>/dev/null | true')
+      const hidden = await run(command + ' 2>/dev/null | true')
       assert.equal(hidden.stderr, '')
       assert.equal(hidden.exitCode, 0)
       assert.deepEqual(identity(hidden), identity(direct))
@@ -151,42 +151,42 @@ describe('diagnostic completeness — runtime and parser limitations', () => {
     ['exec 3>&1', '3>&1'],
     ['read x', 'read'],
   ]) {
-    it(command, () => {
-      const r = run(command)
+    it(command, async () => {
+      const r = await run(command)
       assert.notEqual(r.exitCode, 0)
       assert.notEqual(r.stderr, '')
       assert.deepEqual(r.unsupported.map((u) => u.detail), [detail])
     })
   }
-  it('does not diagnose implemented default and arithmetic expansion', () => {
+  it('does not diagnose implemented default and arithmetic expansion', async () => {
     for (const [command, stdout] of [['echo ${x:-default}', 'default\n'], ['echo $((1+2))', '3\n']]) {
-      const result = run(command)
+      const result = await run(command)
       assert.equal(result.stdout, stdout)
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
       assert.deepEqual(result.unsupported, [])
     }
   })
-  it('preserves output before a computed redirect fails', () => {
-    const r = run(String.raw`awk 'BEGIN {print "before";x="out";print "lost" > x}' 2>/dev/null | cat`)
+  it('preserves output before a computed redirect fails', async () => {
+    const r = await run(String.raw`awk 'BEGIN {print "before";x="out";print "lost" > x}' 2>/dev/null | cat`)
     assert.equal(r.stdout, 'before\n')
     assert.equal(r.stderr, '')
     assert.deepEqual(r.unsupported.map((u) => u.detail), ['output redirection'])
   })
-  it('preserves output before decoding a later operand fails', () => {
-    const r = run(String.raw`awk 'BEGIN {print "before"} {print}' x='\xff' f 2>/dev/null | cat`)
+  it('preserves output before decoding a later operand fails', async () => {
+    const r = await run(String.raw`awk 'BEGIN {print "before"} {print}' x='\xff' f 2>/dev/null | cat`)
     assert.equal(r.stdout, 'before\n')
     assert.equal(r.stderr, '')
     assert.deepEqual(r.unsupported.map((u) => u.detail), ['partial UTF-8 byte sequence'])
   })
-  it('does not report runtime gaps in unexecuted commands or branches', () => {
+  it('does not report runtime gaps in unexecuted commands or branches', async () => {
     for (const command of [
       'false && find . -mtime 1',
       'true || awk \'BEGIN {printf "%a", 1}\'',
       String.raw`awk 'BEGIN {if (0) printf "%a", 1; print "ok"}'`,
-    ]) assert.deepEqual(run(command).unsupported, [], command)
+    ]) assert.deepEqual((await run(command)).unsupported, [], command)
   })
-  it('does not misclassify ordinary errors as implementation limits', () => {
+  it('does not misclassify ordinary errors as implementation limits', async () => {
     for (const command of [
       'find . ! -type q', 'find . -type f,f', 'find . -maxdepth +2',
       'find . -maxdepth 2147483648', 'tree -L2147483648',
@@ -197,7 +197,7 @@ describe('diagnostic completeness — runtime and parser limitations', () => {
       'a= (echo hi)', 'echo a=(one two)',
       String.raw`awk 'BEGIN {print "a" ~ /[[.ab.]]/}'`,
     ]) {
-      const r = run(command)
+      const r = await run(command)
       assert.notEqual(r.exitCode, 0, command)
       assert.deepEqual(r.unsupported, [], command)
     }

@@ -171,8 +171,8 @@ c/one/b.json:1:{"name":"@a/b"}
 
 describe('grep — agent quoting regressions', () => {
   for (const { purpose, command, stdout } of CASES) {
-    it(purpose, () => {
-      const result = createTerminal(FILES).run(command)
+    it(purpose, async () => {
+      const result = await createTerminal(FILES).run(command)
       assert.deepEqual(
         [result.stdout, result.stderr, result.exitCode, result.unsupported],
         [stdout, '', 0, []],
@@ -191,15 +191,15 @@ describe('grep — quoted assignment fragments', () => {
     'other.txt': 'a\n',
   }
 
-  it('the reported command preserves all five BRE alternatives and literal quotes, semicolons and plus signs', () => {
-    assert.deepEqual(createTerminal(files).run(command), {
+  it('the reported command preserves all five BRE alternatives and literal quotes, semicolons and plus signs', async () => {
+    assert.deepEqual(await createTerminal(files).run(command), {
       stdout: selected.map((line, i) => `${i + 2}:${line}\n`).join(''),
       stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 
-  it('retains the longest alternative when a shorter one starts at the same position', () => {
-    assert.deepEqual(createTerminal(files).run(command.replace('grep -n', 'grep -on')), {
+  it('retains the longest alternative when a shorter one starts at the same position', async () => {
+    assert.deepEqual(await createTerminal(files).run(command.replace('grep -n', 'grep -on')), {
       stdout: selected.map((line, i) => `${i + 2}:${line}\n`).join(''),
       stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })

@@ -9,8 +9,8 @@ const FILES = {
   input: 'first\nsecond\n',
 }
 
-function check(command, stdout, exitCode = 0, stderr = '', cwd = '/', notes = []) {
-  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd, notes, unsupported: [] }, command)
+async function check(command, stdout, exitCode = 0, stderr = '', cwd = '/', notes = []) {
+  assert.deepEqual(await createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd, notes, unsupported: [] }, command)
 }
 
 describe('shell if — branches and status', () => {
@@ -40,17 +40,17 @@ describe('shell if — branches and status', () => {
   ]
   for (const [command, stdout, exitCode] of cases) it(command, () => check(command, stdout, exitCode))
 
-  it('accepts newline-separated conditions and bodies', () => {
-    check('if\nfalse\nthen\necho lost\nelif\ntrue\nthen\necho found\nelse\necho lost\nfi', 'found\n')
+  it('accepts newline-separated conditions and bodies', async () => {
+    await check('if\nfalse\nthen\necho lost\nelif\ntrue\nthen\necho found\nelse\necho lost\nfi', 'found\n')
   })
 
-  it('retains output and ordinary errors from evaluated conditions', () => {
-    check('if cat missing; then echo lost; elif echo checked; false; then echo lost; else echo fallback; fi',
+  it('retains output and ordinary errors from evaluated conditions', async () => {
+    await check('if cat missing; then echo lost; elif echo checked; false; then echo lost; else echo fallback; fi',
       'checked\nfallback\n', 0, 'cat: missing: No such file or directory\n')
   })
 
-  it('does not execute later conditions after choosing a branch', () => {
-    check('if true; then echo first; elif cat missing; then echo lost; else cat missing; fi', 'first\n')
+  it('does not execute later conditions after choosing a branch', async () => {
+    await check('if true; then echo first; elif cat missing; then echo lost; else cat missing; fi', 'first\n')
   })
 })
 
@@ -75,42 +75,42 @@ describe('shell if — source analysis and nested execution', () => {
   ]
   for (const [command, stdout] of cases) it(command, () => check(command, stdout))
 
-  it('runs conditions and bodies in the current shell', () => {
-    check('if cd src; then pwd; fi; pwd', '/src\n/src\n', 0, '', '/src')
+  it('runs conditions and bodies in the current shell', async () => {
+    await check('if cd src; then pwd; fi; pwd', '/src\n/src\n', 0, '', '/src')
   })
 
-  it('isolates state when the conditional is in a pipeline or subshell', () => {
-    check('x=outer; if true; then x=inner; cd src; pwd; fi | cat; echo "$x"; pwd', '/src\nouter\n/\n')
-    check('x=outer; (if true; then x=inner; cd src; pwd; fi); echo "$x"; pwd', '/src\nouter\n/\n')
+  it('isolates state when the conditional is in a pipeline or subshell', async () => {
+    await check('x=outer; if true; then x=inner; cd src; pwd; fi | cat; echo "$x"; pwd', '/src\nouter\n/\n')
+    await check('x=outer; (if true; then x=inner; cd src; pwd; fi); echo "$x"; pwd', '/src\nouter\n/\n')
   })
 
-  it('shares redirected input between an evaluated condition and its body', () => {
-    check('if head -n1; then cat; fi < input', 'first\nsecond\n', 0, '', '/', ['head: selected 1 of 2 lines from standard input.'])
+  it('shares redirected input between an evaluated condition and its body', async () => {
+    await check('if head -n1; then cat; fi < input', 'first\nsecond\n', 0, '', '/', ['head: selected 1 of 2 lines from standard input.'])
   })
 
-  it('applies redirection to the whole conditional', () => {
-    check('if echo condition; then echo body; fi >/dev/null', '')
-    check('if cat missing; then echo lost; else echo fallback; fi 2>/dev/null', 'fallback\n', 0, '', '/',
+  it('applies redirection to the whole conditional', async () => {
+    await check('if echo condition; then echo body; fi >/dev/null', '')
+    await check('if cat missing; then echo lost; else echo fallback; fi 2>/dev/null', 'fallback\n', 0, '', '/',
       ["cat: No such file or directory: \"missing\"."])
   })
 })
 
 describe('shell if — diagnostics and malformed syntax', () => {
-  it('does not report unsupported commands in skipped conditions or bodies', () => {
-    check('if true; then echo okay; elif grep --unknown x input; then echo lost; else grep --unknown x input; fi', 'okay\n')
-    check('if false; then echo "$(grep --unknown x input)"; else echo okay; fi', 'okay\n')
-    check('false && if grep --unknown x input; then echo lost; fi', '', 1)
+  it('does not report unsupported commands in skipped conditions or bodies', async () => {
+    await check('if true; then echo okay; elif grep --unknown x input; then echo lost; else grep --unknown x input; fi', 'okay\n')
+    await check('if false; then echo "$(grep --unknown x input)"; else echo okay; fi', 'okay\n')
+    await check('false && if grep --unknown x input; then echo lost; fi', '', 1)
   })
 
-  it('retains unsupported condition diagnostics when an else branch succeeds', () => {
-    const r = createTerminal(FILES).run('if grep --unknown x input; then echo lost; else echo fallback; fi 2>/dev/null')
+  it('retains unsupported condition diagnostics when an else branch succeeds', async () => {
+    const r = await createTerminal(FILES).run('if grep --unknown x input; then echo lost; else echo fallback; fi 2>/dev/null')
     assert.deepEqual(r, {
       stdout: 'fallback\n', stderr: '', exitCode: 0, cwd: '/',
       notes: [], unsupported: [{ kind: 'option', command: 'grep', detail: '--unknown', message: 'grep: unknown option: --unknown' }],
     })
   })
 
-  it('diagnoses invalid conditional grammar as syntax errors', () => {
+  it('diagnoses invalid conditional grammar as syntax errors', async () => {
     for (const command of [
       'if', 'if true', 'if true; then echo x', 'if true; fi',
       'if ; then echo x; fi', 'if true; then; fi',
@@ -119,7 +119,7 @@ describe('shell if — diagnostics and malformed syntax', () => {
       'if true; then echo x; else echo y; elif true; then echo z; fi',
       'then', 'elif true; then echo x; fi', 'else echo x; fi', 'fi',
     ]) {
-      const r = createTerminal(FILES).run(command)
+      const r = await createTerminal(FILES).run(command)
       assert.equal(r.stdout, '', command)
       assert.equal(r.exitCode, 2, command)
       assert.notEqual(r.stderr, '', command)

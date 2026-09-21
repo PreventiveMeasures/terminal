@@ -16,7 +16,7 @@ import { evaluateArithmetic } from './arithmetic.js'
 import { tokenizeFragment } from './tokenize.js'
 import { withState } from './state.js'
 
-export function expandWords(words, ctx) {
+export async function expandWords(words, ctx) {
   const out = []
   const command = words[0]
   const declaration = command?.value === 'export' && !/[12]/u.test(command.mask ?? '') && !command.empty?.length
@@ -26,9 +26,13 @@ export function expandWords(words, ctx) {
       // through brace expansion discards its assignment expansion flags.
       const assignment = declaration && b === w && assignmentOf(w)
       if (assignment) {
-        const value = expandAssignment(b, assignment.end, ctx)
+        // A word is expanded where it stands: what the one before it ran is
+        // what the next one reads, so each waits for the last.
+        // oxlint-disable-next-line no-await-in-loop -- one word after the last, as a shell expands them.
+        const value = await expandAssignment(b, assignment.end, ctx)
         out.push({ value, mask: '1'.repeat(value.length), q: true })
-      } else out.push(...substitute(tilde(b, ctx, b === w ? false : 'word'), ctx, true))
+        // oxlint-disable-next-line no-await-in-loop -- one word after the last, as a shell expands them.
+      } else out.push(...await substitute(tilde(b, ctx, b === w ? false : 'word'), ctx, true))
     }
   }
   return { argv: globWords(out, ctx) }
@@ -50,20 +54,20 @@ function globWords(words, ctx) {
 
 // Redirect expansion must produce exactly one word; zero or several is an
 // ambiguous redirect, including results of splitting and pathname expansion.
-export function expandRedirect(word, ctx) {
-  const { argv: out } = expandWords([word], ctx)
+export async function expandRedirect(word, ctx) {
+  const { argv: out } = await expandWords([word], ctx)
   return out.length === 1 ? { value: out[0] } : { error: `${word.value}: ambiguous redirect` }
 }
 
-function expandAssignment(w, eq, ctx) {
+async function expandAssignment(w, eq, ctx) {
   const rest = sliceWord(w, eq)
-  return w.value.slice(0, eq) + expandScalar(rest, ctx, true)
+  return w.value.slice(0, eq) + await expandScalar(rest, ctx, true)
 }
 
 // Assignments and here-input expand without splitting or globbing.
 // assignmentValue additionally allows tilde prefixes after ':'.
-export function expandScalar(word, ctx, assignmentValue = false) {
-  return substitute(tilde(word, ctx, assignmentValue), ctx, false, assignmentValue)[0].value
+export async function expandScalar(word, ctx, assignmentValue = false) {
+  return (await substitute(tilde(word, ctx, assignmentValue), ctx, false, assignmentValue))[0].value
 }
 
 export const homeOf = (ctx) => ctx.vars.get('HOME') ?? ctx.home
@@ -103,12 +107,12 @@ export function expandPattern(word, ctx) {
   return withState(ctx, { strictExpansion: true }, () => expandedWord(tilde(word, ctx), ctx))
 }
 
-function substitute(word, ctx, split, assignment = false) {
-  const expanded = expandedWord(word, ctx, assignment)
+async function substitute(word, ctx, split, assignment = false) {
+  const expanded = await expandedWord(word, ctx, assignment)
   return split ? splitFields(expanded, ctx) : [expanded]
 }
 
-function expandedWord(w, ctx, assignment = false) {
+async function expandedWord(w, ctx, assignment = false) {
   const out = { value: '', mask: '', empty: [], split: false }
   const append = (value, mask) => { out.value += value; out.mask += mask }
   if (w.value === '' && w.mask !== null) out.empty.push(0)
@@ -125,7 +129,8 @@ function expandedWord(w, ctx, assignment = false) {
     const ref = active ? substitutionRef(w, i, c, m, compound) : null
     if (!ref) { append(w.value[i], m); continue }
     i += ref.raw.length - 1
-    const r = expansionValue(ref, ctx, m === '2', assignment)
+    // oxlint-disable-next-line no-await-in-loop -- a word's expansions run left to right, each reading what the last left.
+    const r = await expansionValue(ref, ctx, m === '2', assignment)
     if (r.literal) { append(ref.raw, m.repeat(ref.raw.length)); continue }
     if (r.omit) continue
     if (m === '2') {
@@ -149,11 +154,11 @@ function substitutionRef(w, i, c, m, compound) {
   return compound ? readExpansion(w.value, i, 0, m === '2') : scanRef(w.value, i, w.mask)
 }
 
-function expansionValue(ref, ctx, quoted, assignment) {
-  if (ref.command !== undefined) return { value: ctx.substitute(ref.command, ref.backtick) }
+async function expansionValue(ref, ctx, quoted, assignment) {
+  if (ref.command !== undefined) return { value: await ctx.substitute(ref.command, ref.backtick) }
   if (ref.arithmetic !== undefined) {
     try {
-      const source = withState(ctx, { strictExpansion: true }, () => expandScalar(tokenizeFragment(ref.arithmetic, true), ctx))
+      const source = await withState(ctx, { strictExpansion: true }, () => expandScalar(tokenizeFragment(ref.arithmetic, true), ctx))
       return { value: String(evaluateArithmetic(source, ctx)) }
     } catch (error) { error.halt = true; throw error }
   }

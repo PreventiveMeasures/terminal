@@ -14,8 +14,8 @@ const sed = (script, input = 'single', flags = '') => `sed ${flags} ${quote(scri
 
 function examples(rows) {
   for (const [name, command, stdout] of rows) {
-    it(name, () => {
-      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
+    it(name, async () => {
+      assert.deepEqual(await createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
     })
   }
 }
@@ -64,8 +64,8 @@ describe('sed conditional branches use substitution state', () => {
 
 describe('sed branch errors and execution limits reach the right channel', () => {
   for (const script of ['b missing', 't missing', 'T missing', '20b missing', 'q;b missing']) {
-    it(`rejects unresolved labels before reading input: ${script}`, () => {
-      const r = createTerminal(FILES).run(sed(script, 'empty'))
+    it(`rejects unresolved labels before reading input: ${script}`, async () => {
+      const r = await createTerminal(FILES).run(sed(script, 'empty'))
       assert.equal(r.stdout, '')
       assert.equal(r.exitCode, 4)
       assert.match(r.stderr, /label/u)
@@ -74,8 +74,8 @@ describe('sed branch errors and execution limits reach the right channel', () =>
   }
 
   for (const script of [':', ':   ', '1:label', '1,2:label']) {
-    it(`reports ordinary syntax errors for ${JSON.stringify(script)}`, () => {
-      const r = createTerminal(FILES).run(sed(script))
+    it(`reports ordinary syntax errors for ${JSON.stringify(script)}`, async () => {
+      const r = await createTerminal(FILES).run(sed(script))
       assert.equal(r.stdout, '')
       assert.equal(r.exitCode, 1)
       assert.notEqual(r.stderr, '')
@@ -84,8 +84,8 @@ describe('sed branch errors and execution limits reach the right channel', () =>
   }
 
   for (const script of [':loop;b loop', ':loop;s/a/a/;t loop']) {
-    it(`diagnoses an execution limit instead of hanging: ${script}`, () => {
-      const r = createTerminal(FILES).run(sed(script))
+    it(`diagnoses an execution limit instead of hanging: ${script}`, async () => {
+      const r = await createTerminal(FILES).run(sed(script))
       assert.equal(r.stdout, '')
       assert.notEqual(r.exitCode, 0)
       assert.match(r.stderr, /limit|budget/u)
@@ -93,16 +93,16 @@ describe('sed branch errors and execution limits reach the right channel', () =>
     })
   }
 
-  it('preserves the execution-limit diagnostic through stderr suppression and a pipe', () => {
-    const r = createTerminal(FILES).run(sed(':loop;b loop') + ' 2>/dev/null | cat')
+  it('preserves the execution-limit diagnostic through stderr suppression and a pipe', async () => {
+    const r = await createTerminal(FILES).run(sed(':loop;b loop') + ' 2>/dev/null | cat')
     assert.equal(r.stdout, '')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)
     assert.ok(r.unsupported.length > 0)
   })
 
-  it('does not execute a backward branch with no input cycle', () => {
-    assert.deepEqual(createTerminal(FILES).run(sed(':loop;b loop', 'empty')), {
+  it('does not execute a backward branch with no input cycle', async () => {
+    assert.deepEqual(await createTerminal(FILES).run(sed(':loop;b loop', 'empty')), {
       stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })

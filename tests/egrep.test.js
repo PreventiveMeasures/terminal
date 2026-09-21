@@ -10,74 +10,74 @@ const FILES = {
   unicode: 'é\n',
 }
 
-function check(command, stdout, exitCode = 0, notes = []) {
-  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode, cwd: '/', notes, unsupported: [] }, command)
+async function check(command, stdout, exitCode = 0, notes = []) {
+  assert.deepEqual(await createTerminal(FILES).run(command), { stdout, stderr: '', exitCode, cwd: '/', notes, unsupported: [] }, command)
 }
 
 describe('egrep compatibility alias', () => {
-  it('selects ERE alternation and grouping without an obsolete-name warning', () => {
-    check("egrep -n '^export (const|function) ' src/app.ts", '2:export const alpha = 1\n3:export function beta() {}\n')
+  it('selects ERE alternation and grouping without an obsolete-name warning', async () => {
+    await check("egrep -n '^export (const|function) ' src/app.ts", '2:export const alpha = 1\n3:export function beta() {}\n')
   })
 
-  it('filters piped input with ERE quantifiers', () => {
-    check("cat input | egrep '^a+$'", 'aa\na\n')
+  it('filters piped input with ERE quantifiers', async () => {
+    await check("cat input | egrep '^a+$'", 'aa\na\n')
   })
 
-  it('uses POSIX longest-match output', () => {
-    check("egrep -o 'a|aa' input", 'aa\na\na\naa\n')
+  it('uses POSIX longest-match output', async () => {
+    await check("egrep -o 'a|aa' input", 'aa\na\na\naa\n')
   })
 
-  it('retains repeated patterns and recursive filename filters', () => {
-    check("egrep -n -e '^export ' -e TODO src/app.ts", '2:export const alpha = 1\n3:export function beta() {}\n4:// TODO gamma\n')
-    check("egrep -rn '^export ' src --include='*.ts'", 'src/app.ts:2:export const alpha = 1\nsrc/app.ts:3:export function beta() {}\nsrc/lib.ts:1:export const delta = 2\n', 0,
+  it('retains repeated patterns and recursive filename filters', async () => {
+    await check("egrep -n -e '^export ' -e TODO src/app.ts", '2:export const alpha = 1\n3:export function beta() {}\n4:// TODO gamma\n')
+    await check("egrep -rn '^export ' src --include='*.ts'", 'src/app.ts:2:export const alpha = 1\nsrc/app.ts:3:export function beta() {}\nsrc/lib.ts:1:export const delta = 2\n', 0,
       ['grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/src/ignored.js".'])
   })
 
-  it('accepts repeated -E and protects a leading-dash pattern after --', () => {
-    check("egrep -E -n '^a+$' input", '1:aa\n2:a\n')
-    check("egrep -- '-E|^b$' input", 'b\n-E\n')
+  it('accepts repeated -E and protects a leading-dash pattern after --', async () => {
+    await check("egrep -E -n '^a+$' input", '1:aa\n2:a\n')
+    await check("egrep -- '-E|^b$' input", 'b\n-E\n')
   })
 
-  it('returns ordinary no-match status', () => {
-    check("egrep '^missing$' input", '', 1)
+  it('returns ordinary no-match status', async () => {
+    await check("egrep '^missing$' input", '', 1)
   })
 
   for (const prefix of ['/bin/', '/sbin/', '/usr/bin/', '/usr/local/bin/']) {
-    it(`resolves ${prefix}egrep`, () => {
-      check(`${prefix}egrep -n '^a+$' input`, '1:aa\n2:a\n')
+    it(`resolves ${prefix}egrep`, async () => {
+      await check(`${prefix}egrep -n '^a+$' input`, '1:aa\n2:a\n')
     })
   }
 
-  it('dispatches through xargs with normal multi-file labels', () => {
-    check("printf '%s\\n' src/app.ts src/lib.ts | xargs egrep -n '^export '",
+  it('dispatches through xargs with normal multi-file labels', async () => {
+    await check("printf '%s\\n' src/app.ts src/lib.ts | xargs egrep -n '^export '",
       'src/app.ts:2:export const alpha = 1\nsrc/app.ts:3:export function beta() {}\nsrc/lib.ts:1:export const delta = 2\n')
   })
 
-  it('dispatches bin aliases through find -exec', () => {
-    check("find src -name '*.ts' -exec /usr/bin/egrep -n '^export ' {} ';'",
+  it('dispatches bin aliases through find -exec', async () => {
+    await check("find src -name '*.ts' -exec /usr/bin/egrep -n '^export ' {} ';'",
       '2:export const alpha = 1\n3:export function beta() {}\n1:export const delta = 2\n')
   })
 
-  it('resolves through which while remaining hidden from completion and hints', () => {
+  it('resolves through which while remaining hidden from completion and hints', async () => {
     const terminal = createTerminal(FILES)
-    assert.equal(terminal.run('which egrep').stdout, '/usr/bin/egrep\n')
+    assert.equal((await terminal.run('which egrep')).stdout, '/usr/bin/egrep\n')
     for (const prefix of ['', '/usr/bin/', 'cat input | ']) assert.deepEqual(terminal.complete(prefix + 'egr'), [])
-    assert.doesNotMatch(terminal.run('unknown-command').stderr, /\begrep\b/u)
+    assert.doesNotMatch((await terminal.run('unknown-command')).stderr, /\begrep\b/u)
   })
 
-  it('cannot be replaced by a custom command', () => {
+  it('cannot be replaced by a custom command', async () => {
     for (const commands of [{ egrep: () => 'wrong' }, new Map([['egrep', () => 'wrong']])]) {
       assert.throws(() => createTerminal(FILES, { commands }), /egrep: cannot redefine a built-in command/u)
     }
     const terminal = createTerminal(FILES, { commands: { custom: () => 'custom\n' } })
-    assert.equal(terminal.run("egrep '^a+$' input").stdout, 'aa\na\n')
-    assert.equal(terminal.run('custom').stdout, 'custom\n')
+    assert.equal((await terminal.run("egrep '^a+$' input")).stdout, 'aa\na\n')
+    assert.equal((await terminal.run('custom')).stdout, 'custom\n')
   })
 })
 
 describe('egrep errors and unsupported diagnostics', () => {
-  it('retains grep status 2 when stdout is closed', () => {
-    const result = createTerminal(FILES).run('egrep a input >&-')
+  it('retains grep status 2 when stdout is closed', async () => {
+    const result = await createTerminal(FILES).run('egrep a input >&-')
     assert.equal(result.stdout, '')
     assert.equal(result.exitCode, 2)
     assert.match(result.stderr, /write error: Bad file descriptor/u)
@@ -85,8 +85,8 @@ describe('egrep errors and unsupported diagnostics', () => {
   })
 
   for (const dialect of ['F', 'G', 'P']) {
-    it(`rejects -${dialect} conflicting with its implicit -E`, () => {
-      const result = createTerminal(FILES).run(`egrep -${dialect} a input`)
+    it(`rejects -${dialect} conflicting with its implicit -E`, async () => {
+      const result = await createTerminal(FILES).run(`egrep -${dialect} a input`)
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 2)
       assert.match(result.stderr, /mutually exclusive/u)
@@ -94,8 +94,8 @@ describe('egrep errors and unsupported diagnostics', () => {
     })
   }
 
-  it('reports missing files as grep errors without unsupported notes', () => {
-    const result = createTerminal(FILES).run('egrep a missing')
+  it('reports missing files as grep errors without unsupported notes', async () => {
+    const result = await createTerminal(FILES).run('egrep a missing')
     assert.equal(result.stdout, '')
     assert.match(result.stderr, /^grep: missing: No such file/u)
     assert.equal(result.exitCode, 2)
@@ -107,23 +107,23 @@ describe('egrep errors and unsupported diagnostics', () => {
     "printf '%s\\n' input | xargs /usr/bin/egrep -Z a",
     "find input -exec egrep -Z a {} ';'",
   ]) {
-    it(`retains underlying grep diagnostics for ${command}`, () => {
+    it(`retains underlying grep diagnostics for ${command}`, async () => {
       const terminal = createTerminal(FILES)
-      const expected = terminal.run('grep -E -Z a input').unsupported.map((note) => ({ ...note, command: 'egrep' }))
-      const result = terminal.run(command)
+      const expected = (await terminal.run('grep -E -Z a input')).unsupported.map((note) => ({ ...note, command: 'egrep' }))
+      const result = await terminal.run(command)
       assert.equal(result.stdout, '')
       assert.notEqual(result.stderr, '')
       assert.equal(expected.length, 1)
       assert.equal(expected[0].command, 'egrep')
       assert.deepEqual(result.unsupported, expected)
-      const hidden = terminal.run(`{ ${command}; } 2>/dev/null | cat`)
+      const hidden = await terminal.run(`{ ${command}; } 2>/dev/null | cat`)
       assert.equal(hidden.stderr, '')
       assert.deepEqual(hidden.unsupported, expected)
     })
   }
 
-  it('preserves runtime regex limitations after stderr redirection', () => {
-    const result = createTerminal(FILES).run("egrep -i '(a)\\1' unicode 2>/dev/null | cat")
+  it('preserves runtime regex limitations after stderr redirection', async () => {
+    const result = await createTerminal(FILES).run("egrep -i '(a)\\1' unicode 2>/dev/null | cat")
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, '')
     assert.deepEqual(result.unsupported.map(({ command, detail }) => [command, detail]), [['egrep', 'non-ASCII regex semantics']])

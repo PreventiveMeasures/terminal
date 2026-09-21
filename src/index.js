@@ -10,7 +10,6 @@ import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
 import { discardedNotes, err, missingPathNote, reason } from './util.js'
 import { complete } from './complete.js'
-import { warmDecompression } from './decompress.js'
 import { commandSubstitution } from './shell/capture.js'
 import { BindingMap, isolated, withState } from './shell/state.js'
 import { commandWriteError, createIoGuard, routeExternalOutput, runSteps } from './shell/run.js'
@@ -23,11 +22,10 @@ export function createTerminal(sources, opts = {}) {
   // filesystem rather than to a terminal: a fork over the same tree shares it.
   // The tree has no clock of its own, so the moment it was made stands in:
   // `ls -l` dates every entry to it, and a fork, being the same tree, keeps it.
-  // What a runtime inflated of this tree's compressed files, kept by what was
-  // inflated rather than by where it was read: the work is done once however
-  // many lines read it, a copy of a file reads the same answer as the file,
-  // and a fork over the same tree shares both.
-  const shared = { fs, io: createIoGuard(fs), mount, writable, registry, createdAt: Date.now(), decompressed: new Map() }
+  // The turn a line takes belongs to the tree for the same reason: a line
+  // that waits waits in the middle of a filesystem every fork of it shares,
+  // so the two take turns over it rather than one starting inside the other.
+  const shared = { fs, io: createIoGuard(fs), mount, writable, registry, createdAt: Date.now(), lock: { turn: Promise.resolve() } }
   return terminal(context(shared, { cwd, home, user: opts.user ?? 'user', locale, ...freshSession() }), 'createTerminal')
 }
 
@@ -61,9 +59,9 @@ function fork(parent, opts = {}) {
 // whoever is running a line, so every terminal starts with a set of its own.
 // stdinLeft tracks consumption within a command list; stdinOrigin allows
 // /dev/stdin to reopen a redirected file independently of that offset.
-function context({ fs, io, mount, writable, registry, createdAt, decompressed }, session) {
+function context({ fs, io, mount, writable, registry, createdAt, lock }, session) {
   const ctx = {
-    fs, io, mount, writable, registry, createdAt, decompressed, ...session, calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
+    fs, io, mount, writable, registry, createdAt, lock, ...session, calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
     loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '',
     unsupported: createUnsupportedFeed(), notes: new Set(),
   }
@@ -74,6 +72,10 @@ function context({ fs, io, mount, writable, registry, createdAt, decompressed },
   ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)
   ctx.invoke = (name, tokens, stdin) => dispatch(name, tokens, stdin, ctx)
   ctx.substitute = (command, backtick) => commandSubstitution(command, ctx, runSteps, backtick)
+  // The line a wired command runs for itself (custom.js `io.run`): part of
+  // the line that reached it rather than a turn of its own, since the turn is
+  // the one this command is holding.
+  ctx.runLine = (line) => safeRun(line, ctx)
   return ctx
 }
 
@@ -82,35 +84,15 @@ function context({ fs, io, mount, writable, registry, createdAt, decompressed },
 // error names the call that made it.
 function terminal(ctx, label) {
   if (!ctx.fs.isDir(ctx.cwd)) throw new Error(`${label}: cwd is not a directory: ${ctx.cwd}`)
-  // A terminal is one place, so the lines given to it run one after another
-  // however many are in the air: a second `runAsync` waits for the first
-  // rather than overtaking it while that one waits for work of its own.
-  let queue = Promise.resolve()
   return {
-    run: (line) => safeRun(line, ctx),
-    // The same line, run the same way, handed back as a promise: the call to
-    // write against where a caller would rather await a result than take one,
-    // and the only one that can wait for work a line cannot do for itself —
-    // what a runtime inflates rather than this code (./decompress.js). The
-    // line itself runs as it does under `run`, and what `run` would throw
-    // this rejects with.
-    runAsync(line) {
-      const answer = queue.then(async () => {
-        await warmDecompression(line, ctx)
-        return safeRun(line, ctx)
-      })
-      // A line that failed is still a line that ended: the next one waits for
-      // this to finish rather than for it to succeed.
-      queue = answer.then(() => null, () => null)
-      return answer
-    },
+    run: (line) => queued(ctx, line),
     cwd: () => ctx.cwd,
     complete: (line) => complete(line, ctx, ctx.registry),
     fork: (opts) => fork(ctx, opts),
   }
 }
 
-function dispatch(name, tokens, stdin, ctx, external = false) {
+async function dispatch(name, tokens, stdin, ctx, external = false) {
   const reg = ctx.registry
   const resolved = reg.resolveCommand(name)
   const run = () => {
@@ -120,7 +102,11 @@ function dispatch(name, tokens, stdin, ctx, external = false) {
   }
   const route = (r) => routeExternalOutput(record(ctx, commandWriteError(name, r, ctx), resolved), ctx)
   try {
-    return ctx.io.run(resolved, () => route(run()))
+    // A command may answer with a promise — gzip waits on a stream the
+    // runtime owns rather than on anything here — and what it then throws is
+    // this call's to report, so the waiting happens here rather than in
+    // whoever reads the result.
+    return await ctx.io.run(resolved, async () => route(await run()))
   } catch (e) {
     missingPathNote(ctx, name, e?.path, e?.fsError)
     const message = `${name}: ${reason(e)}`
@@ -139,16 +125,37 @@ function record(ctx, result, resolved) {
   return result
 }
 
+// One line at a time, and one line at a time over the whole tree rather than
+// over the one terminal: a line waits now — for a command that has to — and
+// what it would wait in the middle of is a filesystem every fork of it
+// shares. So a second line takes its turn rather than starting in the gap the
+// first one left, which is the order a caller reading the lines expects of
+// them anyway. A line that throws is still a turn taken, and leaves the next
+// one to run.
+function queued(ctx, line) {
+  const { lock } = ctx
+  // Every caller waits, this one included: which caller a `run` came from is
+  // not a thing that can be read off a call — the handler that is holding the
+  // turn and a consumer that called during its wait arrive here alike — so
+  // nothing here guesses. A command that means to run a line inside its own
+  // turn asks for it with the `run` it was handed (custom.js), which says so
+  // rather than being taken for saying so.
+  const answer = lock.turn.then(() => safeRun(line, ctx))
+  lock.turn = answer.then(() => null, () => null)
+  return answer
+}
+
 // Reentrant run() calls need separate feeds and stream state.
 // Syntax errors exit 2; unsupported constructs exit 1.
 function safeRun(line, ctx) {
   const feed = createUnsupportedFeed()
-  return withState(ctx, { unsupported: feed, notes: new Set(), discarded: new Set(), stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, () => {
+  return withState(ctx, { unsupported: feed, notes: new Set(), discarded: new Set(), stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, async () => {
     const result = { stdout: '', stderr: '', exitCode: 0 }
     const stream = { text: '' }
     try {
       for (const steps of parseUnits(line, ctx.writable, ctx.registry.has)) {
-        const r = runSteps(steps, ctx, stream)
+        // oxlint-disable-next-line no-await-in-loop -- one unit of a line after the last, as the line reads.
+        const r = await runSteps(steps, ctx, stream)
         result.stdout += r.stdout
         result.stderr += r.stderr
         result.exitCode = r.exitCode

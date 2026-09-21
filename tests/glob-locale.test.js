@@ -5,7 +5,7 @@ import { createTerminal } from '@preventive/terminal'
 const FILES = { 'ascii.txt': 'ascii\n', 'café.txt': 'accent\n', '😀.txt': 'astral\n', '[': 'bracket\n' }
 
 describe('glob locale diagnostics', () => {
-  it('allows Unicode literal/star matching and leaves voided patterns empty', () => {
+  it('allows Unicode literal/star matching and leaves voided patterns empty', async () => {
     const cases = [
       ["find . -name 'café*'", './café.txt\n'],
       ["find . -name '*.txt' | sort", './ascii.txt\n./café.txt\n./😀.txt\n'],
@@ -13,17 +13,17 @@ describe('glob locale diagnostics', () => {
       ["find . -name '[a-[:digit:]][[.a.]]'", ''],
     ]
     for (const [command, stdout] of cases) {
-      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
+      assert.deepEqual(await createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
     }
   })
 
-  it('mirrors locale gaps for unmatched and escaped metacharacters despite stderr suppression', () => {
+  it('mirrors locale gaps for unmatched and escaped metacharacters despite stderr suppression', async () => {
     for (const command of [
       "find . -name '[' 2>/dev/null | cat",
       "find . -name '\\?' 2>/dev/null | cat",
       "find . -iname 'CAFÉ.TXT' 2>/dev/null | cat",
     ]) {
-      assert.deepEqual(createTerminal(FILES).run(command), {
+      assert.deepEqual(await createTerminal(FILES).run(command), {
         stdout: '', stderr: '', exitCode: 0, cwd: '/',
         notes: [], unsupported: [{
           kind: 'feature', command: 'find', detail: 'non-ASCII glob matching',
@@ -33,8 +33,8 @@ describe('glob locale diagnostics', () => {
     }
   })
 
-  it('reports unsupported collating classes before locale-dependent matching', () => {
-    assert.deepEqual(createTerminal(FILES).run("find . -name 'é[[.a.]]' 2>/dev/null | cat"), {
+  it('reports unsupported collating classes before locale-dependent matching', async () => {
+    assert.deepEqual(await createTerminal(FILES).run("find . -name 'é[[.a.]]' 2>/dev/null | cat"), {
       stdout: '', stderr: '', exitCode: 0, cwd: '/',
       notes: [], unsupported: [{
         kind: 'feature', command: 'find', detail: 'glob collating or equivalence class',

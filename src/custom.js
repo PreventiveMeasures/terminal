@@ -1,6 +1,8 @@
-// Caller-provided synchronous commands. Handlers receive a limited I/O view,
-// not the mutable execution context; malformed descriptors/results fail
-// explicitly rather than becoming a successful command with missing output.
+// Caller-provided commands. Handlers receive a limited I/O view, not the
+// mutable execution context; malformed descriptors/results fail explicitly
+// rather than becoming a successful command with missing output. A handler
+// may answer with a promise, which the line waits for as it waits for any
+// other command that has to.
 
 import { lookup, resolve } from './fs.js'
 import { consumeStdin, ok, readBytesOf, readInputs } from './util.js'
@@ -96,6 +98,8 @@ function invoke(name, run, stdin, tokens, ctx) {
   consumeStdin(ctx)
   // Retained I/O views report notes to the run performing the operation.
   const scope = { cwd: ctx.cwd, fs: ctx.fs, mount: ctx.mount, home: ctx.home, get notes() { return ctx.notes }, command: name, stdinFile: ctx.stdinFile, stdinOrigin: ctx.stdinOrigin }
+  let running = true
+  const ended = () => { running = false }
   const io = {
     name,
     args: tokens,
@@ -108,8 +112,29 @@ function invoke(name, run, stdin, tokens, ctx) {
       if (typeof paths === 'string') throw new TypeError(`readInputs: expected an array of paths, got a string: ${paths}`)
       return readInputs(name, [...paths], stdin, scope)
     },
+    // A line run from inside this command, on the terminal it is running in:
+    // part of the line that reached the command rather than a turn of its
+    // own, because the turn is the one this command is holding. The
+    // terminal's own `run` waits for a turn, as every caller of it does, and
+    // a handler waiting there would be waiting for itself — which is why a
+    // handler that re-enters is handed this rather than left to say it some
+    // way that could not be told from anyone else's call.
+    //
+    // It is this command's turn and no other, so a view kept past the command
+    // refuses rather than running a line in the middle of someone else's.
+    run: (line) => {
+      if (!running) throw new Error('run: the command this belongs to has finished, and its turn with it')
+      return ctx.runLine(line)
+    },
   }
-  return normalizeResult(run(io))
+  const answer = run(io)
+  // What a handler promises is what it answers: a line waits for it where it
+  // stands, and a promise that fails fails the command, as a throw does.
+  if (typeof answer?.then !== 'function') {
+    ended()
+    return normalizeResult(answer)
+  }
+  return answer.then(normalizeResult).finally(ended)
 }
 
 // Resolve against the captured cwd; copy listings to protect shared indexes.
@@ -151,10 +176,6 @@ function normalizeResult(result) {
   if (typeof result === 'string') return ok(result)
   if (typeof result !== 'object') {
     throw new TypeError(`invalid result: expected a string or an object (got ${typeof result})`)
-  }
-  // Pipelines are synchronous; a promise has no point at which to be awaited.
-  if (typeof result.then === 'function') {
-    throw new TypeError('invalid result: commands are synchronous, a promise cannot be awaited')
   }
   if (Array.isArray(result)) {
     throw new TypeError('invalid result: expected a string or an object, got an array (join the lines first)')

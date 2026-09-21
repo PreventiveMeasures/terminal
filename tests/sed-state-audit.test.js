@@ -9,7 +9,7 @@ const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const result = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 // A writable overlay needs a mount away from `/`, and cwd follows the mount.
 const mounted = (...args) => ({ ...result(...args), cwd: '/src' })
-const run = (script, input, flags = '-n') => createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
+const run = async (script, input, flags = '-n') => await createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
 
 describe('sed restart state survives addressed blocks and held pattern spaces', () => {
   for (const [purpose, script, input, stdout] of [
@@ -28,42 +28,42 @@ describe('sed restart state survives addressed blocks and held pattern spaces', 
     ['a read after restart updates the last-record address',
       'N;/^a/D;$p;p', 'a\nb\nc\n', 'b\nc\nb\nc\n'],
   ]) {
-    it(purpose, () => assert.deepEqual(run(script, input), result(stdout)))
+    it(purpose, async () => assert.deepEqual(await run(script, input), result(stdout)))
   }
-  it('preserves Unicode and embedded NUL bytes through copies and exchanges', () => {
+  it('preserves Unicode and embedded NUL bytes through copies and exchanges', async () => {
     const input = 'é😀\0z\n'
-    assert.deepEqual(run('h;G;x;G;p', input), result(input.slice(0, -1) + '\n' + input.slice(0, -1) + '\n' + input))
+    assert.deepEqual(await run('h;G;x;G;p', input), result(input.slice(0, -1) + '\n' + input.slice(0, -1) + '\n' + input))
   })
 })
 
 describe('sed terminator metadata survives empty held text and output aliases', () => {
-  it('an empty held unterminated record separates the following printed record', () => {
+  it('an empty held unterminated record separates the following printed record', async () => {
     const t = createTerminal({ first: 'one', second: 'two\nthree\n' })
-    assert.deepEqual(t.run("sed -sn '/one/h;/two/{g;p};/three/p' first second"), result('\nthree\n'))
+    assert.deepEqual(await t.run("sed -sn '/one/h;/two/{g;p};/three/p' first second"), result('\nthree\n'))
   })
-  it('retains the same empty-record behavior under NUL separation', () => {
+  it('retains the same empty-record behavior under NUL separation', async () => {
     const t = createTerminal({ first: 'one', second: 'two\0three\0' })
-    assert.deepEqual(t.run("sed -zsn '/one/h;/two/{g;p};/three/p' first second"), result('\0three\0'))
+    assert.deepEqual(await t.run("sed -zsn '/one/h;/two/{g;p};/three/p' first second"), result('\0three\0'))
   })
   for (const [flags, stdout] of [['', 'aa\n'], ['-n', 'a']]) {
-    it(`q flushes only automatic output's missing terminator with ${flags || 'default output'}`, () => {
-      assert.deepEqual(run('h;g;w /dev/stdout\nq', 'a', flags), result(stdout))
+    it(`q flushes only automatic output's missing terminator with ${flags || 'default output'}`, async () => {
+      assert.deepEqual(await run('h;g;w /dev/stdout\nq', 'a', flags), result(stdout))
     })
   }
 })
 
 describe('sed writes do not change restart or substitution state', () => {
   const writable = () => createTerminal({ input: 'a\nb' }, { mount: '/src/', writable: '/tmp/' })
-  it('writing a substituted pattern does not clear t after restoring held text', () => {
+  it('writing a substituted pattern does not clear t after restoring held text', async () => {
     const t = writable()
     const script = 'h;s/a/A/;w /tmp/out\ng;t yes;s/.*/BAD/;b;:yes;p;q'
-    assert.deepEqual(t.run(`sed -n ${quote(script)} /src/input`), mounted('a\n'))
-    assert.deepEqual(t.run('cat /tmp/out'), mounted('A\n'))
+    assert.deepEqual(await t.run(`sed -n ${quote(script)} /src/input`), mounted('a\n'))
+    assert.deepEqual(await t.run('cat /tmp/out'), mounted('A\n'))
   })
-  it('writes a range only once when D revisits its numeric start line', () => {
+  it('writes a range only once when D revisits its numeric start line', async () => {
     const t = writable()
     const script = '1N;2,2{w /tmp/out\nD};p'
-    assert.deepEqual(t.run(`sed -n ${quote(script)} /src/input`), mounted('b'))
-    assert.deepEqual(t.run('cat /tmp/out'), mounted('a\nb'))
+    assert.deepEqual(await t.run(`sed -n ${quote(script)} /src/input`), mounted('b'))
+    assert.deepEqual(await t.run('cat /tmp/out'), mounted('a\nb'))
   })
 })

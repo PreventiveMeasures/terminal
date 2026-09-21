@@ -13,8 +13,8 @@ const FILES = {
 const options = { commands: { capture: ({ args }) => JSON.stringify(args) + '\n' } }
 const terminal = () => createTerminal(FILES, options)
 
-function check(command, stdout, exitCode = 0, stderr = '', notes = []) {
-  assert.deepEqual(terminal().run(command), { stdout, stderr, exitCode, cwd: '/', notes, unsupported: [] }, command)
+async function check(command, stdout, exitCode = 0, stderr = '', notes = []) {
+  assert.deepEqual(await terminal().run(command), { stdout, stderr, exitCode, cwd: '/', notes, unsupported: [] }, command)
 }
 
 describe('command substitution — output and shell words', () => {
@@ -62,8 +62,8 @@ describe('command substitution — output and shell words', () => {
   ]
   for (const [command, args, notes] of words) it(command, () => check(command, JSON.stringify(args) + '\n', 0, '', notes))
 
-  it('does not split or glob command output in assignment values', () => {
-    check(String.raw`x=$(printf ' src/*.js\nsecond\n'); capture "$x"`, '[" src/*.js\\nsecond"]\n')
+  it('does not split or glob command output in assignment values', async () => {
+    await check(String.raw`x=$(printf ' src/*.js\nsecond\n'); capture "$x"`, '[" src/*.js\\nsecond"]\n')
   })
 })
 
@@ -93,12 +93,12 @@ describe('command substitution — state and status', () => {
   ]
   for (const [command, stdout, exitCode] of cases) it(command, () => check(command, stdout, exitCode))
 
-  it('keeps changes inside nested substitutions isolated at each level', () => {
-    check('x=outer; echo "$(x=middle; echo "$(x=inner; echo "$x")"; echo "$x")"; echo "$x"', 'inner\nmiddle\nouter\n')
+  it('keeps changes inside nested substitutions isolated at each level', async () => {
+    await check('x=outer; echo "$(x=middle; echo "$(x=inner; echo "$x")"; echo "$x")"; echo "$x"', 'inner\nmiddle\nouter\n')
   })
 
-  it('does not consume the enclosing loop when break runs inside a substitution', () => {
-    const r = terminal().run('for f in a b; do echo "$(break; echo "$f")"; done')
+  it('does not consume the enclosing loop when break runs inside a substitution', async () => {
+    const r = await terminal().run('for f in a b; do echo "$(break; echo "$f")"; done')
     assert.equal(r.stdout, 'a\nb\n')
     assert.equal(r.exitCode, 0)
     assert.match(r.stderr, /break: only meaningful in a `for`, `while` or `until` loop/u)
@@ -107,55 +107,55 @@ describe('command substitution — state and status', () => {
 })
 
 describe('command substitution — redirects and diagnostics', () => {
-  it('retains stderr separately from captured stdout', () => {
-    check('echo "$(cat missing; echo kept)"', 'kept\n', 0, 'cat: missing: No such file or directory\n')
-    check('x=$(cat missing)', '', 1, 'cat: missing: No such file or directory\n')
+  it('retains stderr separately from captured stdout', async () => {
+    await check('echo "$(cat missing; echo kept)"', 'kept\n', 0, 'cat: missing: No such file or directory\n')
+    await check('x=$(cat missing)', '', 1, 'cat: missing: No such file or directory\n')
     // The read error went to /dev/null, so only the note carries it.
     check('echo "$(cat missing 2>/dev/null; echo kept)"', 'kept\n', 0, '',
       ['cat: No such file or directory: "missing".'])
   })
 
-  it('captures stderr only when the inner command redirects it to stdout', () => {
-    check('echo "$(cat missing 2>&1)"', 'cat: missing: No such file or directory\n')
+  it('captures stderr only when the inner command redirects it to stdout', async () => {
+    await check('echo "$(cat missing 2>&1)"', 'cat: missing: No such file or directory\n')
   })
 
-  it('supports substitution in input redirection and here-strings', () => {
-    check('cat < "$(printf names)"', 'src/a.js\nsrc/b.js\n')
-    check('cat <<< "$(printf \'a\\nb\\n\\n\')"', 'a\nb\n')
-    check('echo gone > "$(printf /dev/null)"', '')
+  it('supports substitution in input redirection and here-strings', async () => {
+    await check('cat < "$(printf names)"', 'src/a.js\nsrc/b.js\n')
+    await check('cat <<< "$(printf \'a\\nb\\n\\n\')"', 'a\nb\n')
+    await check('echo gone > "$(printf /dev/null)"', '')
   })
 
-  it('expands unquoted heredocs but leaves quoted heredocs literal', () => {
-    check('cat <<EOF\n$(echo first)\n$(printf \'second\\n\\n\')\nEOF', 'first\nsecond\n')
-    check("cat <<'EOF'\n$(echo literal)\nEOF", '$(echo literal)\n')
-    check('echo "$(cat <<EOF\na)\nb\nEOF\n)"', 'a)\nb\n')
+  it('expands unquoted heredocs but leaves quoted heredocs literal', async () => {
+    await check('cat <<EOF\n$(echo first)\n$(printf \'second\\n\\n\')\nEOF', 'first\nsecond\n')
+    await check("cat <<'EOF'\n$(echo literal)\nEOF", '$(echo literal)\n')
+    await check('echo "$(cat <<EOF\na)\nb\nEOF\n)"', 'a)\nb\n')
   })
 
-  it('preserves unsupported diagnostics even when inner stderr and the final status are hidden', () => {
+  it('preserves unsupported diagnostics even when inner stderr and the final status are hidden', async () => {
     const command = 'echo "$(grep --unknown x src/a.js 2>/dev/null)" | true'
     const message = 'grep: unknown option: --unknown'
-    assert.deepEqual(terminal().run(command), {
+    assert.deepEqual(await terminal().run(command), {
       stdout: '', stderr: '', exitCode: 0, cwd: '/',
       notes: [], unsupported: [{ kind: 'option', command: 'grep', detail: '--unknown', message }],
     })
   })
 
-  it('deduplicates diagnostics across substitutions without losing encounter order', () => {
-    const r = terminal().run('echo "$(grep --unknown x src/a.js 2>/dev/null)$(sed -i s/a/A/ src/a.js 2>/dev/null)$(grep --unknown x src/a.js 2>/dev/null)"')
+  it('deduplicates diagnostics across substitutions without losing encounter order', async () => {
+    const r = await terminal().run('echo "$(grep --unknown x src/a.js 2>/dev/null)$(sed -i s/a/A/ src/a.js 2>/dev/null)$(grep --unknown x src/a.js 2>/dev/null)"')
     assert.equal(r.stdout, '\n')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)
     assert.deepEqual(r.unsupported.map(({ command, detail }) => [command, detail]), [['grep', '--unknown'], ['sed', '-i']])
   })
 
-  it('does not execute substitutions in skipped branches', () => {
-    const r = terminal().run('false && echo "$(grep --unknown x src/a.js)"; true || echo "$(grep --unknown x src/a.js)"')
+  it('does not execute substitutions in skipped branches', async () => {
+    const r = await terminal().run('false && echo "$(grep --unknown x src/a.js)"; true || echo "$(grep --unknown x src/a.js)"')
     assert.deepEqual(r, { stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 
-  it('reports malformed substitution syntax as an error without throwing', () => {
+  it('reports malformed substitution syntax as an error without throwing', async () => {
     for (const command of ['echo $(pwd', 'echo "$(pwd)', 'echo $(echo "unterminated)', 'x=$(echo a |)']) {
-      const r = terminal().run(command)
+      const r = await terminal().run(command)
       assert.notEqual(r.exitCode, 0, command)
       assert.notEqual(r.stderr, '', command)
       assert.deepEqual(r.unsupported, [], command)

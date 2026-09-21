@@ -22,8 +22,8 @@ const FILES = {
   '-input': 'alpha\n',
 }
 
-function check(command, stdout, exitCode = 0, stderr = '', files = FILES, notes = []) {
-  assert.deepEqual(createTerminal(files).run(command), {
+async function check(command, stdout, exitCode = 0, stderr = '', files = FILES, notes = []) {
+  assert.deepEqual(await createTerminal(files).run(command), {
     stdout, stderr, exitCode, cwd: '/', notes, unsupported: [],
   }, command)
 }
@@ -65,17 +65,17 @@ describe('grep — patterns from virtual files', () => {
   ]
   for (const [command, stdout, exitCode] of cases) it(command, () => check(command, stdout, exitCode))
 
-  it('distinguishes a trailing newline in -e from a pattern file terminator', () => {
-    check("grep -e 'alpha\n' data", FILES.data)
-    check('grep -f patterns/alpha data', 'alpha\nalphabet\n')
+  it('distinguishes a trailing newline in -e from a pattern file terminator', async () => {
+    await check("grep -e 'alpha\n' data", FILES.data)
+    await check('grep -f patterns/alpha data', 'alpha\nalphabet\n')
   })
 
-  it('reads large generated pattern lists without argument-count limits', () => {
+  it('reads large generated pattern lists without argument-count limits', async () => {
     const files = { patterns: 'alpha\n'.repeat(150000), data: FILES.data }
-    check('grep -Ff patterns data', 'alpha\nalphabet\n', 0, '', files)
+    await check('grep -Ff patterns data', 'alpha\nalphabet\n', 0, '', files)
   })
 
-  it('combines checked-in patterns with recursive filters and explicit files', () => {
+  it('combines checked-in patterns with recursive filters and explicit files', async () => {
     const files = {
       'patterns.txt': 'TODO\nFIXME\n',
       'src/a.ts': '// TODO: validate\nexport const a = 1;\n',
@@ -83,9 +83,9 @@ describe('grep — patterns from virtual files', () => {
       'src/c.js': '// TODO: ignore\n',
       'README.md': '# Fixture\nTODO: document\n',
     }
-    check('grep -rn -f patterns.txt src README.md',
+    await check('grep -rn -f patterns.txt src README.md',
       'src/a.ts:1:// TODO: validate\nsrc/b.ts:1:// FIXME: parse\nsrc/c.js:1:// TODO: ignore\nREADME.md:2:TODO: document\n', 0, '', files)
-    check('grep -rlnf patterns.txt src --include=*.ts', 'src/a.ts\nsrc/b.ts\n', 0, '', files, [
+    await check('grep -rlnf patterns.txt src --include=*.ts', 'src/a.ts\nsrc/b.ts\n', 0, '', files, [
       'glob: no paths matched "--include=*.ts"; the pattern was left literal.',
       'grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/src/c.js".',
     ])
@@ -111,36 +111,36 @@ describe('grep — pattern files and shared stdin', () => {
   ]
   for (const [command, stdout, exitCode] of cases) it(command, () => check(command, stdout, exitCode))
 
-  it('retains stdin consumption when a later pattern file cannot be read', () => {
-    check('{ grep -f missing; cat; } < patterns/alpha', 'alpha\n', 0,
+  it('retains stdin consumption when a later pattern file cannot be read', async () => {
+    await check('{ grep -f missing; cat; } < patterns/alpha', 'alpha\n', 0,
       'grep: missing: No such file or directory\n')
-    check('{ grep -f - -f missing data; cat; } < patterns/alpha', '', 0,
+    await check('{ grep -f - -f missing data; cat; } < patterns/alpha', '', 0,
       'grep: missing: No such file or directory\n')
   })
 })
 
 describe('grep — pattern file errors and diagnostics', () => {
   for (const options of ['-f missing', '-sf missing', '-f missing -s', '--no-messages --file missing', '-qf missing', '-m0 -f missing']) {
-    it(`fails before scanning input: ${options}`, () => {
-      check(`grep ${options} data`, '', 2, 'grep: missing: No such file or directory\n')
+    it(`fails before scanning input: ${options}`, async () => {
+      await check(`grep ${options} data`, '', 2, 'grep: missing: No such file or directory\n')
     })
   }
 
-  it('reports directories and invalid path components as ordinary read errors', () => {
-    check('grep -sf patterns data', '', 2, 'grep: patterns: Is a directory\n')
-    check('grep -sf data/../patterns/alpha data', '', 2, 'grep: data/../patterns/alpha: Not a directory\n')
+  it('reports directories and invalid path components as ordinary read errors', async () => {
+    await check('grep -sf patterns data', '', 2, 'grep: patterns: Is a directory\n')
+    await check('grep -sf data/../patterns/alpha data', '', 2, 'grep: data/../patterns/alpha: Not a directory\n')
   })
 
-  it('keeps input error suppression separate from pattern file errors', () => {
-    check('grep -sf patterns/pair missing data', 'data:alpha\ndata:beta\n', 2)
-    check('grep -sqf patterns/pair missing data', '')
-    check('grep -f patterns/pair missing data', 'data:alpha\ndata:beta\n', 2,
+  it('keeps input error suppression separate from pattern file errors', async () => {
+    await check('grep -sf patterns/pair missing data', 'data:alpha\ndata:beta\n', 2)
+    await check('grep -sqf patterns/pair missing data', '')
+    await check('grep -f patterns/pair missing data', 'data:alpha\ndata:beta\n', 2,
       'grep: missing: No such file or directory\n')
   })
 
-  it('rejects missing option arguments and invalid patterns without unsupported notes', () => {
+  it('rejects missing option arguments and invalid patterns without unsupported notes', async () => {
     for (const command of ['grep -f', 'grep --file', 'grep -sf patterns/bad data']) {
-      const result = createTerminal(FILES).run(command)
+      const result = await createTerminal(FILES).run(command)
       assert.equal(result.stdout, '', command)
       assert.equal(result.exitCode, 2, command)
       assert.match(result.stderr, /^grep: .+\n$/u, command)
@@ -148,16 +148,16 @@ describe('grep — pattern file errors and diagnostics', () => {
     }
   })
 
-  it('mirrors unsupported regex features loaded from files even with -s and redirection', () => {
+  it('mirrors unsupported regex features loaded from files even with -s and redirection', async () => {
     const term = createTerminal(FILES)
-    const result = term.run('grep -sf patterns/unsupported data')
+    const result = await term.run('grep -sf patterns/unsupported data')
     assert.equal(result.exitCode, 2)
     assert.equal(result.stdout, '')
     assert.match(result.stderr, /not supported/u)
     assert.deepEqual(result.unsupported, [{
       kind: 'feature', command: 'grep', detail: 'regex escape', message: result.stderr.trimEnd(),
     }])
-    assert.deepEqual(term.run('grep -sf patterns/unsupported data 2>/dev/null | true'), {
+    assert.deepEqual(await term.run('grep -sf patterns/unsupported data 2>/dev/null | true'), {
       stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: result.unsupported,
     })
   })

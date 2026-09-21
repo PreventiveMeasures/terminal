@@ -5,12 +5,12 @@ import { err } from '../util.js'
 import { parseLine } from './parse.js'
 import { MAX_SUBSTITUTION_DEPTH } from './substitution.js'
 
-export function commandSubstitution(command, ctx, runSteps, backtick = false) {
+export async function commandSubstitution(command, ctx, runSteps, backtick = false) {
   const depth = (ctx.substitutionDepth ?? 0) + 1
   if (depth > MAX_SUBSTITUTION_DEPTH) throw new UnsupportedError('feature', 'command substitution nesting limit', `command substitution nesting beyond ${MAX_SUBSTITUTION_DEPTH} levels is not supported`)
   const stderr = ctx.expansionFds[2]
   const outputFds = { 1: 'out', 2: typeof stderr === 'object' || stderr === 'closed' ? stderr : 'err' }
-  const result = withState(ctx, { substitutionDepth: depth, outputFds, errexitOff: true, closed: { out: false, err: stderr === 'closed' } }, () => isolated(ctx, () => {
+  const result = await withState(ctx, { substitutionDepth: depth, outputFds, errexitOff: true, closed: { out: false, err: stderr === 'closed' } }, () => isolated(ctx, () => {
     let steps
     try {
       steps = parseLine(command, ctx.writable, ctx.registry.has)

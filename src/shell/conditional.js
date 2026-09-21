@@ -5,20 +5,22 @@ import { UnsupportedError } from '../unsupported.js'
 import { evaluateArithmetic } from './arithmetic.js'
 import { probeParameter } from './variables.js'
 
-export function evaluateConditional(expression, ctx) {
-  return { stdout: '', stderr: '', exitCode: evaluate(expression, ctx) ? 0 : 1 }
+export async function evaluateConditional(expression, ctx) {
+  return { stdout: '', stderr: '', exitCode: await evaluate(expression, ctx) ? 0 : 1 }
 }
 
-const scalar = (word, ctx) => expandPattern(word, ctx).value
+const scalar = async (word, ctx) => (await expandPattern(word, ctx)).value
 
-function evaluate(expression, ctx) {
+async function evaluate(expression, ctx) {
   const { kind } = expression
-  if (kind === 'not') return !evaluate(expression.expression, ctx)
-  if (kind === 'and') return evaluate(expression.left, ctx) && evaluate(expression.right, ctx)
-  if (kind === 'or') return evaluate(expression.left, ctx) || evaluate(expression.right, ctx)
+  if (kind === 'not') return !await evaluate(expression.expression, ctx)
+  // `&&` and `||` read the right side only where the left leaves the answer
+  // open, so the wait for it happens only where bash would ask.
+  if (kind === 'and') return await evaluate(expression.left, ctx) && await evaluate(expression.right, ctx)
+  if (kind === 'or') return await evaluate(expression.left, ctx) || await evaluate(expression.right, ctx)
   const { op } = expression
   if (kind === 'unary') {
-    const value = scalar(expression.word, ctx)
+    const value = await scalar(expression.word, ctx)
     if (op === '-n') return value !== ''
     if (op === '-z') return value === ''
     if (['-a', '-e', '-f', '-d'].includes(op)) return fileTest(op, value, ctx)
@@ -26,13 +28,13 @@ function evaluate(expression, ctx) {
     gap(op)
   }
   if (['<', '>', '-nt', '-ot', '-ef'].includes(op)) gap(op)
-  const left = scalar(expression.left, ctx)
+  const left = await scalar(expression.left, ctx)
   if (Object.hasOwn(INTEGER_TESTS, op)) {
     // Bash expands both operands before evaluating either arithmetic expression.
-    const right = scalar(expression.right, ctx)
+    const right = await scalar(expression.right, ctx)
     return INTEGER_TESTS[op](evaluateArithmetic(left, ctx), evaluateArithmetic(right, ctx))
   }
-  const pattern = expandPattern(expression.right, ctx)
+  const pattern = await expandPattern(expression.right, ctx)
   if (hasExtglob(pattern)) gap('extglob')
   const matches = compileGlob(globPattern(pattern), { bash: true }).test(left)
   return op === '!=' ? !matches : matches

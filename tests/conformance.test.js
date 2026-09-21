@@ -136,7 +136,7 @@ function closingQuote(expect, at) {
 // The overlay mounts sources away from /tmp and copies them in, which is how
 // a workflow gets somewhere to write without the source tree becoming
 // writable. Read-only mounts stay at / so paths in a case read naturally.
-function terminalFor({ at, tree, mode }) {
+async function terminalFor({ at, tree, mode }) {
   const files = TREES[tree]
   if (mode === 'readonly') return createTerminal(files)
   const terminal = createTerminal(files, { mount: '/work', cwd: '/work', writable: '/tmp/' })
@@ -145,10 +145,10 @@ function terminalFor({ at, tree, mode }) {
     // a parent, so a nested fixture cannot be materialised in the overlay at
     // all. Say that here rather than failing halfway through a copy.
     assert.ok(!name.includes('/'), `${at}: tree '${tree}' holds '${name}', and @mode overlay needs flat names`)
-    const copy = terminal.run(`cp ${quote(name)} ${quote('/tmp/' + name)}`)
+    const copy = await terminal.run(`cp ${quote(name)} ${quote('/tmp/' + name)}`)
     assert.equal(copy.exitCode, 0, `${at}: copying ${name} into the overlay: ${copy.stderr}`)
   }
-  assert.equal(terminal.run('cd /tmp').exitCode, 0)
+  assert.equal((await terminal.run('cd /tmp')).exitCode, 0)
   return terminal
 }
 
@@ -156,10 +156,10 @@ function terminalFor({ at, tree, mode }) {
 // the copy that sets up an overlay has to pass them through literally.
 const quote = (name) => `'${name.replaceAll("'", String.raw`'\''`)}'`
 
-function check(entry) {
-  const terminal = terminalFor(entry)
+async function check(entry) {
+  const terminal = await terminalFor(entry)
   const started = hrtime.bigint()
-  const result = terminal.run(entry.command)
+  const result = await terminal.run(entry.command)
   const ms = Number(hrtime.bigint() - started) / 1e6
   if (entry.budgetMs !== undefined) {
     assert.deepEqual(result.unsupported, [], `${entry.at}: a budget case must not be refused`)

@@ -18,13 +18,13 @@ const expressions = (...scripts) => scripts.map((script) => '-e ' + quote(script
 const expected = (stdout, exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
 const command = (args, file = 'input', flags = '') => `sed ${flags} ${args} ${file}`
 
-function check(args, stdout, file = 'input', flags = '') {
-  assert.deepEqual(createTerminal(FILES).run(command(args, file, flags)), expected(stdout))
+async function check(args, stdout, file = 'input', flags = '') {
+  assert.deepEqual(await createTerminal(FILES).run(command(args, file, flags)), expected(stdout))
 }
 
 describe('sed text resumes across expression boundaries', () => {
-  it('supports the exact split-expression insert command', () => {
-    const result = createTerminal({ input: 'qwe rty\n' }).run("sed -e 'i\\' -e 'TEXT' input")
+  it('supports the exact split-expression insert command', async () => {
+    const result = await createTerminal({ input: 'qwe rty\n' }).run("sed -e 'i\\' -e 'TEXT' input")
     assert.deepEqual(result, expected('TEXT\nqwe rty\n'))
   })
   const cases = [
@@ -41,29 +41,29 @@ describe('sed text resumes across expression boundaries', () => {
   ]
   for (const kind of ['a', 'i', 'c']) {
     for (const [parts, text] of cases) {
-      it(`${kind} ${JSON.stringify(parts)}`, () => {
+      it(`${kind} ${JSON.stringify(parts)}`, async () => {
         const args = expressions(kind + parts[0], ...parts.slice(1))
         const stdout = kind === 'a' ? FILES.input + text : kind === 'i' ? text + FILES.input : text
-        check(args, stdout)
-        check(args, text, 'input', '-n')
+        await check(args, stdout)
+        await check(args, text, 'input', '-n')
       })
     }
-    it(`${kind} empty later expression completes an empty text line`, () => {
+    it(`${kind} empty later expression completes an empty text line`, async () => {
       const text = '\n'
-      check(expressions(kind + '\\', ''), kind === 'a' ? FILES.input + text : kind === 'i' ? text + FILES.input : text)
+      await check(expressions(kind + '\\', ''), kind === 'a' ? FILES.input + text : kind === 'i' ? text + FILES.input : text)
     })
-    it(`${kind} completed text lets later expressions resume command parsing`, () => {
+    it(`${kind} completed text lets later expressions resume command parsing`, async () => {
       const stdout = kind === 'a' ? 'line\n\n' : kind === 'i' ? '\nline\n' : '\n'
-      check(expressions(kind + '\\', '', 'p'), stdout, 'input', '-n')
+      await check(expressions(kind + '\\', '', 'p'), stdout, 'input', '-n')
     })
-    it(`${kind} completion does not cross a normal text-ending newline`, () => {
+    it(`${kind} completion does not cross a normal text-ending newline`, async () => {
       const text = 'one\ntwo\n'
       const stdout = kind === 'a' ? 'line\n' + text : kind === 'i' ? text + 'line\n' : text
-      check(expressions(kind + '\\', 'one\\\ntwo\np'), stdout, 'input', '-n')
+      await check(expressions(kind + '\\', 'one\\\ntwo\np'), stdout, 'input', '-n')
     })
-    it(`${kind} NUL mode keeps text-source line endings`, () => {
+    it(`${kind} NUL mode keeps text-source line endings`, async () => {
       const text = kind === 'a' ? 'first\nsecond\n' : 'first\nsecond\0'
-      check(expressions(kind + ' first\\', 'second'), text, 'zero', '-zn')
+      await check(expressions(kind + ' first\\', 'second'), text, 'zero', '-zn')
     })
   }
 })
@@ -84,16 +84,16 @@ describe('sed text continuation honors script file and option order', () => {
   ]
   for (const [args, stdout] of cases) it(args, () => check(args, stdout))
 
-  it('reads continuation text from script stdin before data input', () => {
+  it('reads continuation text from script stdin before data input', async () => {
     const run = "printf 'tail\\n' | sed " + expressions('a\\') + ' -f - input'
-    assert.deepEqual(createTerminal(FILES).run(run), expected('line\ntail\n'))
+    assert.deepEqual(await createTerminal(FILES).run(run), expected('line\ntail\n'))
   })
-  it('consumed script stdin is not reused as data', () => {
+  it('consumed script stdin is not reused as data', async () => {
     const run = "printf 'tail\\n' | sed " + expressions('a\\') + ' -f -'
-    assert.deepEqual(createTerminal(FILES).run(run), expected(''))
+    assert.deepEqual(await createTerminal(FILES).run(run), expected(''))
   })
-  it('missing continuation script files fail before input execution', () => {
-    const result = createTerminal(FILES).run(command(expressions('p', 'a\\') + ' -f missing'))
+  it('missing continuation script files fail before input execution', async () => {
+    const result = await createTerminal(FILES).run(command(expressions('p', 'a\\') + ' -f missing'))
     assert.equal(result.stdout, '')
     assert.equal(result.exitCode, 4)
     assert.match(result.stderr, /missing: No such file/u)
@@ -103,75 +103,75 @@ describe('sed text continuation honors script file and option order', () => {
 
 describe('sed final text EOF retains pending raw bytes and NULL text', () => {
   for (const kind of ['a', 'i', 'c']) {
-    it(`${kind} bare final backslash does not print an empty text line`, () => {
-      check(quote(kind + '\\'), kind === 'c' ? '' : 'line\n')
-      check(expressions(kind + '\\'), kind === 'c' ? '' : 'line\n')
-      check(expressions(kind + '\\'), '', 'input', '-n')
-      check(expressions(kind + '\\'), '', 'empty')
+    it(`${kind} bare final backslash does not print an empty text line`, async () => {
+      await check(quote(kind + '\\'), kind === 'c' ? '' : 'line\n')
+      await check(expressions(kind + '\\'), kind === 'c' ? '' : 'line\n')
+      await check(expressions(kind + '\\'), '', 'input', '-n')
+      await check(expressions(kind + '\\'), '', 'empty')
     })
-    it(`${kind} NULL text keeps its own missing-delimiter behavior`, () => {
+    it(`${kind} NULL text keeps its own missing-delimiter behavior`, async () => {
       const stdout = kind === 'a' ? 'line\n' : kind === 'i' ? 'line' : ''
-      check(expressions(kind + '\\'), stdout, 'unterminated')
-      check(expressions('p', kind + '\\'), kind === 'a' ? 'line\n' : 'line', 'unterminated', '-n')
+      await check(expressions(kind + '\\'), stdout, 'unterminated')
+      await check(expressions('p', kind + '\\'), kind === 'a' ? 'line\n' : 'line', 'unterminated', '-n')
     })
     for (const raw of [String.raw`\0`, String.raw`\x80`, String.raw`\c\x`, String.raw`\n\t`]) {
-      it(`${kind} final pending ${raw} stays literal`, () => {
+      it(`${kind} final pending ${raw} stays literal`, async () => {
         const args = expressions(kind + '\\', raw + '\\')
-        check(args, raw + '\n', 'input', '-n')
-        check(args, raw + (kind === 'a' ? '\n' : '\0'), 'zero', '-zn')
+        await check(args, raw + '\n', 'input', '-n')
+        await check(args, raw + (kind === 'a' ? '\n' : '\0'), 'zero', '-zn')
       })
     }
-    it(`${kind} an empty later source completes and normalizes pending text`, () => {
-      check(expressions(kind + '\\', String.raw`\0` + '\\', ''), '0\n\n', 'input', '-n')
+    it(`${kind} an empty later source completes and normalizes pending text`, async () => {
+      await check(expressions(kind + '\\', String.raw`\0` + '\\', ''), '0\n\n', 'input', '-n')
     })
   }
-  it('pending text is scoped to one sed invocation', () => {
+  it('pending text is scoped to one sed invocation', async () => {
     const terminal = createTerminal(FILES)
-    assert.deepEqual(terminal.run(command(expressions('a\\'))), expected('line\n'))
-    assert.deepEqual(terminal.run(command(expressions('p'), 'input', '-n')), expected('line\n'))
+    assert.deepEqual(await terminal.run(command(expressions('a\\'))), expected('line\n'))
+    assert.deepEqual(await terminal.run(command(expressions('p'), 'input', '-n')), expected('line\n'))
   })
 })
 
 describe('sed continuation syntax and normalization failures remain precise', () => {
-  it('a closing brace absorbed as text cannot close a command block', () => {
-    assert.deepEqual(createTerminal(FILES).run(command(expressions('{a\\', '}'))), expected('', 1, "sed: unmatched '{'\n"))
+  it('a closing brace absorbed as text cannot close a command block', async () => {
+    assert.deepEqual(await createTerminal(FILES).run(command(expressions('{a\\', '}'))), expected('', 1, "sed: unmatched '{'\n"))
   })
-  it('a later source triggers ordinary recursive control escape validation', () => {
+  it('a later source triggers ordinary recursive control escape validation', async () => {
     const args = expressions('a\\', String.raw`\c\x` + '\\', '')
-    assert.deepEqual(createTerminal(FILES).run(command(args)), expected('', 1, 'sed: recursive escaping after \\c not allowed\n'))
+    assert.deepEqual(await createTerminal(FILES).run(command(args)), expected('', 1, 'sed: recursive escaping after \\c not allowed\n'))
   })
-  it('unrepresentable completed byte text still reaches diagnostics', () => {
+  it('unrepresentable completed byte text still reaches diagnostics', async () => {
     const run = command(expressions('a\\', String.raw`\x80` + '\\', ''))
     const message = 'sed: byte output that is not valid UTF-8 cannot be represented by this string-based terminal'
     const unsupported = [{ kind: 'feature', command: 'sed', detail: 'partial UTF-8 byte sequence', message }]
     const terminal = createTerminal(FILES)
-    assert.deepEqual(terminal.run(run), expected('', 1, message + '\n', unsupported))
-    assert.deepEqual(terminal.run(run + ' 2>/dev/null | cat'), expected('', 0, '', unsupported))
+    assert.deepEqual(await terminal.run(run), expected('', 1, message + '\n', unsupported))
+    assert.deepEqual(await terminal.run(run + ' 2>/dev/null | cat'), expected('', 0, '', unsupported))
   })
-  it('unsupported commands after completed text retain their diagnostic', () => {
+  it('unsupported commands after completed text retain their diagnostic', async () => {
     const run = command(expressions('a\\', 'tail\nF'))
     const terminal = createTerminal(FILES)
-    const result = terminal.run(run)
+    const result = await terminal.run(run)
     assert.equal(result.stdout, '')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['script'])
-    assert.deepEqual(terminal.run(run + ' 2>/dev/null | cat'), expected('', 0, '', result.unsupported))
+    assert.deepEqual(await terminal.run(run + ' 2>/dev/null | cat'), expected('', 0, '', result.unsupported))
   })
-  it('zero escapes remain literal zero in transliteration text', () => {
-    assert.deepEqual(createTerminal({ input: '0\n' }).run(String.raw`sed 'y/\0/x/' input`), expected('x\n'))
+  it('zero escapes remain literal zero in transliteration text', async () => {
+    assert.deepEqual(await createTerminal({ input: '0\n' }).run(String.raw`sed 'y/\0/x/' input`), expected('x\n'))
   })
 })
 
 describe('sed quit flushes a pending record delimiter before append text', () => {
   for (const flags of ['', '-z']) {
     const delimiter = flags ? '\0' : '\n'
-    it(`q flushes preceding output with ${flags || 'line'} delimiters`, () => {
-      check(expressions('q'), 'line' + delimiter, 'unterminated', flags)
-      check(expressions('p', 'q'), 'line' + delimiter, 'unterminated', flags + ' -n')
-      check(expressions('q'), '', 'unterminated', flags + ' -n')
+    it(`q flushes preceding output with ${flags || 'line'} delimiters`, async () => {
+      await check(expressions('q'), 'line' + delimiter, 'unterminated', flags)
+      await check(expressions('p', 'q'), 'line' + delimiter, 'unterminated', flags + ' -n')
+      await check(expressions('q'), '', 'unterminated', flags + ' -n')
     })
-    it(`q preserves raw append ending after its flush with ${flags || 'line'} delimiters`, () => {
-      check(expressions(String.raw`a tail\c`, 'q'), 'line' + delimiter + 'tailJ', 'unterminated', flags)
+    it(`q preserves raw append ending after its flush with ${flags || 'line'} delimiters`, async () => {
+      await check(expressions(String.raw`a tail\c`, 'q'), 'line' + delimiter + 'tailJ', 'unterminated', flags)
     })
   }
 })

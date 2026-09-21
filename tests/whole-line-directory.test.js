@@ -15,8 +15,8 @@ const FILES = {
   'src/b.txt': 'a\n',
 }
 
-function check(line, stdout, exitCode = 0, files = FILES) {
-  const result = createTerminal(files).run(line)
+async function check(line, stdout, exitCode = 0, files = FILES) {
+  const result = await createTerminal(files).run(line)
   assert.equal(result.stdout, stdout, line)
   assert.equal(result.stderr, '', line)
   assert.equal(result.exitCode, exitCode, line)
@@ -82,8 +82,8 @@ describe('grep -x retains unsupported diagnostics', () => {
     ["grep -x a binary", { binary: 'a\0b\n' }, 'binary input'],
     ["grep -xP '(?i)a' lines", FILES, 'PCRE group'],
   ]) {
-    it(line, () => {
-      const result = createTerminal(files).run(`${line} 2>/dev/null | cat`)
+    it(line, async () => {
+      const result = await createTerminal(files).run(`${line} 2>/dev/null | cat`)
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
       assert.deepEqual(result.unsupported.map((entry) => entry.detail), [detail])
@@ -115,8 +115,8 @@ describe('ls -d lists operands themselves', () => {
     it(line, () => check(line, stdout, 0, TREE))
   }
 
-  it('keeps valid operands when another lookup fails', () => {
-    const result = createTerminal(TREE).run('ls -d a missing z/../b')
+  it('keeps valid operands when another lookup fails', async () => {
+    const result = await createTerminal(TREE).run('ls -d a missing z/../b')
     assert.equal(result.stdout, 'a\n')
     assert.equal(result.exitCode, 2)
     assert.match(result.stderr, /ls: cannot access 'missing': No such file or directory/u)
@@ -126,8 +126,8 @@ describe('ls -d lists operands themselves', () => {
 
   // -l keeps -d to the operands: one long row each, no total, no descent.
   for (const [line, names] of [['ls -ld a', ['a']], ['ls -dl .', ['.']], ['ls -ld */', ['a/', 'b/']]]) {
-    it(`${line} lists the operands themselves in long form`, () => {
-      const result = createTerminal(TREE).run(line)
+    it(`${line} lists the operands themselves in long form`, async () => {
+      const result = await createTerminal(TREE).run(line)
       const rows = result.stdout.split('\n').slice(0, -1)
       assert.deepEqual(rows.map((row) => row.slice(row.lastIndexOf(' ') + 1)), names)
       for (const row of rows) assert.match(row, /^drwx------ \d+ user user 4096 [A-Z][a-z]{2} [ \d]\d \d\d:\d\d /u)

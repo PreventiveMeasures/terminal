@@ -14,24 +14,24 @@ function terminal(excerpt) {
 }
 
 describe('numbered source excerpt from reported command', () => {
-  it('rejects the pasted unterminated quote before executing the semicolon list', () => {
-    const result = terminal().run(pipeline + '; echo "---"; ' + direct)
+  it('rejects the pasted unterminated quote before executing the semicolon list', async () => {
+    const result = await terminal().run(pipeline + '; echo "---"; ' + direct)
     assert.deepEqual(result, { ...expected(''), stderr: 'error: unterminated single quote\n', exitCode: 2 })
   })
 
-  it('runs both completed commands with the expected source line numbers', () => {
+  it('runs both completed commands with the expected source line numbers', async () => {
     const command = pipeline + '; echo "---"; ' + direct + "' in.txt | head -5"
     const excerpt = Array.from({ length: 5 }, (_, index) => `${index + 700}: source line ${index + 700}\n`).join('')
-    assert.deepEqual(terminal().run(command), expected(excerpt + '---\n' + excerpt, previewNotes))
+    assert.deepEqual(await terminal().run(command), expected(excerpt + '---\n' + excerpt, previewNotes))
   })
 
-  it('keeps native index semantics when the search also matches the added number', () => {
+  it('keeps native index semantics when the search also matches the added number', async () => {
     const t = terminal(['alpha', '2 second', '', '  indented', 'plain'])
-    assert.deepEqual(t.run(pipeline), expected('700: alpha\n701: 2\t2 second\n702:        3\t\n703: indented\n704: plain\n', previewNotes))
+    assert.deepEqual(await t.run(pipeline), expected('700: alpha\n701: 2\t2 second\n702:        3\t\n703: indented\n704: plain\n', previewNotes))
   })
 
-  it('preserves blank lines and indentation when awk reads the original file', () => {
+  it('preserves blank lines and indentation when awk reads the original file', async () => {
     const t = terminal(['alpha', '2 second', '', '  indented', 'plain'])
-    assert.deepEqual(t.run(direct + "' in.txt | head -5"), expected('700: alpha\n701: 2 second\n702: \n703:   indented\n704: plain\n', previewNotes))
+    assert.deepEqual(await t.run(direct + "' in.txt | head -5"), expected('700: alpha\n701: 2 second\n702: \n703:   indented\n704: plain\n', previewNotes))
   })
 })

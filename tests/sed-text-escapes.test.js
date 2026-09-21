@@ -25,48 +25,48 @@ describe('sed text commands normalize escapes as GNU text buffers', () => {
   ]
   for (const [text, stdout] of cases) {
     for (const kind of ['a', 'i', 'c']) {
-      it(`${kind} ${JSON.stringify(text)}`, () => {
+      it(`${kind} ${JSON.stringify(text)}`, async () => {
         const command = `sed -n ${quote(kind + '\\\n' + text)} input`
-        assert.deepEqual(createTerminal({ input: 'line\n' }).run(command), expected(stdout))
+        assert.deepEqual(await createTerminal({ input: 'line\n' }).run(command), expected(stdout))
       })
     }
   }
-  it('a leading short-form backslash introduces text instead of an escape', () => {
-    assert.deepEqual(createTerminal({ input: 'line\n' }).run(`sed -n ${quote(String.raw`a \n\t`)} input`), expected('n\t\n'))
+  it('a leading short-form backslash introduces text instead of an escape', async () => {
+    assert.deepEqual(await createTerminal({ input: 'line\n' }).run(`sed -n ${quote(String.raw`a \n\t`)} input`), expected('n\t\n'))
   })
 })
 
 describe('sed text controls at the final compiler newline', () => {
   for (const kind of ['a', 'i', 'c']) {
     for (const nul of [false, true]) {
-      it(`${kind} consumes its final control operand under ${nul ? '-z' : 'line'} mode`, () => {
+      it(`${kind} consumes its final control operand under ${nul ? '-z' : 'line'} mode`, async () => {
         const command = `sed -n ${nul ? '-z ' : ''}${quote(kind + String.raw` tail\c`)} input`
         const stdout = kind === 'a' ? 'tailJ' : 'tail' + (nul ? '\0' : '\n')
-        assert.deepEqual(createTerminal({ input: 'line\n' }).run(command), expected(stdout))
+        assert.deepEqual(await createTerminal({ input: 'line\n' }).run(command), expected(stdout))
       })
     }
   }
-  it('raw append output without LF does not separate the next input record', () => {
-    assert.deepEqual(createTerminal({ input: 'first\nsecond\n' }).run(`sed ${quote(String.raw`1a tail\c`)} input`), expected('first\ntailJsecond\n'))
+  it('raw append output without LF does not separate the next input record', async () => {
+    assert.deepEqual(await createTerminal({ input: 'first\nsecond\n' }).run(`sed ${quote(String.raw`1a tail\c`)} input`), expected('first\ntailJsecond\n'))
   })
 })
 
 describe('sed text errors and unsupported byte output preserve diagnostics', () => {
   for (const text of [String.raw`\x80`, String.raw`\xff`, String.raw`\d999`, String.raw`\cé`, String.raw`\xc3x`]) {
-    it(`refuses text that cannot be represented losslessly: ${text}`, () => {
+    it(`refuses text that cannot be represented losslessly: ${text}`, async () => {
       const command = `sed ${quote('a\\\n' + text)} input`
       const message = 'sed: byte output that is not valid UTF-8 cannot be represented by this string-based terminal'
       const unsupported = [{ kind: 'feature', command: 'sed', detail: 'partial UTF-8 byte sequence', message }]
       const terminal = createTerminal({ input: 'line\n' })
-      assert.deepEqual(terminal.run(command), expected('', 1, message + '\n', unsupported))
-      assert.deepEqual(terminal.run(command + ' 2>/dev/null | cat'), expected('', 0, '', unsupported))
+      assert.deepEqual(await terminal.run(command), expected('', 1, message + '\n', unsupported))
+      assert.deepEqual(await terminal.run(command + ' 2>/dev/null | cat'), expected('', 0, '', unsupported))
     })
   }
   for (const text of [String.raw`\c\x`, String.raw`\c\n`, '\\c\\']) {
-    it(`invalid recursive control escaping is an ordinary syntax error: ${text}`, () => {
+    it(`invalid recursive control escaping is an ordinary syntax error: ${text}`, async () => {
       // A physical LF follows the last case so the command text is complete.
       const command = `sed ${quote('a\\\n' + text + '\n')} input`
-      assert.deepEqual(createTerminal({ input: 'line\n' }).run(command), expected('', 1, 'sed: recursive escaping after \\c not allowed\n'))
+      assert.deepEqual(await createTerminal({ input: 'line\n' }).run(command), expected('', 1, 'sed: recursive escaping after \\c not allowed\n'))
     })
   }
 })

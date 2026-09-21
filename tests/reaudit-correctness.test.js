@@ -41,15 +41,15 @@ for (const count of ['+2', '" 2"', '9007199254740993', '18446744073709551616', '
   )
 }
 
-function virtual(command) {
-  const r = createTerminal(FILES).run(command)
+async function virtual(command) {
+  const r = await createTerminal(FILES).run(command)
   assert.deepEqual(r.unsupported, [], command + ': refusing the command does not count as correct output')
   return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }
 }
 describe('re-audit correctness — permanent regressions', () => {
   for (const [command, stdout] of SUPPORTED) {
-    it(command, () => {
-      assert.deepEqual(virtual(command), { stdout, stderr: '', exitCode: 0 })
+    it(command, async () => {
+      assert.deepEqual(await virtual(command), { stdout, stderr: '', exitCode: 0 })
     })
   }
 })

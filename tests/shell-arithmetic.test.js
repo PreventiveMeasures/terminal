@@ -144,41 +144,41 @@ describe('arithmetic expansion integrates with shell words and state', () => {
     ['n=1; [[ $((n++)) -eq n++ ]]; echo "$? $n"', '1 3\n'],
     ['[[ "1+2" -eq 3 ]]; echo "$?"', '0\n'],
   ]) {
-    it(`preserves expansion order: ${command}`, () => {
-      assert.deepEqual(createTerminal({}).run(command), expected(stdout))
+    it(`preserves expansion order: ${command}`, async () => {
+      assert.deepEqual(await createTerminal({}).run(command), expected(stdout))
     })
   }
 
-  it('keeps large integers exact through expansion and assignment', () => {
+  it('keeps large integers exact through expansion and assignment', async () => {
     const terminal = createTerminal({})
-    assert.deepEqual(terminal.run('n=9007199254740993; printf "%s\\n" "$((n + 2))"'), expected('9007199254740995\n'))
-    assert.deepEqual(terminal.run('n=$((n+1)); printf "%s\\n" "$n"'), expected('9007199254740994\n'))
+    assert.deepEqual(await terminal.run('n=9007199254740993; printf "%s\\n" "$((n + 2))"'), expected('9007199254740995\n'))
+    assert.deepEqual(await terminal.run('n=$((n+1)); printf "%s\\n" "$n"'), expected('9007199254740994\n'))
   })
 
-  it('applies increments left to right without changing quoting', () => {
+  it('applies increments left to right without changing quoting', async () => {
     const terminal = createTerminal({})
-    assert.deepEqual(terminal.run('n=1; printf "%s\\n" "$((n++)):$((++n)):$n"'), expected('1:3:3\n'))
-    assert.deepEqual(terminal.run("printf '%s\\n' '$((n++))'"), expected('$((n++))\n'))
-    assert.deepEqual(terminal.run('printf "%s\\n" "$n"'), expected('3\n'))
+    assert.deepEqual(await terminal.run('n=1; printf "%s\\n" "$((n++)):$((++n)):$n"'), expected('1:3:3\n'))
+    assert.deepEqual(await terminal.run("printf '%s\\n' '$((n++))'"), expected('$((n++))\n'))
+    assert.deepEqual(await terminal.run('printf "%s\\n" "$n"'), expected('3\n'))
   })
 
   for (const expression of ['1/0', 'a[0]', '1 || a[0]', '1<<64', 'RANDOM']) {
-    it(`survives stderr suppression and pipeline status: ${expression}`, () => {
-      const result = createTerminal({}).run(`echo $(( ${expression} )) 2>/dev/null | cat`)
+    it(`survives stderr suppression and pipeline status: ${expression}`, async () => {
+      const result = await createTerminal({}).run(`echo $(( ${expression} )) 2>/dev/null | cat`)
       assert.equal(result.stdout, '')
       assert.ok(result.unsupported.some(({ detail }) => detail.startsWith('arithmetic ')), JSON.stringify(result))
     })
   }
 
   for (const expression of ['1/0', 'a', '1<<64']) {
-    it(`halts the current input after failed expansion: ${expression}`, () => {
+    it(`halts the current input after failed expansion: ${expression}`, async () => {
       const terminal = createTerminal({})
-      terminal.run('a=a')
-      const result = terminal.run(`echo before; echo $(( ${expression} )); echo after`)
+      await terminal.run('a=a')
+      const result = await terminal.run(`echo before; echo $(( ${expression} )); echo after`)
       assert.equal(result.stdout, 'before\n')
       assert.equal(result.exitCode, 1)
       assert.equal(result.unsupported.length, 1)
-      assert.deepEqual(terminal.run('echo fresh'), expected('fresh\n'))
+      assert.deepEqual(await terminal.run('echo fresh'), expected('fresh\n'))
     })
   }
 
@@ -187,24 +187,24 @@ describe('arithmetic expansion integrates with shell words and state', () => {
     ['echo "$(echo before; echo $((1/0)); echo lost)"; echo outer', 'before\nouter\n'],
     ['echo before; echo $((1/0)) | cat; echo after', 'before\nafter\n'],
   ]) {
-    it(`isolates failed arithmetic expansion: ${command}`, () => {
-      const result = createTerminal({}).run(command)
+    it(`isolates failed arithmetic expansion: ${command}`, async () => {
+      const result = await createTerminal({}).run(command)
       assert.equal(result.stdout, stdout)
       assert.equal(result.exitCode, 0)
       assert.ok(result.unsupported.some(({ detail }) => detail === 'arithmetic division'))
     })
   }
 
-  it('does not reinterpret quotes supplied by an expanded variable as expression quoting', () => {
-    const result = createTerminal({}).run("n='\"1\"'; echo $(( $n ))")
+  it('does not reinterpret quotes supplied by an expanded variable as expression quoting', async () => {
+    const result = await createTerminal({}).run("n='\"1\"'; echo $(( $n ))")
     assert.equal(result.stdout, '')
     assert.equal(result.exitCode, 1)
     assert.ok(result.unsupported.some(({ detail }) => detail === 'arithmetic syntax'))
   })
 
   for (const expression of ['"1"+2', "'1'+2"]) {
-    it(`keeps excluded literal quoting visible: ${expression}`, () => {
-      const result = createTerminal({}).run(`echo $(( ${expression} ))`)
+    it(`keeps excluded literal quoting visible: ${expression}`, async () => {
+      const result = await createTerminal({}).run(`echo $(( ${expression} ))`)
       assert.equal(result.stdout, '')
       assert.notEqual(result.exitCode, 0)
       assert.ok(result.unsupported.length > 0)

@@ -8,9 +8,9 @@ import { createTerminal } from '@preventive/terminal'
 // The GPL upstream scripts are not vendored or executed by these tests.
 const quote = (text) => `'${text.replaceAll("'", "'\\''")}'`
 
-function check(script, input, stdout, flags = '') {
+async function check(script, input, stdout, flags = '') {
   const terminal = createTerminal({ input })
-  assert.deepEqual(terminal.run(`sed ${flags} ${quote(script)} input`), {
+  assert.deepEqual(await terminal.run(`sed ${flags} ${quote(script)} input`), {
     stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
   })
 }
@@ -82,8 +82,8 @@ describe('GNU sed audit — address ranges', () => {
     ['s/body/end/;/end/,/last/p', 'end\nstop\nafter\nlast\n'],
   ]) it(script, () => check(script, input, stdout, '-n'))
 
-  it('uses cumulative addresses and separates missing final newlines across operands', () => {
-    const result = createTerminal({ first: 'oak', empty: '', last: 'elm\nfir' }).run("sed -n '2,$p' first empty last")
+  it('uses cumulative addresses and separates missing final newlines across operands', async () => {
+    const result = await createTerminal({ first: 'oak', empty: '', last: 'elm\nfir' }).run("sed -n '2,$p' first empty last")
     assert.deepEqual(result, { stdout: 'elm\nfir', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 })
@@ -106,15 +106,15 @@ describe('GNU sed audit — unavailable features remain observable', () => {
     String.raw`s/\(oak\)\1/elm/`,
   ]
   for (const script of scripts) {
-    it(script, () => {
+    it(script, async () => {
       const terminal = createTerminal({ input: 'oakoak\n' })
       const command = `sed ${quote(script)} input`
-      const result = terminal.run(command)
+      const result = await terminal.run(command)
       assert.notEqual(result.exitCode, 0)
       assert.match(result.stderr, /sed:/u)
       assert.ok(result.unsupported.length > 0)
       assert.ok(result.unsupported.every(({ command: name }) => name === 'sed'))
-      const hidden = terminal.run(`${command} 2>/dev/null | cat`)
+      const hidden = await terminal.run(`${command} 2>/dev/null | cat`)
       assert.equal(hidden.stderr, '')
       assert.equal(hidden.exitCode, 0)
       assert.deepEqual(hidden.unsupported, result.unsupported)
@@ -143,8 +143,8 @@ describe('GNU sed audit — invalid syntax is an ordinary error', () => {
     ['', ['a**', String.raw`a\+*`, String.raw`a*\{2\}`, String.raw`a\{2\}*`, String.raw`\{1\}`, String.raw`\b\{1\}`]],
   ]) {
     for (const pattern of patterns) {
-      it(`rejects invalid ${flags || 'BRE'} repetition or grouping: ${pattern}`, () => {
-        const result = createTerminal({ input: pattern + '\n' }).run(`sed ${flags} ${quote(`s/${pattern}/X/`)} input`)
+      it(`rejects invalid ${flags || 'BRE'} repetition or grouping: ${pattern}`, async () => {
+        const result = await createTerminal({ input: pattern + '\n' }).run(`sed ${flags} ${quote(`s/${pattern}/X/`)} input`)
         assert.equal(result.stdout, '')
         assert.equal(result.exitCode, 1)
         assert.notEqual(result.stderr, '')
@@ -153,8 +153,8 @@ describe('GNU sed audit — invalid syntax is an ordinary error', () => {
     }
   }
   for (const [flags, script] of [['-E', 's/a{,32768}/X/'], ['', String.raw`s/a\{,32768\}/X/`]]) {
-    it(`validates repetition bounds with an omitted minimum: ${script}`, () => {
-      const result = createTerminal({ input: 'a\n' }).run(`sed ${flags} ${quote(script)} input`)
+    it(`validates repetition bounds with an omitted minimum: ${script}`, async () => {
+      const result = await createTerminal({ input: 'a\n' }).run(`sed ${flags} ${quote(script)} input`)
       assert.equal(result.exitCode, 1)
       assert.match(result.stderr, /Regular expression too big/u)
       assert.deepEqual(result.unsupported, [])
@@ -162,8 +162,8 @@ describe('GNU sed audit — invalid syntax is an ordinary error', () => {
   }
   for (const script of [String.raw`/\1/,$p`, String.raw`s/\(oak\1\)/elm/`, String.raw`s/\1\(oak\)/elm/`, String.raw`s/oak/\1/`, String.raw`s/oak\{x\}/elm/`, 's/oak/elm/gg', 's/oak/elm/pp']) {
     for (const input of ['', 'oakoak\n']) {
-      it(`${script} with ${input ? 'nonempty' : 'empty'} input`, () => {
-        const result = createTerminal({ input }).run(`sed ${quote(script)} input`)
+      it(`${script} with ${input ? 'nonempty' : 'empty'} input`, async () => {
+        const result = await createTerminal({ input }).run(`sed ${quote(script)} input`)
         assert.equal(result.stdout, '')
         assert.equal(result.exitCode, 1)
         assert.notEqual(result.stderr, '')

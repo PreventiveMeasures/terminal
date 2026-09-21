@@ -35,8 +35,8 @@ const CASES = [
   [String.raw`file='a/\[b\]/c.ts'; cat "$file"`, 'literal backslashes\n'],
 ]
 
-function virtual(command) {
-  const r = createTerminal(FILES).run(command)
+async function virtual(command) {
+  const r = await createTerminal(FILES).run(command)
   assert.deepEqual(r.unsupported, [], command)
   assert.equal(r.cwd, '/', command)
   return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }
@@ -44,11 +44,11 @@ function virtual(command) {
 
 describe('escaped bracket paths — shell regression cases', () => {
   for (const [command, stdout] of CASES) {
-    it(command, () => assert.deepEqual(virtual(command), { stdout, stderr: '', exitCode: 0 }))
+    it(command, async () => assert.deepEqual(await virtual(command), { stdout, stderr: '', exitCode: 0 }))
   }
 
-  it('reports an absent literal path without retaining shell escape characters', () => {
-    assert.deepEqual(virtual(String.raw`cat a/\[missing\]/c.ts`), {
+  it('reports an absent literal path without retaining shell escape characters', async () => {
+    assert.deepEqual(await virtual(String.raw`cat a/\[missing\]/c.ts`), {
       stdout: '', stderr: 'cat: a/[missing]/c.ts: No such file or directory\n', exitCode: 1,
     })
   })

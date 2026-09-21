@@ -41,8 +41,8 @@ const CASES = [
 
 describe('options from historical agent command logs', () => {
   for (const [command, stdout, exitCode = 0] of CASES) {
-    it(command, () => {
-      const result = createTerminal(FILES).run(command)
+    it(command, async () => {
+      const result = await createTerminal(FILES).run(command)
       assert.equal(result.stdout, stdout)
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, exitCode)

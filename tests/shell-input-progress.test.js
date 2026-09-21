@@ -31,34 +31,34 @@ describe('incremental parsing retains compound-command progress', () => {
     ['for value in one; do\n', 'done'],
     ['if true; then for value in one; do {\n', '}; done; fi'],
   ]) {
-    it(`retains the grammar stack for ${prefix.trim()}`, () => {
+    it(`retains the grammar stack for ${prefix.trim()}`, async () => {
       const source = prefix + ':\n'.repeat(1000) + 'echo complete\n' + suffix
       assert.deepEqual([...parseUnits(source)], [parseLine(source)])
-      const result = createTerminal({}).run(source)
+      const result = await createTerminal({}).run(source)
       assert.deepEqual(result, { stdout: 'complete\n', stderr: '', exitCode: 0, cwd: '/', unsupported: [], notes: [] })
     })
   }
 
-  it('does not execute commands from a large compound with an invalid ending', () => {
+  it('does not execute commands from a large compound with an invalid ending', async () => {
     const t = createTerminal({}, { mount: '/src', writable: '/tmp/' })
     const source = 'echo before\n{\nprintf changed >/tmp/file\n' + ':\n'.repeat(2000) + 'echo ;;\n}\n'
-    const result = t.run(source)
+    const result = await t.run(source)
     assert.equal(result.stdout, 'before\n')
     assert.equal(result.exitCode, 2)
     assert.deepEqual(result.unsupported, [])
     assert.deepEqual(result.notes, [])
-    assert.equal(t.run('test -f /tmp/file').exitCode, 1)
+    assert.equal((await t.run('test -f /tmp/file')).exitCode, 1)
   })
 
-  it('never requests another input unit after a completed exit', () => {
+  it('never requests another input unit after a completed exit', async () => {
     const source = '{\n' + ':\n'.repeat(1000) + 'echo before\nexit 7\n}\necho "'
-    const result = createTerminal({}).run(source)
+    const result = await createTerminal({}).run(source)
     assert.deepEqual(result, { stdout: 'before\n', stderr: '', exitCode: 7, cwd: '/', unsupported: [], notes: [] })
   })
 
   // `&` ends a command, so a loop header is the one place it cannot stand.
-  it('retains a loop header the input ends in the middle of', () => {
-    const result = createTerminal({}).run('echo before\nfor value in one & echo bad\n')
+  it('retains a loop header the input ends in the middle of', async () => {
+    const result = await createTerminal({}).run('echo before\nfor value in one & echo bad\n')
     assert.equal(result.stdout, 'before\n')
     assert.equal(result.stderr, 'error: for: unexpected `&` in word list\n')
     assert.notEqual(result.exitCode, 0)

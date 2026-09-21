@@ -11,8 +11,8 @@ describe('filesystem tool integration', () => {
     ["find src -type f -print0 | xargs -0 realpath --relative-to=src", 'a.js\nb.js\nsub/c.js\n'],
     ["bytes=$(du -bs src | cut -f1); test \"$bytes\" -eq 11 && echo ok", 'ok\n'],
   ]) {
-    it(command, () => {
-      const result = createTerminal(FILES).run(command)
+    it(command, async () => {
+      const result = await createTerminal(FILES).run(command)
       assert.equal(result.stdout, stdout)
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
@@ -21,23 +21,23 @@ describe('filesystem tool integration', () => {
   }
 
   for (const name of ['du', 'stat', 'realpath']) {
-    it(`${name} is discoverable as a command and excluded from pipe completion`, () => {
+    it(`${name} is discoverable as a command and excluded from pipe completion`, async () => {
       const terminal = createTerminal(FILES)
       assert.ok(terminal.complete('').includes(name))
       assert.ok(terminal.complete('/usr/bin/').includes('/usr/bin/' + name))
       assert.deepEqual(terminal.complete('cat | ' + name), [])
       assert.deepEqual(terminal.complete('cat | /usr/bin/' + name), [])
-      assert.equal(terminal.run('which ' + name).exitCode, 0)
-      assert.match(terminal.run('unknown-command').stderr, new RegExp('\\b' + name + '\\b', 'u'))
+      assert.equal((await terminal.run('which ' + name)).exitCode, 0)
+      assert.match((await terminal.run('unknown-command')).stderr, new RegExp('\\b' + name + '\\b', 'u'))
       assert.throws(() => createTerminal({}, { commands: { [name]: () => '' } }), /built.?in/iu)
     })
   }
 
   for (const [name, args, stdout] of [['du', '-bs src', '11\tsrc\n'], ['stat', "-c '%s' src/a.js", '4\n'], ['realpath', 'src/a.js', '/src/a.js\n']]) {
-    it(`${name} dispatches through supported binary prefixes`, () => {
+    it(`${name} dispatches through supported binary prefixes`, async () => {
       const terminal = createTerminal(FILES)
       for (const prefix of ['/bin/', '/usr/bin/', '/usr/local/bin/', '/sbin/']) {
-        const result = terminal.run(prefix + name + ' ' + args)
+        const result = await terminal.run(prefix + name + ' ' + args)
         assert.equal(result.stdout, stdout)
         assert.equal(result.stderr, '')
         assert.equal(result.exitCode, 0)

@@ -59,8 +59,8 @@ const cases = [
 
 describe('cwd notes accompany actual relative-path lookup failures', () => {
   for (const [line, command, path, exitCode, stderr] of cases) {
-    it(line + ' preserves the failure and points to a verified absolute path', () => {
-      const result = createTerminal(SOURCES, OPTIONS).run(line)
+    it(line + ' preserves the failure and points to a verified absolute path', async () => {
+      const result = await createTerminal(SOURCES, OPTIONS).run(line)
       assert.equal(result.exitCode, exitCode)
       assert.equal(result.stderr, stderr)
       assert.deepEqual(result.unsupported, [])
@@ -69,37 +69,37 @@ describe('cwd notes accompany actual relative-path lookup failures', () => {
     })
   }
 
-  it('reports tree failures even though tree writes the error to stdout', () => {
-    const result = createTerminal(SOURCES, OPTIONS).run('tree dir')
+  it('reports tree failures even though tree writes the error to stdout', async () => {
+    const result = await createTerminal(SOURCES, OPTIONS).run('tree dir')
     assert.equal(result.exitCode, 2)
     assert.equal(result.stderr, '')
     assert.equal(result.stdout, 'dir  [error opening dir]\n\n0 directories, 0 files\n')
     assert.deepEqual(result.notes, [note('tree', 'dir', ['/repo/dir'], undefined, 'dir')])
   })
 
-  it('retains successful file output alongside a missing operand', () => {
-    const result = createTerminal(SOURCES, OPTIONS).run('cat keep file keep')
+  it('retains successful file output alongside a missing operand', async () => {
+    const result = await createTerminal(SOURCES, OPTIONS).run('cat keep file keep')
     assert.equal(result.stdout, 'local\nlocal\n')
     assert.equal(result.stderr, 'cat: file: No such file or directory\n')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.notes, [note('cat', 'file', ['/repo/file'])])
   })
 
-  it('does not turn a valid path in the wrong location into a successful read', () => {
+  it('does not turn a valid path in the wrong location into a successful read', async () => {
     const terminal = createTerminal(SOURCES, OPTIONS)
-    const result = terminal.run('cat file')
+    const result = await terminal.run('cat file')
     assert.equal(result.stdout, '')
     assert.equal(result.exitCode, 1)
     assert.equal(terminal.cwd(), '/repo/sub')
-    assert.equal(terminal.run('cat /repo/file').stdout, 'x\n')
+    assert.equal((await terminal.run('cat /repo/file')).stdout, 'x\n')
   })
 
   for (const [line, stdout] of [
     ['awk \'BEGIN {print (getline value < "file"); print ERRNO}\'', '-1\nNo such file or directory\n'],
     ["awk 'BEGINFILE {if (ERRNO) nextfile} {print}' file keep", 'local\n'],
   ]) {
-    it(line + ' notes an attempted open even when awk handles its error', () => {
-      const result = createTerminal(SOURCES, OPTIONS).run(line)
+    it(line + ' notes an attempted open even when awk handles its error', async () => {
+      const result = await createTerminal(SOURCES, OPTIONS).run(line)
       assert.equal(result.stdout, stdout)
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
@@ -109,61 +109,61 @@ describe('cwd notes accompany actual relative-path lookup failures', () => {
 })
 
 describe('cwd alternatives use real filesystem lookups', () => {
-  it('finds root-relative paths when the source map is mounted at root', () => {
-    const result = createTerminal(SOURCES, { cwd: '/sub' }).run('cat src/file')
+  it('finds root-relative paths when the source map is mounted at root', async () => {
+    const result = await createTerminal(SOURCES, { cwd: '/sub' }).run('cat src/file')
     assert.deepEqual(result.notes, [note('cat', 'src/file', ['/src/file'], '/sub')])
   })
 
-  it('finds mount-relative paths from a cwd set outside the mount', () => {
+  it('finds mount-relative paths from a cwd set outside the mount', async () => {
     // cwd follows the mount by default, so reaching this needs it set apart.
-    const result = createTerminal(SOURCES, { mount: '/repo', cwd: '/' }).run('cat file')
+    const result = await createTerminal(SOURCES, { mount: '/repo', cwd: '/' }).run('cat file')
     assert.deepEqual(result.notes, [note('cat', 'file', ['/repo/file'], '/')])
   })
 
-  it('normalizes mount, cwd and the suggested path while retaining the requested spelling', () => {
-    const result = createTerminal(SOURCES, { mount: '/workspace/../repo//', cwd: '/repo/./sub' }).run('cat ./src//file')
+  it('normalizes mount, cwd and the suggested path while retaining the requested spelling', async () => {
+    const result = await createTerminal(SOURCES, { mount: '/workspace/../repo//', cwd: '/repo/./sub' }).run('cat ./src//file')
     assert.deepEqual(result.notes, [note('cat', './src//file', ['/repo/src/file'])])
   })
 
-  it('reports both root and mounted alternatives without duplicate paths', () => {
+  it('reports both root and mounted alternatives without duplicate paths', async () => {
     const terminal = createTerminal({ ...SOURCES, 'tmp/file': 'mounted\n' }, { ...OPTIONS, writable: '/tmp/' })
-    terminal.run('printf overlay >/tmp/file')
-    const result = terminal.run('cat tmp/file')
+    await terminal.run('printf overlay >/tmp/file')
+    const result = await terminal.run('cat tmp/file')
     assert.deepEqual(result.notes, [note('cat', 'tmp/file', ['/repo/tmp/file', '/tmp/file'], undefined, 'file', true)])
   })
 
-  it('finds home-relative paths when the home is set apart from the mount', () => {
-    const result = createTerminal(SOURCES, { ...OPTIONS, cwd: '/repo', home: '/repo/dir' }).run('cat keep')
+  it('finds home-relative paths when the home is set apart from the mount', async () => {
+    const result = await createTerminal(SOURCES, { ...OPTIONS, cwd: '/repo', home: '/repo/dir' }).run('cat keep')
     assert.deepEqual(result.notes, [note('cat', 'keep', ['/repo/dir/keep'], '/repo')])
   })
 
-  it('names all three roots where each of them answers', () => {
+  it('names all three roots where each of them answers', async () => {
     const sources = { 'repo/inner': '', 'dir/repo/deep': '', 'sub/keep': '' }
-    const result = createTerminal(sources, { mount: '/repo', cwd: '/repo/sub', home: '/repo/dir' }).run('ls repo')
+    const result = await createTerminal(sources, { mount: '/repo', cwd: '/repo/sub', home: '/repo/dir' }).run('ls repo')
     assert.deepEqual(result.notes, [note('ls', 'repo', ['/repo', '/repo/dir/repo', '/repo/repo'], undefined, 'dir')])
   })
 
-  it('checks intermediate components before simplifying dot-dot', () => {
-    const result = createTerminal(SOURCES, OPTIONS).run('cat file/../src/file')
+  it('checks intermediate components before simplifying dot-dot', async () => {
+    const result = await createTerminal(SOURCES, OPTIONS).run('cat file/../src/file')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.notes, [])
   })
 
-  it('checks trailing slashes on candidates', () => {
-    const result = createTerminal(SOURCES, OPTIONS).run('cat file/')
+  it('checks trailing slashes on candidates', async () => {
+    const result = await createTerminal(SOURCES, OPTIONS).run('cat file/')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.notes, [])
   })
 
-  it('quotes requested paths, cwd and alternatives safely', () => {
+  it('quotes requested paths, cwd and alternatives safely', async () => {
     const path = 'line\n"quoted"'
     const files = { [path]: '', 'sub/keep': '' }
-    const result = createTerminal(files, { mount: '/repo "name"', cwd: '/repo "name"/sub' }).run("cat 'line\n\"quoted\"'")
+    const result = await createTerminal(files, { mount: '/repo "name"', cwd: '/repo "name"/sub' }).run("cat 'line\n\"quoted\"'")
     assert.deepEqual(result.notes, [note('cat', path, ['/repo "name"/' + path], '/repo "name"/sub')])
   })
 
-  it('does not search unrelated directories or suggest only matching basenames', () => {
-    const result = createTerminal({ 'elsewhere/file': '', 'sub/keep': '' }, OPTIONS).run('cat file')
+  it('does not search unrelated directories or suggest only matching basenames', async () => {
+    const result = await createTerminal({ 'elsewhere/file': '', 'sub/keep': '' }, OPTIONS).run('cat file')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.notes, [])
   })
@@ -190,8 +190,8 @@ const rootedCases = [
 
 describe('root notes accompany an absolute path another root answers for', () => {
   for (const [line, command, path, exitCode, stderr] of rootedCases) {
-    it(line + ' preserves the failure and points under the mount', () => {
-      const result = createTerminal(SOURCES, OPTIONS).run(line)
+    it(line + ' preserves the failure and points under the mount', async () => {
+      const result = await createTerminal(SOURCES, OPTIONS).run(line)
       assert.equal(result.exitCode, exitCode)
       assert.equal(result.stderr, stderr)
       assert.deepEqual(result.unsupported, [])
@@ -199,60 +199,60 @@ describe('root notes accompany an absolute path another root answers for', () =>
     })
   }
 
-  it('names no cwd, and reads the same from every cwd', () => {
+  it('names no cwd, and reads the same from every cwd', async () => {
     for (const cwd of ['/repo/sub', '/repo', '/']) {
-      const result = createTerminal(SOURCES, { ...OPTIONS, cwd }).run('cat /src/file')
+      const result = await createTerminal(SOURCES, { ...OPTIONS, cwd }).run('cat /src/file')
       assert.deepEqual(result.notes, [rooted('cat', '/src/file', ['/repo/src/file'])], cwd)
       assert.ok(!result.notes[0].includes('cwd'), result.notes[0])
     }
   })
 
-  it('names the home when the home is where the path is', () => {
-    const result = createTerminal(SOURCES, { ...OPTIONS, home: '/repo/dir' }).run('cat /keep')
+  it('names the home when the home is where the path is', async () => {
+    const result = await createTerminal(SOURCES, { ...OPTIONS, home: '/repo/dir' }).run('cat /keep')
     assert.deepEqual(result.notes, [rooted('cat', '/keep', ['/repo/dir/keep'])])
   })
 
-  it('names the mount and the home when both answer, and says they differ', () => {
+  it('names the mount and the home when both answer, and says they differ', async () => {
     const sources = { ...SOURCES, 'home/file': 'home\n' }
-    const result = createTerminal(sources, { ...OPTIONS, home: '/repo/home' }).run('cat /file')
+    const result = await createTerminal(sources, { ...OPTIONS, home: '/repo/home' }).run('cat /file')
     assert.deepEqual(result.notes, [rooted('cat', '/file', ['/repo/file', '/repo/home/file'], 'file', true)])
   })
 
-  it('names a home that repeats the mount once', () => {
+  it('names a home that repeats the mount once', async () => {
     for (const home of [undefined, '/repo', '/workspace/../repo/']) {
-      const result = createTerminal(SOURCES, { ...OPTIONS, home }).run('cat /file')
+      const result = await createTerminal(SOURCES, { ...OPTIONS, home }).run('cat /file')
       assert.deepEqual(result.notes, [rooted('cat', '/file', ['/repo/file'])], String(home))
     }
   })
 
-  it('takes the path from every leading slash', () => {
-    const result = createTerminal(SOURCES, OPTIONS).run('cat ///src//file')
+  it('takes the path from every leading slash', async () => {
+    const result = await createTerminal(SOURCES, OPTIONS).run('cat ///src//file')
     assert.deepEqual(result.notes, [rooted('cat', '///src//file', ['/repo/src/file'])])
   })
 
-  it('checks components, trailing slashes and absent paths as a relative lookup does', () => {
+  it('checks components, trailing slashes and absent paths as a relative lookup does', async () => {
     for (const line of ['cat /file/../src/file', 'cat /file/', 'cat /absent', 'cat /repo/absent']) {
-      const result = createTerminal(SOURCES, OPTIONS).run(line)
+      const result = await createTerminal(SOURCES, OPTIONS).run(line)
       assert.notEqual(result.exitCode, 0, line)
       assert.deepEqual(result.notes, [], line)
     }
   })
 
-  it('has nothing to add when the only root is the one that failed', () => {
-    const result = createTerminal(SOURCES, { cwd: '/sub' }).run('cat /absent')
+  it('has nothing to add when the only root is the one that failed', async () => {
+    const result = await createTerminal(SOURCES, { cwd: '/sub' }).run('cat /absent')
     assert.notEqual(result.exitCode, 0)
     assert.deepEqual(result.notes, [])
   })
 
-  it('points at the mounted tmp rather than leaving the overlay unexplained', () => {
+  it('points at the mounted tmp rather than leaving the overlay unexplained', async () => {
     const terminal = createTerminal({ ...SOURCES, 'tmp/file': 'mounted\n' }, { ...OPTIONS, writable: '/tmp/' })
-    const result = terminal.run('cat /tmp/file')
+    const result = await terminal.run('cat /tmp/file')
     assert.equal(result.stderr, 'cat: /tmp/file: No such file or directory\n')
     assert.deepEqual(result.notes, [rooted('cat', '/tmp/file', ['/repo/tmp/file'])])
   })
 
-  it('deduplicates repeats within a run while keeping each command and path', () => {
-    const result = createTerminal(SOURCES, OPTIONS).run('cat /file /file; cat /file; ls /file; cat /src/file')
+  it('deduplicates repeats within a run while keeping each command and path', async () => {
+    const result = await createTerminal(SOURCES, OPTIONS).run('cat /file /file; cat /file; ls /file; cat /src/file')
     assert.deepEqual(result.notes, [
       rooted('cat', '/file', ['/repo/file']),
       rooted('ls', '/file', ['/repo/file']),
@@ -260,18 +260,18 @@ describe('root notes accompany an absolute path another root answers for', () =>
     ])
   })
 
-  it('survives a redirect that hides the failure, as a relative note does', () => {
-    const result = createTerminal(SOURCES, OPTIONS).run('cat /file 2>/dev/null | true')
+  it('survives a redirect that hides the failure, as a relative note does', async () => {
+    const result = await createTerminal(SOURCES, OPTIONS).run('cat /file 2>/dev/null | true')
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)
     assert.deepEqual(result.notes, [rooted('cat', '/file', ['/repo/file'])])
   })
 
-  it('reaches a wired command through the same lookup', () => {
+  it('reaches a wired command through the same lookup', async () => {
     const terminal = createTerminal(SOURCES, { ...OPTIONS, home: '/repo/dir', commands: {
       read: (io) => { const r = io.readInputs(io.args); return { stderr: r.stderr, exitCode: r.failed ? 1 : 0 } },
     } })
-    const result = terminal.run('read /keep')
+    const result = await terminal.run('read /keep')
     assert.equal(result.stderr, 'read: /keep: No such file or directory\n')
     assert.deepEqual(result.notes, [rooted('read', '/keep', ['/repo/dir/keep'])])
   })
@@ -285,22 +285,22 @@ describe('cwd notes do not describe probes, successful operations or different f
     'grep -m0 x file', 'grep -q local keep file', "sed 'q' keep file", "awk 'BEGIN {exit}' file",
     "awk '{exit}' keep file", 'basename file', 'dirname file', './file',
   ]) {
-    it(line + ' has no cwd note', () => {
-      const result = createTerminal(SOURCES, OPTIONS).run(line)
+    it(line + ' has no cwd note', async () => {
+      const result = await createTerminal(SOURCES, OPTIONS).run(line)
       assert.deepEqual(result.notes.filter((message) => message.includes('was not found from cwd')), [])
     })
   }
 
-  it('does not emit cwd notes for unmatched globs passed to a successful command', () => {
-    const result = createTerminal({ 'file.txt': '', 'sub/keep': '' }, OPTIONS).run('echo *.txt')
+  it('does not emit cwd notes for unmatched globs passed to a successful command', async () => {
+    const result = await createTerminal({ 'file.txt': '', 'sub/keep': '' }, OPTIONS).run('echo *.txt')
     assert.equal(result.stdout, '*.txt\n')
     assert.equal(result.exitCode, 0)
     assert.ok(!result.notes.some((message) => message.includes('was not found from cwd')))
   })
 
-  it('does not report alternative paths when a valid write creates the requested file', () => {
+  it('does not report alternative paths when a valid write creates the requested file', async () => {
     const terminal = createTerminal(SOURCES, { mount: '/repo', cwd: '/tmp', writable: '/tmp/' })
-    const result = terminal.run('cp /repo/file file; cat file')
+    const result = await terminal.run('cp /repo/file file; cat file')
     assert.equal(result.stdout, 'x\n')
     assert.equal(result.exitCode, 0)
     assert.deepEqual(result.notes, [])
@@ -314,68 +314,68 @@ describe('cwd notes survive output routing and respect run isolation', () => {
     'find keep -exec cat file \\; 2>/dev/null | true',
     "printf file | xargs cat 2>/dev/null | true",
   ]) {
-    it(line + ' keeps the note when stderr is hidden', () => {
-      const result = createTerminal(SOURCES, OPTIONS).run(line)
+    it(line + ' keeps the note when stderr is hidden', async () => {
+      const result = await createTerminal(SOURCES, OPTIONS).run(line)
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
       assert.deepEqual(result.notes, [note('cat', 'file', ['/repo/file'])])
     })
   }
 
-  it('deduplicates identical failures but preserves different commands and paths', () => {
-    const result = createTerminal(SOURCES, OPTIONS).run('cat file file; cat file; ls file; cat src/file')
+  it('deduplicates identical failures but preserves different commands and paths', async () => {
+    const result = await createTerminal(SOURCES, OPTIONS).run('cat file file; cat file; ls file; cat src/file')
     assert.deepEqual(result.notes, [note('cat', 'file', ['/repo/file']), note('ls', 'file', ['/repo/file']), note('cat', 'src/file', ['/repo/src/file'])])
   })
 
-  it('uses the cwd at each failure and clears notes for later runs', () => {
+  it('uses the cwd at each failure and clears notes for later runs', async () => {
     const terminal = createTerminal(SOURCES, OPTIONS)
-    const first = terminal.run('cat file; cd /repo/dir; cat file')
+    const first = await terminal.run('cat file; cd /repo/dir; cat file')
     assert.deepEqual(first.notes, [note('cat', 'file', ['/repo/file']), note('cat', 'file', ['/repo/file'], '/repo/dir')])
-    assert.deepEqual(terminal.run('cat /repo/file').notes, [])
+    assert.deepEqual((await terminal.run('cat /repo/file')).notes, [])
     assert.ok(Object.isFrozen(first.notes))
   })
 
-  it('keeps notes from earlier completed input units after a parse error', () => {
-    const result = createTerminal(SOURCES, OPTIONS).run('cat file\necho $(if true)')
+  it('keeps notes from earlier completed input units after a parse error', async () => {
+    const result = await createTerminal(SOURCES, OPTIONS).run('cat file\necho $(if true)')
     assert.equal(result.exitCode, 2)
     assert.deepEqual(result.notes, [note('cat', 'file', ['/repo/file'])])
   })
 })
 
 describe('custom commands and writable failures use the shared cwd note path', () => {
-  it('supports custom readInputs without changing returned read errors', () => {
+  it('supports custom readInputs without changing returned read errors', async () => {
     const terminal = createTerminal(SOURCES, { ...OPTIONS, commands: {
       read: (io) => {
         const result = io.readInputs(io.args)
         return { stdout: result.inputs.map((input) => input.content).join(''), stderr: result.stderr, exitCode: result.failed ? 1 : 0 }
       },
     } })
-    const result = terminal.run('read file')
+    const result = await terminal.run('read file')
     assert.equal(result.stderr, 'read: file: No such file or directory\n')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.notes, [note('read', 'file', ['/repo/file'])])
   })
 
-  it('supports custom directory reads while leaving existence probes silent', () => {
+  it('supports custom directory reads while leaving existence probes silent', async () => {
     const terminal = createTerminal(SOURCES, { ...OPTIONS, commands: {
       list: ({ fs, args }) => fs.listDir(args[0]).files.join('\n'),
       probe: ({ fs }) => String(fs.isFile('file') || fs.isDir('dir') || fs.readFile('file') !== undefined),
     } })
-    const listed = terminal.run('list dir')
+    const listed = await terminal.run('list dir')
     assert.equal(listed.stderr, 'list: dir: No such file or directory\n')
     assert.equal(listed.exitCode, 1)
     assert.deepEqual(listed.notes, [note('list', 'dir', ['/repo/dir'], undefined, 'dir')])
-    const probed = terminal.run('probe')
+    const probed = await terminal.run('probe')
     assert.equal(probed.stdout, 'false')
     assert.deepEqual(probed.notes, [])
   })
 
-  it('isolates notes from reentrant runs', () => {
+  it('isolates notes from reentrant runs', async () => {
     let inner
     const terminal = createTerminal(SOURCES, { ...OPTIONS, commands: {
-      reenter: () => { inner = terminal.run('ls file'); return '' },
+      reenter: async ({ run }) => { inner = await run('ls file'); return '' },
     } })
-    const outer = terminal.run('cat file; reenter; cat file')
+    const outer = await terminal.run('cat file; reenter; cat file')
     assert.deepEqual(outer.notes, [note('cat', 'file', ['/repo/file'])])
     assert.deepEqual(inner.notes, [note('ls', 'file', ['/repo/file'])])
   })
@@ -384,23 +384,23 @@ describe('custom commands and writable failures use the shared cwd note path', (
     (io) => io.fs.listDir('dir'),
     (io) => { const result = io.readInputs(['dir']); if (result.failed) throw new Error(result.stderr.trim()) },
   ]) {
-    it('routes a retained custom I/O view to the active run while preserving its cwd', () => {
+    it('routes a retained custom I/O view to the active run while preserving its cwd', async () => {
       let nested, saved
       const terminal = createTerminal(SOURCES, { ...OPTIONS, commands: {
         save: (io) => { saved = io; return '' },
         use: () => { read(saved); return '' },
-        reenter: () => { nested = terminal.run('use'); return '' },
+        reenter: async ({ run }) => { nested = await run('use'); return '' },
       } })
-      const first = terminal.run('save; cd /repo')
+      const first = await terminal.run('save; cd /repo')
       assert.deepEqual(first.notes, [])
-      const second = terminal.run('use')
+      const second = await terminal.run('use')
       assert.notEqual(second.exitCode, 0)
       assert.deepEqual(second.notes, [note('save', 'dir', ['/repo/dir'], undefined, 'dir')])
       assert.deepEqual(first.notes, [])
-      const outer = terminal.run('reenter')
+      const outer = await terminal.run('reenter')
       assert.deepEqual(outer.notes, [])
       assert.deepEqual(nested.notes, [note('save', 'dir', ['/repo/dir'], undefined, 'dir')])
-      assert.deepEqual(terminal.run('true').notes, [])
+      assert.deepEqual((await terminal.run('true')).notes, [])
     })
   }
 
@@ -409,10 +409,10 @@ describe('custom commands and writable failures use the shared cwd note path', (
     ["sed 'w missing/../repo/file' /repo/repo/file", 'sed'],
     ["sed -i'missing/../repo/*' p file", 'sed'],
   ]) {
-    it(line + ' reports a structured writable ENOENT without parsing stderr', () => {
+    it(line + ' reports a structured writable ENOENT without parsing stderr', async () => {
       const terminal = createTerminal({ 'missing/keep': '', 'repo/file': 'text' }, { mount: '/repo', cwd: '/tmp', writable: '/tmp/' })
-      terminal.run('printf text >file')
-      const result = terminal.run(line)
+      await terminal.run('printf text >file')
+      const result = await terminal.run(line)
       assert.notEqual(result.exitCode, 0)
       assert.deepEqual(result.unsupported, [])
       assert.deepEqual(result.notes, [note(command, 'missing/../repo/file', ['/repo/repo/file'], '/tmp')])

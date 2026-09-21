@@ -13,8 +13,8 @@ const FILES = {
 }
 const result = (stdout, exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
 
-function check(command, stdout) {
-  assert.deepEqual(createTerminal(FILES).run(command), result(stdout), command)
+async function check(command, stdout) {
+  assert.deepEqual(await createTerminal(FILES).run(command), result(stdout), command)
 }
 
 describe('sed expression option spellings and ordering', () => {
@@ -78,32 +78,32 @@ describe('sed expression regex dialect follows option order', () => {
 describe('sed reports expression argument and option errors precisely', () => {
   for (const option of ['-e', '--expression']) {
     for (const prefix of ['sed ', "sed -e 's/a/A/' input "]) {
-      it(`missing ${option} argument after ${prefix}`, () => {
-        assert.deepEqual(createTerminal(FILES).run(prefix + option), result('', 1, `sed: ${option} requires an argument\n`))
+      it(`missing ${option} argument after ${prefix}`, async () => {
+        assert.deepEqual(await createTerminal(FILES).run(prefix + option), result('', 1, `sed: ${option} requires an argument\n`))
       })
     }
   }
   for (const [args, detail] of [
     ['--posix', '--posix'], ['--not-a-sed-option', '--not-a-sed-option'],
   ]) {
-    it(`identifies ${detail} instead of blaming script syntax`, () => {
+    it(`identifies ${detail} instead of blaming script syntax`, async () => {
       const command = `sed ${args} -e 's/a/A/' input`
       const message = `sed: unknown option: ${detail}`
       const diagnostics = [{ kind: 'option', command: 'sed', detail, message }]
       const terminal = createTerminal(FILES)
-      assert.deepEqual(terminal.run(command), result('', 1, message + '\n', diagnostics))
-      assert.deepEqual(terminal.run(command + ' 2>/dev/null | cat'), result('', 0, '', diagnostics))
+      assert.deepEqual(await terminal.run(command), result('', 1, message + '\n', diagnostics))
+      assert.deepEqual(await terminal.run(command + ' 2>/dev/null | cat'), result('', 0, '', diagnostics))
     })
   }
   for (const option of ['-i', '--in-place', '--in-place=backup']) {
-    it(`reports read-only in-place editing after accepting ${option}`, () => {
+    it(`reports read-only in-place editing after accepting ${option}`, async () => {
       const command = `sed ${option} -e 's/a/A/' input`
       const message = 'sed: input: file system is read-only'
       const diagnostics = [{ kind: 'feature', command: 'sed', detail: '-i', message }]
       const terminal = createTerminal(FILES)
-      assert.deepEqual(terminal.run(command), result('', 1, message + '\n', diagnostics))
-      assert.deepEqual(terminal.run(command + ' 2>/dev/null | cat'), result('', 0, '', diagnostics))
-      assert.deepEqual(terminal.run('cat input'), result(FILES.input))
+      assert.deepEqual(await terminal.run(command), result('', 1, message + '\n', diagnostics))
+      assert.deepEqual(await terminal.run(command + ' 2>/dev/null | cat'), result('', 0, '', diagnostics))
+      assert.deepEqual(await terminal.run('cat input'), result(FILES.input))
     })
   }
   for (const command of [
@@ -115,8 +115,8 @@ describe('sed reports expression argument and option errors precisely', () => {
     'sed -e -n input',
     'sed -e -- input',
   ]) {
-    it(`keeps ordinary expression/argument failures off diagnostics: ${command}`, () => {
-      const actual = createTerminal(FILES).run(command)
+    it(`keeps ordinary expression/argument failures off diagnostics: ${command}`, async () => {
+      const actual = await createTerminal(FILES).run(command)
       assert.equal(actual.stdout, '')
       assert.equal(actual.exitCode, 1)
       assert.notEqual(actual.stderr, '')
@@ -124,8 +124,8 @@ describe('sed reports expression argument and option errors precisely', () => {
     })
   }
   for (const command of ['sed -e l input', 'sed -e F input']) {
-    it(`attributes unsupported command text to the script: ${command}`, () => {
-      const actual = createTerminal(FILES).run(command)
+    it(`attributes unsupported command text to the script: ${command}`, async () => {
+      const actual = await createTerminal(FILES).run(command)
       assert.equal(actual.exitCode, 1)
       assert.equal(actual.unsupported.length, 1)
       assert.deepEqual(actual.unsupported[0], {
@@ -135,8 +135,8 @@ describe('sed reports expression argument and option errors precisely', () => {
       assert.equal(actual.stderr, actual.unsupported[0].message + '\n')
     })
   }
-  it('retains successful output beside an ordinary missing input error', () => {
-    const actual = createTerminal(FILES).run("sed -e 's/a/A/' missing first")
+  it('retains successful output beside an ordinary missing input error', async () => {
+    const actual = await createTerminal(FILES).run("sed -e 's/a/A/' missing first")
     assert.equal(actual.stdout, 'A\n')
     assert.equal(actual.exitCode, 2)
     assert.match(actual.stderr, /missing: No such file or directory/u)

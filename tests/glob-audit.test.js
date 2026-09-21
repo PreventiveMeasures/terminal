@@ -42,10 +42,10 @@ describe('glob named classes use shell matching rules', () => {
     ["pattern='[[:di\\git:]]'; [[ 1 == $pattern ]]", 0],
     ["[[ Z == [[:ascii:]] ]]", 0],
   ]) {
-    it(command, () => { assert.deepEqual(createTerminal({}).run(command), result(status)) })
+    it(command, async () => { assert.deepEqual(await createTerminal({}).run(command), result(status)) })
   }
 
-  it('preserves the different Bash pathname and GNU fnmatch class dialects', () => {
+  it('preserves the different Bash pathname and GNU fnmatch class dialects', async () => {
     const files = { 1: '', a: '', 'B]': '', 'd]': '' }
     for (const [command, stdout, notes] of [
       ["printf '<%s>' [[:di'git':]]", '<1>'],
@@ -53,7 +53,7 @@ describe('glob named classes use shell matching rules', () => {
       ["find . -name '[[:di\\git:]]'", './d]\n'],
       ["find . -name '[[:BOGUS:]]'", './B]\n'],
     ]) {
-      assert.deepEqual(createTerminal(files).run(command), result(0, stdout, notes), command)
+      assert.deepEqual(await createTerminal(files).run(command), result(0, stdout, notes), command)
     }
   })
 })
@@ -72,9 +72,9 @@ describe('glob matching consumes a complete filename including final newlines', 
     ["printf '<%s>' fi*e", '<file>'],
     ["grep -rl x . --include='file'", './file\n', ['grep: excluded 2 entries by --include/--exclude/--exclude-dir rules: "/file\\n", "/file\\r\\n".']],
   ]) {
-    it(command, () => {
+    it(command, async () => {
       const files = { file: 'x\n', 'file\n': 'x\n', 'file\r\n': 'x\n' }
-      assert.deepEqual(createTerminal(files).run(command), result(0, stdout, notes))
+      assert.deepEqual(await createTerminal(files).run(command), result(0, stdout, notes))
     })
   }
 })
@@ -86,8 +86,8 @@ describe('unknown command filename classes remain diagnostic', () => {
     "find . -name '[[:bogus:]]'", "find . -name '[![:bogus:]]'",
     "find . -name '[a[:bogus:]]'", "grep -r x . --include='[![:bogus:]]'",
   ]) {
-    it(command, () => {
-      const actual = createTerminal({ a: 'x\n' }).run(command + ' 2>/dev/null | cat')
+    it(command, async () => {
+      const actual = await createTerminal({ a: 'x\n' }).run(command + ' 2>/dev/null | cat')
       assert.equal(actual.stdout, '')
       assert.equal(actual.stderr, '')
       assert.equal(actual.unsupported[0]?.detail, 'glob character class')
@@ -113,11 +113,11 @@ describe('extended glob diagnostics respect quoting and bracket boundaries', () 
     [String.raw`pattern='\@(a)'; [[ '@(a)' == $pattern ]]`, 0],
     ["pattern='@(a)'; [[ '@(a)' == \"$pattern\" ]]", 0],
   ]) {
-    it(command, () => { assert.deepEqual(createTerminal({}).run(command), result(status)) })
+    it(command, async () => { assert.deepEqual(await createTerminal({}).run(command), result(status)) })
   }
 
-  it('still diagnoses an unquoted extended pattern after a bracket', () => {
-    const actual = createTerminal({}).run("pattern='[a]@(b)'; [[ ab == $pattern ]] 2>/dev/null | cat")
+  it('still diagnoses an unquoted extended pattern after a bracket', async () => {
+    const actual = await createTerminal({}).run("pattern='[a]@(b)'; [[ ab == $pattern ]] 2>/dev/null | cat")
     assert.equal(actual.stdout, '')
     assert.equal(actual.stderr, '')
     assert.equal(actual.unsupported[0]?.detail, '[[ extglob')
@@ -129,17 +129,17 @@ describe('non-ASCII glob syntax cannot silently choose ASCII results', () => {
     "[[ z == [a-é] ]]", "[[ a != [é-z] ]]",
     "p='[a-é]'; [[ z == $p ]]", "find . -name '[a-é]'", "printf '%s' [a-é]",
   ]) {
-    it(command, () => {
-      const actual = createTerminal({ a: '', z: '' }).run('{ ' + command + '; } 2>/dev/null | cat')
+    it(command, async () => {
+      const actual = await createTerminal({ a: '', z: '' }).run('{ ' + command + '; } 2>/dev/null | cat')
       assert.equal(actual.stdout, '')
       assert.equal(actual.stderr, '')
       assert.equal(actual.unsupported[0]?.detail, 'non-ASCII glob matching')
     })
   }
 
-  it('continues to match non-ASCII literal text and star patterns', () => {
-    assert.deepEqual(createTerminal({}).run('[[ café == café* ]]'), result())
-    assert.deepEqual(createTerminal({}).run('[[ a == [aé] ]]'), result())
-    assert.deepEqual(createTerminal({}).run('[[ a == [[:é:]] ]]'), result(1))
+  it('continues to match non-ASCII literal text and star patterns', async () => {
+    assert.deepEqual(await createTerminal({}).run('[[ café == café* ]]'), result())
+    assert.deepEqual(await createTerminal({}).run('[[ a == [aé] ]]'), result())
+    assert.deepEqual(await createTerminal({}).run('[[ a == [[:é:]] ]]'), result(1))
   })
 })

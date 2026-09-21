@@ -11,7 +11,7 @@ import { lookupWithNote, omissionNote } from '../notes.js'
 
 const TYPE_LETTERS = { file: 'f', dir: 'd', link: 'l' }
 
-export function find(stdin, tokens, ctx) {
+export async function find(stdin, tokens, ctx) {
   const parsed = parseFindArgs(tokens)
   if (parsed.error) return parsed.error
   if (stdin !== '' && tokens.some((t) => t === '-exec' || t === '--exec')) return unsupported('feature', 'find', '-exec stdin', 'find: passing shared standard input to -exec is not supported')
@@ -34,7 +34,8 @@ export function find(stdin, tokens, ctx) {
       for (const entry of walkTree(ctx.fs, startAbs, maxDepth, (path) => !pruned.has(path))) {
         const display = toDisplayPath(start, startAbs, entry.path)
         if (entry.depth >= minDepth) {
-          runPredicates(groups, { kind: entry.kind, path: display, abs: entry.path, prune: pruned }, ctx, result)
+          // oxlint-disable-next-line no-await-in-loop -- an entry is tested after the one the walk reached before it.
+          await runPredicates(groups, { kind: entry.kind, path: display, abs: entry.path, prune: pruned }, ctx, result)
         }
         if (entry.kind !== 'dir' || entry.depth !== maxDepth || pruned.has(entry.path)) continue
         const { dirs, files, links } = ctx.fs.listDir(entry.path)
@@ -49,7 +50,8 @@ export function find(stdin, tokens, ctx) {
     for (const pred of batches) {
       if (pred.collected.length === 0) continue
       const finalArgs = pred.args.slice(0, -1).concat(pred.collected)
-      if (!runExec(pred.cmd, finalArgs, ctx, result)) result.exitCode = 1
+      // oxlint-disable-next-line no-await-in-loop -- one batch after the last, as find runs them.
+      if (!await runExec(pred.cmd, finalArgs, ctx, result)) result.exitCode = 1
     }
   } finally {
     omissionNote(ctx.notes, { command: 'find', action: 'depth limit omitted contents of', noun: ['directory', 'directories'], paths: omitted })
@@ -59,8 +61,18 @@ export function find(stdin, tokens, ctx) {
 
 // Preserve action output even when negation or a later predicate rejects
 // the entry. Stop at the first matching OR group to avoid repeating actions.
-function runPredicates(groups, entry, ctx, result) {
-  return groups.some((group) => group.every((p) => evalPredicate(p, entry, ctx, result) !== Boolean(p.negate)))
+async function runPredicates(groups, entry, ctx, result) {
+  for (const group of groups) {
+    let all = true
+    for (const p of group) {
+      // A predicate may run a command, which may wait; the one to its right
+      // is read only where this one let it be, so it waits for it.
+      // oxlint-disable-next-line no-await-in-loop -- a predicate is read only where the one to its left passed.
+      if (await evalPredicate(p, entry, ctx, result) === Boolean(p.negate)) { all = false; break }
+    }
+    if (all) return true
+  }
+  return false
 }
 
 function evalPredicate(p, entry, ctx, result) {
@@ -93,8 +105,8 @@ function evalPredicate(p, entry, ctx, result) {
   return runExec(p.cmd, p.args.map((arg) => arg.replaceAll('{}', entry.path)), ctx, result)
 }
 
-function runExec(cmd, args, ctx, result) {
-  const r = ctx.dispatch(cmd, args, '')
+async function runExec(cmd, args, ctx, result) {
+  const r = await ctx.dispatch(cmd, args, '')
   collectOutput(result, r)
   return r.exitCode === 0
 }

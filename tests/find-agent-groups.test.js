@@ -20,14 +20,14 @@ const FILES = {
 }
 const EXPECTED = 'a/index.ts\na/nested/component.tsx\na/nested/helper.js\nb/app.tsx\nb/lib.js\nb/nested/types.ts\n'
 
-function virtual() {
-  const result = createTerminal(FILES).run(COMMAND)
+async function virtual() {
+  const result = await createTerminal(FILES).run(COMMAND)
   assert.deepEqual(result.unsupported, [])
   return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode }
 }
 
 describe('find — escaped grouping from an agent source-tree search', () => {
-  it(COMMAND, () => {
-    assert.deepEqual(virtual(), { stdout: EXPECTED, stderr: '', exitCode: 0 })
+  it(COMMAND, async () => {
+    assert.deepEqual(await virtual(), { stdout: EXPECTED, stderr: '', exitCode: 0 })
   })
 })

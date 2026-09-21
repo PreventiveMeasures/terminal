@@ -14,8 +14,8 @@ const sed = (script, input = 'input', flags = '') => `sed ${flags} ${quote(scrip
 
 function examples(rows) {
   for (const [name, command, stdout] of rows) {
-    it(name, () => {
-      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
+    it(name, async () => {
+      assert.deepEqual(await createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
     })
   }
 }
@@ -81,8 +81,8 @@ describe('sed input commands preserve range and shared-input state', () => {
   ])
 
   for (const operation of ['n', 'N']) {
-    it(`${operation} reports errors encountered while looking for the next record`, () => {
-      const r = createTerminal(FILES).run(sed(operation, 'single missing'))
+    it(`${operation} reports errors encountered while looking for the next record`, async () => {
+      const r = await createTerminal(FILES).run(sed(operation, 'single missing'))
       assert.equal(r.stdout, 'one\n')
       assert.equal(r.exitCode, 2)
       assert.match(r.stderr, /missing/u)

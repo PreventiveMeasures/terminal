@@ -14,7 +14,7 @@ describe('replacement delimiters use logical characters after continuations', ()
     ['v=/b/x/b; printf "%s" "${v//' + continuation + '/b/Y}"', 'Y/xY'],
     ['v=a/b; printf "%s" "${v//' + continuation + '//X}"', 'aXb'],
   ]) {
-    it(command, () => assert.deepEqual(createTerminal({}).run(command), expected(stdout)))
+    it(command, async () => assert.deepEqual(await createTerminal({}).run(command), expected(stdout)))
   }
 })
 
@@ -30,20 +30,20 @@ describe('ambiguous trailing pattern escapes are diagnosed', () => {
     ['a\\', '\\', '${v/$p/Z}'],
     ['é\\', '\\', '${v/%$p/Z}'],
   ]) {
-    it(JSON.stringify({ value, pattern, expression }), () => {
+    it(JSON.stringify({ value, pattern, expression }), async () => {
       const terminal = createTerminal({})
-      terminal.run(`v='${value}'; p='${pattern}'`)
-      const result = terminal.run(`printf '%s' "${expression}"`)
+      await terminal.run(`v='${value}'; p='${pattern}'`)
+      const result = await terminal.run(`printf '%s' "${expression}"`)
       assert.equal(result.stdout, '')
       assert.notEqual(result.exitCode, 0)
       assert.ok(result.unsupported.some(({ kind, message }) => kind === 'feature' && /trailing.*backslash/u.test(message)), JSON.stringify(result))
     })
   }
 
-  it('preserves the diagnostic with hidden stderr and a successful pipeline', () => {
+  it('preserves the diagnostic with hidden stderr and a successful pipeline', async () => {
     const terminal = createTerminal({})
-    terminal.run("v='a\\ a*'; p='a\\'")
-    const result = terminal.run('{ printf "%s" "${v/$p/Z}"; } 2>/dev/null | true')
+    await terminal.run("v='a\\ a*'; p='a\\'")
+    const result = await terminal.run('{ printf "%s" "${v/$p/Z}"; } 2>/dev/null | true')
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)
@@ -54,8 +54,8 @@ describe('ambiguous trailing pattern escapes are diagnosed', () => {
     "v='ba\\'; p='a\\'; printf '%s' \"${v/%\"$p\"/Z}\"",
     "v='ba\\'; p='a\\\\'; printf '%s' \"${v/%$p/Z}\"",
   ]) {
-    it('keeps literal escaped-backslash patterns supported: ' + command, () => {
-      assert.deepEqual(createTerminal({}).run(command), expected('bZ'))
+    it('keeps literal escaped-backslash patterns supported: ' + command, async () => {
+      assert.deepEqual(await createTerminal({}).run(command), expected('bZ'))
     })
   }
 })

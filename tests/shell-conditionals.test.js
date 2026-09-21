@@ -9,8 +9,8 @@ const FILES = { 'plain.txt': 'data\n', 'empty.txt': '', 'dir/a b.txt': 'x', 'dir
 const terminal = (options) => createTerminal(FILES, options)
 const result = (exitCode = 0, stdout = '') => ({ stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
 
-function check(command, exitCode = 0, stdout = '') {
-  assert.deepEqual(terminal().run(command), result(exitCode, stdout), command)
+async function check(command, exitCode = 0, stdout = '') {
+  assert.deepEqual(await terminal().run(command), result(exitCode, stdout), command)
 }
 
 describe('[[ scalar and file predicates', () => {
@@ -23,7 +23,7 @@ describe('[[ scalar and file predicates', () => {
     ['text', 0], ['""', 1], ["'-f'", 0], ['a==b', 0],
     ['! text', 1], ['! ""', 0], ['! ! text', 0], ['( text )', 0],
   ]) {
-    it(expression, () => { check(`[[ ${expression} ]]`, status) })
+    it(expression, async () => { await check(`[[ ${expression} ]]`, status) })
   }
 
   for (const command of [
@@ -36,7 +36,7 @@ describe('[[ scalar and file predicates', () => {
     '[[ -n "$HOME" ]]',
     '[[ -n $"value" ]]',
   ]) {
-    it(command, () => { check(command) })
+    it(command, async () => { await check(command) })
   }
 })
 
@@ -51,22 +51,22 @@ describe('[[ boolean grouping and lazy evaluation', () => {
     ['a || -n "$(grep --unknown plain.txt)"', 0],
     ['"" && -n "$(printf bad)"', 1],
   ]) {
-    it(expression, () => { check(`[[ ${expression} ]]`, status) })
+    it(expression, async () => { await check(`[[ ${expression} ]]`, status) })
   }
 
-  it('skips arithmetic and command-substitution side effects', () => {
-    check('n=0; [[ a || n++ -eq 0 ]]; [[ "" && n++ -eq 0 ]]; echo "$n"', 0, '0\n')
-    check('n=0; [[ a || -n "$(n=9; printf bad)" ]]; echo "$n"', 0, '0\n')
+  it('skips arithmetic and command-substitution side effects', async () => {
+    await check('n=0; [[ a || n++ -eq 0 ]]; [[ "" && n++ -eq 0 ]]; echo "$n"', 0, '0\n')
+    await check('n=0; [[ a || -n "$(n=9; printf bad)" ]]; echo "$n"', 0, '0\n')
   })
 
-  it('runs ordinary surrounding shell gates, groups, loops, and substitutions', () => {
-    check('if [[ -f plain.txt ]]; then echo yes; else echo no; fi', 0, 'yes\n')
-    check('if [[ -f missing ]]; then echo no; elif [[ -d dir ]]; then echo dir; fi', 0, 'dir\n')
-    check('for f in plain.txt missing; do [[ -f $f ]] && echo "$f"; done', 1, 'plain.txt\n')
-    check('echo "$(if [[ -n one && -f plain.txt ]]; then printf yes; fi)"', 0, 'yes\n')
-    check('[[ -f missing ]] || { [[ -f plain.txt ]] && echo yes; }', 0, 'yes\n')
-    check('printf input | { [[ -f plain.txt ]]; cat; }', 0, 'input')
-    check('echo [[ -f plain.txt ]]', 0, '[[ -f plain.txt ]]\n')
+  it('runs ordinary surrounding shell gates, groups, loops, and substitutions', async () => {
+    await check('if [[ -f plain.txt ]]; then echo yes; else echo no; fi', 0, 'yes\n')
+    await check('if [[ -f missing ]]; then echo no; elif [[ -d dir ]]; then echo dir; fi', 0, 'dir\n')
+    await check('for f in plain.txt missing; do [[ -f $f ]] && echo "$f"; done', 1, 'plain.txt\n')
+    await check('echo "$(if [[ -n one && -f plain.txt ]]; then printf yes; fi)"', 0, 'yes\n')
+    await check('[[ -f missing ]] || { [[ -f plain.txt ]] && echo yes; }', 0, 'yes\n')
+    await check('printf input | { [[ -f plain.txt ]]; cat; }', 0, 'input')
+    await check('echo [[ -f plain.txt ]]', 0, '[[ -f plain.txt ]]\n')
   })
 })
 
@@ -80,7 +80,7 @@ describe('[[ pattern operands preserve shell quoting', () => {
     ['café == café', 0], ["'@(a|b)' == '@(a|b)'", 0],
     [String.raw`'a*' == a\*`, 0], [String.raw`'a\b' == 'a\b'`, 0],
   ]) {
-    it(expression, () => { check(`[[ ${expression} ]]`, status) })
+    it(expression, async () => { await check(`[[ ${expression} ]]`, status) })
   }
 
   for (const [command, status] of [
@@ -91,7 +91,7 @@ describe('[[ pattern operands preserve shell quoting', () => {
     ['pattern="?"; [[ x == "${pattern}" ]]', 1],
     ['pattern="?"; [[ x == ${pattern} ]]', 0],
   ]) {
-    it(command, () => { check(command, status) })
+    it(command, async () => { await check(command, status) })
   }
 })
 
@@ -103,7 +103,7 @@ describe('[[ variable presence distinguishes unset and empty', () => {
     ['unset HOME; [[ -v HOME ]]', 1], ['name=value; value=; [[ -v "$name" ]]', 0],
     ['[[ -v 1 ]]', 1], ['[[ -v -1 ]]', 1], ['[[ -v "invalid name" ]]', 1],
   ]) {
-    it(command, () => { check(command, status) })
+    it(command, async () => { await check(command, status) })
   }
 })
 
@@ -113,13 +113,13 @@ describe('[[ numeric predicates use shell arithmetic', () => {
     ['2 -gt 1', 0], ['2 -ge 2', 0], ['0x10 -eq 16', 0], ['010 -eq 8', 0],
     ['"1 + 2" -eq 3', 0], ['"" -eq 0', 0], ['9007199254740993 -gt 9007199254740992', 0],
   ]) {
-    it(expression, () => { check(`[[ ${expression} ]]`, status) })
+    it(expression, async () => { await check(`[[ ${expression} ]]`, status) })
   }
 
-  it('compares statuses and updates scalar arithmetic state', () => {
-    check('false; if [[ $? -ne 0 ]]; then echo failed; fi', 0, 'failed\n')
-    check('n=1; [[ n++ -eq 1 && n -eq 2 ]]; echo "$n"', 0, '2\n')
-    check('n=1; [[ "n += 2" -eq 3 ]]; echo "$n"', 0, '3\n')
+  it('compares statuses and updates scalar arithmetic state', async () => {
+    await check('false; if [[ $? -ne 0 ]]; then echo failed; fi', 0, 'failed\n')
+    await check('n=1; [[ n++ -eq 1 && n -eq 2 ]]; echo "$n"', 0, '2\n')
+    await check('n=1; [[ "n += 2" -eq 3 ]]; echo "$n"', 0, '3\n')
   })
 })
 
@@ -139,15 +139,15 @@ describe('[[ scanning retains compound words and real source boundaries', () => 
     "[[ ${absent:-'a b'} == 'a b' ]]",
     '[[ $((1 + 2)) -eq 3 ]]',
   ]) {
-    it(command, () => { check(command) })
+    it(command, async () => { await check(command) })
   }
 
-  it('recognizes only bare condition keywords in command position', () => {
-    const quoted = terminal().run(`'[[' -f plain.txt ']]'`)
+  it('recognizes only bare condition keywords in command position', async () => {
+    const quoted = await terminal().run(`'[[' -f plain.txt ']]'`)
     assert.equal(quoted.exitCode, 127)
     assert.match(quoted.stderr, /command not found/u)
     assert.equal(quoted.unsupported[0].kind, 'command')
-    check('echo "[[" -f plain.txt "]]"', 0, '[[ -f plain.txt ]]\n')
+    await check('echo "[[" -f plain.txt "]]"', 0, '[[ -f plain.txt ]]\n')
   })
 })
 
@@ -162,8 +162,8 @@ describe('[[ unsupported and malformed input always reaches diagnostics', () => 
     `[[ a '==' a ]]`, '[[ -n"" value ]]', '[[ -f\nplain.txt ]]', '[[ a\n== b ]]',
     '[[ a == b', '[[ a == b ]] extra',
   ]) {
-    it(`rejects ${JSON.stringify(command)} as bash does`, () => {
-      const r = terminal().run(command)
+    it(`rejects ${JSON.stringify(command)} as bash does`, async () => {
+      const r = await terminal().run(command)
       assert.equal(r.stdout, '', command)
       assert.equal(r.exitCode, 2, command)
       assert.notEqual(r.stderr, '', command)
@@ -181,8 +181,8 @@ describe('[[ unsupported and malformed input always reaches diagnostics', () => 
     'pattern="@(a|b)"; [[ a == $pattern ]]', '[[ é == ? ]]',
     '[[ -n "$PATH" ]]', '[[ 08 -eq 8 ]]', '[[ -e <(printf input) ]]',
   ]) {
-    it(command, () => {
-      const r = terminal().run(command)
+    it(command, async () => {
+      const r = await terminal().run(command)
       assert.equal(r.stdout, '', command)
       assert.notEqual(r.exitCode, 0, command)
       assert.ok(r.unsupported.length > 0, command)
@@ -190,17 +190,17 @@ describe('[[ unsupported and malformed input always reaches diagnostics', () => 
     })
   }
 
-  it('keeps runtime diagnostics after stderr redirection and pipeline status replacement', () => {
-    const r = terminal().run('[[ -r plain.txt ]] 2>/dev/null | cat')
+  it('keeps runtime diagnostics after stderr redirection and pipeline status replacement', async () => {
+    const r = await terminal().run('[[ -r plain.txt ]] 2>/dev/null | cat')
     assert.equal(r.stdout, '')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)
     assert.deepEqual(r.unsupported.map(({ detail }) => detail), ['[[ -r'])
   })
 
-  it('bounds nested and chained conditional ASTs explicitly', () => {
+  it('bounds nested and chained conditional ASTs explicitly', async () => {
     for (const source of ['( '.repeat(70) + 'x' + ' )'.repeat(70), Array.from({ length: 140 }, () => 'x').join(' && ')]) {
-      const r = terminal().run(`[[ ${source} ]]`)
+      const r = await terminal().run(`[[ ${source} ]]`)
       assert.equal(r.unsupported.length, 1)
       assert.match(r.unsupported[0].detail, /^\[\[ (?:nesting|complexity)$/u)
     }

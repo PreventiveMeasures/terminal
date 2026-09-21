@@ -24,7 +24,7 @@ export function routeExternalOutput(result, ctx) {
 
 // A list shares stdin across its steps: { cat; cat; } consumes it once.
 // `exit` bypasses pipeline negation; break/continue still carry its status.
-export function runSteps(steps, ctx, stream, condition = false) {
+export async function runSteps(steps, ctx, stream, condition = false) {
   // `&` hands the whole list it closes to the background, and nothing here
   // runs there. Running it in the foreground instead is a different answer —
   // a different order, and a status the shell would not have waited for — so
@@ -44,9 +44,12 @@ export function runSteps(steps, ctx, stream, condition = false) {
     // reaches whatever that command itself runs — a subshell, a group, a body
     // it calls — so it travels with the shell state rather than this call.
     const exempt = condition || step.negate || continues(steps, index)
-    const r = exempt
+    // A list is one command after another, which is what a list is: each step
+    // waits for the one before it, whether or not that one had to wait itself.
+    // oxlint-disable-next-line no-await-in-loop -- a step of a list runs after the one before it.
+    const r = await (exempt
       ? withState(ctx, { errexitOff: true }, () => runPipeline(step.stages, ctx, stream))
-      : runPipeline(step.stages, ctx, stream)
+      : runPipeline(step.stages, ctx, stream))
     appendOutput(result, r)
     if (step.negate && !r.halt) result.exitCode = r.exitCode === 0 ? 1 : 0
     // The status a list ends on is the list's, and so is what `set -e` makes
@@ -71,7 +74,7 @@ const continues = (steps, index) => ['and', 'or'].includes(steps[index + 1]?.gat
 
 // Multi-stage pipelines isolate shell state and take the last stage's status.
 // Only the first stage consumes the enclosing list's shared input stream.
-function runPipeline(stages, ctx, stream) {
+async function runPipeline(stages, ctx, stream) {
   const output = emptyOutput()
   let input = stream.text
   for (let i = 0; i < stages.length; i++) {
@@ -84,7 +87,8 @@ function runPipeline(stages, ctx, stream) {
     const run = () => pipelineStage(stage, ctx, stageInput, first && ctx.stdinFile, fds, first ? ctx.stdinPiped : true)
     // Every stage of a real pipeline is its own process, and what `set -e`
     // ignored in there is as much its own business as the rest of its state.
-    const routed = stages.length > 1 ? { ...isolated(ctx, run), ignored: false } : run()
+    // oxlint-disable-next-line no-await-in-loop -- a stage reads what the one before it wrote, so it runs after it.
+    const routed = stages.length > 1 ? { ...await isolated(ctx, run), ignored: false } : await run()
     if (first) stream.text = routed.inputLeft
     appendOutput(output, routed)
     input = piped
@@ -99,14 +103,14 @@ function runPipeline(stages, ctx, stream) {
 // follow the descriptors active at their expansion site.
 function pipelineStage(stage, ctx, stdin, stdinFile, fds, stdinPiped) {
   const initial = { fds, stdin, stdinFile, stdinPiped, stdinOrigin: stdinFile ? ctx.stdinOrigin : null, stdinHandle: stdinFile ? ctx.stdinHandle : null }
-  return withState(ctx, { substitutionExit: null, expansionOutput: emptyOutput(), expansionFds: fds }, () => withStreams(initial, ctx, () => {
+  return withState(ctx, { substitutionExit: null, expansionOutput: emptyOutput(), expansionFds: fds }, () => withStreams(initial, ctx, async () => {
     const simple = !stage.group && !stage.loop && !stage.conditional && !stage.test && !stage.define
     let expanded, expansionError
     try {
       if (simple) {
-        expanded = expandWords(stage.words, ctx)
-        if (expanded.argv.length === 0) assignValues(stage.assigns, ctx)
-        else expanded.temps = temporaryValues(stage.assigns, ctx)
+        expanded = await expandWords(stage.words, ctx)
+        if (expanded.argv.length === 0) await assignValues(stage.assigns, ctx)
+        else expanded.temps = await temporaryValues(stage.assigns, ctx)
       }
     } catch (e) {
       expansionError = shellFailure(ctx, e)
@@ -115,17 +119,17 @@ function pipelineStage(stage, ctx, stdin, stdinFile, fds, stdinPiped) {
       appendOutput(ctx.expansionOutput, routeStageOutput(expansionError, initial, ctx))
       return { ...ctx.expansionOutput, inputLeft: ctx.stdinLeft, halt: expansionError.halt }
     }
-    const io = resolveRedirs(stage, ctx, ctx.stdinLeft, stdinFile, fds)
+    const io = await resolveRedirs(stage, ctx, ctx.stdinLeft, stdinFile, fds)
     ctx.expansionFds = io.fds
     let routed = false
     // Blame for an `&&` gate reading this stage's status. A stage that failed
     // before reaching a command — a bad redirect, an expansion error — leaves
     // it unset, and the gate then has nothing to name.
     let blame = null
-    const result = withStreams(io, ctx, () => shellResult(ctx, () => {
+    const result = await withStreams(io, ctx, () => shellResult(ctx, async () => {
       if (io.error) return io.error
       if (!simple) {
-        const r = runBlock(stage, ctx, io.stdin, runSteps)
+        const r = await runBlock(stage, ctx, io.stdin, runSteps)
         routed = true
         blame = r.blame ?? null
         return r
@@ -148,9 +152,9 @@ function pipelineStage(stage, ctx, stdin, stdinFile, fds, stdinPiped) {
         // line the body was defined on was.
         // A call reports the body's status as its own, and no more: bash
         // exits on it even where the body ended on a `!` it was ignoring.
-        try { return withState(ctx, { loopDepth: 0 }, () => ({ ...withTemporaries(expanded.temps, ctx, () => runSteps(body, ctx, { text: io.stdin })), ignored: false })) } finally { ctx.calling.delete(name) }
+        try { return await withState(ctx, { loopDepth: 0 }, async () => ({ ...await withTemporaries(expanded.temps, ctx, () => runSteps(body, ctx, { text: io.stdin })), ignored: false })) } finally { ctx.calling.delete(name) }
       }
-      const r = runStage(ctx, expanded)
+      const r = await runStage(ctx, expanded)
       if (expanded.argv.length) blame = gateBlame(ctx.registry.chainRole(expanded.argv), expanded.argv[0])
       return r
     }))
@@ -166,7 +170,7 @@ function routeStageOutput(result, io, ctx) {
 
 // Apply redirects left to right. Track reopened file origins separately
 // from pipe input; only inherited input advances the enclosing list's stream.
-function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
+async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
   const fds = { ...initialFds }
   let input = stdin
   let file = stdinFile
@@ -176,20 +180,23 @@ function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
   let parentLeft = stdin
   let redirected = false
   const done = (error) => ({ error, fds, stdin: input, stdinFile: file, stdinPiped: redirected || ctx.stdinPiped, stdinOrigin: file ? origin : null, stdinHandle: file ? handle : null, inherited, parentLeft })
-  const expand = (fn) => {
-    const value = withState(ctx, { expansionFds: fds }, () => withStreams({ fds, stdin: input, stdinFile: file, stdinOrigin: origin, stdinHandle: handle }, ctx, fn))
+  const expand = async (fn) => {
+    const value = await withState(ctx, { expansionFds: fds }, () => withStreams({ fds, stdin: input, stdinFile: file, stdinOrigin: origin, stdinHandle: handle }, ctx, fn))
     input = ctx.stdinLeft
     if (inherited) parentLeft = input
     return value
   }
   try {
+    // Redirects are applied left to right and a word is expanded where its
+    // redirect stands, so each of these waits for the one to its left.
+    // oxlint-disable no-await-in-loop -- a redirect is applied after the one to its left.
     for (const r of stage.redirs) {
       if (r.op === 'dup') {
         if (fds[r.toFd] === undefined || fds[r.toFd] === 'closed') return done(err(`error: ${r.toFd}: Bad file descriptor`))
         fds[r.fd] = fds[r.toFd]
       } else if (r.op === 'close') fds[r.fd] = 'closed'
       else if (r.op === 'to') {
-        const t = r.target === undefined ? expand(() => expandRedirect(r.word, ctx)) : { value: r.target }
+        const t = r.target === undefined ? await expand(() => expandRedirect(r.word, ctx)) : { value: r.target }
         if (t.error) return done(err(`error: ${t.error}`))
         const dest = t.value === '/dev/null' ? 'null' : t.value === '/dev/stdout' ? fds[1] : t.value === '/dev/stderr' ? fds[2] : ctx.writable ? ctx.fs.openWritable(ctx.cwd, t.value, r.append) : null
         if (dest === null) {
@@ -200,11 +207,11 @@ function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
         if (dest === 'closed') return done(err(`error: ${t.value}: No such file or directory`))
         fds[r.fd] = dest
         if (r.both) fds[2] = dest
-      } else if (r.op === 'text') { input = r.expand ? expand(() => expandScalar(heredocWord(r.body), ctx)) : r.body; file = false; inherited = false }
+      } else if (r.op === 'text') { input = r.expand ? await expand(() => expandScalar(heredocWord(r.body), ctx)) : r.body; file = false; inherited = false }
       // A here-string is expanded but neither split nor globbed (bash).
-      else if (r.op === 'herestring') { input = expand(() => expandScalar(r.word, ctx)) + '\n'; file = false; inherited = false }
+      else if (r.op === 'herestring') { input = await expand(() => expandScalar(r.word, ctx)) + '\n'; file = false; inherited = false }
       else {
-        const t = expand(() => expandRedirect(r.word, ctx))
+        const t = await expand(() => expandRedirect(r.word, ctx))
         const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, file ? origin : input)
         if (read.error) return done(read.error)
         input = read.content
@@ -214,6 +221,7 @@ function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
         if (t.value !== '/dev/stdin') { file = t.value !== '/dev/null'; origin = file ? input : null; handle = read.handle; redirected = file }
       }
     }
+    // oxlint-enable no-await-in-loop
     if (file && handle) {
       const current = ctx.io.bufferReads(() => ctx.fs.readIdentity(handle.identity))
       if (current !== handle.content) {
@@ -236,8 +244,8 @@ function shellFailure(ctx, e) {
   return { ...err(`error: ${reason(e)}`, 1), ...(e?.halt ? { halt: true } : {}) }
 }
 
-function shellResult(ctx, fn) {
-  try { return fn() } catch (e) { return shellFailure(ctx, e) }
+async function shellResult(ctx, fn) {
+  try { return await fn() } catch (e) { return shellFailure(ctx, e) }
 }
 
 // Closed descriptors propagate from enclosing groups. Leave stdinLeft
@@ -304,20 +312,22 @@ function runStage(ctx, expanded) {
 
 // Prefix values expand left to right. After dispatch, keep changes to other
 // variables and explicit assignments to temporary names, but not their unsets.
-function assignValues(assigns, ctx) {
-  for (const a of assigns) ctx.vars.set(a.name, expandScalar(a.word, ctx, true))
+async function assignValues(assigns, ctx) {
+  // oxlint-disable-next-line no-await-in-loop -- prefix values expand left to right, each reading what the last assigned.
+  for (const a of assigns) ctx.vars.set(a.name, await expandScalar(a.word, ctx, true))
 }
 
-function temporaryValues(assigns, ctx) {
+async function temporaryValues(assigns, ctx) {
   if (assigns.length === 0) return null
   const outer = ctx.vars, vars = new BindingMap(outer)
   const names = new Set(assigns.map((a) => a.name))
   vars.bound = new Set()
   try {
-    withState(ctx, { vars }, () => {
+    await withState(ctx, { vars }, async () => {
       for (const a of assigns) {
         vars.expansionTargets = names
-        const value = expandScalar(a.word, ctx, true)
+        // oxlint-disable-next-line no-await-in-loop -- prefix values expand left to right, each reading what the last assigned.
+        const value = await expandScalar(a.word, ctx, true)
         vars.expansionTargets = null
         vars.set(a.name, value)
       }
@@ -331,7 +341,7 @@ function temporaryValues(assigns, ctx) {
   return { vars, names }
 }
 
-function withTemporaries(prepared, ctx, fn) {
+async function withTemporaries(prepared, ctx, fn) {
   if (!prepared) return fn()
   const outer = ctx.vars
   const inner = new BindingMap(outer), temps = prepared.names
@@ -339,7 +349,7 @@ function withTemporaries(prepared, ctx, fn) {
   ctx.vars = inner
   try {
     inner.bound = new Set()
-    return fn()
+    return await fn()
   } finally {
     ctx.vars = outer
     for (const [name, value] of inner) if (!temps.has(name) || inner.bound?.has(name)) outer.set(name, value)

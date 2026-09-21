@@ -15,8 +15,8 @@ const FILES = {
   'dir/text.txt': 'hit\n',
 }
 
-function check(command, stdout = '', exitCode = 1, stderr = '', files = FILES, notes = []) {
-  assert.deepEqual(createTerminal(files).run(command), {
+async function check(command, stdout = '', exitCode = 1, stderr = '', files = FILES, notes = []) {
+  assert.deepEqual(await createTerminal(files).run(command), {
     stdout, stderr, exitCode, cwd: '/', notes, unsupported: [],
   }, command)
 }
@@ -60,27 +60,27 @@ describe('grep binary inputs containing only empty records', () => {
     it(command, () => check(command, stdout, exitCode, '', FILES, notes))
   }
 
-  it('does not depend on where an all-empty binary input first contains NUL', () => {
+  it('does not depend on where an all-empty binary input first contains NUL', async () => {
     const files = { zero: '\0'.repeat(200000), late: '\n'.repeat(100000) + '\0' }
-    check('grep . zero', '', 1, '', files)
-    check('grep -c . late', '0\n', 1, '', files)
+    await check('grep . zero', '', 1, '', files)
+    await check('grep -c . late', '0\n', 1, '', files)
   })
 
-  it('preserves ordinary read failures alongside binary non-matches', () => {
-    check('grep . missing zero', '', 2, 'grep: missing: No such file or directory\n')
-    check('grep -c . zero missing', 'zero:0\n', 2, 'grep: missing: No such file or directory\n')
-    check('grep -s . missing zero', '', 2)
-    check('grep -sq . missing zero', '', 2)
+  it('preserves ordinary read failures alongside binary non-matches', async () => {
+    await check('grep . missing zero', '', 2, 'grep: missing: No such file or directory\n')
+    await check('grep -c . zero missing', 'zero:0\n', 2, 'grep: missing: No such file or directory\n')
+    await check('grep -s . missing zero', '', 2)
+    await check('grep -sq . missing zero', '', 2)
   })
 
-  it('treats NUL as text only when the last binary option selects text mode', () => {
-    check('grep -a . zero', '\0\n', 0)
-    check('grep --text . zeros', '\0\0\0\n', 0)
-    check('grep -ao . zeros', '\0\n\0\n\0\n', 0)
-    check('grep -Ia . zero', '\0\n', 0)
+  it('treats NUL as text only when the last binary option selects text mode', async () => {
+    await check('grep -a . zero', '\0\n', 0)
+    await check('grep --text . zeros', '\0\0\0\n', 0)
+    await check('grep -ao . zeros', '\0\n\0\n\0\n', 0)
+    await check('grep -Ia . zero', '\0\n', 0)
     const notes = ['grep: skipped 1 binary file: "/zero". Binary input is treated as text with -a.']
-    check('grep -aI . zero', '', 1, '', FILES, notes)
-    check('grep -Iv . zero', '', 1, '', FILES, notes)
+    await check('grep -aI . zero', '', 1, '', FILES, notes)
+    await check('grep -Iv . zero', '', 1, '', FILES, notes)
   })
 
   for (const command of [
@@ -90,8 +90,8 @@ describe('grep binary inputs containing only empty records', () => {
     'grep -v . zero',
     "grep -e . -e '^$' zero",
   ]) {
-    it(`retains binary diagnostics when a record can be selected: ${command}`, () => {
-      const result = createTerminal(FILES).run(command)
+    it(`retains binary diagnostics when a record can be selected: ${command}`, async () => {
+      const result = await createTerminal(FILES).run(command)
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 2)
       assert.deepEqual(result.unsupported.map(({ command: name, detail }) => [name, detail]), [['grep', 'binary input']])

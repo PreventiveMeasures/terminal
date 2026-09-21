@@ -37,19 +37,19 @@ describe('upstream base64 standard byte vectors', () => {
     })
   }
 
-  it('retains NUL and control bytes through the command interface', () => {
+  it('retains NUL and control bytes through the command interface', async () => {
     for (const { input, hex } of corpus.raw.slice(0, 3)) {
       const text = String.fromCodePoint(...bytesFromHex(hex))
       const t = createTerminal({ input, text })
-      assert.deepEqual(t.run('base64 -d input'), result(text))
-      assert.deepEqual(t.run('base64 -w0 text'), result(input))
+      assert.deepEqual(await t.run('base64 -d input'), result(text))
+      assert.deepEqual(await t.run('base64 -w0 text'), result(input))
     }
   })
 
-  it('diagnoses the upstream 0xff vector instead of corrupting its output', () => {
+  it('diagnoses the upstream 0xff vector instead of corrupting its output', async () => {
     const t = createTerminal({ input: '/w==' })
-    assert.deepEqual(t.run('base64 -d input'), result('', 1, utf8Gap[0].message + '\n', utf8Gap))
-    assert.deepEqual(t.run('base64 -d input 2>/dev/null | cat'), result('', 0, '', utf8Gap))
+    assert.deepEqual(await t.run('base64 -d input'), result('', 1, utf8Gap[0].message + '\n', utf8Gap))
+    assert.deepEqual(await t.run('base64 -d input 2>/dev/null | cat'), result('', 0, '', utf8Gap))
   })
 })
 
@@ -66,15 +66,15 @@ describe('all upstream string rejection vectors with GNU decoding expectations',
     })
   }
 
-  it('preserves recoverable bytes even though the strict codec rejects the entire input', () => {
+  it('preserves recoverable bytes even though the strict codec rejects the entire input', async () => {
     const t = createTerminal({ input: 'aa==' })
-    assert.deepEqual(t.run('base64 -d input'), result('i', 1, 'base64: invalid input\n'))
-    assert.deepEqual(t.run('base64 -d input 2>&1'), result('ibase64: invalid input\n', 1))
+    assert.deepEqual(await t.run('base64 -d input'), result('i', 1, 'base64: invalid input\n'))
+    assert.deepEqual(await t.run('base64 -d input 2>&1'), result('ibase64: invalid input\n', 1))
   })
 
-  it('keeps the UTF-8 diagnostic when rejected input has a binary decoded prefix', () => {
+  it('keeps the UTF-8 diagnostic when rejected input has a binary decoded prefix', async () => {
     const t = createTerminal({ input: 'aaa#' })
-    assert.deepEqual(t.run('base64 -d input'), result('', 1, utf8Gap[0].message + '\n', utf8Gap))
+    assert.deepEqual(await t.run('base64 -d input'), result('', 1, utf8Gap[0].message + '\n', utf8Gap))
   })
 })
 
@@ -94,18 +94,18 @@ describe('GNU stream rules around the strict base64 codec', () => {
     ['YQ===Yg==', true, [97], false],
   ]
   for (const [input, ignoreGarbage, bytes, valid] of cases) {
-    it(`${JSON.stringify(input)}, ignore garbage ${ignoreGarbage}`, () => {
+    it(`${JSON.stringify(input)}, ignore garbage ${ignoreGarbage}`, async () => {
       assert.deepEqual(decodeBase64(input, ignoreGarbage), { bytes: Uint8Array.from(bytes), valid })
       const command = 'base64 -d' + (ignoreGarbage ? 'i' : '') + ' input'
-      assert.deepEqual(createTerminal({ input }).run(command), result(
+      assert.deepEqual(await createTerminal({ input }).run(command), result(
         String.fromCodePoint(...bytes), valid ? 0 : 1, valid ? '' : 'base64: invalid input\n',
       ))
     })
   }
 
-  it('reassembles UTF-8 across padded blocks before validating text', () => {
+  it('reassembles UTF-8 across padded blocks before validating text', async () => {
     const t = createTerminal({ input: '8A==nw==mA==gw==' })
-    assert.deepEqual(t.run('base64 -d input'), result('😃'))
+    assert.deepEqual(await t.run('base64 -d input'), result('😃'))
   })
 })
 
