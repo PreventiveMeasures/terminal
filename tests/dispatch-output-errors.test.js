@@ -25,6 +25,31 @@ describe('closed stdout is validated for commands entering any dispatch path', (
       assert.deepEqual(await setup().run(command + ' 1>&-'), { ...result('', status), notes })
     })
   }
+  // A command whose output is the bytes themselves leaves `stdout` empty and
+  // carries them as events. That is output all the same, so writing it to a
+  // closed descriptor is the same failure, and sending it to /dev/null is the
+  // same nothing — neither is a question about whether the bytes spell text.
+  describe('output that is bytes rather than a string', () => {
+    const member = Uint8Array.of(0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xeb, 0x0c, 0xf0, 0x73, 0xff, 0xcf, 0x05, 0x00, 0x5f, 0x8b, 0x81, 0xcd, 0x06, 0x00, 0x00, 0x00)
+    const bytes = () => createTerminal({ binary: Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0xff, 0x0a), 'img.gz': member, 'e64': 'iVBOR/8K\n' })
+    for (const [command, name, status] of [
+      ['cat /binary', 'cat', 1], ['gzip -dc /img.gz', 'gzip', 1], ['zcat /img.gz', 'zcat', 1],
+      ['gunzip -c /img.gz', 'gunzip', 1], ['base64 -d /e64', 'base64', 1], ['xxd /binary', 'xxd', 3],
+    ]) {
+      it(`${command} reports a closed stdout`, async () => {
+        assert.deepEqual(await bytes().run(command + ' 1>&-'), result('', status, writeError(name)))
+      })
+    }
+    it('ignores a closed stdout where the command does', async () => {
+      assert.deepEqual(await bytes().run('hexdump -C /binary 1>&-'), result('', 0))
+    })
+    for (const command of ['cat /binary', 'gzip -dc /img.gz', 'zcat /img.gz', 'base64 -d /e64']) {
+      it(`${command} discards into /dev/null without asking for text`, async () => {
+        assert.deepEqual(await bytes().run(command + ' >/dev/null'), result('', 0))
+      })
+    }
+  })
+
   it('handles inherited closure without duplicated errors', async () => {
     assert.deepEqual(await setup().run('{ echo one; /bin/echo two; } 1>&-'), result('', 1, writeError('echo') + writeError('/bin/echo')))
   })

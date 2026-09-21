@@ -62,9 +62,10 @@ function routeEvents(result, io, ctx, write) {
   for (const e of eventsOf(r)) {
     const dest = io.fds[e.fd]
     if (typeof dest === 'object') { write(e, dest); continue }
-    // Bytes on their way to a pipe wait for the router that writes it, which
-    // is the one that can hand them over as the bytes they are.
-    if (io.piped?.[e.fd] && e.bytes !== undefined) { events.push(e); continue }
+    // Bytes on their way somewhere else wait for the router that writes it,
+    // which is the one that can hand them over as the bytes they are — or
+    // drop them, which needs them to be no more readable than this does.
+    if (io.deferred?.[e.fd] && e.bytes !== undefined) { events.push(e); continue }
     if (dest !== 'out' && dest !== 'err') {
       // A diagnostic sent to /dev/null or a closed descriptor reaches nobody.
       if (e.fd === 2) discardedStderr(ctx, textOf(e))
@@ -83,8 +84,13 @@ function routeEvents(result, io, ctx, write) {
 // Commands differ in closed-stdout status; hexdump and tree ignore the failure.
 const WRITE_ERROR_STATUS = new Map([['ls', 2], ['grep', 2], ['egrep', 2], ['fgrep', 2], ['sort', 2], ['xxd', 3], ['sed', 4], ['diff', 2], ['patch', 2], ['xargs', 123], ['hexdump', 0], ['tree', 0]])
 
+// What a command wrote to stdout, which is a string for most of them and the
+// bytes themselves for the few that write what no string spells. Both are
+// output, and writing either to a closed descriptor is the same failure.
+const wroteOut = (r) => r.stdout !== '' || eventsOf(r).some((e) => e.fd === 1 && (e.bytes?.length ?? 0) > 0)
+
 export function commandWriteError(name, r, ctx) {
-  return ctx.closed.out && r.stdout !== '' ? writeError(name, r, ctx) : r
+  return ctx.closed.out && wroteOut(r) ? writeError(name, r, ctx) : r
 }
 
 export function writeError(name, r, ctx) {

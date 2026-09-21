@@ -13,21 +13,25 @@ export { createIoGuard } from './io.js'
 export { commandWriteError } from './output.js'
 
 // Commands flush files before a subsequent command reads them. Other streams
-// stay in the enclosing handler's result for routing — and where that stream
-// is a pipe, bytes stay bytes until it is written, since a pipe can take
-// them and this terminal's own output, being a string, cannot.
+// stay in the enclosing handler's result for routing, and bytes bound for one
+// of those stay bytes until it writes them: only this terminal's own output
+// is a string, and only what is going there has to spell text. A pipe takes
+// bytes, and a descriptor that is closed or /dev/null takes them the way it
+// takes everything — so asking any of the three for text asks the wrong
+// question, and would answer with a gap where there is no trouble at all.
 export function routeExternalOutput(result, ctx) {
   const fds = {
     1: ctx.outputFds[1]?.path ? ctx.outputFds[1] : 'out',
     2: ctx.outputFds[2]?.path ? ctx.outputFds[2] : 'err',
   }
-  const piped = { 1: isPipe(ctx.outputFds[1]), 2: isPipe(ctx.outputFds[2]) }
-  return routeOutput(result, { fds, piped }, ctx)
+  const deferred = { 1: elsewhere(ctx.outputFds[1]), 2: elsewhere(ctx.outputFds[2]) }
+  return routeOutput(result, { fds, deferred }, ctx)
 }
 
-// A descriptor the enclosing router will write: a pipe rather than a file,
-// which is an object with a path, or one of the terminal's own two streams.
-const isPipe = (fd) => typeof fd === 'object' && fd !== null && !fd.path
+// A descriptor the enclosing router will deal with: a pipe, a closed one or
+// /dev/null — anything but a file, which is an object with a path and is
+// written here, and the terminal's own two streams, which are the string.
+const elsewhere = (fd) => fd !== 'out' && fd !== 'err' && !fd?.path
 
 // A list shares stdin across its steps: { cat; cat; } consumes it once.
 // `exit` bypasses pipeline negation; break/continue still carry its status.
