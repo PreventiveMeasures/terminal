@@ -1,19 +1,25 @@
 /**
- * What a source entry is where a string cannot say it. Today that is a
- * symbolic link: `{ type: 'link', target }` holds the path the link carries,
- * resolved from the directory the link itself is in, exactly as the kernel
- * resolves one. The target need not exist — a link leading nowhere is a link,
- * and `find -type l` and `ls -l` say so — and an absolute target names a path
- * in the terminal's own filesystem rather than one inside the mount.
+ * What a source entry is where a string cannot say it. A symbolic link,
+ * `{ type: 'link', target }`, holds the path the link carries, resolved from
+ * the directory the link itself is in, exactly as the kernel resolves one.
+ * The target need not exist — a link leading nowhere is a link, and
+ * `find -type l` and `ls -l` say so — and an absolute target names a path in
+ * the terminal's own filesystem rather than one inside the mount. Bytes spelt
+ * in base64, `{ format: 'base64', data }`, are the file a `Uint8Array` of the
+ * same bytes would be, for a tree that arrives serialized as text: the
+ * spelling is checked when the terminal is created (RFC 4648, padded or
+ * not), and decoded the first time the file is read, so a tree of many such
+ * files costs nothing until one is opened.
  */
-export type SourceEntry = { type: 'link'; target: string }
+export type SourceEntry = { type: 'link'; target: string } | { format: 'base64'; data: string }
 
 /**
  * Virtual source tree: file paths within the configured mount (leading `/`
  * optional) to file contents, as either a plain object or a `Map`. A file is
  * the text it holds, or — for one no string can spell, such as an image or a
  * compiled object — the bytes themselves, as a `Uint8Array` that is copied
- * when the terminal is created.
+ * when the terminal is created, or those bytes spelt in base64 (see
+ * {@link SourceEntry}).
  */
 export type Sources = Record<string, string | Uint8Array | SourceEntry> | Map<string, string | Uint8Array | SourceEntry>
 

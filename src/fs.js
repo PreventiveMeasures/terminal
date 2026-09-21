@@ -4,6 +4,7 @@
 // The byte codec directly rather than through util.js, which reaches back
 // here for its own lookups.
 import { decodeUtf8Maybe, encodeUtf8, encodeUtf8Loose } from './bytes.js'
+import { fromBase64 } from '@exodus/bytes/base64.js'
 import { UnsupportedError } from './unsupported.js'
 
 export function normalize(path) {
@@ -195,6 +196,17 @@ export function createFs(sources, mount = '/') {
     entry.files.sort(compareNames)
     entry.links.sort(compareNames)
   }
+  // A file declared in base64 is decoded the first time its bytes are asked
+  // for, and is those bytes from then on; what can be answered without them
+  // — its size, whether it is empty, whether it is bytes at all — reads the
+  // map as it is.
+  const held = (p) => {
+    const content = files.get(p)
+    if (!(content instanceof Base64Bytes)) return content
+    const bytes = content.decode()
+    files.set(p, bytes)
+    return bytes
+  }
   const fs = {
     isFile: (p) => files.has(p),
     isDir: (p) => childMap.has(p),
@@ -204,7 +216,7 @@ export function createFs(sources, mount = '/') {
     // every command here works in; one whose bytes spell none is said to be
     // what it is, rather than read as something it is not.
     readFile: (p) => {
-      const content = files.get(p)
+      const content = held(p)
       return content === undefined || typeof content === 'string' ? content : textOfFile(content, JSON.stringify(p))
     },
     // The file as it is stored, for the commands that work in bytes: what a
@@ -215,7 +227,7 @@ export function createFs(sources, mount = '/') {
     // the replacement character each stands for, which is the byte count
     // `wc -c` and `head -c` have always worked in.
     readBytes: (p, loose = false) => {
-      const content = files.get(p)
+      const content = held(p)
       if (typeof content !== 'string') return content
       return loose ? encodeUtf8Loose(content) : encodeUtf8(content)
     },
@@ -224,13 +236,13 @@ export function createFs(sources, mount = '/') {
     fileSize: (p) => childMap.has(p) ? undefined
       : links.has(p) ? encodeUtf8(links.get(p)).length
         : files.has(p) ? contentSize(files.get(p)) : undefined,
-    sameFileContents: (a, b) => sameContents(files.get(a), files.get(b)),
+    sameFileContents: (a, b) => sameContents(held(a), held(b)),
     // What a comparison may read of a file without asking it to be text.
-    exactBytes: (p) => exactBytes(files.get(p)),
+    exactBytes: (p) => exactBytes(held(p)),
     // Whether a file is held as bytes rather than as text, which is what says
     // that reading it as text may have no answer. Asking costs nothing, so a
     // command that answers for such a file need not read one to find out.
-    isBytes: (p) => files.get(p) instanceof Uint8Array,
+    isBytes: (p) => typeof files.get(p) === 'object',
     // Whether a file holds nothing at all, which `find -empty` asks of every
     // file it walks: a question about its length, answered without encoding
     // the text it holds or spelling out the bytes.
@@ -246,7 +258,8 @@ export function createFs(sources, mount = '/') {
 }
 
 // A file's length in bytes, which is what it is stored as when it was
-// declared as bytes and what its text encodes to when it was declared as one.
+// declared as bytes, what its base64 spells without being decoded, and what
+// its text encodes to when it was declared as one.
 const contentSize = (content) => typeof content === 'string' ? encodeUtf8(content).length : content.length
 
 // The bytes a file certainly has, for comparing one with another without
@@ -289,12 +302,13 @@ function sourceEntries(sources) {
 }
 
 // A source value is the file's contents — text, or the bytes of one a string
-// cannot spell — or an object saying what the entry is where neither can:
-// today a symbolic link, `{ type: 'link', target }`. A value that declares
-// neither stays ignored, as every non-string value was before links existed;
-// one that says `type` or `target` is a deliberate declaration, so a
-// misspelled one is refused rather than dropped into a tree where the entry
-// would simply not be there.
+// cannot spell — or an object saying what the entry is where neither can: a
+// symbolic link, `{ type: 'link', target }`, or bytes spelt in base64,
+// `{ format: 'base64', data }`, for a tree that arrives serialized as text.
+// A value that declares neither stays ignored, as every non-string value was
+// before links existed; one that says `type`, `target` or `format` is a
+// deliberate declaration, so a misspelled one is refused rather than dropped
+// into a tree where the entry would simply not be there.
 function sourceEntry(value, key) {
   if (typeof value === 'string') return { content: value }
   // A `Uint8Array` — or any other one-byte view, `Buffer` among them — is the
@@ -305,6 +319,7 @@ function sourceEntry(value, key) {
   if (value instanceof ArrayBuffer) {
     throw new TypeError(`createTerminal: source ${JSON.stringify(key)} is an ArrayBuffer; declare a file's bytes as a Uint8Array over it`)
   }
+  if (value.format !== undefined) return { content: encodedContent(value, key) }
   if (value.type === undefined && value.target === undefined) return null
   const name = JSON.stringify(key)
   if (value.type !== 'link') {
@@ -315,6 +330,35 @@ function sourceEntry(value, key) {
     throw new TypeError(`createTerminal: link ${name} must declare a non-empty target without NUL characters`)
   }
   return { link: target }
+}
+
+// Bytes spelt in base64: RFC 4648's alphabet in whole groups of four, a last
+// group of two or three that spells whole bytes and nothing past them, and
+// the `=` padding present or left off. The spelling is checked here, where
+// every other declaration is, in one pass that allocates nothing; decoding
+// it, which allocates the file, waits for the first reader.
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw](?:==)?|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=?)?$/u
+
+function encodedContent(value, key) {
+  const name = JSON.stringify(key)
+  if (value.format !== 'base64') {
+    throw new TypeError(`createTerminal: source ${name} declares format ${JSON.stringify(value.format)}; the only format is { format: 'base64', data }`)
+  }
+  if (typeof value.data !== 'string') throw new TypeError(`createTerminal: source ${name} must declare its base64 as a string in \`data\``)
+  if (!BASE64.test(value.data)) throw new TypeError(`createTerminal: source ${name} declares base64 that does not decode`)
+  return new Base64Bytes(value.data)
+}
+
+// The base64 of a file, and the length of the bytes it spells — three for
+// every four characters, less what the padding stands for — which is what a
+// listing, a size and `find -empty` ask without the bytes themselves.
+class Base64Bytes {
+  constructor(text) {
+    this.text = text
+    const padding = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0
+    this.length = Math.floor((text.length - padding) * 3 / 4)
+  }
+  decode() { return fromBase64(this.text) }
 }
 
 // Only a view of single bytes says what a file holds: a wider one would be
