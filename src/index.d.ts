@@ -8,8 +8,14 @@
  */
 export type SourceEntry = { type: 'link'; target: string }
 
-/** Virtual source tree: file paths within the configured mount (leading `/` optional) to file contents, as either a plain object or a `Map`. */
-export type Sources = Record<string, string | SourceEntry> | Map<string, string | SourceEntry>
+/**
+ * Virtual source tree: file paths within the configured mount (leading `/`
+ * optional) to file contents, as either a plain object or a `Map`. A file is
+ * the text it holds, or — for one no string can spell, such as an image or a
+ * compiled object — the bytes themselves, as a `Uint8Array` that is copied
+ * when the terminal is created.
+ */
+export type Sources = Record<string, string | Uint8Array | SourceEntry> | Map<string, string | Uint8Array | SourceEntry>
 
 /** Read-only view of the virtual source tree, handed to a {@link CommandRun} handler. Paths may be relative to {@link CommandIo.cwd}. */
 export interface CommandFs {
@@ -23,8 +29,12 @@ export interface CommandFs {
   isLink(path: string): boolean
   /** The path a symbolic link holds, unresolved, or `undefined` if `path` is not one. */
   readLink(path: string): string | undefined
-  /** Contents of `path`, or `undefined` if it is not a file. */
+  /** Whether `path` holds bytes rather than text — a file declared as a `Uint8Array`, or one written under `/tmp`. Its bytes may still spell text, which {@link CommandFs.readFile} then reads. */
+  isBytes(path: string): boolean
+  /** Contents of `path`, or `undefined` if it is not a file. Throws where the file holds bytes that spell no text, as this string-based terminal cannot carry them out; {@link CommandFs.readBytes} reads those. */
   readFile(path: string): string | undefined
+  /** The bytes of `path`, or `undefined` if it is not a file — what a file declared as a `Uint8Array` holds, and what the text of any other file encodes to as UTF-8. */
+  readBytes(path: string): Uint8Array | undefined
   /** Immediate children of directory `path`, each list sorted (copies — mutating them cannot affect the tree). Links are listed apart from the files they may lead to. Throws `<path>: Not a directory` / `No such file or directory` otherwise. */
   listDir(path: string): { dirs: string[]; files: string[]; links: string[] }
   /** Every file path at or under `path`, absolute. `path` resolves as it does everywhere else here, so a link naming a directory walks the directory it names; a link the walk then reaches is neither crossed nor named. Empty if `path` does not exist. */

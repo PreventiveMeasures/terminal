@@ -76,7 +76,10 @@ function evalPredicate(p, entry, ctx, result) {
   // neither of the two things GNU calls empty, whatever it points at.
   if (p.kind === 'empty') {
     if (entry.kind === 'link') return false
-    if (entry.kind === 'file') return ctx.fs.readFile(entry.abs) === ''
+    // An empty file is one holding nothing, which the filesystem answers
+    // without reading it: a file of bytes has none to read as text, and a
+    // file of text is not encoded to be weighed.
+    if (entry.kind === 'file') return ctx.fs.isEmptyFile(entry.abs)
     const { dirs, files, links } = ctx.fs.listDir(entry.abs)
     return dirs.length + files.length + links.length === 0
   }

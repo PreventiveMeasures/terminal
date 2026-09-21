@@ -1,6 +1,6 @@
 import { DiffError, FormatError, diff as diffText } from '@preventive/diff'
-import { basename, lookup } from '../fs.js'
-import { consumeStdin, err } from '../util.js'
+import { basename, lookup, sameBytes, textOfFile } from '../fs.js'
+import { consumeStdin, err, readTextOrBytes } from '../util.js'
 import { unsupported } from '../unsupported.js'
 import { lookupWithNote } from '../notes.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
@@ -92,13 +92,30 @@ export function compareFiles(state, nameA, nameB, inDirectory, listed = null) {
   }
   if (failed) return
   if (sides[0].identity !== undefined && sides[0].identity === sides[1].identity && !missing[0]) return sameReport(state, nameA, nameB)
-  let contents = sides.map((side) => side.content ?? '')
-  if (opts.stripCr) contents = contents.map(stripTrailingCr)
   const label = (i) => opts.labels[i] ?? [nameA, nameB][i]
-  if (!opts.text && contents.some(isBinary)) {
-    if (contents[0] === contents[1]) return sameReport(state, nameA, nameB)
+  // A file holding a NUL is binary to diff, which says only whether the two
+  // differ and reads neither as text — so one whose bytes spell none is
+  // answered for here as readily as one that does.
+  if (!opts.text && sides.some(isBinary)) {
+    if (sameSides(sides)) return sameReport(state, nameA, nameB)
     return report(state, `${opts.brief ? 'Files' : 'Binary files'} ${label(0)} and ${label(1)} differ\n`, 1)
   }
+  // What is left is a comparison GNU prints as text, and a file whose bytes
+  // spell none is one it would print as those bytes. What it says of such a
+  // file without printing it, this terminal says too: the same bytes are the
+  // same file, and `-q` says only that two differ. An option that reads text
+  // more loosely than its bytes — case, whitespace, line endings — answers
+  // for neither, since files differing in bytes may be the same text to it.
+  if (sides.some((side) => side.content === undefined)) {
+    if (sameSides(sides)) return sameReport(state, nameA, nameB)
+    if (opts.brief && !opts.ignoreCase && !opts.stripCr && opts.whitespace === 'none') {
+      return report(state, `Files ${label(0)} and ${label(1)} differ\n`, 1)
+    }
+  }
+  // The file it could not read is named as the one it is.
+  for (const [i, side] of sides.entries()) if (side.content === undefined) textOfFile(side.bytes, JSON.stringify(label(i)))
+  let contents = sides.map((side) => side.content ?? '')
+  if (opts.stripCr) contents = contents.map(stripTrailingCr)
   // -q asks whether they differ at all, which the library answers by one
   // pass that stops at the first line that differs, where a diff would go on
   // to find the shortest way to describe them all.
@@ -130,10 +147,22 @@ function sameReport(state, nameA, nameB) {
 const stripTrailingCr = (text) => text.replace(/\r\n/gu, '\n')
 
 // GNU looks for a NUL in the first block it reads; a file this size is read
-// whole, so the whole file is what is looked at.
-const isBinary = (text) => text.includes('\0')
+// whole, so the whole file is what is looked at — its bytes where its text
+// is not there to look through.
+const isBinary = (side) => side.content === undefined ? side.bytes.includes(0) : side.content?.includes('\0') === true
 
-// Content null means the file is not there. Identity tells `diff a ./a`
+// Two files of text are the same text; where either is bytes that spell
+// none, the bytes are what says whether they differ. A side that is not
+// there at all stands in as the empty file `-N` makes of it.
+const sameSides = ([a, b]) => a.content !== undefined && b.content !== undefined
+  ? a.content === b.content
+  : sameBytes(a.bytes ?? EMPTY, b.bytes ?? EMPTY)
+
+const EMPTY = new Uint8Array()
+
+// Content null means the file is not there, and undefined that its bytes
+// spell no text — which diff answers for, since a file holding a NUL is one
+// it compares without reading either as text. Identity tells `diff a ./a`
 // apart from two files that merely read the same.
 function readOperand(state, name) {
   const { ctx } = state
@@ -144,6 +173,7 @@ function readOperand(state, name) {
   const found = lookupWithNote(ctx, 'diff', name)
   // What stopped the read travels with it: a link that loops is not the
   // missing file a name that is simply absent is.
-  if (found.error || ctx.fs.isDir(found.path)) return { content: null, identity: undefined, error: found.error }
-  return { content: ctx.fs.readFile(found.path), identity: ctx.fs.fileIdentity?.(found.path) ?? found.path }
+  if (found.error || ctx.fs.isDir(found.path)) return { content: null, bytes: null, identity: undefined, error: found.error }
+  const { text, bytes } = readTextOrBytes(ctx.fs, found.path)
+  return { content: text, bytes, identity: ctx.fs.fileIdentity?.(found.path) ?? found.path }
 }

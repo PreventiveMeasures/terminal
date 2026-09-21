@@ -1,6 +1,6 @@
 import { parseArgs } from '../args.js'
 import { INT64_MAX } from '../numeric.js'
-import { decodeUtf8, encodeUtf8, err, ok, readInputs } from '../util.js'
+import { decodeUtf8, decodeUtf8Loose, encodeUtf8, err, ok, readInputs } from '../util.js'
 import { fromBase64, toBase64 } from '@exodus/bytes/base64.js'
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -18,11 +18,17 @@ export function base64(stdin, tokens, ctx) {
     wrap = count > INT64_MAX ? 0 : Number(count)
   }
   if (positional.length > 1) return err(`base64: extra operand: ${positional[1]}`)
-  const input = readInputs('base64', positional, stdin, ctx)
+  // The file as it is held: base64 is what bytes look like as text, so a file
+  // this terminal cannot spell as text has an encoding all the same, while
+  // one held as text is encoded from the text it is rather than read twice.
+  const input = readInputs('base64', positional, stdin, ctx, { read: 'as-held' })
   if (input.failed) return err(input.stderr)
-  const text = input.inputs[0].content
-  if (flags.has('d') || flags.has('decode')) return decode(text, flags.has('i') || flags.has('ignore-garbage'))
-  const encoded = toBase64(encodeUtf8(text))
+  const { content, bytes } = input.inputs[0]
+  // Decoding reads base64 itself, which is text; a byte that spells no
+  // character spells none of its alphabet either, which is the invalid input
+  // GNU reports.
+  if (flags.has('d') || flags.has('decode')) return decode(content ?? decodeUtf8Loose(bytes), flags.has('i') || flags.has('ignore-garbage'))
+  const encoded = toBase64(bytes ?? encodeUtf8(content))
   if (!wrap || encoded === '') return ok(encoded)
   const lines = []
   for (let i = 0; i < encoded.length; i += wrap) lines.push(encoded.slice(i, i + wrap))

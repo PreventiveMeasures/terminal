@@ -214,7 +214,7 @@ describe('du reports failures without inventing metadata', () => {
     const fs = writableFs(createFs({}, '/src'))
     const first = fs.openWritable('/', '/tmp/file'), second = fs.openWritable('/', '/tmp/file')
     first.write('é'); second.write('X')
-    assert.throws(() => fs.readFile('/tmp/file'), /UTF-8/u)
+    assert.throws(() => fs.readFile('/tmp/file'), /spell no text/u)
     const ctx = { fs, cwd: '/', vars: new Map(), notes: new Set(), unsupported: { add() {} }, flushOutput: (r) => r }
     assert.equal(du('', ['-b', '/tmp/file'], ctx).stdout, '2\t/tmp/file\n')
   })

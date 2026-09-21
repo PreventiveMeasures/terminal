@@ -3,10 +3,10 @@
 import { basename, lookup, relativeTo, resolve, walkTree } from '../fs.js'
 import { lookupWithNote, omissionNote } from '../notes.js'
 import { parseArgs } from '../args.js'
-import { consumeStdin, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, usage } from '../util.js'
+import { consumeStdin, decodeUtf8Maybe, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, readTextOrBytes, usage } from '../util.js'
 import { UnsupportedError, unsupported, unsupportedFrom } from '../unsupported.js'
 import { AwkError } from '../awk/common.js'
-import { compilePatterns, inputGap } from './grep-pattern.js'
+import { cannotHoldMatch, compilePatterns, inputGap } from './grep-pattern.js'
 import { compileGlob } from '../glob.js'
 import { countMatches, grepRun, grepSummary, noMatch } from './grep-output.js'
 import { grepPatterns } from './grep-pattern-files.js'
@@ -111,6 +111,23 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
 // Retain empty operands for -L and -c. Default binary mode treats NUL as
 // a record separator, so an input of unselected empty records is a non-match.
 function textInput(input, filters, res, invert) {
+  // Bytes that spell no text are binary whatever they hold: GNU calls a file
+  // its locale cannot read binary, and what this terminal cannot do is search
+  // those bytes at all — so `-I` passes over such a file, as it passes over
+  // any binary one, and every other reading says so.
+  if (input.content === undefined) {
+    // Unless nothing in it could have been selected anyway: a literal the
+    // bytes do not hold selects no line of them, and `-v` selects the lines
+    // a pattern does not, which is every line there is.
+    if (!invert && cannotHoldMatch(input.bytes, res)) return { ...input, content: '' }
+    // What is left of such a file is the gap `inputGap` reports for every
+    // other binary one, in the same words and with grep's own status.
+    if (!filters.ignoreBinary) return input
+    if (!stopsBeingTextWithin(input.bytes, BINARY_BUFFER)) {
+      throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
+    }
+    return skipBinary(input, filters)
+  }
   if (!input.content.includes('\0') || filters.forceText) return input
   if (!filters.ignoreBinary) {
     // oxlint-disable-next-line no-control-regex -- GNU binary mode uses NUL as a record delimiter.
@@ -120,11 +137,33 @@ function textInput(input, filters, res, invert) {
   // GNU's initial 96 KiB read detects NUL before matching that buffer.
   // Later discovery may retain earlier output, counts, or a quiet success;
   // buffer growth and read boundaries are not represented by this runtime.
-  if (encodeUtf8Loose(input.content.slice(0, input.content.indexOf('\0'))).length >= 96 * 1024) throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
+  if (encodeUtf8Loose(input.content.slice(0, input.content.indexOf('\0'))).length >= BINARY_BUFFER) throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
+  return skipBinary(input, filters)
+}
+
+// GNU reads this much before it decides, so what that read holds is what
+// makes a file binary.
+const BINARY_BUFFER = 96 * 1024
+
+// `-I` passes over a binary file: the name is kept for the note that says so,
+// and the search is handed the nothing it reads of it.
+function skipBinary(input, filters) {
   const path = input.name === null || input.name === '/dev/stdin' ? filters.stdinPath : resolve(filters.cwd, input.name)
   if (path) filters.binary.add(path)
   else filters.binaryStdin = true
   return { ...input, content: '' }
+}
+
+// Whether the bytes stop being text inside that first read. A prefix of valid
+// text can fail to decode only by ending inside a character, which at most
+// three more bytes complete, so a prefix that decodes with any of them is one
+// this read never saw the end of.
+function stopsBeingTextWithin(bytes, limit) {
+  if (bytes.length <= limit) return true
+  for (let end = limit; end <= limit + 3 && end <= bytes.length; end++) {
+    if (decodeUtf8Maybe(bytes.subarray(0, end)) !== undefined) return false
+  }
+  return true
 }
 
 function filterNotes(filters, notes) {
@@ -178,7 +217,7 @@ function pickShowName(flags, nFiles) {
 
 function grepInputs(recursive, stdin, rest, ctx, filters) {
   if (!recursive) {
-    const r = readInputs('grep', rest, stdin, ctx)
+    const r = readInputs('grep', rest, stdin, ctx, { read: 'maybe-text' })
     return { ...r, stderr: filters.silent ? '' : r.stderr, inputs: r.inputs.map((input) => input.name === '-' ? { ...input, name: null } : input) }
   }
   const inputs = []
@@ -193,7 +232,7 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
     }
     const { path: abs, error } = lookupWithNote(ctx, 'grep', p)
     // Filename filters apply after collecting both explicit and discovered files.
-    if (ctx.fs.isFile(abs)) { inputs.push({ name: p, content: ctx.fs.readFile(abs) }); continue }
+    if (ctx.fs.isFile(abs)) { inputs.push({ name: p, ...searchable(ctx, abs) }); continue }
     if (error) { stderr += `grep: ${p}: ${error}\n`; failed = true; continue }
     if (excludedStartDir(p, filters.dir)) { filters.excluded.add(abs); continue }
     const descend = (path) => {
@@ -213,7 +252,7 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
       if (entry.kind !== 'file') continue
       const filePath = entry.path
       // Preserve operand spelling; the implicit '.' root has no display prefix.
-      inputs.push({ name: displayName(rest.length ? p : '', abs, filePath), content: ctx.fs.readFile(filePath), recursive: true })
+      inputs.push({ name: displayName(rest.length ? p : '', abs, filePath), ...searchable(ctx, filePath), recursive: true })
     }
   }
   return { inputs, stderr: filters.silent ? '' : stderr, failed }
@@ -235,7 +274,15 @@ function followedLink(path, named, ctx, filters) {
   if (!kept) { filters.excluded.add(path); return null }
   if (directory) throw new UnsupportedError('option', '-R', `following a symbolic link to a directory is not supported: ${named}`)
   if (target.error) return { error: `grep: ${named}: ${target.error}\n` }
-  return { input: { name: named, content: ctx.fs.readFile(target.path), recursive: true } }
+  return { input: { name: named, ...searchable(ctx, target.path), recursive: true } }
+}
+
+// What a search reads of a file: the text it spells, or the bytes where it
+// spells none. A file whose bytes its locale cannot read is binary to GNU as
+// surely as one holding a NUL, and `textInput` answers for both.
+function searchable(ctx, path) {
+  const { text, bytes } = readTextOrBytes(ctx.fs, path)
+  return text === undefined ? { content: undefined, bytes } : { content: text }
 }
 
 // Name filters retain option order so the last matching include/exclude wins.

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Development REPL over a real directory: read every file under it into
-// memory once, then run the virtual terminal over that snapshot, mounted at
-// the directory's own resolved path so paths read exactly as they do on the
-// host. Nothing else on the host is visible, and nothing is written back —
-// the snapshot is read-only and /tmp/ is an in-memory overlay.
+// memory once — as text where its bytes spell text, and as the bytes
+// themselves where they do not — then run the virtual terminal over that
+// snapshot, mounted at the directory's own resolved path so paths read
+// exactly as they do on the host. Nothing else on the host is visible, and
+// nothing is written back — the snapshot is read-only and /tmp/ is an
+// in-memory overlay.
 // Not part of the published package; run it as `bin/terminal.js <dir>`.
 
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
@@ -23,10 +25,12 @@ path. Nothing else on the host is visible and nothing is written back: the
 snapshot is read-only, and /tmp/ is an in-memory overlay that lasts for the
 session only.
 
-Files that are not valid UTF-8 are left out, as are symlinks and anything that
-is not a regular file; \`.info\` lists what was skipped. Directories exist only
-where files do, so empty ones are not part of the tree. The mounted directory
-doubles as the session's home, so \`~\` and a bare \`cd\` return to it.
+A file whose bytes spell no text is mounted as those bytes, which \`wc\`, \`du\`,
+\`cp\`, \`base64\` and \`hexdump\` read as readily as text; symlinks and anything
+that is not a regular file are left out, and \`.info\` lists what was skipped.
+Directories exist only where files do, so empty ones are not part of the tree.
+The mounted directory doubles as the session's home, so \`~\` and a bare \`cd\`
+return to it.
 
   -h, --help   show this message
 `
@@ -87,10 +91,10 @@ function readTree(root) {
       if (!entry.isFile()) { omitted.push({ path, reason: entry.isSymbolicLink() ? 'symbolic link' : 'not a regular file' }); continue }
       let data
       try { data = readFileSync(path) } catch (e) { omitted.push({ path, reason: reasonOf(e) }); continue }
-      const text = decode(decoder, data)
-      // A string-based terminal cannot carry bytes it could not print back.
-      if (text === null) { omitted.push({ path, reason: 'not valid UTF-8' }); continue }
-      sources.set(posix(relative(root, path)), text)
+      // A file is the text its bytes spell, and where they spell none — an
+      // image, a compiled object, an archive — it is those bytes themselves,
+      // which the terminal measures, copies and encodes as readily.
+      sources.set(posix(relative(root, path)), decode(decoder, data) ?? data)
       bytes += data.length
     }
   }

@@ -183,7 +183,7 @@ describe('unlinking writable files preserves open descriptors', () => {
     const second = fs.openWritable('/', '/tmp/file')
     first.write('é')
     second.write('X')
-    assert.throws(() => fs.readFile('/tmp/file'), /UTF-8/u)
+    assert.throws(() => fs.readFile('/tmp/file'), /spell no text/u)
     assert.equal(fs.removeWritable('/', '/tmp/file'), true)
     assert.equal(fs.isFile('/tmp/file'), false)
   })

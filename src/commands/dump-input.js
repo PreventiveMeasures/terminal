@@ -3,6 +3,8 @@
 import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, readInputs, scaledCount } from '../util.js'
 import { unsupported } from '../unsupported.js'
 
+const EMPTY = new Uint8Array()
+
 export function dumpInput(cmd, files, stdin, ctx, opt) {
   const skip = dumpCount(cmd, opt.skip, opt.skipFlag, 0)
   const len = dumpCount(cmd, opt.len, opt.lenFlag, Number.POSITIVE_INFINITY)
@@ -14,7 +16,9 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
   const chunks = []
   const r = { stderr: '', failed: false }
   for (const file of files.length ? files : [null]) {
-    const input = readInputs(cmd, file === null ? [] : [file], rest, ctx, { noRead: remaining === 0 && skipping === 0 })
+    // A dump is the bytes themselves, so a file this terminal cannot spell as
+    // text is dumped as readily as one it can.
+    const input = readInputs(cmd, file === null ? [] : [file], rest, ctx, { read: 'loose-bytes', noRead: remaining === 0 && skipping === 0 })
     const isDir = input.entries[0]?.kind === 'dir'
     r.stderr += input.stderr
     r.failed ||= input.failed && !(cmd === 'hexdump' && isDir)
@@ -30,7 +34,7 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
     // xxd seeks from the beginning unless +OFFSET was specified. Linux
     // hexdump also uses SEEK_SET for a nonzero skip; od skips from here.
     const rewind = shared && ctx.stdinFile && opt.skip !== undefined && (cmd === 'xxd' || (cmd === 'hexdump' && skip.value > 0))
-    const all = encodeUtf8Loose(rewind ? ctx.stdinOrigin : entry?.content ?? '')
+    const all = rewind ? encodeUtf8Loose(ctx.stdinOrigin) : entry?.bytes ?? EMPTY
     const skipped = Math.min(skipping, all.length)
     skipping -= skipped; start += skipped
     const taken = Math.min(remaining, all.length - skipped)

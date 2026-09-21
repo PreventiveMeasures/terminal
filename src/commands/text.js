@@ -5,7 +5,7 @@ import { echo } from './echo.js'
 import { printf } from './printf.js'
 import { parseArgs } from '../args.js'
 import { formatWc } from './wc-format.js'
-import { byteLocale, consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines } from '../util.js'
+import { byteLocale, classTables, consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8CodePoints } from '../util.js'
 import { awk } from '../awk/index.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
@@ -148,7 +148,10 @@ function truncationNote(cmd, content, body, unit, input) {
 function wc(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c', 'm'] })
   const which = pickWcFlags(flags)
-  const r = readInputs('wc', positional, stdin, ctx)
+  // Counted in what each file is: the text of one held as text, and the bytes
+  // of one held as bytes, which this terminal may not be able to spell — and
+  // need not spell to be counted.
+  const r = readInputs('wc', positional, stdin, ctx, { read: 'as-held' })
   const needsWidth = positional.length > 1 || Object.values(which).filter(Boolean).length > 1
   // GNU aligns multi-column or multi-operand output using file sizes,
   // reserving seven columns when an input is a pipe of unknown size.
@@ -157,8 +160,8 @@ function wc(stdin, tokens, ctx) {
   // A directory is a row of zeros — GNU's `wc -l dir` prints `0 dir`
   // beside its error, because the open succeeded. A missing path gets
   // no row at all.
-  for (const { name, content, kind, shared } of r.entries.filter((e) => e.kind !== 'missing')) {
-    const counts = wcCounts(content, ctx, which, needsWidth)
+  for (const { name, content, bytes, kind, shared } of r.entries.filter((e) => e.kind !== 'missing')) {
+    const counts = wcCounts(bytes ?? content, ctx, which, needsWidth)
     rows.push({ counts, name, kind, shared })
     total.l += counts.l; total.w += counts.w; total.m += counts.m; total.c += counts.c
   }
@@ -184,15 +187,100 @@ function pickWcFlags(flags) {
   return { l: flags.has('l'), w: flags.has('w'), m: flags.has('m'), c: flags.has('c') }
 }
 
-// Character counts use code points in UTF-8 mode and bytes in an explicit C locale.
-function wcCounts(content, ctx, which, needsWidth) {
+// `input` is the file as it is held: the text of one declared as text, or the
+// bytes of one declared as bytes. Lines and words are counted in either, so a
+// file this terminal cannot spell as text is counted like any other, and text
+// is never encoded to be counted. Bytes are the size, which text has to be
+// encoded to know; characters are the spelling itself, which bytes that spell
+// no text do not have — the C locale counts them as the bytes they are, and a
+// UTF-8 one says so rather than counting a guess.
+function wcCounts(input, ctx, which, needsWidth) {
   const cLocale = byteLocale(ctx)
-  const bytes = which.c || needsWidth || (which.m && cLocale) ? encodeUtf8Loose(content).length : 0
+  const size = which.c || needsWidth || (which.m && cLocale) ? byteLength(input) : 0
   return {
-    l: which.l ? (content.match(/\n/gu) ?? []).length : 0,
-    w: which.w ? (content.match(cLocale ? /[^\t\n\v\f\r ]+/gu : /[^\t\n\v\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u2060\u3000]+/gu) ?? []).length : 0,
-    m: which.m ? cLocale ? bytes : content.length - (content.match(/[\u{10000}-\u{10FFFF}]/gu) ?? []).length : 0,
-    c: bytes,
+    l: which.l ? countNewlines(input) : 0,
+    w: which.w ? wordCount(input, ctx) : 0,
+    m: which.m ? (cLocale ? size : characterCount(input)) : 0,
+    c: size,
+  }
+}
+
+const byteLength = (input) => typeof input === 'string' ? encodeUtf8Loose(input).length : input.length
+
+// A newline is one byte and no part of another, and one character and no part
+// of another, so counting them is counting lines whatever the file holds.
+function countNewlines(input) {
+  let lines = 0
+  const newline = typeof input === 'string' ? '\n' : 0x0a
+  for (let at = input.indexOf(newline); at >= 0; at = input.indexOf(newline, at + 1)) lines++
+  return lines
+}
+
+// A character of the text, which a JS string spells in one UTF-16 unit or two.
+// Bytes are counted for the characters they do spell: a byte that spells none
+// is a byte and not a character, which is what wc counts of one as well.
+function characterCount(input) {
+  if (typeof input === 'string') return input.length - (input.match(/[\u{10000}-\u{10FFFF}]/gu) ?? []).length
+  let characters = 0
+  for (const code of utf8CodePoints(input)) if (code >= 0) characters++
+  return characters
+}
+
+// wc's own reading of a word, which is coreutils' loop rather than a rule
+// about blanks: the six blanks ASCII spells always part one, and past them
+// only a printable character is looked at at all. A printable character
+// glibc calls a space parts a word, and so do the four non-breaking spaces
+// wc adds to them itself; any other printable character is a word's own; and
+// everything else — a control, an unassigned code point, a byte that spells
+// no character — passes through without beginning a word or ending one. So
+// `\x01` alone is no word and `abc\x89def` is one, while U+2028, a space
+// glibc does not call printable, joins the two sides of it into one.
+const ASCII_BLANKS = new Set([0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20])
+// wc's iswnbspace: the spaces it parts words on that glibc's own class does
+// not hold. POSIXLY_CORRECT drops them, and nothing may set it here.
+const NO_BREAK_SPACES = new Set([0x00a0, 0x2007, 0x202f, 0x2060])
+
+// The three answers a character gets, and ASCII's own, which every locale
+// here reads the same way: a table of them keeps a line of ordinary text off
+// the locale's classes, which are ranges to search rather than an index.
+const PARTS = 1
+const PASSES = 0
+const WORD = 2
+const ASCII = Uint8Array.from({ length: 0x80 }, (_, code) =>
+  ASCII_BLANKS.has(code) ? PARTS : code > 0x20 && code < 0x7f ? WORD : PASSES)
+
+const classify = (code, tables) => tables.has('print', code)
+  ? (tables.has('space', code) || NO_BREAK_SPACES.has(code) ? PARTS : WORD)
+  : PASSES
+
+function wordCount(input, ctx) {
+  const tables = classTables(ctx.locale)
+  let words = 0
+  let inWord = false
+  for (const code of wordCharacters(input, ctx)) {
+    // A byte that spells no character is none, and so begins no word.
+    const kind = code < 0 ? PASSES : code < 0x80 ? ASCII[code] : classify(code, tables)
+    if (kind === PARTS) {
+      if (inWord) words++
+      inWord = false
+    } else if (kind === WORD) inWord = true
+  }
+  return inWord ? words + 1 : words
+}
+
+// The characters wc reads one at a time: the text's own where it has text,
+// and where it has bytes, the characters they spell — with -1 for a byte that
+// spells none, which no class holds. A lone surrogate is read as the
+// replacement character its bytes are, which is how every reader that only
+// measures text reads one. The C locale reads bytes throughout, where each
+// one is a character of its own.
+function* wordCharacters(input, ctx) {
+  if (typeof input !== 'string') { yield* byteLocale(ctx) ? input : utf8CodePoints(input); return }
+  if (byteLocale(ctx)) { yield* encodeUtf8Loose(input); return }
+  for (let at = 0; at < input.length;) {
+    const code = input.codePointAt(at)
+    yield code >= 0xd800 && code <= 0xdfff ? 0xfffd : code
+    at += code > 0xffff ? 2 : 1
   }
 }
 

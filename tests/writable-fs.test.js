@@ -62,7 +62,7 @@ describe('separate writable filesystem layer', () => {
     const second = fs.openWritable('/', '/tmp/file')
     first.write('é')
     second.write('X')
-    assert.throws(() => fs.readFile('/tmp/file'), /not valid UTF-8/u)
+    assert.throws(() => fs.readFile('/tmp/file'), /spell no text/u)
   })
 
   it('queries byte sizes without registering reads or decoding overlay contents', () => {
