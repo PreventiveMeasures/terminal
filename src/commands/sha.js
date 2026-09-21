@@ -41,7 +41,7 @@ function chosen(cmd, bits, values) {
 
 function sums(cmd, bits) {
   return async (stdin, tokens, ctx) => {
-    const { flags, values, positional } = parseArgs(tokens, {
+    const { flags, order, positional, values } = parseArgs(tokens, {
       short: cmd === 'shasum' ? ['b', 't', 'c'] : ['b', 't', 'c', 'z'],
       long: cmd === 'shasum' ? ['binary', 'text', 'check', 'tag'] : ['binary', 'text', 'check', 'tag', 'zero'],
       valueShort: cmd === 'shasum' ? ['a'] : [],
@@ -53,25 +53,53 @@ function sums(cmd, bits) {
     }
     const { algorithm, error } = chosen(cmd, bits, values)
     if (error) return error
+    const { mode, error: refusal } = tagMode(cmd, flags, order)
+    if (refusal) return refusal
     const r = readInputs(cmd, positional, stdin, ctx, { read: 'bytes' })
     // One digest does not wait for the last: what they are of is already read.
     const digests = await Promise.all(r.inputs.map((input) => digest(algorithm, input.bytes)))
-    const line = format(algorithm, flags)
+    const line = format(algorithm, flags, mode)
     return okWith(r.inputs.map((input, at) => line(digests[at], input.name ?? '-')).join(''), r)
   }
 }
 
-// `--tag` writes the BSD form, which says which digest it is and marks
-// nothing about how the file was read; otherwise the mode is the space or the
-// star between the two.
-function format(algorithm, flags) {
+// How the file was read, which is the last thing said about it: coreutils
+// takes `-b` and `-t` as one setting written over, and `--tag` writes binary
+// into it too — so `-t --tag` tags and `--tag -t` is the refusal below.
+// shasum keeps the two apart and calls having both of them ambiguous, whatever
+// order they came in, which is why the two commands answer differently here.
+const BINARY = new Set(['b', 'binary'])
+const TEXT = new Set(['t', 'text'])
+function fileMode(cmd, order) {
+  let binary = false, said = null, text = false
+  for (const { name } of order) {
+    if (BINARY.has(name)) { binary = true; said = 'binary' }
+    else if (TEXT.has(name)) { text = true; said = 'text' }
+    else if (name === 'tag') said = 'binary'
+  }
+  if (cmd === 'shasum') return { binary, text: text && !binary, ambiguous: binary && text }
+  return { binary: said === 'binary', text: said === 'text', ambiguous: false }
+}
+
+// `--tag` writes the BSD form, which says which digest it is and marks nothing
+// about how the file was read — so asking for it and for text is asking for
+// both of two things, which these commands refuse rather than pick between.
+function tagMode(cmd, flags, order) {
+  const mode = fileMode(cmd, order)
+  const help = cmd === 'shasum' ? `Type ${cmd} -h for help\n` : `Try '${cmd} --help' for more information.\n`
+  if (mode.ambiguous) return { error: err(`${cmd}: Ambiguous file mode\n${help}`, 1) }
+  if (flags.has('tag') && mode.text) return { error: err(`${cmd}: --tag does not support --text mode\n${help}`, 1) }
+  return { mode }
+}
+
+// Otherwise the mode is the space or the star between the two.
+function format(algorithm, flags, mode) {
   const end = flags.has('z') || flags.has('zero') ? '\0' : '\n'
   if (flags.has('tag')) {
     const label = algorithm.replace('-', '')
     return (hash, name) => `${label} (${name}) = ${hash}${end}`
   }
-  const mode = flags.has('b') || flags.has('binary') ? ' *' : '  '
-  return (hash, name) => `${hash}${mode}${name}${end}`
+  return (hash, name) => `${hash}${mode.binary ? ' *' : '  '}${name}${end}`
 }
 
 // Only where the runtime can do the work, as with a compressor: a terminal

@@ -95,3 +95,47 @@ describe('the digest commands are the ones coreutils and shasum write', () => {
     assert.doesNotMatch((await t.run('frobnicate')).stderr, /sha|shasum/u)
   })
 })
+
+// How the file was read is one setting for coreutils, written over by each of
+// `-b`, `-t` and `--tag` in turn, and two separate ones for shasum, which
+// calls having both ambiguous. Either way, asking for `--tag` and for text is
+// asking for both of two things, which both tools refuse. Recorded from
+// sha256sum 9.4 and shasum 6.04.
+describe('the file mode is the last thing said about it, and --tag says binary', () => {
+  const HELP = { sha256sum: "Try 'sha256sum --help' for more information.\n", shasum: 'Type shasum -h for help\n' }
+  const refused = (cmd, why) => result('', { stderr: `${cmd}: ${why}\n${HELP[cmd]}`, exitCode: 1 })
+
+  it('writes over the mode in the order coreutils reads it', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('sha256sum -b a.txt'), result(`${DIGESTS[256]} *a.txt\n`))
+    assert.deepEqual(await t.run('sha256sum -t a.txt'), result(`${DIGESTS[256]}  a.txt\n`))
+    // The last of them wins, which is what writing over means.
+    assert.deepEqual(await t.run('sha256sum -b -t a.txt'), result(`${DIGESTS[256]}  a.txt\n`))
+    assert.deepEqual(await t.run('sha256sum -t -b a.txt'), result(`${DIGESTS[256]} *a.txt\n`))
+    assert.deepEqual(await t.run('sha256sum --binary --text a.txt'), result(`${DIGESTS[256]}  a.txt\n`))
+  })
+
+  it('refuses --tag with text, where text is what was said last', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('sha256sum --tag -t a.txt'), refused('sha256sum', '--tag does not support --text mode'))
+    assert.deepEqual(await t.run('sha256sum --tag --text a.txt'), refused('sha256sum', '--tag does not support --text mode'))
+    assert.deepEqual(await t.run('sha256sum --tag -b -t a.txt'), refused('sha256sum', '--tag does not support --text mode'))
+    // `--tag` says binary itself, so text said before it is written over.
+    assert.deepEqual(await t.run('sha256sum -t --tag a.txt'), result(`SHA256 (a.txt) = ${DIGESTS[256]}\n`))
+    assert.deepEqual(await t.run('sha256sum --text --tag a.txt'), result(`SHA256 (a.txt) = ${DIGESTS[256]}\n`))
+    assert.deepEqual(await t.run('sha256sum --tag -t -b a.txt'), result(`SHA256 (a.txt) = ${DIGESTS[256]}\n`))
+  })
+
+  it('keeps the two apart for shasum, which calls having both ambiguous', async () => {
+    const t = terminal()
+    // Order does not settle it there: either way round is the same refusal.
+    assert.deepEqual(await t.run('shasum -b -t a.txt'), refused('shasum', 'Ambiguous file mode'))
+    assert.deepEqual(await t.run('shasum -t -b a.txt'), refused('shasum', 'Ambiguous file mode'))
+    assert.deepEqual(await t.run('shasum --tag -t -b a.txt'), refused('shasum', 'Ambiguous file mode'))
+    // And `--tag` with text is refused whichever order they came in.
+    assert.deepEqual(await t.run('shasum --tag -t a.txt'), refused('shasum', '--tag does not support --text mode'))
+    assert.deepEqual(await t.run('shasum -t --tag a.txt'), refused('shasum', '--tag does not support --text mode'))
+    assert.deepEqual(await t.run('shasum --tag -a 256 -t a.txt'), refused('shasum', '--tag does not support --text mode'))
+    assert.deepEqual(await t.run('shasum --tag -b a.txt'), result(`SHA1 (a.txt) = ${DIGESTS[1]}\n`))
+  })
+})
