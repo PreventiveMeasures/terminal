@@ -11,10 +11,11 @@ import boundaries from './fixtures/upstream/base64/byte-boundaries.json' with { 
 const bytesFromHex = (hex) => Uint8Array.from(hex.match(/../gu) ?? [], (pair) => Number.parseInt(pair, 16))
 const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 const result = (stdout = '', exitCode = 0, stderr = '', unsupported = []) => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported })
-const utf8Gap = [{
-  kind: 'feature', command: 'base64', detail: 'partial UTF-8 byte sequence',
-  message: 'base64: byte output that is not valid UTF-8 cannot be represented by this string-based terminal',
+const gapFor = (command) => [{
+  kind: 'feature', command, detail: 'partial UTF-8 byte sequence',
+  message: `${command}: byte output that is not valid UTF-8 cannot be represented by this string-based terminal`,
 }]
+const utf8Gap = gapFor('base64')
 
 describe('upstream base64 standard byte vectors', () => {
   for (const { input, hex } of corpus.raw) {
@@ -49,7 +50,13 @@ describe('upstream base64 standard byte vectors', () => {
   it('diagnoses the upstream 0xff vector instead of corrupting its output', async () => {
     const t = createTerminal({ input: '/w==' })
     assert.deepEqual(await t.run('base64 -d input'), result('', 1, utf8Gap[0].message + '\n', utf8Gap))
-    assert.deepEqual(await t.run('base64 -d input 2>/dev/null | cat'), result('', 0, '', utf8Gap))
+    // The byte goes where a byte can go. A pipe carries it, so what is decoded
+    // is what the next command reads; the terminal at the end of the line is
+    // the string that cannot hold it, and the command writing there says so.
+    assert.deepEqual(await t.run('base64 -d input | hexdump -C'), result('00000000  ff                                                |.|\n00000001\n'))
+    assert.deepEqual(await t.run('base64 -d input | base64'), result('/w==\n'))
+    const catGap = gapFor('cat')
+    assert.deepEqual(await t.run('base64 -d input 2>/dev/null | cat'), result('', 1, catGap[0].message + '\n', catGap))
   })
 })
 

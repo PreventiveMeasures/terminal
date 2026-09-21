@@ -39,7 +39,7 @@ const COMMAND_ORDER = [
 // are the shell's syntax rather than something a terminal hands out.
 const UNANNOUNCED = Object.keys(BUILTIN_COMMANDS).filter((name) => !SHELL_ONLY.has(name) && !Object.hasOwn(VISIBLE_COMMANDS, name)).sort()
 // The unannounced readers, which belong after a pipe as the announced ones do.
-const UNANNOUNCED_PIPE = new Set(['brotli', 'egrep', 'fgrep', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd'])
+const UNANNOUNCED_PIPE = new Set(['base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat'])
 const BUILTIN_NAMES = orderedCommandNames()
 
 // Only commands that consume stdin are offered after a pipe.

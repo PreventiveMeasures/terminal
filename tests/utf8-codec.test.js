@@ -142,8 +142,18 @@ describe('shell byte operations retain BOMs and UTF-8 diagnostics', () => {
     })
   }
 
+  // `base64 -d` is not among these: what it decodes is bytes, and a pipe
+  // carries those, so the command at the end of the pipe is the one left
+  // writing them to a terminal that holds a string.
+  it('carries the bytes base64 decoded to whatever reads them', async () => {
+    const t = createTerminal({ input: text, invalid: '/w==' })
+    assert.deepEqual((await t.run('base64 -d invalid | hexdump -C')).stdout, '00000000  ff                                                |.|\n00000001\n')
+    const piped = await t.run('base64 -d invalid 2>/dev/null | cat')
+    assert.deepEqual(piped.unsupported.map(({ command, detail }) => [command, detail]), [['cat', 'partial UTF-8 byte sequence']])
+  })
+
   for (const command of [
-    'head -c2 input', 'cut -c2 input', 'base64 -d invalid',
+    'head -c2 input', 'cut -c2 input',
     String.raw`printf '\377'`, String.raw`echo -en '\xFF'`,
     String.raw`awk 'BEGIN {printf "\377"}'`, String.raw`printf x | sed 'y/x/\xFF/'`,
   ]) {

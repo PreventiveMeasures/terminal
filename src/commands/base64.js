@@ -1,47 +1,9 @@
-import { parseArgs } from '../args.js'
-import { INT64_MAX } from '../numeric.js'
-import { decodeUtf8, decodeUtf8Loose, encodeUtf8, err, ok, readInputs } from '../util.js'
+import { baseCommand } from './base-coding.js'
 import { fromBase64, toBase64 } from '@exodus/bytes/base64.js'
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-const DEFAULT_WRAP = 76
 
-export function base64(stdin, tokens, ctx) {
-  const { flags, positional, order } = parseArgs(tokens, {
-    short: ['d', 'i'], long: ['decode', 'ignore-garbage'], valueShort: ['w'], valueLong: ['wrap'],
-  })
-  let wrap = DEFAULT_WRAP
-  for (const { name, value } of order) {
-    if (name !== 'w' && name !== 'wrap') continue
-    if (!/^[ \t\n\r\f\v]*[+-]?\d+$/u.test(value) || BigInt(value) < 0n) return err(`base64: invalid wrap size: ${value}`)
-    const count = BigInt(value)
-    wrap = count > INT64_MAX ? 0 : Number(count)
-  }
-  if (positional.length > 1) return err(`base64: extra operand: ${positional[1]}`)
-  // The file as it is held: base64 is what bytes look like as text, so a file
-  // this terminal cannot spell as text has an encoding all the same, while
-  // one held as text is encoded from the text it is rather than read twice.
-  const input = readInputs('base64', positional, stdin, ctx, { read: 'as-held' })
-  if (input.failed) return err(input.stderr)
-  const { content, bytes } = input.inputs[0]
-  // Decoding reads base64 itself, which is text; a byte that spells no
-  // character spells none of its alphabet either, which is the invalid input
-  // GNU reports.
-  if (flags.has('d') || flags.has('decode')) return decode(content ?? decodeUtf8Loose(bytes), flags.has('i') || flags.has('ignore-garbage'))
-  const encoded = toBase64(bytes ?? encodeUtf8(content))
-  if (!wrap || encoded === '') return ok(encoded)
-  const lines = []
-  for (let i = 0; i < encoded.length; i += wrap) lines.push(encoded.slice(i, i + wrap))
-  return ok(lines.join('\n') + '\n')
-}
-
-function decode(input, ignoreGarbage) {
-  const { bytes, valid } = decodeBase64(input, ignoreGarbage)
-  const stdout = decodeUtf8(bytes)
-  if (valid) return ok(stdout)
-  const stderr = 'base64: invalid input\n'
-  return { stdout, stderr, exitCode: 1, events: [...(stdout ? [{ fd: 1, text: stdout }] : []), { fd: 2, text: stderr }] }
-}
+export const base64 = baseCommand('base64', { encode: toBase64, decode: decodeBase64 })
 
 export function decodeBase64(input, ignoreGarbage = false) {
   const text = input.replace(ignoreGarbage ? /[^A-Za-z0-9+/=]/gu : /\n/gu, '')

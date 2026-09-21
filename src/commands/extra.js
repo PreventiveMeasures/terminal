@@ -4,6 +4,7 @@ import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, joinLines, lineRecords,
 import { unsupported } from '../unsupported.js'
 import { hexdump, od, xxd } from './dump.js'
 import { INT64_MAX, INT64_MIN, UINT64_MAX } from '../numeric.js'
+import { base32 } from './base32.js'
 import { base64 } from './base64.js'
 import { rg } from './rg.js'
 import { WRITE_TOOLS } from './write-tools.js'
@@ -349,4 +350,4 @@ export const EXTRA_COMMANDS = { rg, cut, tac, tr, seq, nl, which: whichCmd, hexd
 // What the runtime does rather than this code — the compressors, the digests
 // — is there only where the runtime can do it, and nothing at all where it
 // cannot.
-export const HIDDEN_EXTRAS = { whoami, date, od, xxd, ...RUNTIME_COMMANDS }
+export const HIDDEN_EXTRAS = { whoami, date, od, xxd, base32, ...RUNTIME_COMMANDS }

@@ -23,6 +23,13 @@ not.
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
 `printf` `test` `cp` `rm` `mkdir` `touch` `ln` `diff` `patch` `du` `stat` `realpath`
 `pwd` `seq` `which` `basename` `dirname` — plus your own, via `opts.commands`.
+It has more besides, which it completes but leaves out of the list a
+`command not found` prints, that list being the everyday one: `gzip`,
+`gunzip` and `zcat`, `brotli`, `base32`, `od`, `xxd`, `sha1sum`, `sha256sum`,
+`sha384sum`, `sha512sum`, `shasum`, `whoami`, `date`, `true` and `false`.
+The compressors and the digests are there only where the runtime can do the
+work — a format its streams do not know, or a crypto it does not have, is a
+command this terminal does not have either.
 
 A file may be bytes rather than text: a source entry that is a `Uint8Array` is
 the file's own bytes, for what no JS string can spell — an image, a compiled

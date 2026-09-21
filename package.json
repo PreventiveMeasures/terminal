@@ -56,6 +56,8 @@
     "src/bre.js",
     "src/bytes.js",
     "src/charclass.js",
+    "src/commands/base-coding.js",
+    "src/commands/base32.js",
     "src/commands/base64.js",
     "src/commands/brotli.js",
     "src/commands/cat.js",
