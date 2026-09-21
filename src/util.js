@@ -128,6 +128,7 @@ const READ_FAILURES = {
   sort: ['cannot read: %s: %r', 'read failed: %s: Is a directory'],
   sed: ["can't read %s: %r", 'read error on %s: Is a directory'],
   tac: ["failed to open '%s' for reading: %r", '%s: read error: Invalid argument'],
+  base32: [null, 'read error: Is a directory'],
   base64: [null, 'read error: Is a directory'],
   uniq: [null, "error reading '%s': Is a directory"],
 }

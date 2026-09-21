@@ -258,6 +258,8 @@ describe('GNU conformance — what a reader says it could not read', () => {
     ['grep hi f/x', 'grep: f/x: Not a directory\n', 2],
     ['base64 missing', 'base64: missing: No such file or directory\n', 1],
     ['base64 d', 'base64: read error: Is a directory\n', 1],
+    ['base32 missing', 'base32: missing: No such file or directory\n', 1],
+    ['base32 d', 'base32: read error: Is a directory\n', 1],
     ['od missing', 'od: missing: No such file or directory\n', 1],
     ['od d', 'od: d: Is a directory\n', 1],
     ['nl missing', 'nl: missing: No such file or directory\n', 1],

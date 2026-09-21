@@ -75,6 +75,17 @@ describe('base32 reads back what coreutils reads back', () => {
     assert.deepEqual(await t.run('echo MFRGGZA=X | base32 -d'), result('abcd', { stderr: INVALID, exitCode: 1 }))
   })
 
+  it('names an operand it cannot read the way coreutils names it', async () => {
+    const t = createTerminal({ 'dir/inner.txt': 'x\n' })
+    const gnu = (stderr) => ({ stdout: '', stderr, exitCode: 1, cwd: '/', notes: [], unsupported: [] })
+    // A directory is a read error rather than a named operand, for both
+    // spellings of the command and either direction.
+    assert.deepEqual(await t.run('base32 dir'), gnu('base32: read error: Is a directory\n'))
+    assert.deepEqual(await t.run('base32 -d dir'), gnu('base32: read error: Is a directory\n'))
+    // A file that is not there is named, as coreutils names it.
+    assert.deepEqual(await t.run('base32 missing'), gnu('base32: missing: No such file or directory\n'))
+  })
+
   it('takes its own alphabet and no other, unless told to ignore the rest', async () => {
     const t = terminal()
     // Lowercase is not the alphabet, and coreutils does not fold it.
