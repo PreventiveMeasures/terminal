@@ -202,13 +202,16 @@ export function createFs(sources, mount = '/') {
   // map as it is. The decoder is strict, and is the one check the spelling
   // gets: over a hundred mebibytes any check of its own costs more than the
   // decoding does, so a spelling that does not decode is reported here, to
-  // the reader, as a file of bytes that spell no text is.
-  const held = (p) => {
+  // the reader, as a file of bytes that spell no text is. A comparison asks
+  // for what the file `surely` holds instead, and is answered with nothing
+  // rather than a diagnostic, as it is for text that has no bytes.
+  const held = (p, surely = false) => {
     const content = files.get(p)
     if (!(content instanceof Base64Bytes)) return content
     let bytes
     try { bytes = content.decode() } catch (e) {
       if (!(e instanceof SyntaxError)) throw e
+      if (surely) return undefined
       throw new UnsupportedError('feature', 'base64 source', `${JSON.stringify(p)} declares base64 that does not decode, so its bytes cannot be read`)
     }
     files.set(p, bytes)
@@ -243,9 +246,9 @@ export function createFs(sources, mount = '/') {
     fileSize: (p) => childMap.has(p) ? undefined
       : links.has(p) ? encodeUtf8(links.get(p)).length
         : files.has(p) ? contentSize(files.get(p)) : undefined,
-    sameFileContents: (a, b) => sameContents(held(a), held(b)),
+    sameFileContents: (a, b) => sameContents(held(a, true), held(b, true)),
     // What a comparison may read of a file without asking it to be text.
-    exactBytes: (p) => exactBytes(held(p)),
+    exactBytes: (p) => exactBytes(held(p, true)),
     // Whether a file is held as bytes rather than as text, which is what says
     // that reading it as text may have no answer. Asking costs nothing, so a
     // command that answers for such a file need not read one to find out.

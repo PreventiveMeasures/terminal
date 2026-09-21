@@ -183,6 +183,15 @@ describe('a source entry can be the bytes of a file spelt in base64', () => {
       check(t, 'ls /tmp')
     }
     assert.throws(() => terminal({ f: { format: 'hex', data: '01' } }), /source "f" declares format "hex"; the only format is \{ format: 'base64', data \}/u)
+    // A comparison never throws: where a hint weighs two paths a missing name
+    // could have meant, a spelling that does not decode is a file no other is
+    // the same as, and the command's own error is the one reported.
+    const weighed = { file: { format: 'base64', data: '!!!!' }, 'home/file': 'x\n', 'sub/keep': '' }
+    const note = 'cat: relative path "file" was not found from cwd "/repo/sub". Both of "/repo/file" and "/repo/home/file" exist, and they differ in contents.'
+    for (const writable of [undefined, '/tmp/']) {
+      const t = createTerminal(weighed, { mount: '/repo', home: '/repo/home', cwd: '/repo/sub', writable })
+      check(t, 'cat file', '', { stderr: 'cat: file: No such file or directory\n', exitCode: 1, cwd: '/repo/sub', notes: [note] })
+    }
     // `data` alone is a declaration with its format left off, not a value to
     // pass over: the file would otherwise simply not be there.
     assert.throws(() => terminal({ f: { data: 'AQ==' } }), /source "f" declares format null; the only format is \{ format: 'base64', data \}/u)
