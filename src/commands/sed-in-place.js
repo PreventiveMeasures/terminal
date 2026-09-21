@@ -1,4 +1,5 @@
 import { lookupWithNote, missingPathNote } from '../notes.js'
+import { lookup } from '../fs.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { err, readFailure } from '../util.js'
@@ -87,7 +88,10 @@ function inPlaceInput(name, ctx) {
   const found = lookupWithNote(ctx, 'sed', name)
   if (found.error) return { error: err(readFailure('sed', name, found.error).trimEnd(), 2) }
   if (ctx.fs.isDir(found.path)) return { error: err(`sed: couldn't edit ${name}: not a regular file`, 4) }
-  if (!ctx.writable || !found.path.startsWith('/tmp/')) return { error: refused(name) }
+  // The file read is the one the name leads to; the file written takes the
+  // name itself, so it is the name's own directory that has to be writable.
+  const own = lookup(ctx.cwd, name, ctx.fs, { follow: false }).path
+  if (!ctx.writable || !own.startsWith('/tmp/')) return { error: refused(name) }
   return found
 }
 

@@ -110,7 +110,7 @@ function blockedAbove(into, below, state) {
   return false
 }
 
-const linkedCopy = (name) => new UnsupportedError('feature', 'symbolic link', `copying a symbolic link is not supported: ${name} (a recursive copy keeps the link, and nothing here makes one)`)
+const linkedCopy = (name) => new UnsupportedError('feature', 'symbolic link', `copying a symbolic link is not supported: ${name} (a recursive copy keeps the link, which cp does not make here)`)
 
 // A destination that is a link leading nowhere. GNU writes through neither
 // half of such a name: not the link, which is a name already taken, and not

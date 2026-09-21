@@ -411,10 +411,10 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     // `-r` keeps every link it meets as the link it is, and only `-L` reads
     // through one. Nothing here can make a link, so writing the file it points
     // at in its place would be a tree the copy was never asked for.
-    const refused = gap(t, 'cp -r a /tmp/copy', 'symbolic link', 'cp: copying a symbolic link is not supported: a/link (a recursive copy keeps the link, and nothing here makes one)\n')
+    const refused = gap(t, 'cp -r a /tmp/copy', 'symbolic link', 'cp: copying a symbolic link is not supported: a/link (a recursive copy keeps the link, which cp does not make here)\n')
     assert.equal(refused.stdout, '')
     check(t, 'ls /tmp', '', { cwd: '/repo' })
-    gap(t, 'cp -r a/link /tmp/copy', 'symbolic link', 'cp: copying a symbolic link is not supported: a/link (a recursive copy keeps the link, and nothing here makes one)\n')
+    gap(t, 'cp -r a/link /tmp/copy', 'symbolic link', 'cp: copying a symbolic link is not supported: a/link (a recursive copy keeps the link, which cp does not make here)\n')
     // A tree with no link in it is copied as ever.
     check(t, 'cp -r plain /tmp/plain; find /tmp -type f', '/tmp/plain/f\n', { cwd: '/repo' })
     check(t, 'cp -r a/sub /tmp/sub; find /tmp/sub -type f', '/tmp/sub/deep\n', { cwd: '/repo' })
@@ -656,7 +656,7 @@ describe('what a link cannot change', () => {
     after.run(blocked + 'cp -r g /tmp/dest')
     check(after, 'find /tmp -type f', '/tmp/dest/g/f\n/tmp/dest/g/sub\n', at)
     // Where the copy does reach it, the link is refused as ever.
-    gap(made(), 'cp -r g /tmp/fresh', 'symbolic link', 'cp: copying a symbolic link is not supported: g/sub/gl (a recursive copy keeps the link, and nothing here makes one)\n')
+    gap(made(), 'cp -r g /tmp/fresh', 'symbolic link', 'cp: copying a symbolic link is not supported: g/sub/gl (a recursive copy keeps the link, which cp does not make here)\n')
   })
 
   it('leaves a link alone where -n has left its destination alone', () => {
@@ -679,7 +679,7 @@ describe('what a link cannot change', () => {
     // so `-n` reads the destination as `lstat` reads it.
     check(made(), 'cp -rn e/el gone; find /tmp -type f', '', at)
     // A link the copy would reach is refused as ever, and before it writes.
-    const refusal = 'cp: copying a symbolic link is not supported: e/el (a recursive copy keeps the link, and nothing here makes one)\n'
+    const refusal = 'cp: copying a symbolic link is not supported: e/el (a recursive copy keeps the link, which cp does not make here)\n'
     gap(made(), 'cp -rn e /tmp/dest', 'symbolic link', refusal)
     const partial = made()
     partial.run('mkdir -p /tmp/dest/e; printf kept > /tmp/dest/e/f')

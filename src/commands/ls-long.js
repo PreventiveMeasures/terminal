@@ -8,16 +8,11 @@
 
 import { UnsupportedError } from '../unsupported.js'
 import { encodeUtf8 } from '../util.js'
-import { duSize, humanScale } from './du-options.js'
+import { BLOCK, allocated, duSize, humanScale } from './du-options.js'
 import { formatDate } from './extra.js'
 
-// ext4 allocates 4 KiB blocks and counts them in 512-byte units: a directory
-// takes one block, an empty file none, and `total` is the sum in KiB.
-const BLOCK = 4096
-const BLOCK_UNITS = BLOCK / 512
-// ext4 keeps a link target of under 60 bytes in the inode's own block list,
-// where it occupies no block at all: the fast symlink.
-const FAST_LINK = 60
+// `total` counts what ext4 allocates (see allocated in ./du-options.js) in
+// the 512-byte units `st_blocks` is kept in, and prints the sum in KiB.
 // What GNU ls calls recent, and so dates to the minute rather than the year:
 // within the past half of an average Gregorian year, and not in the future.
 const HALF_YEAR = 31556952 * 1000 / 2
@@ -44,10 +39,9 @@ export function longFormat(ctx, human) {
       const rows = entries.map(({ name, abs, kind, target }) => {
         const dir = kind === 'dir'
         const bytes = dir ? BLOCK : ctx.fs.fileSize(abs) ?? encodeUtf8(ctx.fs.readFile(abs)).length
-        // A link's own mode is the one every symbolic link on Linux carries,
-        // and a target ext4 can hold in the inode takes no block of its own.
+        // A link's own mode is the one every symbolic link on Linux carries.
         const mode = dir ? 'drwx------' : kind === 'link' ? 'lrwxrwxrwx' : '-rw-------'
-        const units = dir ? BLOCK_UNITS : kind === 'link' && bytes < FAST_LINK ? 0 : Math.ceil(bytes / BLOCK) * BLOCK_UNITS
+        const units = allocated(bytes, kind) / 512
         const shown = kind === 'link' ? `${name} -> ${target}` : name
         return { name: shown, mode, units, links: String(dir ? 2 + ctx.fs.listDir(abs).dirs.length : 1), size: size(bytes) }
       })

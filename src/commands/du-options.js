@@ -92,6 +92,14 @@ function blockSize(value) {
   return { unit, suffix: label }
 }
 
+// What ext4 allocates for an entry, the one model plain `du` and `ls -l` read
+// from a tree that keeps no disk: 4 KiB blocks, a directory taking one, an
+// empty file none, and a link whose target is under 60 bytes none either,
+// since ext4 keeps that target in the inode itself — the fast symlink.
+export const BLOCK = 4096
+const FAST_LINK = 60
+export const allocated = (bytes, kind) => (kind === 'dir' ? BLOCK : kind === 'link' && bytes < FAST_LINK ? 0 : Math.ceil(bytes / BLOCK) * BLOCK)
+
 const ceiling = (size, unit) => (size + unit - 1n) / unit
 
 export function duSize(size, { base, unit, suffix = '' }) {

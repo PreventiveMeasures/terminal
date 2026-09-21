@@ -17,7 +17,7 @@ import { err, ok } from '../util.js'
 // another — is kept as it was spelled; `-e` needs all of it; and the default
 // mode allows the last component alone to be missing, which is where a link
 // pointing at nothing leads.
-function canonicalize(ctx, path, mode, links) {
+export function canonicalize(ctx, path, mode, links) {
   if (path === '' || path.includes('\0')) return { error: 'No such file or directory' }
   if (links === 'none') return strippedName(ctx, path, mode)
   let walked = path
@@ -76,7 +76,7 @@ function strippedPath(ctx, path) {
   return { path: at }
 }
 
-function relativePath(from, to) {
+export function relativePath(from, to) {
   const base = from.split('/').filter(Boolean)
   const target = to.split('/').filter(Boolean)
   let common = 0

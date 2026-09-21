@@ -128,6 +128,42 @@ describe('du counts modeled inodes', () => {
   })
 })
 
+// Without --apparent-size the sizes are what ext4 would allocate for the same
+// tree, the model `ls -l` reads its `total` from: 4 KiB blocks, a directory
+// taking one, an empty file none, and a link whose target is under 60 bytes
+// none. Every figure here is what GNU du 9.4 printed over this tree on ext4.
+describe('du allocated sizes follow the ext4 model', () => {
+  it('rounds every entry up to whole blocks and gives a directory one of its own', () => {
+    assert.deepEqual(run('du'), result('8\t./dir/sub\n20\t./dir\n32\t.\n'))
+    assert.deepEqual(run('du -a dir'), result('4\tdir/.hidden\n4\tdir/b\n4\tdir/sub/c\n8\tdir/sub\n20\tdir\n'))
+    assert.deepEqual(run('du -S'), result('8\t./dir/sub\n12\t./dir\n12\t.\n'))
+    assert.deepEqual(run('du -c a dir empty'), result('4\ta\n8\tdir/sub\n20\tdir\n0\tempty\n24\ttotal\n'))
+    assert.deepEqual(run('du -d0'), result('32\t.\n'))
+  })
+
+  it('scales the allocation as the byte counts are scaled', () => {
+    assert.deepEqual(run('du -h'), result('8.0K\t./dir/sub\n20K\t./dir\n32K\t.\n'))
+    assert.deepEqual(run('du -sh .'), result('32K\t.\n'))
+    assert.deepEqual(run('du -k dir'), result('8\tdir/sub\n20\tdir\n'))
+    assert.deepEqual(run('du -m dir'), result('1\tdir/sub\n1\tdir\n'))
+    assert.deepEqual(run('du -B 3000 dir'), result('3\tdir/sub\n7\tdir\n'))
+    assert.deepEqual(run('du --si -s .'), result('33k\t.\n'))
+    assert.deepEqual(run('du -ch a empty'), result('4.0K\ta\n0\tempty\n4.0K\ttotal\n'))
+  })
+
+  it('gives a link no block while its target fits the inode', () => {
+    const t = createTerminal({ ...sources, near: { type: 'link', target: 'a' }, far: { type: 'link', target: 'x'.repeat(60) } })
+    assert.deepEqual(t.run('du near far'), result('0\tnear\n4\tfar\n'))
+    assert.deepEqual(t.run('du -b near far'), result('1\tnear\n60\tfar\n'))
+    assert.deepEqual(t.run('du -s .'), result('36\t.\n'))
+  })
+
+  it('measures the overlay by the same model', () => {
+    const t = createTerminal(sources, { mount: '/src/', writable: '/tmp/' })
+    assert.deepEqual(t.run('mkdir /tmp/d; printf x > /tmp/d/one; touch /tmp/d/empty; du /tmp'), result('8\t/tmp/d\n12\t/tmp\n', 0, '', '/src'))
+  })
+})
+
 describe('du reports failures without inventing metadata', () => {
   it('reports missing paths and continues with valid operands', () => {
     assert.deepEqual(run('du -bc missing a'), result('3\ta\n3\ttotal\n', 1, "du: cannot access 'missing': No such file or directory\n"))
@@ -146,14 +182,6 @@ describe('du reports failures without inventing metadata', () => {
     assert.equal(actual.exitCode, 1)
     assert.deepEqual(actual.notes, ['du: relative path "a" was not found from cwd "/repo/dir". A file exists at "/repo/a".'])
   })
-  for (const flags of ['', '-h', '-sh', '-k', '-m']) {
-    it(`diagnoses allocated-size mode: ${flags}`, () => {
-      const actual = run(`du ${flags} a 2>/dev/null | cat`)
-      assert.equal(actual.stdout, '')
-      assert.equal(actual.stderr, '')
-      assert.equal(actual.unsupported[0].detail, 'allocated disk size')
-    })
-  }
   for (const flag of ['--time', '--time=ctime', '-x', '--exclude=x', '--exclude-from=x', '--files0-from=-', '--threshold=1', '--bad']) {
     it(`diagnoses ${flag}`, () => {
       const actual = run(`du -b ${flag} a 2>/dev/null | cat`)
