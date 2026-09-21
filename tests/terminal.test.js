@@ -5630,9 +5630,9 @@ describe('createTerminal — complete: corner cases', () => {
   it('`||` / `&&` / `;` are not pipes — full command list applies', () => {
     const t = createTerminal(SOURCES)
     // `ls` is non-pipeable but legal after the non-pipe separators.
-    assert.deepEqual(t.complete('cat || l'), ['cat || ls'])
-    assert.deepEqual(t.complete('cat && l'), ['cat && ls'])
-    assert.deepEqual(t.complete('cat ; l'), ['cat ; ls'])
+    assert.deepEqual(t.complete('cat || l'), ['cat || ls', 'cat || ln'])
+    assert.deepEqual(t.complete('cat && l'), ['cat && ls', 'cat && ln'])
+    assert.deepEqual(t.complete('cat ; l'), ['cat ; ls', 'cat ; ln'])
     // Likewise for empty trailing word — fresh command position with
     // the FULL command list, including non-pipeable commands.
     assert.ok(t.complete('cat || ').includes('cat || ls'))
@@ -5696,7 +5696,7 @@ describe('createTerminal — complete: corner cases', () => {
   it('`||` after a `|` resets the trailing word to the full command list', () => {
     const t = createTerminal(SOURCES)
     // Last separator is `||`, not `|` — pipe filter doesn't carry over.
-    assert.deepEqual(t.complete('cat | grep || l'), ['cat | grep || ls'])
+    assert.deepEqual(t.complete('cat | grep || l'), ['cat | grep || ls', 'cat | grep || ln'])
     assert.ok(t.complete('cat | grep || ').includes('cat | grep || ls'))
     assert.ok(t.complete('cat | grep || ').includes('cat | grep || pwd'))
   })
@@ -5807,7 +5807,7 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat;gre'), ['cat;grep'])
     // Even when the last separator is `||` after an earlier `|`, the
     // last-separator type wins — no space inserted.
-    assert.deepEqual(t.complete('cat|grep||l'), ['cat|grep||ls'])
+    assert.deepEqual(t.complete('cat|grep||l'), ['cat|grep||ls', 'cat|grep||ln'])
   })
 
   it('non-pipeable first command does not affect completion (no validation)', () => {

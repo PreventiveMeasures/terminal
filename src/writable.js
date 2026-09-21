@@ -11,6 +11,8 @@ export const inOverlay = (absolute) => absolute === '/tmp' || absolute.startsWit
 // directory index remain separate and are never copied into this map.
 export function writableFs(base) {
   const files = new Map()
+  // The links `ln -s` made, each the path it holds; the sources own the rest.
+  const links = new Map()
   // Directories the overlay holds. `/tmp` is there from the start and the rest
   // are made deliberately, by `cp -r`; a file's parent is always one of them,
   // since nothing may be written where no directory is.
@@ -18,7 +20,7 @@ export function writableFs(base) {
   let observer
   const root = base.listDir('/')
   const rootEntries = { dirs: [...root.dirs, 'tmp'].sort(compareNames), files: root.files, links: root.links ?? [] }
-  const listings = overlayListings(dirs, files)
+  const listings = overlayListings(dirs, files, links)
   const reshaped = listings.reshaped
   const put = (path, inode) => {
     if (!path.startsWith('/tmp/')) throw new Error('writable overlay paths must start with /tmp/')
@@ -28,13 +30,12 @@ export function writableFs(base) {
   const fs = {
     observeIo: (value) => { observer = value },
     fileIdentity: (path) => files.get(path),
-    fileSize: (path) => files.get(path)?.bytes.length ?? base.fileSize(path),
+    fileSize: (path) => files.get(path)?.bytes.length ?? (links.has(path) ? encodeUtf8(links.get(path)).length : base.fileSize(path)),
     readIdentity: (inode) => { observer?.read(inode); return decodeUtf8(inode.bytes) },
     isFile: (path) => files.has(path) || base.isFile(path),
     isDir: (path) => dirs.has(path) || base.isDir(path),
-    // Nothing here makes a link, so the sources own every one there is.
-    isLink: (path) => base.isLink?.(path) === true,
-    readLink: (path) => base.readLink?.(path),
+    isLink: (path) => links.has(path) || base.isLink?.(path) === true,
+    readLink: (path) => links.get(path) ?? base.readLink?.(path),
     readFile: (path) => {
       const inode = files.get(path)
       observer?.read(inode ?? path)
@@ -57,7 +58,17 @@ export function writableFs(base) {
       else if (!append) { observer?.write(inode); inode.bytes = new Uint8Array() }
       return writeHandle(absolute, inode, append, () => observer?.write(inode))
     },
-    makeWritableDir: (cwd, path) => addDirectory(fs, { dirs, files, reshaped }, cwd, path),
+    makeWritableDir: (cwd, path) => addDirectory(fs, { dirs, files, links, reshaped }, cwd, path),
+    makeWritableLink(cwd, path, target) {
+      // A link is made at the name itself, never where a link already there
+      // leads, so only the way to the name resolves.
+      const absolute = writeTarget(fs, cwd, path, false)
+      if (!absolute.startsWith('/tmp/')) return false
+      checkNewName(fs, cwd, path)
+      links.set(absolute, target)
+      reshaped()
+      return true
+    },
     removeWritableDir: (cwd, path) => dropDirectory(fs, { dirs, reshaped }, cwd, path),
     copyWritable(cwd, source, target) {
       const absolute = writeTarget(fs, cwd, target)
@@ -72,15 +83,16 @@ export function writableFs(base) {
       fs.openWritable(cwd, target).writeBytes(bytes)
       return true
     },
-    replaceWritable: (cwd, path, content, backup) => replaceFile(fs, { files, put }, cwd, path, content, backup),
+    replaceWritable: (cwd, path, content, backup) => replaceFile(fs, { files, links, put }, cwd, path, content, backup),
     removeWritable(cwd, path) {
       const absolute = writeTarget(fs, cwd, path, false)
       if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
-      const found = lookup(cwd, path, fs)
+      // The name itself is what is unlinked: a link is taken away, not followed.
+      const found = lookup(cwd, path, fs, { follow: false })
       if (found.error) throw pathError(path, found.error)
       if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
       // Open handles retain the unlinked inode until their last writer ends.
-      files.delete(found.path)
+      if (!links.delete(found.path)) files.delete(found.path)
       reshaped()
       return true
     },
@@ -99,9 +111,9 @@ function addDirectory(fs, overlay, cwd, path) {
   if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
   if (overlay.dirs.has(absolute)) return true
   checkTarget(fs, cwd, path)
-  // checkTarget passes a name already taken by a file, which is not a name a
-  // directory can take.
-  if (overlay.files.has(absolute)) throw new Error(`${path}: File exists`)
+  // checkTarget passes a name already taken by a file or a link, which is not
+  // a name a directory can take.
+  if (overlay.files.has(absolute) || overlay.links.has(absolute)) throw new Error(`${path}: File exists`)
   overlay.dirs.add(absolute)
   overlay.reshaped()
   return true
@@ -117,10 +129,16 @@ function replaceFile(fs, overlay, cwd, path, content, backupPath) {
   if (!absolute.startsWith('/tmp/') || backup !== null && !backup.startsWith('/tmp/')) return false
   checkTarget(fs, cwd, path)
   const inode = overlay.files.get(absolute)
-  if (!inode) throw pathError(path, 'No such file or directory')
+  const link = overlay.links.get(absolute)
+  if (!inode && link === undefined) throw pathError(path, 'No such file or directory')
   if (backup !== null) checkTarget(fs, cwd, backupPath)
   const replacement = { bytes: encodeUtf8(content) }
-  if (backup !== null) overlay.put(backup, inode)
+  // GNU renames the name aside for the backup and the new file over it, so a
+  // link's backup is the link itself, and the name is a regular file after.
+  if (link === undefined) { if (backup !== null) overlay.put(backup, inode) } else {
+    overlay.links.delete(absolute)
+    if (backup !== null) { overlay.links.set(backup, link); overlay.files.delete(backup) }
+  }
   // Renaming a replacement keeps already-open descriptors on the old file.
   overlay.put(absolute, replacement)
   return true
@@ -137,8 +155,8 @@ function dropDirectory(fs, overlay, cwd, path) {
   if (found.error) throw pathError(path, found.error)
   if (!overlay.dirs.has(found.path)) throw new Error(`${path}: Not a directory`)
   if (found.path === '/tmp') throw new Error(`${path}: Device or resource busy`)
-  const { dirs, files } = fs.listDir(found.path)
-  if (dirs.length || files.length) throw new Error(`${path}: Directory not empty`)
+  const { dirs, files, links } = fs.listDir(found.path)
+  if (dirs.length || files.length || links.length) throw new Error(`${path}: Directory not empty`)
   overlay.dirs.delete(found.path)
   overlay.reshaped()
   return true
@@ -147,7 +165,7 @@ function dropDirectory(fs, overlay, cwd, path) {
 // A directory's listing, built when it is asked for and dropped whole when the
 // overlay changes shape: a scratch tree is cheaper to rebuild than to keep in
 // step entry by entry. Names are sorted as the source tree sorts its own.
-function overlayListings(dirs, files) {
+function overlayListings(dirs, files, links) {
   let cache = new Map()
   const children = (paths, prefix) => [...paths]
     .filter((path) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
@@ -157,7 +175,7 @@ function overlayListings(dirs, files) {
     of(path) {
       const cached = cache.get(path)
       if (cached) return cached
-      const entries = { dirs: children(dirs, path + '/'), files: children(files.keys(), path + '/'), links: [] }
+      const entries = { dirs: children(dirs, path + '/'), files: children(files.keys(), path + '/'), links: children(links.keys(), path + '/') }
       cache.set(path, entries)
       return entries
     },
@@ -195,6 +213,18 @@ function checkTarget(fs, cwd, path) {
   // take: a trailing slash names a directory, and a NUL names nothing.
   if (found.rest.length > 0 || path.endsWith('/') || path.includes('\0')) throw pathError(path, found.error)
   if (!fs.isDir(dirname(found.path))) throw pathError(path, 'No such file or directory')
+}
+
+// What a name about to be made must be, as symlink(2) checks one: not there,
+// under a directory that is, and — a trailing slash asking for a directory —
+// not a name that could only be a file. A link already there is a name taken,
+// wherever it leads, so the final component is never followed.
+function checkNewName(fs, cwd, path) {
+  if (path === '' || path.includes('\0')) throw pathError(path, 'No such file or directory')
+  const found = walkPath(cwd, path, fs, { follow: false })
+  if (found.error === null) throw pathError(path, 'File exists')
+  if (found.rest.length > 0 || path.endsWith('/')) throw pathError(path, found.error)
+  if (!fs.isDir(dirname(found.path))) throw pathError(path, 'Not a directory')
 }
 
 function pathError(path, fsError) {

@@ -77,6 +77,7 @@
     "src/commands/grep-pattern.js",
     "src/commands/grep-pcre.js",
     "src/commands/grep.js",
+    "src/commands/ln.js",
     "src/commands/ls-long.js",
     "src/commands/mkdir.js",
     "src/commands/nav.js",

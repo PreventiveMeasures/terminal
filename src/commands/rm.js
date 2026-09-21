@@ -68,9 +68,9 @@ function crossedLink(ctx, name) {
 // what the name itself fails with once the directory under it is empty.
 function removeTree(name, absolute, state, last = null) {
   const { ctx } = state
-  const { dirs, files } = ctx.fs.listDir(absolute)
+  const { dirs, files, links = [] } = ctx.fs.listDir(absolute)
   const base = name.replace(/\/+$/u, '')
-  for (const child of [...dirs, ...files].sort(compareNames)) {
+  for (const child of [...dirs, ...files, ...links].sort(compareNames)) {
     const path = joinPath(absolute, child)
     if (ctx.fs.isDir(path)) removeTree(`${base}/${child}`, path, state)
     else removeEntry(`${base}/${child}`, path, state, false, null)

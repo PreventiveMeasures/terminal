@@ -21,7 +21,7 @@ not.
 
 `ls` `cd` `cat` `grep` `rg` `egrep` `fgrep` `sed` `awk` `find` `head` `tail` `wc`
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
-`printf` `test` `cp` `rm` `mkdir` `touch` `diff` `patch` `du` `stat` `realpath`
+`printf` `test` `cp` `rm` `mkdir` `touch` `ln` `diff` `patch` `du` `stat` `realpath`
 `pwd` `seq` `which` `basename` `dirname` — plus your own, via `opts.commands`.
 
 `cp -r` copies a tree into the overlay, making each directory before what goes
@@ -29,10 +29,10 @@ inside it; `-R` and `--recursive` spell the same flag, and `-v` announces a
 directory once, where it is made. A destination inside the source, a
 destination that is the source, and a directory over a file are refused with
 GNU's own diagnostics. Directories exist in the overlay only where `cp -r` puts
-them, since nothing else here makes one. A link is the one thing it cannot
-carry over: `-r` keeps every link it meets as the link it is, and the overlay
-holds files and directories alone, so such a copy is refused rather than
-written as the files those links point at. A link handed to `cp` without `-r`
+them, since nothing else here makes one. A link is the one thing it does not
+carry over: `-r` keeps every link it meets as the link it is, and `cp` makes
+none here, so such a copy is refused rather than written as the files those
+links point at. A link handed to `cp` without `-r`
 is read through, which is what GNU reads there too, and one `-n` has left
 alone is never in question, since that flag answers from the destination
 before the source is opened. A destination is read the
@@ -69,13 +69,25 @@ terminal was made, so a name already there reports an unsupported diagnostic
 rather than a success that changed nothing, and `-a`, `-m`, `-d`, `-t` and `-r`
 are refused for the same reason.
 
+`ln -s` makes a symbolic link in the overlay, holding the target as it was
+written — resolved from the link's own directory when the link is read, as the
+kernel resolves one, whether or not it leads anywhere. One operand makes the
+link in the current directory under the target's last component; a name that
+is a directory takes the link inside it, unless `-T`, or `-n` for a link to
+one; `-t` names that directory outright; `-f` replaces a file or a link in the
+way and refuses a directory; `-r` writes the target relative to the link; and
+`-v` announces each link made. What is left is a name every other command
+reads as it reads a link the sources declare, and `rm` takes away as the link
+it is. A hard link — `ln` without `-s` — reports an unsupported diagnostic, as
+do backups and the interactive prompt.
+
 `ls -l` fills in what the filesystem does not keep with one deliberate model
 rather than a guess per entry: every entry is the session user's alone
 (`-rw-------` and `drwx------`) and is dated to the moment the terminal was
 created, a time its forks carry with them. Link counts, directory sizes and
 the `total` line are what ext4 would report for the same tree, and `-h`
 rounds sizes as `du -h` does. A symbolic link — one a source entry declares,
-since nothing here makes one — is the row the model has nothing to guess at:
+or one `ln -s` made — is the row the model has nothing to guess at:
 the `lrwxrwxrwx` every link on Linux carries, the length of the path it holds
 as its size, and that path named after it.
 
