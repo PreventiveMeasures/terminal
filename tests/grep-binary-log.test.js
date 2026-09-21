@@ -17,17 +17,17 @@ const FILES = {
 const EXPECTED = 'd/f/first.ts:1:a\nd/f/first.ts:2:obj.x\nd/f/first.ts:6:obj.x;\nd/f/first.ts:10:only y\n'
   + 'd/f/with space.ts:1:a\npackages/index.ts:1:y\npackages/index.ts:2:.x!\npackages/nested/helper.ts:4:z.x-\n'
 
-function virtual() {
+async function virtual() {
   // The logged cd must change the working directory before either relative
   // search root resolves. Uppercase -I must not become case-insensitive -i.
-  const result = createTerminal(FILES, { cwd: '/packages/nested' }).run(COMMAND)
+  const result = await createTerminal(FILES, { cwd: '/packages/nested' }).run(COMMAND)
   assert.deepEqual(result.unsupported, [])
   assert.equal(result.cwd, '/')
   return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode }
 }
 
 describe('grep — recursive binary exclusion from an agent log', () => {
-  it(COMMAND, () => {
-    assert.deepEqual(virtual(), { stdout: EXPECTED, stderr: '', exitCode: 0 })
+  it(COMMAND, async () => {
+    assert.deepEqual(await virtual(), { stdout: EXPECTED, stderr: '', exitCode: 0 })
   })
 })

@@ -220,7 +220,7 @@ describe('no JS execution — source', () => {
 })
 
 describe('no JS execution — runtime', () => {
-  it('runs hostile input without touching any evaluator in the realm', () => {
+  it('runs hostile input without touching any evaluator in the realm', async () => {
     const t = createTerminal(SOURCES)
     const hits = []
 
@@ -261,7 +261,7 @@ describe('no JS execution — runtime', () => {
       // only have come from `run()`. Errors are allowed to surface as
       // return values (the terminal never throws for bad input) but a
       // throw here would still be a failure worth seeing.
-      for (const line of HOSTILE) t.run(line)
+      for (const line of HOSTILE) await t.run(line)
     } finally {
       for (const [i, [obj, key]] of slots.entries()) {
         Object.defineProperty(obj, key, saved[i])
@@ -271,26 +271,26 @@ describe('no JS execution — runtime', () => {
     assert.deepEqual(hits, [], `evaluator reached: ${JSON.stringify(hits)}`)
   })
 
-  it('returns a clean result for every hostile line instead of throwing', () => {
+  it('returns a clean result for every hostile line instead of throwing', async () => {
     const t = createTerminal(SOURCES)
     for (const line of HOSTILE) {
-      const r = t.run(line)
+      const r = await t.run(line)
       assert.equal(typeof r.stdout, 'string', line)
       assert.equal(typeof r.stderr, 'string', line)
       assert.equal(typeof r.exitCode, 'number', line)
     }
   })
 
-  it('runs command substitution through the virtual registry and rejects unsupported expansion forms', () => {
+  it('runs command substitution through the virtual registry and rejects unsupported expansion forms', async () => {
     const t = createTerminal(SOURCES)
-    assert.deepEqual(t.run('echo "$(cat a.js)"'), {
+    assert.deepEqual(await t.run('echo "$(cat a.js)"'), {
       stdout: 'hello\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
-    assert.deepEqual(t.run('echo $((1+1))'), {
+    assert.deepEqual(await t.run('echo $((1+1))'), {
       stdout: '2\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
     for (const line of ['echo `echo \\`nested\\``', 'echo $[1+1]']) {
-      const r = t.run(line)
+      const r = await t.run(line)
       assert.equal(r.exitCode, 1, line)
       assert.equal(r.stdout, '', line)
       assert.match(r.stderr, /not supported/u, line)
@@ -300,7 +300,7 @@ describe('no JS execution — runtime', () => {
     // named in either form is reported missing rather than run.
     for (const line of ["echo $(node -e 'process.exit(1)')", 'x=$(sh -c id)', 'echo "$(/bin/sh -c id)"',
       'echo `id`', "echo `node -e 'process.exit(1)'`", 'x=`sh -c id`', 'echo "`/bin/sh -c id`"']) {
-      const r = t.run(line)
+      const r = await t.run(line)
       assert.match(r.stderr, /command not found/u, line)
       assert.equal(r.unsupported[0].kind, 'command', line)
     }
@@ -309,36 +309,36 @@ describe('no JS execution — runtime', () => {
     // few names it answers itself) — there is no environment behind them.
     // A name bash would have answered from its own process is refused outright.
     for (const line of ['echo ${PATH}', 'for x in a; do echo $SHELL; done']) {
-      const r = t.run(line)
+      const r = await t.run(line)
       assert.deepEqual([r.stdout, r.exitCode, r.unsupported[0].kind], ['', 1, 'feature'], line)
     }
-    assert.equal(t.run('echo $HOME').stdout, '/\n')
+    assert.equal((await t.run('echo $HOME')).stdout, '/\n')
     // `&` would be the other way to hand work to a real process.
-    assert.match(t.run('cat a.js & id').stderr, /background processes/u)
+    assert.match((await t.run('cat a.js & id')).stderr, /background processes/u)
   })
 
-  it('interpreter names are unknown commands, not passthroughs to a host shell', () => {
+  it('interpreter names are unknown commands, not passthroughs to a host shell', async () => {
     const t = createTerminal(SOURCES)
     for (const line of ['node -e 1', 'sh -c id', '/bin/sh -c id', '/usr/bin/env node']) {
-      const r = t.run(line)
+      const r = await t.run(line)
       assert.equal(r.exitCode, 127, line)
       assert.match(r.stderr, /command not found/u, line)
       assert.equal(r.stdout, '', line)
     }
   })
 
-  it('command dispatch cannot reach Object.prototype members', () => {
+  it('command dispatch cannot reach Object.prototype members', async () => {
     const t = createTerminal(SOURCES)
     // The registries are `__proto__: null`, so inherited names are
     // misses (127) rather than an accidental call on a builtin.
     for (const name of ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__']) {
-      const r = t.run(name)
+      const r = await t.run(name)
       assert.equal(r.exitCode, 127, name)
       assert.match(r.stderr, /command not found/u, name)
     }
   })
 
-  it('awk refuses its process-spawning and file-writing forms at parse time', () => {
+  it('awk refuses its process-spawning and file-writing forms at parse time', async () => {
     const t = createTerminal(SOURCES)
     const cases = [
       ["awk 'BEGIN { system(\"id\") }'", /system\(\) is not supported: this terminal runs no processes/u],
@@ -347,88 +347,88 @@ describe('no JS execution — runtime', () => {
       ["awk 'BEGIN { print \"x\" > \"/etc/passwd\" }'", /the filesystem is read-only/u],
     ]
     for (const [line, re] of cases) {
-      const r = t.run(line)
+      const r = await t.run(line)
       assert.equal(r.exitCode, 1, line)
       assert.equal(r.stdout, '', line)
       assert.match(r.stderr, re, line)
     }
     // Refused even when the statement could never run: the parser
     // rejects the program as a whole.
-    assert.match(t.run("awk 'NR == -1 { system(\"id\") } { print }' a.js").stderr, /system\(\) is not supported/u)
+    assert.match((await t.run("awk 'NR == -1 { system(\"id\") } { print }' a.js")).stderr, /system\(\) is not supported/u)
   })
 
-  it('awk refuses the same reaches when the operand is a string only at runtime', () => {
+  it('awk refuses the same reaches when the operand is a string only at runtime', async () => {
     const t = createTerminal(SOURCES)
     // A command name held in a variable is still a pipeline to a process.
-    assert.match(t.run("awk 'BEGIN { cmd = \"id\"; cmd | getline x }'").stderr, /command pipelines .* are not supported/u)
+    assert.match((await t.run("awk 'BEGIN { cmd = \"id\"; cmd | getline x }'")).stderr, /command pipelines .* are not supported/u)
     // gawk's coprocess operator, which the four literal forms do not cover.
-    assert.match(t.run("awk 'BEGIN { print \"x\" |& \"sh\" }'").stderr, /output pipes .* are not supported/u)
+    assert.match((await t.run("awk 'BEGIN { print \"x\" |& \"sh\" }'")).stderr, /output pipes .* are not supported/u)
     // A redirect target the parser cannot read as a literal is checked
     // again where it becomes a string, so it fails at runtime instead.
-    const redirect = t.run("awk 'BEGIN { f = \"/tmp/pwn\"; print \"x\" > f }'")
+    const redirect = await t.run("awk 'BEGIN { f = \"/tmp/pwn\"; print \"x\" > f }'")
     assert.equal(redirect.exitCode, 2)
     assert.equal(redirect.stdout, '')
     assert.match(redirect.stderr, /the filesystem is read-only/u)
     // `@f(...)` would make a builtin's name a value, and a user function
     // cannot take a refused builtin's name to smuggle the call past the
     // parse-time check either.
-    assert.match(t.run("awk 'BEGIN { f = \"system\"; @f(\"id\") }'").stderr, /indirect calls .* are not supported/u)
-    assert.match(t.run("awk 'function system(c) { return 1 } BEGIN { system(\"id\") }'").stderr, /cannot redefine builtin function `system`/u)
+    assert.match((await t.run("awk 'BEGIN { f = \"system\"; @f(\"id\") }'")).stderr, /indirect calls .* are not supported/u)
+    assert.match((await t.run("awk 'function system(c) { return 1 } BEGIN { system(\"id\") }'")).stderr, /cannot redefine builtin function `system`/u)
     // Only awk's three device names are writable; everything else is
     // refused rather than reaching a real file.
-    assert.equal(t.run("awk 'BEGIN { print \"x\" > \"/dev/stderr\" }'").stderr, 'x\n')
+    assert.equal((await t.run("awk 'BEGIN { print \"x\" > \"/dev/stderr\" }'")).stderr, 'x\n')
   })
 
-  it('awk program text is data at every entry point, and awk is the only thing that reads it', () => {
+  it('awk program text is data at every entry point, and awk is the only thing that reads it', async () => {
     const t = createTerminal(SOURCES)
     // A program from `-f` comes out of the virtual FS and goes to awk's
     // own parser, exactly like one typed as an operand.
-    assert.equal(t.run('awk -f prog.awk a.js').stdout, 'from a program file\n')
+    assert.equal((await t.run('awk -f prog.awk a.js')).stdout, 'from a program file\n')
     // `-v` and operand assignments carry values, never programs: this
     // one is printed, not run.
-    assert.equal(t.run("awk -v x='BEGIN{system(\"id\")}' 'BEGIN { print x }'").stdout, 'BEGIN{system("id")}\n')
+    assert.equal((await t.run("awk -v x='BEGIN{system(\"id\")}' 'BEGIN { print x }'")).stdout, 'BEGIN{system("id")}\n')
     // Names that are evaluators in JS are undefined awk functions. A call
     // is looked up in the program's own table of them and nowhere else, so
     // a name JS would answer for is a name nothing here defines — including
     // the ones every JS object carries.
     for (const name of ['eval', 'Function', 'require', 'constructor', '__proto__', 'toString', 'hasOwnProperty']) {
-      const r = t.run(`awk 'BEGIN { print ${name}("1+1") }'`)
+      const r = await t.run(`awk 'BEGIN { print ${name}("1+1") }'`)
       assert.equal(r.exitCode, 2, name)
       assert.equal(r.stdout, '', name)
       assert.match(r.stderr, new RegExp(`function \`${name}\` not defined`, 'u'), name)
     }
     // `getline < file` reads the virtual FS: a host path is simply
     // absent (-1), not opened.
-    assert.equal(t.run("awk 'BEGIN { print (getline l < \"/etc/passwd\") }'").stdout, '-1\n')
-    assert.equal(t.run("awk 'BEGIN { while ((getline l < \"a.js\") > 0) print l }'").stdout, 'hello\n')
+    assert.equal((await t.run("awk 'BEGIN { print (getline l < \"/etc/passwd\") }'")).stdout, '-1\n')
+    assert.equal((await t.run("awk 'BEGIN { while ((getline l < \"a.js\") > 0) print l }'")).stdout, 'hello\n')
   })
 
-  it('awk arrays are prototype-free: Object.prototype names are ordinary keys', () => {
+  it('awk arrays are prototype-free: Object.prototype names are ordinary keys', async () => {
     const t = createTerminal(SOURCES)
     // Subscripts come from input, so they are attacker-chosen. Held in
     // a Map, they are keys; in a plain object, `a["__proto__"] = ...`
     // would reach Object.prototype instead of the array.
-    const r = t.run("awk 'BEGIN { a[\"__proto__\"] = 1; a[\"constructor\"] = 2; a[\"toString\"] = 3; for (k in a) print k, a[k] }'")
+    const r = await t.run("awk 'BEGIN { a[\"__proto__\"] = 1; a[\"constructor\"] = 2; a[\"toString\"] = 3; for (k in a) print k, a[k] }'")
     assert.equal(r.exitCode, 0)
     assert.equal(r.stdout, '__proto__ 1\nconstructor 2\ntoString 3\n')
     // A fresh array inherits none of it, and an unset element is empty
     // rather than an inherited member.
-    assert.equal(t.run("awk 'BEGIN { a[\"__proto__\"] = 1; print length(b), ((\"__proto__\" in b) ? \"yes\" : \"no\") }'").stdout, '0 no\n')
-    assert.equal(t.run("awk 'BEGIN { print length(a[\"toString\"]) }'").stdout, '0\n')
+    assert.equal((await t.run("awk 'BEGIN { a[\"__proto__\"] = 1; print length(b), ((\"__proto__\" in b) ? \"yes\" : \"no\") }'")).stdout, '0 no\n')
+    assert.equal((await t.run("awk 'BEGIN { print length(a[\"toString\"]) }'")).stdout, '0\n')
   })
 
-  it('find -exec and xargs dispatch through the registry, never to a host process', () => {
+  it('find -exec and xargs dispatch through the registry, never to a host process', async () => {
     const t = createTerminal(SOURCES)
     // Both are the "run another command" surfaces. An unregistered
     // name must fail closed at the registry rather than escaping.
-    assert.match(t.run("find . -exec node -e 'x' ';'").stderr, /node: command not found/u)
-    assert.match(t.run('echo a | xargs node -e').stderr, /node: command not found/u)
+    assert.match((await t.run("find . -exec node -e 'x' ';'")).stderr, /node: command not found/u)
+    assert.match((await t.run('echo a | xargs node -e')).stderr, /node: command not found/u)
     // A loop value in command position is word-split like bash splits
     // it: `sh` is a command name that does not exist, `-c id` its args.
-    assert.match(t.run('for c in "sh -c id"; do $c; done').stderr, /^sh: command not found/u)
-    assert.match(t.run('for c in "sh -c id"; do "$c"; done').stderr, /^sh -c id: command not found/u)
+    assert.match((await t.run('for c in "sh -c id"; do $c; done')).stderr, /^sh: command not found/u)
+    assert.match((await t.run('for c in "sh -c id"; do "$c"; done')).stderr, /^sh -c id: command not found/u)
     // And a registered one still works, so this is failing closed
     // rather than -exec being broken outright.
-    assert.equal(t.run("find . -name 'a.js' -exec echo found {} ';'").stdout, 'found ./a.js\n')
+    assert.equal((await t.run("find . -name 'a.js' -exec echo found {} ';'")).stdout, 'found ./a.js\n')
   })
 })

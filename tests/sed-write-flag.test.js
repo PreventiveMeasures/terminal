@@ -14,12 +14,12 @@ const terminal = () => createTerminal(FILES, OPTIONS)
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const command = (script, input = '/repo/input', flags = '') => `sed ${flags} ${quote(script)} ${input}`
 
-function check(t, text, stdout = '', stderr = '', exitCode = 0) {
-  assert.deepEqual(t.run(text), { stdout, stderr, exitCode, cwd: '/tmp', notes: [], unsupported: [] }, text)
+async function check(t, text, stdout = '', stderr = '', exitCode = 0) {
+  assert.deepEqual(await t.run(text), { stdout, stderr, exitCode, cwd: '/tmp', notes: [], unsupported: [] }, text)
 }
 
-function written(t, path, content) {
-  check(t, `cat ${quote(path)}`, content)
+async function written(t, path, content) {
+  await check(t, `cat ${quote(path)}`, content)
 }
 
 describe('sed substitution w writes only successful substitutions', () => {
@@ -37,24 +37,24 @@ describe('sed substitution w writes only successful substitutions', () => {
     ['inverted address', '/skip/!s/qwe/Z/w out', '-n', '', 'Z\nZ qwe\n'],
     ['selected numeric range', '2,3s/qwe/Z/w out', '-n', '', 'Z qwe\n'],
   ]) {
-    it(name, () => {
+    it(name, async () => {
       const t = terminal()
-      check(t, command(script, '/repo/input', flags), stdout)
-      written(t, 'out', output)
-      written(t, '/repo/input', FILES.input)
+      await check(t, command(script, '/repo/input', flags), stdout)
+      await written(t, 'out', output)
+      await written(t, '/repo/input', FILES.input)
     })
   }
 
-  it('writes the pattern space before later commands modify it', () => {
+  it('writes the pattern space before later commands modify it', async () => {
     const t = terminal()
-    check(t, "sed -e 's/qwe/Z/w out' -e 's/Z/Y/g' /repo/input", 'Y\nskip\nY qwe\n')
-    written(t, 'out', 'Z\nZ qwe\n')
+    await check(t, "sed -e 's/qwe/Z/w out' -e 's/Z/Y/g' /repo/input", 'Y\nskip\nY qwe\n')
+    await written(t, 'out', 'Z\nZ qwe\n')
   })
 
-  it('writes a multiline replacement as one complete pattern space', () => {
+  it('writes a multiline replacement as one complete pattern space', async () => {
     const t = terminal()
-    check(t, command(String.raw`s/qwe/X\nY/w out`, '/repo/single'), 'X\nY\n')
-    written(t, 'out', 'X\nY\n')
+    await check(t, command(String.raw`s/qwe/X\nY/w out`, '/repo/single'), 'X\nY\n')
+    await written(t, 'out', 'X\nY\n')
   })
 })
 
@@ -66,67 +66,67 @@ describe('sed opens substitution output files while compiling the script', () =>
     ['unselected block', '20{\ns/qwe/Z/w out\n}', '/repo/single', 'qwe\n'],
     ['earlier quit', 'q\ns/qwe/Z/w out', '/repo/single', 'qwe\n'],
   ]) {
-    it(`truncates existing output with ${name}`, () => {
+    it(`truncates existing output with ${name}`, async () => {
       const t = terminal()
-      check(t, 'printf old >out')
-      check(t, command(script, input), stdout)
-      written(t, 'out', '')
+      await check(t, 'printf old >out')
+      await check(t, command(script, input), stdout)
+      await written(t, 'out', '')
     })
   }
 
-  it('creates a missing target even without an input cycle', () => {
+  it('creates a missing target even without an input cycle', async () => {
     const t = terminal()
-    check(t, command('s/qwe/Z/w out', '/repo/empty'))
-    check(t, 'test -f out')
-    written(t, 'out', '')
+    await check(t, command('s/qwe/Z/w out', '/repo/empty'))
+    await check(t, 'test -f out')
+    await written(t, 'out', '')
   })
 
-  it('truncates a target before reading it as an input operand', () => {
+  it('truncates a target before reading it as an input operand', async () => {
     const t = terminal()
-    check(t, 'cat /repo/single >out')
-    check(t, command('s/qwe/Z/w out', 'out'))
-    written(t, 'out', '')
+    await check(t, 'cat /repo/single >out')
+    await check(t, command('s/qwe/Z/w out', 'out'))
+    await written(t, 'out', '')
   })
 
-  it('creates the output before an ordinary input-open failure', () => {
+  it('creates the output before an ordinary input-open failure', async () => {
     const t = terminal()
-    const r = t.run(command('s/qwe/Z/w out', 'missing'))
+    const r = await t.run(command('s/qwe/Z/w out', 'missing'))
     assert.equal(r.stdout, '')
     assert.equal(r.exitCode, 2)
     assert.match(r.stderr, /missing/u)
     assert.deepEqual(r.unsupported, [])
-    written(t, 'out', '')
+    await written(t, 'out', '')
   })
 
-  it('makes early truncation visible while loading a later script file', () => {
+  it('makes early truncation visible while loading a later script file', async () => {
     const t = terminal()
-    check(t, "printf 's/qwe/Y/\\n' >script")
-    check(t, "sed -e 's/qwe/Z/w script' -f script /repo/single", 'Z\n')
-    written(t, 'script', 'Z\n')
+    await check(t, "printf 's/qwe/Y/\\n' >script")
+    await check(t, "sed -e 's/qwe/Z/w script' -f script /repo/single", 'Z\n')
+    await written(t, 'script', 'Z\n')
   })
 
-  it('reads a later input file after earlier substitutions have written it', () => {
+  it('reads a later input file after earlier substitutions have written it', async () => {
     const t = terminal()
-    check(t, command('s/qwe/Z/w out', '/repo/single out'), 'Z\nZ\n')
-    written(t, 'out', 'Z\n')
+    await check(t, command('s/qwe/Z/w out', '/repo/single out'), 'Z\nZ\n')
+    await written(t, 'out', 'Z\n')
   })
 
-  it('shares one open file across expressions that use the same filename', () => {
+  it('shares one open file across expressions that use the same filename', async () => {
     const t = terminal()
-    check(t, "sed -e 's/qwe/X/w out' -e 's/X/Y/w out' /repo/single", 'Y\n')
-    written(t, 'out', 'X\nY\n')
+    await check(t, "sed -e 's/qwe/X/w out' -e 's/X/Y/w out' /repo/single", 'Y\n')
+    await written(t, 'out', 'X\nY\n')
   })
 
-  it('shares one open file across script files', () => {
+  it('shares one open file across script files', async () => {
     const t = terminal()
-    check(t, 'sed -f /repo/scripts/write -f /repo/scripts/second /repo/single', 'Y\n')
-    written(t, 'out', 'Z\nY\n')
+    await check(t, 'sed -f /repo/scripts/write -f /repo/scripts/second /repo/single', 'Y\n')
+    await written(t, 'out', 'Z\nY\n')
   })
 
-  it('keeps separate descriptor offsets for different spellings of one file', () => {
+  it('keeps separate descriptor offsets for different spellings of one file', async () => {
     const t = terminal()
-    check(t, "sed -e 's/qwe/X/w out' -e 's/X/Y/w ./out' /repo/single", 'Y\n')
-    written(t, 'out', 'Y\n')
+    await check(t, "sed -e 's/qwe/X/w out' -e 's/X/Y/w ./out' /repo/single", 'Y\n')
+    await written(t, 'out', 'Y\n')
   })
 
   for (const [name, script, flags] of [
@@ -135,69 +135,69 @@ describe('sed opens substitution output files while compiling the script', () =>
     ['invalid expression after w is parsed', 's/(/Z/w out', '-E'],
     ['invalid replacement reference after w is parsed', String.raw`s/qwe/\1/w out`, ''],
   ]) {
-    it(`preserves file opening before ${name}`, () => {
+    it(`preserves file opening before ${name}`, async () => {
       const t = terminal()
       const path = name === 'unfinished block' ? 'out}' : 'out'
-      check(t, `printf old >${quote(path)}`)
-      const r = t.run(command(script, '/repo/single', flags))
+      await check(t, `printf old >${quote(path)}`)
+      const r = await t.run(command(script, '/repo/single', flags))
       assert.equal(r.stdout, '')
       assert.equal(r.exitCode, 1)
       assert.notEqual(r.stderr, '')
       assert.deepEqual(r.unsupported, [])
-      written(t, path, '')
+      await written(t, path, '')
     })
   }
 
-  it('preserves earlier file openings when a later command is unsupported', () => {
+  it('preserves earlier file openings when a later command is unsupported', async () => {
     const t = terminal()
-    check(t, 'printf old >out')
-    const r = t.run(command('s/qwe/Z/w out\nF', '/repo/single') + ' 2>/dev/null | cat')
+    await check(t, 'printf old >out')
+    const r = await t.run(command('s/qwe/Z/w out\nF', '/repo/single') + ' 2>/dev/null | cat')
     assert.equal(r.stdout, '')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)
     assert.ok(r.unsupported.length > 0)
-    written(t, 'out', '')
+    await written(t, 'out', '')
   })
 
-  it('does not open a target when the substitution delimiters are unfinished', () => {
+  it('does not open a target when the substitution delimiters are unfinished', async () => {
     const t = terminal()
-    const r = t.run(command('s/qwe/Z', '/repo/single'))
+    const r = await t.run(command('s/qwe/Z', '/repo/single'))
     assert.equal(r.exitCode, 1)
     assert.deepEqual(r.unsupported, [])
-    check(t, 'test -f out', '', '', 1)
+    await check(t, 'test -f out', '', '', 1)
   })
 })
 
 describe('sed w record delimiters belong to each output file', () => {
-  it('preserves the final missing newline and separates successive records', () => {
+  it('preserves the final missing newline and separates successive records', async () => {
     const t = terminal()
-    check(t, command('s/qwe/Z/w out', '/repo/unterminated /repo/unterminated'), 'Z\nZ')
-    written(t, 'out', 'Z\nZ')
+    await check(t, command('s/qwe/Z/w out', '/repo/unterminated /repo/unterminated'), 'Z\nZ')
+    await written(t, 'out', 'Z\nZ')
   })
 
-  it('tracks missing delimiters separately for different files', () => {
+  it('tracks missing delimiters separately for different files', async () => {
     const t = terminal()
-    check(t, "sed -e '1s/qwe/X/w out' -e '2s/qwe/Y/w other' /repo/unterminated /repo/unterminated", 'X\nY')
-    written(t, 'out', 'X')
-    written(t, 'other', 'Y')
+    await check(t, "sed -e '1s/qwe/X/w out' -e '2s/qwe/Y/w other' /repo/unterminated /repo/unterminated", 'X\nY')
+    await written(t, 'out', 'X')
+    await written(t, 'other', 'Y')
   })
 
-  it('tracks missing delimiters across successive writes to one file', () => {
+  it('tracks missing delimiters across successive writes to one file', async () => {
     const t = terminal()
-    check(t, "sed -n -e 's/qwe/X/w out' -e 's/X/Y/w out' /repo/unterminated")
-    written(t, 'out', 'X\nY')
+    await check(t, "sed -n -e 's/qwe/X/w out' -e 's/X/Y/w out' /repo/unterminated")
+    await written(t, 'out', 'X\nY')
   })
 
-  it('writes NUL record terminators under -z', () => {
+  it('writes NUL record terminators under -z', async () => {
     const t = terminal()
-    check(t, command('s/qwe/Z/gw out', '/repo/nul', '-zn'))
-    written(t, 'out', 'Z\0Z Z\0')
+    await check(t, command('s/qwe/Z/gw out', '/repo/nul', '-zn'))
+    await written(t, 'out', 'Z\0Z Z\0')
   })
 
-  it('preserves a missing final NUL and inserts a separator before later output', () => {
+  it('preserves a missing final NUL and inserts a separator before later output', async () => {
     const t = terminal()
-    check(t, command('s/qwe/Z/w out', '/repo/nulLast /repo/unterminated', '-zn'))
-    written(t, 'out', 'Z\0Z\0Z')
+    await check(t, command('s/qwe/Z/w out', '/repo/nulLast /repo/unterminated', '-zn'))
+    await written(t, 'out', 'Z\0Z\0Z')
   })
 })
 
@@ -212,23 +212,23 @@ describe('sed w filenames consume the rest of the physical script line', () => {
     ['s/qwe/Z/w out\r\n', 'out\r'],
     [String.raw`s/qwe/Z/w out\ name`, String.raw`out\ name`],
   ]) {
-    it(`uses the literal filename ${JSON.stringify(path)}`, () => {
+    it(`uses the literal filename ${JSON.stringify(path)}`, async () => {
       const t = terminal()
-      check(t, command(script, '/repo/single', '-n'))
-      written(t, path, 'Z\n')
+      await check(t, command(script, '/repo/single', '-n'))
+      await written(t, path, 'Z\n')
     })
   }
 
-  it('a physical newline ends the filename and permits the next command', () => {
+  it('a physical newline ends the filename and permits the next command', async () => {
     const t = terminal()
-    check(t, command('s/qwe/Z/w out\np', '/repo/input', '-n'), 'Z\nskip\nZ qwe\n')
-    written(t, 'out', 'Z\nZ qwe\n')
+    await check(t, command('s/qwe/Z/w out\np', '/repo/input', '-n'), 'Z\nskip\nZ qwe\n')
+    await written(t, 'out', 'Z\nZ qwe\n')
   })
 
   for (const script of ['s/qwe/Z/w', 's/qwe/Z/w \t']) {
-    it(`rejects a missing filename: ${JSON.stringify(script)}`, () => {
+    it(`rejects a missing filename: ${JSON.stringify(script)}`, async () => {
       const t = terminal()
-      const r = t.run(command(script, '/repo/empty'))
+      const r = await t.run(command(script, '/repo/empty'))
       assert.equal(r.exitCode, 1)
       assert.match(r.stderr, /filename/u)
       assert.deepEqual(r.unsupported, [])
@@ -249,57 +249,57 @@ describe('sed w standard streams and null device', () => {
     ['s/qwe/Z/w /dev/stdout', '/repo/unterminated /repo/unterminated', '', 'ZZ\nZ\nZ', ''],
     ['s/qwe/Z/w /dev/stderr', '/repo/nulLast', '-zn', '', 'Z\0Z'],
   ]) {
-    it(`${script} ${flags} ${input}`, () => {
+    it(`${script} ${flags} ${input}`, async () => {
       const t = terminal()
-      check(t, command(script, input, flags), stdout, stderr)
+      await check(t, command(script, input, flags), stdout, stderr)
     })
   }
 
-  it('uses the active stdout descriptor without reopening or truncating it', () => {
+  it('uses the active stdout descriptor without reopening or truncating it', async () => {
     const t = terminal()
-    check(t, 'printf before >out')
-    check(t, command('s/qwe/Z/w /dev/stdout', '/repo/single', '-n') + ' >>out')
-    written(t, 'out', 'beforeZ\n')
+    await check(t, 'printf before >out')
+    await check(t, command('s/qwe/Z/w /dev/stdout', '/repo/single', '-n') + ' >>out')
+    await written(t, 'out', 'beforeZ\n')
   })
 
-  it('keeps unsupported diagnostics after writing stderr to a file', () => {
+  it('keeps unsupported diagnostics after writing stderr to a file', async () => {
     const t = terminal()
-    const r = t.run(command('s/qwe/Z/w /repo/blocked', '/repo/empty') + ' 2>errors | cat')
+    const r = await t.run(command('s/qwe/Z/w /repo/blocked', '/repo/empty') + ' 2>errors | cat')
     assert.equal(r.stdout, '')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)
     assert.ok(r.unsupported.length > 0)
-    assert.notEqual(t.run('cat errors').stdout, '')
+    assert.notEqual((await t.run('cat errors')).stdout, '')
   })
 })
 
 describe('sed w distinguishes unsupported writes from ordinary open failures', () => {
   for (const path of ['/repo/single', '/other', '/tmp/../outside']) {
-    it(`reports an unsupported write to ${path} before reading empty input`, () => {
+    it(`reports an unsupported write to ${path} before reading empty input`, async () => {
       const t = terminal()
-      const r = t.run(command(`s/qwe/Z/w ${path}`, '/repo/empty'))
+      const r = await t.run(command(`s/qwe/Z/w ${path}`, '/repo/empty'))
       assert.equal(r.stdout, '')
       assert.notEqual(r.exitCode, 0)
       assert.ok(r.unsupported.length > 0)
-      written(t, '/repo/single', 'qwe\n')
+      await written(t, '/repo/single', 'qwe\n')
     })
   }
 
-  it('keeps normal files read-only when writable mode is disabled', () => {
+  it('keeps normal files read-only when writable mode is disabled', async () => {
     const t = createTerminal(FILES, { mount: '/repo', cwd: '/repo' })
-    const r = t.run("sed 's/qwe/Z/w out' empty")
+    const r = await t.run("sed 's/qwe/Z/w out' empty")
     assert.equal(r.stdout, '')
     assert.notEqual(r.exitCode, 0)
     assert.ok(r.unsupported.length > 0)
-    assert.deepEqual(t.run('cat single').unsupported, [])
-    assert.equal(t.run('cat single').stdout, 'qwe\n')
+    assert.deepEqual((await t.run('cat single')).unsupported, [])
+    assert.equal((await t.run('cat single')).stdout, 'qwe\n')
   })
 
   for (const path of ['/tmp', '/tmp/missing/out', '/tmp/out/', '/tmp/file/../out']) {
-    it(`reports GNU status 4 for ordinary output-open failure: ${path}`, () => {
+    it(`reports GNU status 4 for ordinary output-open failure: ${path}`, async () => {
       const t = terminal()
-      check(t, 'printf file >file')
-      const r = t.run(command(`s/qwe/Z/w ${path}`, '/repo/empty'))
+      await check(t, 'printf file >file')
+      const r = await t.run(command(`s/qwe/Z/w ${path}`, '/repo/empty'))
       assert.equal(r.stdout, '')
       assert.equal(r.exitCode, 4)
       assert.notEqual(r.stderr, '')
@@ -309,74 +309,74 @@ describe('sed w distinguishes unsupported writes from ordinary open failures', (
 })
 
 describe('sed substitution output interacts with stdin and in-place descriptors', () => {
-  it('refreshes redirected stdin after compiling a write that truncates it', () => {
+  it('refreshes redirected stdin after compiling a write that truncates it', async () => {
     const t = terminal()
-    check(t, 'cat /repo/single >out')
-    check(t, "sed 's/qwe/Z/w out' <out")
-    written(t, 'out', '')
+    await check(t, 'cat /repo/single >out')
+    await check(t, "sed 's/qwe/Z/w out' <out")
+    await written(t, 'out', '')
   })
 
   for (const operand of ['-', '/dev/stdin']) {
-    it(`refreshes ${operand} when earlier input writes new data before that operand opens`, () => {
+    it(`refreshes ${operand} when earlier input writes new data before that operand opens`, async () => {
       const t = terminal()
-      check(t, 'printf old >out')
-      check(t, command('s/qwe/Z/w out', `/repo/single ${operand}`) + ' <out', 'Z\nZ\n')
-      written(t, 'out', 'Z\n')
+      await check(t, 'printf old >out')
+      await check(t, command('s/qwe/Z/w out', `/repo/single ${operand}`) + ' <out', 'Z\nZ\n')
+      await written(t, 'out', 'Z\n')
     })
   }
 
-  it('reopens /dev/stdin from current file contents after shared stdin was consumed', () => {
+  it('reopens /dev/stdin from current file contents after shared stdin was consumed', async () => {
     const t = terminal()
-    check(t, 'cat /repo/single >out')
-    check(t, command('1b;2s/qwe/Z/w /dev/stderr\n3,$p', '- /repo/single /dev/stdin', '-n') + ' <out 2>>out', 'qwe\nZ\n')
-    written(t, 'out', 'qwe\nZ\n')
+    await check(t, 'cat /repo/single >out')
+    await check(t, command('1b;2s/qwe/Z/w /dev/stderr\n3,$p', '- /repo/single /dev/stdin', '-n') + ' <out 2>>out', 'qwe\nZ\n')
+    await written(t, 'out', 'qwe\nZ\n')
   })
 
-  it('diagnoses reopening a consumed shared stream after its file changes', () => {
+  it('diagnoses reopening a consumed shared stream after its file changes', async () => {
     const t = terminal()
-    check(t, 'cat /repo/single >out')
-    const r = t.run(command('1b;2s/qwe/Z/w /dev/stderr\n3,$p', '- /repo/single -', '-n') + ' <out 2>>out')
+    await check(t, 'cat /repo/single >out')
+    const r = await t.run(command('1b;2s/qwe/Z/w /dev/stderr\n3,$p', '- /repo/single -', '-n') + ' <out 2>>out')
     assert.equal(r.stdout, '')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 1)
     assert.ok(r.unsupported.some((note) => note.detail === 'modified redirected input'))
   })
 
-  it('diagnoses writes to a later input while that input is being read', () => {
+  it('diagnoses writes to a later input while that input is being read', async () => {
     const t = terminal()
-    const r = t.run(command('s/qwe/qwe/w out', '/repo/single out'))
+    const r = await t.run(command('s/qwe/qwe/w out', '/repo/single out'))
     assert.equal(r.stdout, 'qwe\n')
     assert.equal(r.exitCode, 1)
     assert.match(r.stderr, /actively read input/u)
     assert.ok(r.unsupported.some((note) => note.detail === 'streaming self-output'))
-    written(t, 'out', 'qwe\n')
+    await written(t, 'out', 'qwe\n')
   })
 
-  it('diagnoses a write that changes partially consumed redirected stdin', () => {
+  it('diagnoses a write that changes partially consumed redirected stdin', async () => {
     const t = terminal()
-    check(t, 'cat /repo/input >out')
-    const r = t.run("{ head -n1 >/dev/null; sed 's/qwe/Z/w out'; } <out 2>/dev/null | cat")
+    await check(t, 'cat /repo/input >out')
+    const r = await t.run("{ head -n1 >/dev/null; sed 's/qwe/Z/w out'; } <out 2>/dev/null | cat")
     assert.equal(r.stdout, '')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)
     assert.ok(r.unsupported.some((note) => note.detail === 'modified redirected input'))
-    written(t, 'out', '')
+    await written(t, 'out', '')
   })
 
   for (const flags of ['-i', '-ni']) {
-    it(`w /dev/stdout remains explicit stdout while ${flags} captures edited output`, () => {
+    it(`w /dev/stdout remains explicit stdout while ${flags} captures edited output`, async () => {
       const t = terminal()
-      check(t, 'cat /repo/single >out')
-      check(t, command('s/qwe/Z/w /dev/stdout', 'out', flags), 'Z\n')
-      written(t, 'out', flags === '-i' ? 'Z\n' : '')
+      await check(t, 'cat /repo/single >out')
+      await check(t, command('s/qwe/Z/w /dev/stdout', 'out', flags), 'Z\n')
+      await written(t, 'out', flags === '-i' ? 'Z\n' : '')
     })
   }
 
-  it('an inherited append descriptor keeps writing the original file now named by its backup', () => {
+  it('an inherited append descriptor keeps writing the original file now named by its backup', async () => {
     const t = terminal()
-    check(t, 'cat /repo/single >out')
-    check(t, "{ sed -i.bak 's/qwe/Z/' out; printf tail; } >>out")
-    written(t, 'out', 'Z\n')
-    written(t, 'out.bak', 'qwe\ntail')
+    await check(t, 'cat /repo/single >out')
+    await check(t, "{ sed -i.bak 's/qwe/Z/' out; printf tail; } >>out")
+    await written(t, 'out', 'Z\n')
+    await written(t, 'out.bak', 'qwe\ntail')
   })
 })

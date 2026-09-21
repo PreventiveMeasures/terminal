@@ -10,8 +10,8 @@ const SOURCES = {
 }
 
 const term = () => createTerminal(SOURCES)
-const gaps = (line, t = term()) => t.run(line).unsupported
-const details = (line, t = term()) => gaps(line, t).map((u) => u.detail)
+const gaps = async (line, t = term()) => (await t.run(line)).unsupported
+const details = async (line, t = term()) => (await gaps(line, t)).map((u) => u.detail)
 
 describe('run().unsupported — the case it exists for', () => {
   // The report that prompted the channel. `-prune` was missing, find
@@ -19,8 +19,8 @@ describe('run().unsupported — the case it exists for', () => {
   // replaced the exit code. An unimplemented option was indistinguishable
   // from an empty tree. `-prune` works now, so this uses another option
   // find does not have — the shape is what matters, not the spelling.
-  it('survives the redirect-and-pipe that hid it: empty stderr, exit 0, gap still reported', () => {
-    const r = term().run('find . -newer ref 2>/dev/null | head -50')
+  it('survives the redirect-and-pipe that hid it: empty stderr, exit 0, gap still reported', async () => {
+    const r = await term().run('find . -newer ref 2>/dev/null | head -50')
     assert.equal(r.stdout, '')
     assert.equal(r.stderr, '', 'the message really is gone from stderr')
     assert.equal(r.exitCode, 0, "head's status really did replace find's")
@@ -32,7 +32,7 @@ describe('run().unsupported — the case it exists for', () => {
     }])
   })
 
-  it('is not suppressible by any of the shell plumbing', () => {
+  it('is not suppressible by any of the shell plumbing', async () => {
     // Each of these silences or overrides the command's own channels.
     for (const line of [
       'ls -t 2>/dev/null',
@@ -43,72 +43,72 @@ describe('run().unsupported — the case it exists for', () => {
       '(ls -t) 2>/dev/null',
       'echo a | (ls -t) 2>/dev/null | wc -l',
     ]) {
-      assert.deepEqual(details(line), ['-t'], line)
+      assert.deepEqual(await details(line), ['-t'], line)
     }
   })
 
-  it('reports gaps hit through find -exec and xargs, two levels down', () => {
+  it('reports gaps hit through find -exec and xargs, two levels down', async () => {
     // Quoted and backslash-escaped semicolons both reach find as a
     // literal terminator; the nested command's diagnostic must survive.
-    assert.deepEqual(details("find . -name '*.js' -exec frobnicate {} ';' 2>/dev/null"), ['frobnicate'])
-    assert.deepEqual(details(String.raw`find . -name '*.js' -exec frobnicate {} \; 2>/dev/null`), ['frobnicate'])
-    assert.deepEqual(details("find . -name '*.js' -exec frobnicate {} + 2>/dev/null"), ['frobnicate'])
-    assert.deepEqual(details('echo hi | xargs frobnicate 2>/dev/null'), ['frobnicate'])
+    assert.deepEqual(await details("find . -name '*.js' -exec frobnicate {} ';' 2>/dev/null"), ['frobnicate'])
+    assert.deepEqual(await details(String.raw`find . -name '*.js' -exec frobnicate {} \; 2>/dev/null`), ['frobnicate'])
+    assert.deepEqual(await details("find . -name '*.js' -exec frobnicate {} + 2>/dev/null"), ['frobnicate'])
+    assert.deepEqual(await details('echo hi | xargs frobnicate 2>/dev/null'), ['frobnicate'])
   })
 })
 
 describe('run().unsupported — what counts as a gap', () => {
-  it('kind `command`: a name that is not registered', () => {
-    const [u] = gaps('frobnicate')
+  it('kind `command`: a name that is not registered', async () => {
+    const [u] = await gaps('frobnicate')
     assert.equal(u.kind, 'command')
     assert.equal(u.command, 'frobnicate')
     assert.equal(u.detail, 'frobnicate')
     assert.match(u.message, /^frobnicate: command not found\./u)
     // The name as TYPED, so a bin-prefixed miss is reported as written.
-    assert.deepEqual(details('/usr/bin/frobnicate'), ['/usr/bin/frobnicate'])
+    assert.deepEqual(await details('/usr/bin/frobnicate'), ['/usr/bin/frobnicate'])
   })
 
-  it('kind `option`: a registered command handed an option it lacks', () => {
+  it('kind `option`: a registered command handed an option it lacks', async () => {
     // Short, long, and bundled forms all route through parseArgs, which
     // does not know whose tokens it has — the dispatcher supplies the name.
-    assert.deepEqual(gaps('ls -t'), [{
+    assert.deepEqual(await gaps('ls -t'), [{
       kind: 'option', command: 'ls', detail: '-t', message: 'ls: unknown option: -t',
     }])
-    assert.deepEqual(gaps('wc --bogus f.txt'), [{
+    assert.deepEqual(await gaps('wc --bogus f.txt'), [{
       kind: 'option', command: 'wc', detail: '--bogus', message: 'wc: unknown option: --bogus',
     }])
-    assert.deepEqual(details('ls -at'), ['-t'], 'a bundle reports the offending char')
+    assert.deepEqual(await details('ls -at'), ['-t'], 'a bundle reports the offending char')
   })
 
-  it('kind `option`: an option a command parses and then explicitly rejects', () => {
-    assert.deepEqual(gaps('tr -d -s a'), [{
+  it('kind `option`: an option a command parses and then explicitly rejects', async () => {
+    assert.deepEqual(await gaps('tr -d -s a'), [{
       kind: 'option', command: 'tr', detail: '-d -s',
       message: 'tr: -d combined with -s is not supported',
     }])
-    assert.deepEqual(details('find . -not -exec echo {} + '), ['-not -exec ... +'])
+    assert.deepEqual(await details('find . -not -exec echo {} + '), ['-not -exec ... +'])
   })
 
-  it('kind `feature`: shell constructs the parser recognizes and refuses', () => {
-    assert.deepEqual(details('sleep 1 &'), ['&'])
-    assert.deepEqual(details('cat f.txt > out.txt'), ['>'])
-    assert.deepEqual(details('cat f.txt >> out.txt'), ['>>'])
-    assert.deepEqual(details('cat f.txt 2>> out.txt'), ['2>>'])
+  it('kind `feature`: shell constructs the parser recognizes and refuses', async () => {
+    assert.deepEqual(await details('sleep 1 &'), ['&'])
+    assert.deepEqual(await details('cat f.txt > out.txt'), ['>'])
+    assert.deepEqual(await details('cat f.txt >> out.txt'), ['>>'])
+    assert.deepEqual(await details('cat f.txt 2>> out.txt'), ['2>>'])
     // Shell-level gaps have no command to name.
-    assert.equal(gaps('sleep 1 &')[0].command, null)
-    assert.equal(gaps('sleep 1 &')[0].kind, 'feature')
+    assert.equal((await gaps('sleep 1 &'))[0].command, null)
+    assert.equal((await gaps('sleep 1 &'))[0].kind, 'feature')
   })
 
-  it('kind `feature`: sed reports unsupported scripts', () => {
+  it('kind `feature`: sed reports unsupported scripts', async () => {
     for (const line of ["sed -n '/a/F' f.txt", "sed -n 'l' f.txt"]) {
-      assert.deepEqual(details(line), ['script'], line)
-      assert.equal(gaps(line)[0].command, 'sed')
+      assert.deepEqual(await details(line), ['script'], line)
+      assert.equal((await gaps(line))[0].command, 'sed')
     }
-    assert.deepEqual(gaps("sed -i -e s/a/b/ f.txt"), [{
+    assert.deepEqual(await gaps("sed -i -e s/a/b/ f.txt"), [{
       kind: 'feature', command: 'sed', detail: '-i', message: 'sed: f.txt: file system is read-only',
     }])
   })
 
-  it('a plain failure is not a gap — GNU fails the same way', () => {
+  it('a plain failure is not a gap — GNU fails the same way', async () => {
     for (const line of [
       'cat missing.txt',      // unreadable operand
       'grep nomatch f.txt',   // no match
@@ -132,13 +132,13 @@ describe('run().unsupported — what counts as a gap', () => {
       ')',                    // syntax error
       'cat |',                // empty pipeline stage
     ]) {
-      const r = term().run(line)
+      const r = await term().run(line)
       assert.deepEqual(r.unsupported, [], line)
       assert.notEqual(r.exitCode, 0, `${line} should still fail`)
     }
   })
 
-  it('reports nothing for lines that work — no phantom gaps', () => {
+  it('reports nothing for lines that work — no phantom gaps', async () => {
     // The `-NUM` shorthands and the digit options that share their
     // syntax are the ones worth pinning: they are the reason parseArgs
     // has a schema-aware numeric guard at all.
@@ -150,18 +150,18 @@ describe('run().unsupported — what counts as a gap', () => {
       "sed -n '1,2p' f.txt", 'cat -A f.txt', 'seq -w 8 11',
       'find . -name node_modules -prune -o -print',
     ]) {
-      assert.deepEqual(gaps(line), [], line)
+      assert.deepEqual(await gaps(line), [], line)
     }
   })
 
-  it('reports a gap and an ordinary error in the same line on their own channels', () => {
-    const r = term().run('cat missing.txt; ls -t')
+  it('reports a gap and an ordinary error in the same line on their own channels', async () => {
+    const r = await term().run('cat missing.txt; ls -t')
     assert.match(r.stderr, /No such file or directory/u)
     assert.match(r.stderr, /unknown option: -t/u)
     assert.deepEqual(r.unsupported.map((u) => u.detail), ['-t'])
   })
 
-  it('separates "GNU has it, we do not" from "nobody has it"', () => {
+  it('separates "GNU has it, we do not" from "nobody has it"', async () => {
     // The whole boundary, pinned against the real binaries. Each pair is
     // the same shape of input: the first is a working GNU invocation
     // this terminal does not implement, the second is malformed for GNU
@@ -174,97 +174,97 @@ describe('run().unsupported — what counts as a gap', () => {
       ['find . -type p', 'find . -type q'],             // file type
       ['nl -b p1 f.txt', 'nl -b x f.txt'],              // numbering style
     ]) {
-      assert.equal(gaps(gap).length, 1, `${gap} should be a gap`)
-      assert.deepEqual(gaps(notGap), [], `${notGap} should not be a gap`)
+      assert.equal((await gaps(gap)).length, 1, `${gap} should be a gap`)
+      assert.deepEqual(await gaps(notGap), [], `${notGap} should not be a gap`)
       // Both still fail identically on the command's own channels — the
       // classification changes what the caller is told, never the run.
-      assert.equal(term().run(gap).exitCode, term().run(notGap).exitCode)
-      assert.notEqual(term().run(gap).stderr, '')
-      assert.notEqual(term().run(notGap).stderr, '')
+      assert.equal((await term().run(gap)).exitCode, (await term().run(notGap)).exitCode)
+      assert.notEqual((await term().run(gap)).stderr, '')
+      assert.notEqual((await term().run(notGap)).stderr, '')
     }
   })
 
-  it('classifies every file type GNU has and this FS cannot represent', () => {
+  it('classifies every file type GNU has and this FS cannot represent', async () => {
     // A virtual FS of path -> content has no devices, FIFOs or sockets to
     // match against, so each is a gap rather than a typo. Files, directories
     // and the links a source map can declare are all answerable, and a tree
     // holding none of one kind answers that nothing is of it.
     for (const ty of ['b', 'c', 'p', 's']) {
-      assert.deepEqual(details(`find . -type ${ty}`), [`-type ${ty}`], ty)
+      assert.deepEqual(await details(`find . -type ${ty}`), [`-type ${ty}`], ty)
     }
     for (const ty of ['f', 'd', 'l']) {
-      assert.equal(term().run(`find . -type ${ty}`).exitCode, 0, ty)
+      assert.equal((await term().run(`find . -type ${ty}`)).exitCode, 0, ty)
     }
   })
 
-  it('does not mistake a fd-duplication redirect for backgrounding', () => {
+  it('does not mistake a fd-duplication redirect for backgrounding', async () => {
     // `>&2` is `1>&2` with the fd implicit. It used to reach the `&`
     // branch and report a background-process gap, which is both the
     // wrong classification and a working bash idiom refused.
-    const r = term().run('echo hi >&2')
+    const r = await term().run('echo hi >&2')
     assert.equal(r.stdout, '')
     assert.equal(r.stderr, 'hi\n')
     assert.deepEqual(r.unsupported, [])
-    assert.deepEqual(details('echo a >&1'), [])
+    assert.deepEqual(await details('echo a >&1'), [])
     // A real `&` is still reported.
-    assert.deepEqual(details('sleep 1 &'), ['&'])
+    assert.deepEqual(await details('sleep 1 &'), ['&'])
   })
 })
 
 describe('run().unsupported — the contract', () => {
-  it('is always present, and empty when nothing was missing', () => {
+  it('is always present, and empty when nothing was missing', async () => {
     for (const line of ['', 'ls', 'cat f.txt | wc -l', 'find . -name "*.js"']) {
-      assert.deepEqual(term().run(line).unsupported, [], line)
+      assert.deepEqual((await term().run(line)).unsupported, [], line)
     }
   })
 
-  it('leaves stderr and the exit code exactly as they were', () => {
+  it('leaves stderr and the exit code exactly as they were', async () => {
     // The whole point is that this is an ADDITIONAL channel: an
     // interactive user must still see the message.
-    const r = term().run('ls -t')
+    const r = await term().run('ls -t')
     assert.equal(r.stderr, 'ls: unknown option: -t\n')
     assert.equal(r.exitCode, 1)
-    assert.equal(term().run('frobnicate').exitCode, 127, 'command-not-found keeps its 127')
-    assert.equal(term().run('grep -Z foo f.txt').exitCode, 2, "grep keeps its own usage exit 2")
+    assert.equal((await term().run('frobnicate')).exitCode, 127, 'command-not-found keeps its 127')
+    assert.equal((await term().run('grep -Z foo f.txt')).exitCode, 2, "grep keeps its own usage exit 2")
     // The entry's message is that stderr line, minus the stream newline.
     assert.equal(r.unsupported[0].message + '\n', r.stderr)
   })
 
-  it('deduplicates: one entry per distinct gap, however many times it is hit', () => {
-    const r = term().run('frobnicate; frobnicate; frobnicate')
+  it('deduplicates: one entry per distinct gap, however many times it is hit', async () => {
+    const r = await term().run('frobnicate; frobnicate; frobnicate')
     assert.equal(r.unsupported.length, 1)
     assert.equal(r.stderr.split('\n').filter(Boolean).length, 3, 'stderr still shows all three')
     // Distinct gaps stay distinct, in the order first hit.
-    assert.deepEqual(details('ls -t; frobnicate; wc --bogus f.txt; ls -t'), ['-t', 'frobnicate', '--bogus'])
+    assert.deepEqual(await details('ls -t; frobnicate; wc --bogus f.txt; ls -t'), ['-t', 'frobnicate', '--bogus'])
   })
 
-  it('deduplicates across bin prefixes — one gap, not one per spelling', () => {
+  it('deduplicates across bin prefixes — one gap, not one per spelling', async () => {
     // `command` records the name as typed, so the two entries would
     // differ there; dedup keys off the resolved name instead.
-    const r = term().run('ls -t; /usr/bin/ls -t; /bin/ls -t')
+    const r = await term().run('ls -t; /usr/bin/ls -t; /bin/ls -t')
     assert.deepEqual(r.unsupported.map((u) => [u.command, u.detail]), [['ls', '-t']])
     assert.equal(r.stderr.split('\n').filter(Boolean).length, 3)
   })
 
-  it('is per-run, not cumulative', () => {
+  it('is per-run, not cumulative', async () => {
     const t = term()
-    assert.deepEqual(details('ls -t', t), ['-t'])
-    assert.deepEqual(gaps('ls', t), [], 'the next run starts clean')
-    assert.deepEqual(details('frobnicate', t), ['frobnicate'])
+    assert.deepEqual(await details('ls -t', t), ['-t'])
+    assert.deepEqual(await gaps('ls', t), [], 'the next run starts clean')
+    assert.deepEqual(await details('frobnicate', t), ['frobnicate'])
   })
 
-  it('is frozen, entries included', () => {
-    const r = term().run('ls -t')
+  it('is frozen, entries included', async () => {
+    const r = await term().run('ls -t')
     assert.equal(Object.isFrozen(r.unsupported), true)
     assert.equal(Object.isFrozen(r.unsupported[0]), true)
     assert.throws(() => r.unsupported.push({}), TypeError)
   })
 
-  it('is plain data: JSON-safe and structured-clonable, with no hidden passengers', () => {
+  it('is plain data: JSON-safe and structured-clonable, with no hidden passengers', async () => {
     // The classification rides a symbol internally; none of it may reach
     // the caller, who may be sending this across a worker or tool-call
     // boundary.
-    const r = term().run('ls -t')
+    const r = await term().run('ls -t')
     assert.deepEqual(Object.getOwnPropertySymbols(r), [])
     assert.deepEqual(Object.getOwnPropertySymbols(r.unsupported[0]), [])
     assert.deepEqual(Object.keys(r).sort(), ['cwd', 'exitCode', 'notes', 'stderr', 'stdout', 'unsupported'])
@@ -276,17 +276,17 @@ describe('run().unsupported — the contract', () => {
 })
 
 describe('run().unsupported — wired commands', () => {
-  it('never classifies a wired handler\'s own throw as a gap', () => {
+  it('never classifies a wired handler\'s own throw as a gap', async () => {
     // Only this package can say what this package fails to implement.
     // A wired handler's error is the embedder's, even when it is worded
     // exactly like the parser's own unknown-option message.
     const t = createTerminal(SOURCES, { commands: { probe: () => { throw new Error('unknown option: -z') } } })
-    const r = t.run('probe -z')
+    const r = await t.run('probe -z')
     assert.deepEqual(r.unsupported, [])
     assert.equal(r.stderr, 'probe: unknown option: -z\n')
   })
 
-  it('survives a handler that throws a non-Error, including a hostile one', () => {
+  it('survives a handler that throws a non-Error, including a hostile one', async () => {
     // Harvesting the classification means READING a property off the
     // thrown value, so every shape that made index.js's `reason` careful
     // applies here too: `null` has no properties, and a proxy can throw
@@ -300,18 +300,18 @@ describe('run().unsupported — wired commands', () => {
       },
     })
     for (const name of ['nul', 'str', 'hostile']) {
-      const r = t.run(name)
+      const r = await t.run(name)
       assert.deepEqual(r.unsupported, [], name)
       assert.equal(r.exitCode, 1, name)
     }
   })
 
-  it('keeps the feeds apart when a handler re-enters run()', () => {
+  it('keeps the feeds apart when a handler re-enters run()', async () => {
     // Same isolation runGroup gives the cwd: each run reports the gaps
     // hit beneath it, to whoever made that call.
     let inner = null
-    const t = createTerminal(SOURCES, { commands: { probe: () => { inner = t.run('ls -t'); return 'ok\n' } } })
-    const outer = t.run('probe; frobnicate')
+    const t = createTerminal(SOURCES, { commands: { probe: async () => { inner = await t.run('ls -t'); return 'ok\n' } } })
+    const outer = await t.run('probe; frobnicate')
     assert.deepEqual(inner.unsupported.map((u) => u.detail), ['-t'])
     assert.deepEqual(outer.unsupported.map((u) => u.detail), ['frobnicate'])
   })
@@ -319,9 +319,9 @@ describe('run().unsupported — wired commands', () => {
 
 describe('run().unsupported — awk', () => {
   const t = () => createTerminal({ 'f.txt': 'a 1\nb 2\n' })
-  const gapsOf = (line) => t().run(line).unsupported
+  const gapsOf = async (line) => (await t().run(line)).unsupported
 
-  it('classifies the gawk constructs this interpreter refuses', () => {
+  it('classifies the gawk constructs this interpreter refuses', async () => {
     // awk is the sharpest case for the channel in the whole package:
     // the program is a quoted argument, so an exit code alone cannot
     // tell a caller whether it wrote bad awk or reached for a feature
@@ -340,11 +340,11 @@ describe('run().unsupported — awk', () => {
       [`awk '{ printf "x" > "out.txt" }' f.txt`, 'printf > FILE'],
     ]
     for (const [line, detail] of cases) {
-      assert.deepEqual(gapsOf(line).map((u) => [u.kind, u.command, u.detail]), [['feature', 'awk', detail]], line)
+      assert.deepEqual((await gapsOf(line)).map((u) => [u.kind, u.command, u.detail]), [['feature', 'awk', detail]], line)
     }
   })
 
-  it('does not classify a program\'s own mistakes as gaps', () => {
+  it('does not classify a program\'s own mistakes as gaps', async () => {
     // gawk rejects these too, so they are the caller's, not ours.
     for (const line of [
       `awk 'BEGIN { frobnicate() }'`,       // function never defined
@@ -353,79 +353,79 @@ describe('run().unsupported — awk', () => {
       `awk -v 1bad=x 'BEGIN { }'`,          // malformed -v assignment
       `awk 'BEGIN { print 1/0 }'`,          // division by zero
     ]) {
-      const r = t().run(line)
+      const r = await t().run(line)
       assert.deepEqual(r.unsupported, [], line)
       assert.notEqual(r.exitCode, 0, line)
     }
   })
 
-  it('survives a redirect, and keeps output produced before a runtime gap', () => {
-    const r = t().run(`awk '{ system("x") }' f.txt 2>/dev/null | wc -l`)
+  it('survives a redirect, and keeps output produced before a runtime gap', async () => {
+    const r = await t().run(`awk '{ system("x") }' f.txt 2>/dev/null | wc -l`)
     assert.equal(r.stderr, '')
     assert.deepEqual(r.unsupported.map((u) => u.detail), ['system()'])
     // A working program stays clean.
-    assert.deepEqual(gapsOf(`awk '{ print $2 }' f.txt`), [])
-    assert.equal(t().run(`awk '{ print $2 }' f.txt`).stdout, '1\n2\n')
+    assert.deepEqual(await gapsOf(`awk '{ print $2 }' f.txt`), [])
+    assert.equal((await t().run(`awk '{ print $2 }' f.txt`)).stdout, '1\n2\n')
   })
 })
 
 describe('run().unsupported — shell constructs', () => {
   const t = () => createTerminal({ 'f.txt': 'a\n' })
-  const detailsOf = (line) => t().run(line).unsupported.map((u) => u.detail)
+  const detailsOf = async (line) => (await t().run(line)).unsupported.map((u) => u.detail)
 
   // Nothing runs beside a line here, so a loop that never ends would never
   // return. What it ran before the bound stands; the rest is a gap.
-  it('stops a loop that would never end, keeping what it printed', () => {
-    const r = t().run('while true; do echo x; done')
+  it('stops a loop that would never end, keeping what it printed', async () => {
+    const r = await t().run('while true; do echo x; done')
     assert.equal(r.stdout.split('\n').length - 1, 10_000)
     assert.equal(r.exitCode, 1)
     assert.deepEqual(r.unsupported, [{ kind: 'feature', command: null, detail: 'loop limit', message: 'a loop running more than 10000 times is not supported' }])
     assert.match(r.stderr, /a loop running more than 10000 times/u)
     // A loop that ends on its own never reaches it.
-    assert.deepEqual(t().run('x=0; while test $x -lt 3; do x=$((x+1)); done; echo $x').stdout, '3\n')
+    assert.deepEqual((await t().run('x=0; while test $x -lt 3; do x=$((x+1)); done; echo $x')).stdout, '3\n')
   })
 
   // A body standing where it is called cannot stand inside itself.
-  it('refuses a function that calls itself, rather than run out of stack', () => {
-    const r = t().run('f() { f; }; f')
+  it('refuses a function that calls itself, rather than run out of stack', async () => {
+    const r = await t().run('f() { f; }; f')
     assert.equal(r.exitCode, 1)
     assert.deepEqual(r.unsupported.map((gap) => gap.detail), ['function recursion'])
     assert.match(r.stderr, /a function calling itself is not supported/u)
-    assert.deepEqual(t().run('f() { g; }; g() { f; }; f').unsupported.map((gap) => gap.detail), ['function recursion'])
+    assert.deepEqual((await t().run('f() { g; }; g() { f; }; f')).unsupported.map((gap) => gap.detail), ['function recursion'])
   })
 
-  it('names the construct, not the word the parser choked on', () => {
+  it('names the construct, not the word the parser choked on', async () => {
     // Unsupported blocks identify their opening construct, not a later keyword.
     for (const [line, detail] of [
       ['case x in a) echo a;; esac', 'case'],
       ['select x in a b; do echo $x; done', 'select'],
       ['function f { echo a; }', 'function'],
     ]) {
-      const r = t().run(line)
+      const r = await t().run(line)
       assert.deepEqual(r.unsupported.map((u) => [u.kind, u.command, u.detail]), [['feature', null, detail]], line)
       assert.notEqual(r.exitCode, 0, line)
     }
   })
 
-  it('supports multi-level loop control in nested for loops', () => {
+  it('supports multi-level loop control in nested for loops', async () => {
     // Counts larger than the nesting depth target the outermost loop.
-    assert.deepEqual(detailsOf('for f in a b; do break; done'), [])
-    assert.deepEqual(detailsOf('for f in a b; do for g in c; do break 2; done; done'), [])
-    assert.deepEqual(detailsOf('for f in a b; do continue 2; done'), [])
-    assert.equal(t().run('for f in a b; do break 2; done').exitCode, 0)
+    assert.deepEqual(await detailsOf('for f in a b; do break; done'), [])
+    assert.deepEqual(await detailsOf('for f in a b; do for g in c; do break 2; done; done'), [])
+    assert.deepEqual(await detailsOf('for f in a b; do continue 2; done'), [])
+    assert.equal((await t().run('for f in a b; do break 2; done')).exitCode, 0)
   })
 
-  it('leaves reserved words alone anywhere but command position', () => {
+  it('leaves reserved words alone anywhere but command position', async () => {
     // Same rule bash uses, and the one `for` / `do` / `done` already
     // followed: unquoted, in command position, or it is just a word.
-    assert.equal(t().run('echo while if case function').stdout, 'while if case function\n')
-    assert.equal(t().run('echo "while"').stdout, 'while\n')
-    assert.equal(t().run('for f in if while; do echo $f; done').stdout, 'if\nwhile\n')
-    assert.deepEqual(t().run('echo while').unsupported, [])
+    assert.equal((await t().run('echo while if case function')).stdout, 'while if case function\n')
+    assert.equal((await t().run('echo "while"')).stdout, 'while\n')
+    assert.equal((await t().run('for f in if while; do echo $f; done')).stdout, 'if\nwhile\n')
+    assert.deepEqual((await t().run('echo while')).unsupported, [])
   })
 
-  it('reports gaps from inside a loop body once, not once per iteration', () => {
-    const r = t().run('for f in a b c; do ls -t; done')
+  it('reports gaps from inside a loop body once, not once per iteration', async () => {
+    const r = await t().run('for f in a b c; do ls -t; done')
     assert.deepEqual(r.unsupported.map((u) => u.detail), ['-t'])
     assert.equal(r.stderr.split('\n').filter(Boolean).length, 3, 'stderr still shows all three')
   })

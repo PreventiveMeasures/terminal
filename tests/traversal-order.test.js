@@ -26,23 +26,23 @@ describe('a recursive walk sorts each directory, not the paths it produced', () 
     ['du -b .', '2\t./d\n6\t.\n'],
     ['ls -R', '.:\nd\nd.txt\n\n./d:\nx\n'],
   ]) {
-    it(command, () => {
-      const result = run(command)
+    it(command, async () => {
+      const result = await run(command)
       assert.equal(result.stdout, stdout)
       assert.equal(result.stderr, '')
       assert.deepEqual(result.unsupported, [])
     })
   }
 
-  it('renders the same nesting as a tree', () => {
-    assert.equal(run('tree').stdout, '.\n\u251C\u2500\u2500 d\n\u2502\u00A0\u00A0 \u2514\u2500\u2500 x\n\u2514\u2500\u2500 d.txt\n\n2 directories, 2 files\n')
+  it('renders the same nesting as a tree', async () => {
+    assert.equal((await run('tree')).stdout, '.\n\u251C\u2500\u2500 d\n\u2502\u00A0\u00A0 \u2514\u2500\u2500 x\n\u2514\u2500\u2500 d.txt\n\n2 directories, 2 files\n')
   })
 
   // Reversing within each directory stays reproducible — entries created in the
   // opposite order give exactly that. Reversing the finished list does not: it
   // puts a directory below its contents and the root last.
-  it('keeps every directory above its own contents', () => {
-    const paths = run('find .').stdout.trimEnd().split('\n')
+  it('keeps every directory above its own contents', async () => {
+    const paths = (await run('find .')).stdout.trimEnd().split('\n')
     assert.ok(paths.indexOf('./d') < paths.indexOf('./d/x'), 'a directory precedes its contents')
     assert.equal(paths[0], '.', 'the starting point comes first')
   })

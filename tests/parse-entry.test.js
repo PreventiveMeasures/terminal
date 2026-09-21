@@ -83,19 +83,19 @@ describe('the parse entry point reads a line with no terminal at all', () => {
 
   // Where a line may write belongs to a terminal's filesystem, not to the line.
   for (const line of ['echo a > out', 'echo a > /etc/passwd', 'echo a >> dir/b.txt', 'cat a.txt > out 2> err']) {
-    it(`reads rather than refuses ${JSON.stringify(line)}`, () => {
+    it(`reads rather than refuses ${JSON.stringify(line)}`, async () => {
       assert.deepEqual(parse(line).unsupported, [])
       assert.equal(parse(line).ok, true)
-      assert.ok(createTerminal({}).run(line).unsupported.length > 0, 'a read-only terminal still refuses it')
+      assert.ok((await createTerminal({}).run(line)).unsupported.length > 0, 'a read-only terminal still refuses it')
     })
   }
 
-  it('names no command as unknown, having no commands to check against', () => {
+  it('names no command as unknown, having no commands to check against', async () => {
     const result = parse('jq foo | wc -l')
     assert.equal(result.ok, true)
     assert.deepEqual(result.unsupported, [])
     assert.deepEqual(result.list[0].stages.map((stage) => stage.argv[0]), ['jq', 'wc'])
-    assert.equal(createTerminal({}).run('jq foo | wc -l').unsupported[0].kind, 'command')
+    assert.equal((await createTerminal({}).run('jq foo | wc -l')).unsupported[0].kind, 'command')
   })
 
   it('reports unfinished input, a syntax error and a refused construct apart', () => {

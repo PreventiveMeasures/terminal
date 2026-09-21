@@ -56,37 +56,37 @@ const CASES = [
 
 describe('wc counts words as coreutils counts them', () => {
   for (const [content, words, lines, size, what] of CASES) {
-    it(what, () => {
+    it(what, async () => {
       const terminal = createTerminal({ f: content })
-      assert.equal(terminal.run('wc -w f').stdout, `${words} f\n`)
-      assert.equal(terminal.run('wc -l f').stdout, `${lines} f\n`)
-      assert.equal(terminal.run('wc -c f').stdout, `${size} f\n`)
+      assert.equal((await terminal.run('wc -w f')).stdout, `${words} f\n`)
+      assert.equal((await terminal.run('wc -l f')).stdout, `${lines} f\n`)
+      assert.equal((await terminal.run('wc -c f')).stdout, `${size} f\n`)
     })
   }
 
-  it('reads a pipe and a redirection by the same rule', () => {
+  it('reads a pipe and a redirection by the same rule', async () => {
     const terminal = createTerminal({ blanks: 'a b c⁠d\n' })
     // One line holding all three rules: the no-break space and the word
     // joiner part, and the line separator joins.
-    assert.equal(terminal.run('wc -w blanks').stdout, '3 blanks\n')
-    assert.equal(terminal.run('wc -w < blanks').stdout, '3\n')
-    assert.equal(terminal.run('cat blanks | wc -w').stdout, '3\n')
-    assert.equal(terminal.run('printf "a\\u00A0b" | wc -w').stdout, '2\n')
+    assert.equal((await terminal.run('wc -w blanks')).stdout, '3 blanks\n')
+    assert.equal((await terminal.run('wc -w < blanks')).stdout, '3\n')
+    assert.equal((await terminal.run('cat blanks | wc -w')).stdout, '3\n')
+    assert.equal((await terminal.run('printf "a\\u00A0b" | wc -w')).stdout, '2\n')
   })
 
-  it('totals and aligns several operands', () => {
+  it('totals and aligns several operands', async () => {
     const terminal = createTerminal({ blanks: 'a b c⁠d\n', astral: 'café ☃ \u{1F600}\n', short: 'x\n' })
-    assert.equal(terminal.run('wc -w blanks astral short').stdout, ' 3 blanks\n 3 astral\n 1 short\n 7 total\n')
-    assert.equal(terminal.run('wc blanks astral').stdout, ' 1  3 13 blanks\n 1  3 15 astral\n 2  6 28 total\n')
-    assert.equal(terminal.run('wc -lw blanks astral').stdout, ' 1  3 blanks\n 1  3 astral\n 2  6 total\n')
+    assert.equal((await terminal.run('wc -w blanks astral short')).stdout, ' 3 blanks\n 3 astral\n 1 short\n 7 total\n')
+    assert.equal((await terminal.run('wc blanks astral')).stdout, ' 1  3 13 blanks\n 1  3 15 astral\n 2  6 28 total\n')
+    assert.equal((await terminal.run('wc -lw blanks astral')).stdout, ' 1  3 blanks\n 1  3 astral\n 2  6 total\n')
   })
 
-  it('counts characters where the bytes spell them', () => {
+  it('counts characters where the bytes spell them', async () => {
     const terminal = createTerminal({ astral: 'café ☃ \u{1F600}\n', blanks: 'a b c⁠d\n' })
     // An astral character is one character and four bytes, which is where
     // `-m` and `-c` part company.
-    assert.equal(terminal.run('wc -m astral').stdout, '9 astral\n')
-    assert.equal(terminal.run('wc -mc astral').stdout, ' 9 15 astral\n')
-    assert.equal(terminal.run('wc -m blanks').stdout, '8 blanks\n')
+    assert.equal((await terminal.run('wc -m astral')).stdout, '9 astral\n')
+    assert.equal((await terminal.run('wc -mc astral')).stdout, ' 9 15 astral\n')
+    assert.equal((await terminal.run('wc -m blanks')).stdout, '8 blanks\n')
   })
 })

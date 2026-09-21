@@ -11,12 +11,12 @@ const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const expected = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
 // A writable overlay needs a mount away from `/`, and cwd follows the mount.
 const mounted = (...args) => ({ ...expected(...args), cwd: '/src' })
-const run = (script, input, flags = '') => createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
+const run = async (script, input, flags = '') => await createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
 
 describe('sed case-insensitive substitution flags', () => {
   for (const modifier of ['i', 'I', 'ii', 'II', 'iI', 'Ii', 'i I']) {
-    it(`accepts modifier ${modifier}`, () => {
-      assert.deepEqual(run(`s/alpha/X/${modifier}`, 'ALPHA alpha\nAlpha\n'), expected('X alpha\nX\n'))
+    it(`accepts modifier ${modifier}`, async () => {
+      assert.deepEqual(await run(`s/alpha/X/${modifier}`, 'ALPHA alpha\nAlpha\n'), expected('X alpha\nX\n'))
     })
   }
 
@@ -50,24 +50,24 @@ describe('sed case-insensitive substitution flags', () => {
     ['previous case mode persists across print addresses', 's/a/a/i;//p', 'A\n', 'a\n', '-n'],
   ]
   for (const [name, script, input, stdout, flags] of cases) {
-    it(name, () => assert.deepEqual(run(script, input, flags), expected(stdout)))
+    it(name, async () => assert.deepEqual(await run(script, input, flags), expected(stdout)))
   }
 
-  it('uses the same behavior for script files and multiple expressions', () => {
+  it('uses the same behavior for script files and multiple expressions', async () => {
     const t = createTerminal({ input: 'AaA\n', program: 's/a/a/I\n' })
-    assert.deepEqual(t.run("sed -f program -e 's//X/g' input"), expected('XXX\n'))
+    assert.deepEqual(await t.run("sed -f program -e 's//X/g' input"), expected('XXX\n'))
   })
 
-  it('writes once per successful case-insensitive substitution', () => {
+  it('writes once per successful case-insensitive substitution', async () => {
     const t = createTerminal({ input: 'AaA\nb\n' }, { mount: '/src/', writable: '/tmp/' })
-    assert.deepEqual(t.run("sed -n 's/a/X/Igpw /tmp/out' /src/input"), mounted('XXX\n'))
-    assert.deepEqual(t.run('cat /tmp/out'), mounted('XXX\n'))
+    assert.deepEqual(await t.run("sed -n 's/a/X/Igpw /tmp/out' /src/input"), mounted('XXX\n'))
+    assert.deepEqual(await t.run('cat /tmp/out'), mounted('XXX\n'))
   })
 })
 
 describe('sed uppercase I regex address modifier', () => {
   for (const script of ['/a/Ip', '/a/ I p', '/a/IIp', String.raw`\#a#Ip`]) {
-    it(script, () => assert.deepEqual(run(script, 'A\nb\na\n', '-n'), expected('A\na\n')))
+    it(script, async () => assert.deepEqual(await run(script, 'A\nb\na\n', '-n'), expected('A\na\n')))
   }
 
   const cases = [
@@ -79,38 +79,38 @@ describe('sed uppercase I regex address modifier', () => {
     ['/a/I{p;}', 'A\nb\n', 'A\n'],
   ]
   for (const [script, input, stdout, flags = '-n'] of cases) {
-    it(script, () => assert.deepEqual(run(script, input, flags), expected(stdout)))
+    it(script, async () => assert.deepEqual(await run(script, input, flags), expected(stdout)))
   }
 })
 
 describe('sed regex flag errors and engine limitations', () => {
   for (const flag of ['i', 'I', 'm', 'M']) {
     for (const input of ['', 'a\n']) {
-      it(`empty regex with ${flag} fails before processing ${JSON.stringify(input)}`, () => {
-        assert.deepEqual(run(`s/a/A/;s//X/${flag}`, input), expected('', 1, 'sed: cannot specify modifiers on empty regexp\n'))
+      it(`empty regex with ${flag} fails before processing ${JSON.stringify(input)}`, async () => {
+        assert.deepEqual(await run(`s/a/A/;s//X/${flag}`, input), expected('', 1, 'sed: cannot specify modifiers on empty regexp\n'))
       })
     }
   }
 
-  it('opens w targets before rejecting modifiers on an empty regex', () => {
+  it('opens w targets before rejecting modifiers on an empty regex', async () => {
     const t = createTerminal({ input: 'a\n' }, { mount: '/src/', writable: '/tmp/' })
-    assert.deepEqual(t.run('printf old >/tmp/out'), mounted())
-    assert.deepEqual(t.run("sed 's//X/Iw /tmp/out' /src/input"), mounted('', 1, 'sed: cannot specify modifiers on empty regexp\n'))
-    assert.deepEqual(t.run('cat /tmp/out'), mounted())
+    assert.deepEqual(await t.run('printf old >/tmp/out'), mounted())
+    assert.deepEqual(await t.run("sed 's//X/Iw /tmp/out' /src/input"), mounted('', 1, 'sed: cannot specify modifiers on empty regexp\n'))
+    assert.deepEqual(await t.run('cat /tmp/out'), mounted())
   })
 
-  it('reports invalid flags before checking whether the regex is empty', () => {
-    assert.deepEqual(run('s//X/iQ', ''), expected('', 1, "sed: unknown option to substitute command: 'Q'\n"))
+  it('reports invalid flags before checking whether the regex is empty', async () => {
+    assert.deepEqual(await run('s//X/iQ', ''), expected('', 1, "sed: unknown option to substitute command: 'Q'\n"))
   })
 
   for (const flag of ['m', 'M', 'e']) {
-    it(`reports the actual unsupported flag ${flag}`, () => {
+    it(`reports the actual unsupported flag ${flag}`, async () => {
       const feature = flag === 'e' ? 'command evaluation' : 'multiline regex matching'
       const message = `sed: substitution flag '${flag}' (${feature}) is not supported`
       const unsupported = [{ kind: 'feature', command: 'sed', detail: `substitution flag ${flag}`, message }]
       const t = createTerminal({ input: 'a\n' })
-      assert.deepEqual(t.run(`sed 's/a/X/${flag}' input`), { ...expected('', 1, message + '\n'), unsupported })
-      assert.deepEqual(t.run(`sed 's/a/X/${flag}' input 2>/dev/null | cat`), { ...expected(), unsupported })
+      assert.deepEqual(await t.run(`sed 's/a/X/${flag}' input`), { ...expected('', 1, message + '\n'), unsupported })
+      assert.deepEqual(await t.run(`sed 's/a/X/${flag}' input 2>/dev/null | cat`), { ...expected(), unsupported })
     })
   }
 
@@ -120,14 +120,14 @@ describe('sed regex flag errors and engine limitations', () => {
     ['s/в/X/I', '\u1C80\n', 'case folding of Cyrillic Extended-C letters'],
     ['s/\u1C80/X/I', 'в\n', 'case folding of Cyrillic Extended-C letters'],
   ]) {
-    it(`preserves regex engine diagnostics: ${script}`, () => {
+    it(`preserves regex engine diagnostics: ${script}`, async () => {
       const t = createTerminal({ input })
-      const result = t.run(`sed -E ${quote(script)} input`)
+      const result = await t.run(`sed -E ${quote(script)} input`)
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 1)
       assert.equal(result.unsupported.length, 1)
       assert.equal(result.unsupported[0].detail, detail)
-      assert.deepEqual(t.run(`sed -E ${quote(script)} input 2>/dev/null | cat`), { ...expected(), notes: [], unsupported: result.unsupported })
+      assert.deepEqual(await t.run(`sed -E ${quote(script)} input 2>/dev/null | cat`), { ...expected(), notes: [], unsupported: result.unsupported })
     })
   }
 })

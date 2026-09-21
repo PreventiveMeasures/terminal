@@ -32,14 +32,14 @@ const CASES = [
   ['find src -type f -iname "[[:lower:]A]*.js" | sort', 'src/Alpha.JS\nsrc/beta.js\nsrc/charlie.Js\n'],
 ]
 
-function virtual(command) {
-  const r = createTerminal(FILES).run(command)
+async function virtual(command) {
+  const r = await createTerminal(FILES).run(command)
   assert.deepEqual(r.unsupported, [], command)
   return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }
 }
 
 describe('find -iname — source-tree matching regressions', () => {
   for (const [command, stdout] of CASES) {
-    it(command, () => assert.deepEqual(virtual(command), { stdout, stderr: '', exitCode: 0 }))
+    it(command, async () => assert.deepEqual(await virtual(command), { stdout, stderr: '', exitCode: 0 }))
   }
 })

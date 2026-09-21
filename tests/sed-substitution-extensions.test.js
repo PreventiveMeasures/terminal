@@ -11,16 +11,16 @@ import { createTerminal } from '@preventive/terminal'
 const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'"
 const result = (stdout) => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 
-function check(script, input, stdout, flags = '') {
-  const actual = createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
+async function check(script, input, stdout, flags = '') {
+  const actual = await createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
   assert.deepEqual(actual, result(stdout), script)
 }
 
 describe('sed accepts single-byte substitution delimiters', () => {
   for (const sep of ['a', 's', '1', '_', ' ', '\t', '\r', '|', '#', ':', '@', '%', ';', '}', ']', '[', '\\', '&', '\u0001']) {
-    it(`delimiter ${JSON.stringify(sep)}`, () => {
+    it(`delimiter ${JSON.stringify(sep)}`, async () => {
       const program = `s${sep}x${sep}Y${sep}g`
-      const actual = createTerminal({ input: 'x-x\n', program }).run('sed -f program input')
+      const actual = await createTerminal({ input: 'x-x\n', program }).run('sed -f program input')
       assert.deepEqual(actual, result('Y-Y\n'))
     })
   }
@@ -38,8 +38,8 @@ describe('sed accepts single-byte substitution delimiters', () => {
   ]
   for (const [script, input, stdout, flags] of cases) it(script, () => check(script, input, stdout, flags))
   for (const script of ['s', 's\nx\nY\n', 'séxéYé', 's😀x😀Y😀']) {
-    it(`invalid delimiter is an ordinary script error: ${JSON.stringify(script)}`, () => {
-      const actual = createTerminal({ input: 'x\n', program: script }).run('sed -f program input')
+    it(`invalid delimiter is an ordinary script error: ${JSON.stringify(script)}`, async () => {
+      const actual = await createTerminal({ input: 'x\n', program: script }).run('sed -f program input')
       assert.equal(actual.exitCode, 1)
       assert.equal(actual.stdout, '')
       assert.notEqual(actual.stderr, '')
@@ -90,23 +90,23 @@ describe('sed numeric substitution occurrences', () => {
   ]
   for (const [script, input, stdout, flags] of cases) it(script + ' on ' + JSON.stringify(input), () => check(script, input, stdout, flags))
   for (const script of ['s/a/X/0', 's/a/X/00', 's/a/X/1 2', 's/a/X/2g3', 's/a/X/2gg', 's/a/X/2pp', 's/a/X/-1', 's/a/X/1.5']) {
-    it(`invalid occurrence syntax is an ordinary script error: ${script}`, () => {
-      const actual = createTerminal({ input: 'a\n' }).run(`sed ${quote(script)} input`)
+    it(`invalid occurrence syntax is an ordinary script error: ${script}`, async () => {
+      const actual = await createTerminal({ input: 'a\n' }).run(`sed ${quote(script)} input`)
       assert.equal(actual.exitCode, 1)
       assert.equal(actual.stdout, '')
       assert.notEqual(actual.stderr, '')
       assert.deepEqual(actual.unsupported, [])
     })
   }
-  it('keeps case-folding limitations visible for numeric selectors', () => {
-    const actual = createTerminal({ input: 'в \u1C80\n' }).run("sed 's/в/X/2I' input 2>/dev/null | cat")
+  it('keeps case-folding limitations visible for numeric selectors', async () => {
+    const actual = await createTerminal({ input: 'в \u1C80\n' }).run("sed 's/в/X/2I' input 2>/dev/null | cat")
     assert.equal(actual.exitCode, 0)
     assert.equal(actual.stderr, '')
     assert.equal(actual.unsupported.length, 1)
     assert.equal(actual.unsupported[0].detail, 'case folding of Cyrillic Extended-C letters')
   })
-  it('reports unsupported numeric precision even when stderr is redirected', () => {
-    const actual = createTerminal({ input: 'a\n' }).run("sed 's/a/X/9007199254740992' input 2>/dev/null | cat")
+  it('reports unsupported numeric precision even when stderr is redirected', async () => {
+    const actual = await createTerminal({ input: 'a\n' }).run("sed 's/a/X/9007199254740992' input 2>/dev/null | cat")
     assert.equal(actual.exitCode, 0)
     assert.equal(actual.stderr, '')
     assert.equal(actual.unsupported.length, 1)
@@ -136,40 +136,40 @@ describe('sed reuses the last evaluated regular expression', () => {
     ['/z/{s/a/A/};s//X/', 'a\n', 'a\n'],
   ]
   for (const [script, input, stdout, flags] of cases) it(script, () => check(script, input, stdout, flags))
-  it('shares the last regex across expression and file boundaries, including -s', () => {
+  it('shares the last regex across expression and file boundaries, including -s', async () => {
     const files = { first: 'aa\n', second: 'aa\n', program: 's//X/' }
     for (const flags of ['', '-s']) {
-      const actual = createTerminal(files).run(`sed ${flags} -e 's/a/A/' -f program first second`)
+      const actual = await createTerminal(files).run(`sed ${flags} -e 's/a/A/' -f program first second`)
       assert.deepEqual(actual, result('AX\nAX\n'))
     }
   })
   for (const script of ['s//X/', '//p', '2s/a/A/;s//X/']) {
-    it(`missing prior regex is an ordinary runtime error: ${script}`, () => {
-      const actual = createTerminal({ input: 'a\n' }).run(`sed ${quote(script)} input`)
+    it(`missing prior regex is an ordinary runtime error: ${script}`, async () => {
+      const actual = await createTerminal({ input: 'a\n' }).run(`sed ${quote(script)} input`)
       assert.equal(actual.exitCode, 1)
       assert.match(actual.stderr, /no previous regular expression/u)
       assert.deepEqual(actual.unsupported, [])
     })
   }
   for (const flag of ['i', 'I', 'm', 'M']) {
-    it(`rejects modifier ${flag} on an empty regex before reading input`, () => {
-      const actual = createTerminal({ input: 'a\n' }).run(`sed 's/a/A/;s//X/${flag}' input`)
+    it(`rejects modifier ${flag} on an empty regex before reading input`, async () => {
+      const actual = await createTerminal({ input: 'a\n' }).run(`sed 's/a/A/;s//X/${flag}' input`)
       assert.equal(actual.exitCode, 1)
       assert.equal(actual.stdout, '')
       assert.match(actual.stderr, /cannot specify modifiers on empty regexp/u)
       assert.deepEqual(actual.unsupported, [])
     })
   }
-  it('validates captures when an address regex is reused by substitution', () => {
-    const actual = createTerminal({ input: 'a\n' }).run(String.raw`sed '/a/s//\1/' input`)
+  it('validates captures when an address regex is reused by substitution', async () => {
+    const actual = await createTerminal({ input: 'a\n' }).run(String.raw`sed '/a/s//\1/' input`)
     assert.equal(actual.exitCode, 1)
     assert.match(actual.stderr, /invalid reference/u)
     assert.deepEqual(actual.unsupported, [])
   })
-  it('does not leak a previous regex into the next command invocation', () => {
+  it('does not leak a previous regex into the next command invocation', async () => {
     const terminal = createTerminal({ input: 'a\n' })
-    assert.deepEqual(terminal.run("sed 's/a/A/' input"), result('A\n'))
-    const actual = terminal.run("sed 's//X/' input")
+    assert.deepEqual(await terminal.run("sed 's/a/A/' input"), result('A\n'))
+    const actual = await terminal.run("sed 's//X/' input")
     assert.equal(actual.exitCode, 1)
     assert.match(actual.stderr, /no previous regular expression/u)
     assert.deepEqual(actual.unsupported, [])

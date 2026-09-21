@@ -16,10 +16,10 @@ const FILES = {
   'field-file': 'maple:birch\n',
 }
 
-function check(command, input, stdout, exitCode = 0, notes = []) {
+async function check(command, input, stdout, exitCode = 0, notes = []) {
   const files = input === null ? FILES : { ...FILES, input }
   const line = input === null ? command : `${command} < input`
-  assert.deepEqual(createTerminal(files).run(line), { stdout, stderr: '', exitCode, cwd: '/', notes, unsupported: [] })
+  assert.deepEqual(await createTerminal(files).run(line), { stdout, stderr: '', exitCode, cwd: '/', notes, unsupported: [] })
 }
 
 function cases(rows) {
@@ -132,16 +132,16 @@ describe('upstream BusyBox audit — printf', () => {
 
   // A character constant is one character; GNU says what it passed over, and
   // says it as a warning, so the run still succeeds.
-  it('warns about the characters after a quoted integer operand', () => {
-    assert.deepEqual(createTerminal(FILES).run(`printf '%d\\n' "'Stail"`), {
+  it('warns about the characters after a quoted integer operand', async () => {
+    assert.deepEqual(await createTerminal(FILES).run(`printf '%d\\n' "'Stail"`), {
       stdout: '83\n',
       stderr: 'printf: warning: tail: character(s) following character constant have been ignored\n',
       exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 
-  it('Bash retains the converted numeric prefix on a malformed operand', () => {
-    const r = createTerminal().run("printf '%d\\n' 4 57tail 8")
+  it('Bash retains the converted numeric prefix on a malformed operand', async () => {
+    const r = await createTerminal().run("printf '%d\\n' 4 57tail 8")
     assert.equal(r.stdout, '4\n57\n8\n')
     assert.equal(r.exitCode, 1)
     assert.match(r.stderr, /57tail.*not completely converted/u)
@@ -220,12 +220,12 @@ describe('upstream BusyBox audit — unavailable features retain diagnostics', (
     ['xargs', 'xargs -t echo'],
   ]
   for (const [name, command] of commands) {
-    it(command, () => {
-      const r = createTerminal(FILES).run(command)
+    it(command, async () => {
+      const r = await createTerminal(FILES).run(command)
       assert.notEqual(r.exitCode, 0)
       assert.notEqual(r.stderr, '')
       assert.ok(r.unsupported.some((entry) => entry.command === name), JSON.stringify(r))
-      const hidden = createTerminal(FILES).run(`{ ${command}; } 2>/dev/null | true`)
+      const hidden = await createTerminal(FILES).run(`{ ${command}; } 2>/dev/null | true`)
       assert.equal(hidden.stdout, '')
       assert.equal(hidden.stderr, '')
       assert.equal(hidden.exitCode, 0)

@@ -9,13 +9,13 @@ const hidden = (line) => {
   const [, command, operand, reason] = /^([^:]+): (.+): (.+)$/u.exec(line.trimEnd())
   return `${command}: ${reason}: ${JSON.stringify(/'([^']*)'$/u.exec(operand)?.[1] ?? operand)}.`
 }
-const notesOf = (command, files = FILES, opts) => createTerminal(files, opts).run(command).notes
+const notesOf = async (command, files = FILES, opts) => (await createTerminal(files, opts).run(command)).notes
 
 describe('a path failure sent to /dev/null is reported anyway', () => {
   // `2>/dev/null` is written to quiet expected noise and silences a missing
   // path just as completely; the status alone cannot tell the two apart.
-  it('reads as a sentence', () => {
-    assert.deepEqual(notesOf('cat f 2>/dev/null | head -30'),
+  it('reads as a sentence', async () => {
+    assert.deepEqual(await notesOf('cat f 2>/dev/null | head -30'),
       ['cat: No such file or directory: "f".'])
   })
 
@@ -34,23 +34,23 @@ describe('a path failure sent to /dev/null is reported anyway', () => {
     ['value=$(cat nope 2>/dev/null); true', ['cat: nope: No such file or directory']],
     ['for f in nope; do cat $f; done 2>/dev/null', ['cat: nope: No such file or directory']],
   ]) {
-    it(command, () => assert.deepEqual(notesOf(command), lines.map(hidden)))
+    it(command, async () => assert.deepEqual(await notesOf(command), lines.map(hidden)))
   }
 
-  it('names every path one command failed the same way on, once', () => {
-    assert.deepEqual(notesOf('grep -rn a d1 d2 d3 2>/dev/null'),
+  it('names every path one command failed the same way on, once', async () => {
+    assert.deepEqual(await notesOf('grep -rn a d1 d2 d3 2>/dev/null'),
       ['grep: No such file or directory: "d2", "d3".'])
   })
 
-  it('reports a repeated failure once', () => {
-    assert.deepEqual(notesOf('cat nope 2>/dev/null; cat nope 2>/dev/null'),
+  it('reports a repeated failure once', async () => {
+    assert.deepEqual(await notesOf('cat nope 2>/dev/null; cat nope 2>/dev/null'),
       [hidden('cat: nope: No such file or directory')])
   })
 
-  it('does not carry one run into the next', () => {
+  it('does not carry one run into the next', async () => {
     const terminal = createTerminal(FILES)
-    assert.equal(terminal.run('cat nope 2>/dev/null').notes.length, 1)
-    assert.deepEqual(terminal.run('cat a.txt').notes, [])
+    assert.equal((await terminal.run('cat nope 2>/dev/null')).notes.length, 1)
+    assert.deepEqual((await terminal.run('cat a.txt')).notes, [])
   })
 })
 
@@ -71,39 +71,39 @@ describe('nothing is said where the caller can already see it', () => {
     'grep --unknown x a.txt 2>/dev/null',
     'shopt -s nullglob 2>/dev/null',
   ]) {
-    it(command, () => assert.deepEqual(notesOf(command).filter((n) => n.startsWith('stderr:')), []))
+    it(command, async () => assert.deepEqual((await notesOf(command)).filter((n) => n.startsWith('stderr:')), []))
   }
 
-  it('says nothing when the same diagnostic reaches stderr elsewhere in the run', () => {
-    assert.deepEqual(notesOf('cat nope 2>/dev/null; cat nope'), [])
+  it('says nothing when the same diagnostic reaches stderr elsewhere in the run', async () => {
+    assert.deepEqual(await notesOf('cat nope 2>/dev/null; cat nope'), [])
   })
 
-  it('says nothing when another note already accounts for the path', () => {
+  it('says nothing when another note already accounts for the path', async () => {
     // The cwd note names the same path and says more about it.
-    const result = createTerminal({ file: 'x\n', 'sub/keep': '' }, { mount: '/repo', cwd: '/repo/sub' })
+    const result = await createTerminal({ file: 'x\n', 'sub/keep': '' }, { mount: '/repo', cwd: '/repo/sub' })
       .run('cat file 2>/dev/null')
     assert.deepEqual(result.notes, ['cat: relative path "file" was not found from cwd "/repo/sub". A file exists at "/repo/file".'])
   })
 
-  it('says nothing when stderr goes somewhere the caller can read', () => {
+  it('says nothing when stderr goes somewhere the caller can read', async () => {
     const terminal = createTerminal({ 'a.txt': 'oak\n' }, { mount: '/repo', cwd: '/repo', writable: '/tmp/' })
-    const result = terminal.run('cat nope 2>/tmp/err')
+    const result = await terminal.run('cat nope 2>/tmp/err')
     assert.deepEqual(result.notes, [])
-    assert.equal(terminal.run('cat /tmp/err').stdout, 'cat: nope: No such file or directory\n')
+    assert.equal((await terminal.run('cat /tmp/err')).stdout, 'cat: nope: No such file or directory\n')
   })
 })
 
 describe('the note leaves the run itself alone', () => {
-  it('changes neither output nor status', () => {
-    const result = createTerminal(FILES).run('grep -rn a d1 d2 d3 2>/dev/null')
+  it('changes neither output nor status', async () => {
+    const result = await createTerminal(FILES).run('grep -rn a d1 d2 d3 2>/dev/null')
     assert.equal(result.stdout, 'd1/x.js:1:a\n')
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 2)
     assert.deepEqual(result.unsupported, [])
   })
 
-  it('sits alongside whatever else the run had to say', () => {
-    assert.deepEqual(createTerminal(FILES).run('cat nope 2>/dev/null && cat a.txt').notes, [
+  it('sits alongside whatever else the run had to say', async () => {
+    assert.deepEqual((await createTerminal(FILES).run('cat nope 2>/dev/null && cat a.txt')).notes, [
       'cat: exited 1, so the command after && did not run.',
       hidden('cat: nope: No such file or directory'),
     ])

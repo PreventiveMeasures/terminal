@@ -112,19 +112,19 @@ const GAPS = [
 
 describe('regex performance paths retain matching and capture semantics', () => {
   for (const { purpose, prog = '', input, stdout, command = 'awk -f prog < input' } of CASES) {
-    it(purpose, () => {
-      const result = createTerminal({ prog, input }).run(command)
+    it(purpose, async () => {
+      const result = await createTerminal({ prog, input }).run(command)
       assert.deepEqual(result, { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
     })
   }
   for (const { purpose, prog, input, stdout, detail, message } of GAPS) {
-    it(purpose, () => {
+    it(purpose, async () => {
       const terminal = createTerminal({ prog, input })
       const unsupported = [{ kind: 'feature', command: 'awk', detail, message }]
-      assert.deepEqual(terminal.run('awk -f prog < input'), {
+      assert.deepEqual(await terminal.run('awk -f prog < input'), {
         stdout, stderr: message + '\n', exitCode: 2, cwd: '/', notes: [], unsupported,
       })
-      assert.deepEqual(terminal.run('awk -f prog < input 2>/dev/null | cat'), {
+      assert.deepEqual(await terminal.run('awk -f prog < input 2>/dev/null | cat'), {
         stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported,
       })
     })

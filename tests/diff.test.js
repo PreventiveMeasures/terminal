@@ -21,55 +21,55 @@ describe('diff refuses what it does not do, on the feed', () => {
     ['diff --from-file=ten ten2', '--from-file'], ['diff -X list ten ten2', '-X'], ['diff -S start ten ten2', '-S'], ['diff -v', '-v'], ['diff --help', '--help'],
     ['diff --bogus ten ten2', '--bogus'], ['diff -Q ten ten2', '-Q'], ['diff --ignore-blank-lines ten ten2', '--ignore-blank-lines'], ['diff -P ten ten2', '-P'],
   ]) {
-    it(line, () => {
-      const r = run(line + ' 2>/dev/null || true')
+    it(line, async () => {
+      const r = await run(line + ' 2>/dev/null || true')
       assert.deepEqual(r.unsupported.map((u) => [u.kind, u.command, u.detail]), [['option', 'diff', detail]], line)
-      assert.equal(run(line).exitCode, 2, line)
-      assert.notEqual(run(line).stderr, '', line)
+      assert.equal((await run(line)).exitCode, 2, line)
+      assert.notEqual((await run(line)).stderr, '', line)
     })
   }
-  it('says nothing on the feed for ordinary trouble', () => {
-    const r = run('diff nope ten')
+  it('says nothing on the feed for ordinary trouble', async () => {
+    const r = await run('diff nope ten')
     assert.deepEqual(r.unsupported, [])
     assert.equal(r.exitCode, 2)
     assert.equal(r.stderr, 'diff: nope: No such file or directory\n')
   })
-  it('notes a relative operand that exists elsewhere', () => {
+  it('notes a relative operand that exists elsewhere', async () => {
     const t = createTerminal({ 'a/x': '1\n', x: '2\n' }, { cwd: '/a' })
-    const r = t.run('diff x ../x')
+    const r = await t.run('diff x ../x')
     assert.equal(r.exitCode, 1)
-    const missing = t.run('diff y x')
+    const missing = await t.run('diff y x')
     assert.deepEqual(missing.notes, [])
-    assert.deepEqual(createTerminal({ 'a/x': '1\n', y: '2\n' }, { cwd: '/a' }).run('diff y x').notes, ['diff: relative path "y" was not found from cwd "/a". A file exists at "/y".'])
+    assert.deepEqual((await createTerminal({ 'a/x': '1\n', y: '2\n' }, { cwd: '/a' }).run('diff y x')).notes, ['diff: relative path "y" was not found from cwd "/a". A file exists at "/y".'])
   })
 })
 
 describe('diff through the shell', () => {
-  it('reads standard input for - and consumes it', () => {
-    assert.deepEqual(run("printf 'x\\n' | { diff - a1; cat; }").stdout, '1c1\n< x\n---\n> a\n')
-    assert.equal(run("printf 'x\\n' | diff -u a1 - | head -2").stdout, '--- a1\n+++ -\n')
+  it('reads standard input for - and consumes it', async () => {
+    assert.deepEqual((await run("printf 'x\\n' | { diff - a1; cat; }")).stdout, '1c1\n< x\n---\n> a\n')
+    assert.equal((await run("printf 'x\\n' | diff -u a1 - | head -2")).stdout, '--- a1\n+++ -\n')
   })
-  it('exit status gates a chain and is noted when it cancels one', () => {
-    const r = run('diff ten ten2 > /dev/null && echo same')
+  it('exit status gates a chain and is noted when it cancels one', async () => {
+    const r = await run('diff ten ten2 > /dev/null && echo same')
     assert.equal(r.stdout, '')
     assert.deepEqual(r.notes, ['diff: exited 1, so the command after && did not run.'])
-    assert.equal(run('diff ten ten && echo same').stdout, 'same\n')
+    assert.equal((await run('diff ten ten && echo same')).stdout, 'same\n')
   })
-  it('dispatches through xargs and find with the usual status', () => {
-    assert.equal(run('echo ten ten2 | xargs diff').exitCode, 123)
-    assert.equal(run('echo ten ten2 | xargs diff').stdout, '3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n')
-    assert.equal(run("find . -name ten -exec diff {} ten2 ';'").stdout, '3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n')
+  it('dispatches through xargs and find with the usual status', async () => {
+    assert.equal((await run('echo ten ten2 | xargs diff')).exitCode, 123)
+    assert.equal((await run('echo ten ten2 | xargs diff')).stdout, '3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n')
+    assert.equal((await run("find . -name ten -exec diff {} ten2 ';'")).stdout, '3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n')
   })
-  it('a directory pair given twice is nothing to compare', () => {
-    assert.deepEqual(run('diff -rs d1 d1; echo $?', TREES.dirs).stdout, '0\n')
-    assert.deepEqual(run('diff -rs d1/sub ./d1/sub; echo $?', TREES.dirs).stdout, '0\n')
+  it('a directory pair given twice is nothing to compare', async () => {
+    assert.deepEqual((await run('diff -rs d1 d1; echo $?', TREES.dirs)).stdout, '0\n')
+    assert.deepEqual((await run('diff -rs d1/sub ./d1/sub; echo $?', TREES.dirs)).stdout, '0\n')
   })
-  it('quotes a name in a header only when it needs it', () => {
+  it('quotes a name in a header only when it needs it', async () => {
     const t = createTerminal({ 'ünï': 'v\n', a1: 'a\n' })
-    assert.equal(t.run('diff -u ünï a1 | head -1').stdout, '--- ünï\n')
+    assert.equal((await t.run('diff -u ünï a1 | head -1')).stdout, '--- ünï\n')
     // The C locale, where the name would be octal, is refused before diff runs.
-    const refused = t.run('LC_ALL=C diff -u ünï a1 | head -1')
+    const refused = await t.run('LC_ALL=C diff -u ünï a1 | head -1')
     assert.deepEqual([refused.stdout, refused.unsupported.map((u) => u.detail)], ['', ['LC_ALL']])
-    assert.equal(t.run("diff -u 'sp ace' a1 2>&1 | head -1", TREES.pair).stdout, 'diff: sp ace: No such file or directory\n')
+    assert.equal((await t.run("diff -u 'sp ace' a1 2>&1 | head -1", TREES.pair)).stdout, 'diff: sp ace: No such file or directory\n')
   })
 })

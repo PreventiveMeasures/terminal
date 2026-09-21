@@ -16,8 +16,8 @@ const FILES = {
   literal: 'a{value}\na}b\na]b\n',
 }
 
-function check(line, stdout, exitCode = 0, files = FILES) {
-  const result = createTerminal(files).run(line)
+async function check(line, stdout, exitCode = 0, files = FILES) {
+  const result = await createTerminal(files).run(line)
   assert.equal(result.stdout, stdout, line)
   assert.equal(result.stderr, '', line)
   assert.equal(result.exitCode, exitCode, line)
@@ -67,15 +67,15 @@ describe('grep -P supports compatible PCRE expressions', () => {
     [String.raw`grep -Pq 'missing' numbers`, '', 1],
     [String.raw`grep -P 'a*' alternatives`, 'ab\n'],
   ]) {
-    it(line, () => check(line, stdout, exitCode, { ...FILES, text: 'xabbaa\n' }))
+    it(line, async () => await check(line, stdout, exitCode, { ...FILES, text: 'xabbaa\n' }))
   }
 
-  it('preserves escaped astral literals', () => {
-    check(String.raw`grep -P '\😀' text`, '😀\n', 0, { text: '😀\nx\n' })
+  it('preserves escaped astral literals', async () => {
+    await check(String.raw`grep -P '\😀' text`, '😀\n', 0, { text: '😀\nx\n' })
   })
 
-  it('works in a source-tree pipeline', () => {
-    check(String.raw`grep -rPn '(?<=id=)\d+' src --include=*.js | head -1`, 'src/a.js:1:id=42\n', 0,
+  it('works in a source-tree pipeline', async () => {
+    await check(String.raw`grep -rPn '(?<=id=)\d+' src --include=*.js | head -1`, 'src/a.js:1:id=42\n', 0,
       { 'src/a.js': 'id=42\n', 'src/b.txt': 'id=9\n' })
   })
 })
@@ -113,30 +113,30 @@ describe('grep -P diagnoses PCRE features with different semantics', () => {
     [String.raw`(?!(a))b\1`, 'PCRE conditional backreference'],
     [String.raw`(?<=([ab]){2})c\1`, 'PCRE conditional backreference'],
   ]) {
-    it(pattern, () => {
+    it(pattern, async () => {
       const line = `grep -P '${pattern}' text`
       const files = { text: 'foo abcb abca b\n' }
-      const direct = createTerminal(files).run(line)
+      const direct = await createTerminal(files).run(line)
       assert.equal(direct.exitCode, 2)
       assert.notEqual(direct.stderr, '')
       assert.deepEqual(direct.unsupported.map((entry) => entry.detail), [detail])
-      const hidden = createTerminal(files).run(`${line} 2>/dev/null | cat`)
+      const hidden = await createTerminal(files).run(`${line} 2>/dev/null | cat`)
       assert.equal(hidden.stderr, '')
       assert.equal(hidden.exitCode, 0)
       assert.deepEqual(hidden.unsupported, direct.unsupported)
     })
   }
 
-  it('does not silently skip a nonempty alternative after an empty PCRE match', () => {
-    const result = createTerminal({ text: 'a\n' }).run("grep -Po '(?=a)|a' text 2>/dev/null | cat")
+  it('does not silently skip a nonempty alternative after an empty PCRE match', async () => {
+    const result = await createTerminal({ text: 'a\n' }).run("grep -Po '(?=a)|a' text 2>/dev/null | cat")
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)
     assert.deepEqual(result.unsupported.map((entry) => entry.detail), ['PCRE empty match extent'])
   })
 
   for (const [pattern, content] of [[String.raw`\s`, '\uFEFF\n'], [String.raw`\D`, 'é\n'], [String.raw`\w`, 'é\n']]) {
-    it(`retains Unicode semantic diagnostics for ${pattern}`, () => {
-      const result = createTerminal({ text: content }).run(`grep -Po '${pattern}' text 2>/dev/null | cat`)
+    it(`retains Unicode semantic diagnostics for ${pattern}`, async () => {
+      const result = await createTerminal({ text: content }).run(`grep -Po '${pattern}' text 2>/dev/null | cat`)
       assert.deepEqual(result.unsupported.map((entry) => entry.detail), ['non-ASCII regex semantics'])
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
@@ -154,8 +154,8 @@ describe('grep -P ordinary syntax errors stay off the unsupported channel', () =
     "grep -PF 'a' numbers",
     "grep -P -e a -e b numbers",
   ]) {
-    it(line, () => {
-      const result = createTerminal(FILES).run(line)
+    it(line, async () => {
+      const result = await createTerminal(FILES).run(line)
       assert.equal(result.exitCode, 2)
       assert.notEqual(result.stderr, '')
       assert.deepEqual(result.unsupported, [])

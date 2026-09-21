@@ -80,8 +80,8 @@ b "@a/double";
 
 describe('grep and sed — logged package-count pipeline', () => {
   for (const { purpose, command, files, cwd, stdout } of CASES) {
-    it(purpose, () => {
-      const result = createTerminal(files, { cwd }).run(command)
+    it(purpose, async () => {
+      const result = await createTerminal(files, { cwd }).run(command)
       assert.deepEqual(result, { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
     })
   }

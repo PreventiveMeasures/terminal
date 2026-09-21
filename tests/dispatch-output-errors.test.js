@@ -16,46 +16,46 @@ describe('closed stdout is validated for commands entering any dispatch path', (
     ['/bin/echo value', '/bin/echo', 1], ['/usr/bin/ls /input', '/usr/bin/ls', 2],
     ['/usr/local/bin/grep a /input', '/usr/local/bin/grep', 2],
   ]) {
-    it(command, () => assert.deepEqual(setup().run(command + ' 1>&-'), result('', status, writeError(name))))
+    it(command, async () => assert.deepEqual(await setup().run(command + ' 1>&-'), result('', status, writeError(name))))
   }
   for (const command of ['true', 'grep missing /input', 'head -n0 /input', 'hexdump /input', 'tree /']) {
-    it(`does not fabricate failures for ${command}`, () => {
+    it(`does not fabricate failures for ${command}`, async () => {
       const status = command === 'grep missing /input' ? 1 : 0
       const notes = command === 'head -n0 /input' ? ['head: selected 0 of 2 lines from "/input".'] : []
-      assert.deepEqual(setup().run(command + ' 1>&-'), { ...result('', status), notes })
+      assert.deepEqual(await setup().run(command + ' 1>&-'), { ...result('', status), notes })
     })
   }
-  it('handles inherited closure without duplicated errors', () => {
-    assert.deepEqual(setup().run('{ echo one; /bin/echo two; } 1>&-'), result('', 1, writeError('echo') + writeError('/bin/echo')))
+  it('handles inherited closure without duplicated errors', async () => {
+    assert.deepEqual(await setup().run('{ echo one; /bin/echo two; } 1>&-'), result('', 1, writeError('echo') + writeError('/bin/echo')))
   })
-  it('keeps substitution capture usable under a closed enclosing descriptor', () => {
-    assert.deepEqual(setup().run('echo "$(echo inner)" 1>&-'), result('', 1, writeError('echo')))
+  it('keeps substitution capture usable under a closed enclosing descriptor', async () => {
+    assert.deepEqual(await setup().run('echo "$(echo inner)" 1>&-'), result('', 1, writeError('echo')))
   })
 })
 
 describe('nested commands report their own closed-output failures', () => {
   for (const child of ['echo', '/bin/echo']) {
-    it(`find -exec ${child} uses a false predicate without failing find`, () => {
-      assert.deepEqual(setup().run(`find /input -exec ${child} {} \\; 1>&-`), result('', 0, writeError(child)))
+    it(`find -exec ${child} uses a false predicate without failing find`, async () => {
+      assert.deepEqual(await setup().run(`find /input -exec ${child} {} \\; 1>&-`), result('', 0, writeError(child)))
     })
-    it(`find batched -exec ${child} propagates child failure`, () => {
-      assert.deepEqual(setup().run(`find /input -exec ${child} {} + 1>&-`), result('', 1, writeError(child)))
+    it(`find batched -exec ${child} propagates child failure`, async () => {
+      assert.deepEqual(await setup().run(`find /input -exec ${child} {} + 1>&-`), result('', 1, writeError(child)))
     })
-    it(`xargs ${child} applies its child-failure status once`, () => {
-      assert.deepEqual(setup().run(`printf 'a\\nb\\n' | xargs -n1 ${child} 1>&-`), result('', 123, writeError(child).repeat(2)))
+    it(`xargs ${child} applies its child-failure status once`, async () => {
+      assert.deepEqual(await setup().run(`printf 'a\\nb\\n' | xargs -n1 ${child} 1>&-`), result('', 123, writeError(child).repeat(2)))
     })
   }
-  it('handles find dispatching xargs dispatching echo', () => {
-    assert.deepEqual(setup().run('find /input -exec xargs echo {} \\; 1>&-'), result('', 0, writeError('echo')))
+  it('handles find dispatching xargs dispatching echo', async () => {
+    assert.deepEqual(await setup().run('find /input -exec xargs echo {} \\; 1>&-'), result('', 0, writeError('echo')))
   })
-  it('handles xargs dispatching find dispatching echo', () => {
+  it('handles xargs dispatching find dispatching echo', async () => {
     const command = "printf '/input\\n' | xargs -I{} find {} -exec echo FOUND \\; 1>&-"
-    assert.deepEqual(setup().run(command), result('', 0, writeError('echo')))
+    assert.deepEqual(await setup().run(command), result('', 0, writeError('echo')))
   })
-  it('routes each child error into the enclosing stderr file', () => {
+  it('routes each child error into the enclosing stderr file', async () => {
     const t = createTerminal({ input: 'a\n' }, { mount: '/src/', writable: '/tmp/' })
-    assert.deepEqual(t.run('find /src/input -exec echo {} \\; 1>&- 2>/tmp/errors'), mounted())
-    assert.deepEqual(t.run('cat /tmp/errors'), mounted(writeError('echo')))
+    assert.deepEqual(await t.run('find /src/input -exec echo {} \\; 1>&- 2>/tmp/errors'), mounted())
+    assert.deepEqual(await t.run('cat /tmp/errors'), mounted(writeError('echo')))
   })
 })
 
@@ -66,25 +66,25 @@ describe('custom commands share built-in output validation', () => {
     silent: () => ({ stdout: '', exitCode: 7 }),
   } })
   for (const command of ['emit', '/bin/emit']) {
-    it(command, () => assert.deepEqual(terminal().run(command + ' 1>&-'), result('', 1, writeError(command))))
+    it(command, async () => assert.deepEqual(await terminal().run(command + ' 1>&-'), result('', 1, writeError(command))))
   }
-  it('retains earlier stderr while replacing the failed output status', () => {
-    assert.deepEqual(terminal().run('mixed 1>&-'), result('', 1, 'earlier diagnostic\n' + writeError('mixed')))
+  it('retains earlier stderr while replacing the failed output status', async () => {
+    assert.deepEqual(await terminal().run('mixed 1>&-'), result('', 1, 'earlier diagnostic\n' + writeError('mixed')))
   })
-  it('does not change a silent custom status', () => {
-    assert.deepEqual(terminal().run('silent 1>&-'), result('', 7))
+  it('does not change a silent custom status', async () => {
+    assert.deepEqual(await terminal().run('silent 1>&-'), result('', 7))
   })
-  it('validates custom handlers reached through find', () => {
-    assert.deepEqual(terminal().run('find /input -exec emit {} \\; 1>&-'), result('', 0, writeError('emit')))
+  it('validates custom handlers reached through find', async () => {
+    assert.deepEqual(await terminal().run('find /input -exec emit {} \\; 1>&-'), result('', 0, writeError('emit')))
   })
-  it('validates custom handlers reached through xargs', () => {
-    assert.deepEqual(terminal().run('printf a | xargs emit 1>&-'), result('', 123, writeError('emit')))
+  it('validates custom handlers reached through xargs', async () => {
+    assert.deepEqual(await terminal().run('printf a | xargs emit 1>&-'), result('', 123, writeError('emit')))
   })
 })
 
 describe('output validation preserves earlier unsupported diagnostics', () => {
-  it('retains a runtime limit when partial stdout cannot be written', () => {
-    const actual = setup().run("awk 'BEGIN{print \"prefix\"; while(1){}}' 1>&- 2>/dev/null | cat")
+  it('retains a runtime limit when partial stdout cannot be written', async () => {
+    const actual = await setup().run("awk 'BEGIN{print \"prefix\"; while(1){}}' 1>&- 2>/dev/null | cat")
     assert.equal(actual.stdout, '')
     assert.equal(actual.stderr, '')
     assert.equal(actual.exitCode, 0)

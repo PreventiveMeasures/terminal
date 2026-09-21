@@ -25,7 +25,7 @@ export function runBlock(stage, ctx, stdin, runSteps) {
 // it refuses, rather than take the terminal with it.
 const TURN_LIMIT = 10_000
 const TURN_GAP = { kind: 'feature', command: null, detail: 'loop limit', message: `a loop running more than ${TURN_LIMIT} times is not supported` }
-function runWhile(loop, ctx, runSteps) {
+async function runWhile(loop, ctx, runSteps) {
   const result = emptyOutput()
   const stream = { text: ctx.stdinLeft }
   ctx.loopDepth++
@@ -39,13 +39,15 @@ function runWhile(loop, ctx, runSteps) {
         break
       }
       const ignored = result.ignored, status = result.exitCode
-      const test = runSteps(loop.condition, ctx, stream, true)
+      // oxlint-disable-next-line no-await-in-loop -- a turn of the loop runs after the last one has.
+      const test = await runSteps(loop.condition, ctx, stream, true)
       appendOutput(result, test)
       result.exitCode = status
       result.ignored = ignored
       if (test.halt || test.control) return { ...result, halt: test.halt, control: test.control, blame: test.blame }
       if ((test.exitCode === 0) === Boolean(loop.until)) break
-      const r = runSteps(loop.body, ctx, stream)
+      // oxlint-disable-next-line no-await-in-loop -- a turn of the loop runs after the last one has.
+      const r = await runSteps(loop.body, ctx, stream)
       appendOutput(result, r)
       result.blame = r.blame
       if (r.halt) return { ...result, halt: true }
@@ -63,15 +65,16 @@ function runWhile(loop, ctx, runSteps) {
 // taken for a declaration. The loop variable persists after completion, and
 // nested break/continue signals propagate one level per enclosing loop.
 const FOR_KEYWORD = { value: 'for', mask: null }
-function runLoop(loop, ctx, runSteps) {
-  const expanded = expandWords([FOR_KEYWORD, ...loop.words], ctx)
+async function runLoop(loop, ctx, runSteps) {
+  const expanded = await expandWords([FOR_KEYWORD, ...loop.words], ctx)
   const result = emptyOutput()
   const stream = { text: ctx.stdinLeft }
   ctx.loopDepth++
   try {
     for (const value of expanded.argv.slice(1)) {
       ctx.vars.set(loop.name, value)
-      const r = runSteps(loop.body, ctx, stream)
+      // oxlint-disable-next-line no-await-in-loop -- a turn of the loop runs after the last one has.
+      const r = await runSteps(loop.body, ctx, stream)
       appendOutput(result, r)
       result.blame = r.blame
       if (r.halt) return { ...result, halt: true }
@@ -84,29 +87,31 @@ function runLoop(loop, ctx, runSteps) {
   return result
 }
 
-function runConditional(conditional, ctx, stdin, runSteps) {
+async function runConditional(conditional, ctx, stdin, runSteps) {
   const result = emptyOutput()
   const stream = { text: stdin }
   for (const branch of conditional.branches) {
-    const test = runSteps(branch.condition, ctx, stream, true)
+    // oxlint-disable-next-line no-await-in-loop -- a branch is read only where the ones before it failed.
+    const test = await runSteps(branch.condition, ctx, stream, true)
     appendOutput(result, test)
     if (test.halt || test.control) return { ...result, halt: test.halt, control: test.control, blame: test.blame }
     if (test.exitCode !== 0) continue
-    const body = runSteps(branch.body, ctx, stream)
+    // oxlint-disable-next-line no-await-in-loop -- the branch that answered is the only one whose body runs.
+    const body = await runSteps(branch.body, ctx, stream)
     appendOutput(result, body)
     return { ...result, halt: body.halt, control: body.control, blame: body.blame }
   }
   if (!conditional.otherwise) { result.exitCode = 0; result.ignored = false; return result }
-  const last = runSteps(conditional.otherwise, ctx, stream)
+  const last = await runSteps(conditional.otherwise, ctx, stream)
   appendOutput(result, last)
   return { ...result, halt: last.halt, control: last.control, blame: last.blame }
 }
 
 
-function runGroup(stage, ctx, stdin, runSteps) {
+async function runGroup(stage, ctx, stdin, runSteps) {
   const stream = { text: stdin }
   if (!stage.isolate) return runSteps(stage.group, ctx, stream)
-  const r = isolated(ctx, () => runSteps(stage.group, ctx, stream))
+  const r = await isolated(ctx, () => runSteps(stage.group, ctx, stream))
   // A subshell is the one compound bash still exits on: what `set -e` ignored
   // in the child is nothing the parent reading its status can see.
   return { ...r, halt: false, control: undefined, ignored: false }

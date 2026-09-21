@@ -12,8 +12,8 @@ const FILES = {
 
 const FILTER_NOTES = ['grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/src/d.txt".']
 
-function check(command, stdout, exitCode = 0, stderr = '', notes = []) {
-  assert.deepEqual(createTerminal(FILES).run(command), {
+async function check(command, stdout, exitCode = 0, stderr = '', notes = []) {
+  assert.deepEqual(await createTerminal(FILES).run(command), {
     stdout, stderr, exitCode, cwd: '/', notes, unsupported: [],
   }, command)
 }
@@ -59,13 +59,13 @@ describe('grep count and attached match limits', () => {
     it(command, () => check(command, stdout, exitCode, '', notes))
   }
 
-  it('keeps successful counts and capped matches when another operand cannot be read', () => {
+  it('keeps successful counts and capped matches when another operand cannot be read', async () => {
     const stderr = 'grep: missing: No such file or directory\n'
-    check('grep -c hit missing src/a.js', 'src/a.js:2\n', 2, stderr)
-    check('grep -m1 hit missing src/a.js', 'src/a.js:hit hit\n', 2, stderr)
+    await check('grep -c hit missing src/a.js', 'src/a.js:2\n', 2, stderr)
+    await check('grep -m1 hit missing src/a.js', 'src/a.js:hit hit\n', 2, stderr)
   })
 
-  it('mirrors unsupported combinations and shared-file early reads even when stderr is hidden', () => {
+  it('mirrors unsupported combinations and shared-file early reads even when stderr is hidden', async () => {
     const earlyRead = 'grep: early termination on shared file input is not supported'
     const unsupportedCases = [
       ['grep -m1 hit < src/a.js', 'feature', 'partial stdin reads', earlyRead],
@@ -74,7 +74,7 @@ describe('grep count and attached match limits', () => {
       ['grep -cL hit src/a.js', 'option', 'combined output modes', 'grep: -L / -c are mutually exclusive'],
     ]
     for (const [command, kind, detail, message] of unsupportedCases) {
-      const result = createTerminal(FILES).run(command + ' 2>/dev/null | cat')
+      const result = await createTerminal(FILES).run(command + ' 2>/dev/null | cat')
       assert.deepEqual(result, {
         stdout: '', stderr: '', exitCode: 0, cwd: '/',
         notes: [], unsupported: [{ kind, command: 'grep', detail, message }],

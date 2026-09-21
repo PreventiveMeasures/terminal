@@ -21,16 +21,16 @@ describe('Unicode boundaries in echo and printf escapes', () => {
     [String.raw`printf '%b' '\é\😀\n'`, '\\é\\😀\n'],
   ]
   for (const [command, stdout] of cases) {
-    it(command, () => assert.deepEqual(createTerminal().run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }))
+    it(command, async () => assert.deepEqual(await createTerminal().run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }))
   }
 
-  it('still diagnoses precision that splits a multibyte character', () => {
+  it('still diagnoses precision that splits a multibyte character', async () => {
     const command = String.raw`printf '%.4b' '\😀'`
-    const r = createTerminal().run(command)
+    const r = await createTerminal().run(command)
     assert.equal(r.stdout, '')
     assert.notEqual(r.exitCode, 0)
     assert.ok(r.unsupported.some((note) => note.detail === 'partial UTF-8 byte sequence'))
-    const hidden = createTerminal().run(`${command} 2>/dev/null | true`)
+    const hidden = await createTerminal().run(`${command} 2>/dev/null | true`)
     assert.equal(hidden.stderr, '')
     assert.deepEqual(hidden.unsupported, r.unsupported)
   })

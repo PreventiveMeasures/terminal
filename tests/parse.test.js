@@ -135,10 +135,10 @@ describe('parse() hands back the line as the parser read it', () => {
 
   // A redirect names one file, so a target that multiplies has nothing to say
   // for itself but what it was written as.
-  it('keeps a redirect target that brace expansion would multiply', () => {
+  it('keeps a redirect target that brace expansion would multiply', async () => {
     assert.deepEqual(list('ls > {a,b}')[0].redirects, [{ fd: 1, op: '>', target: { type: 'brace', source: '{a,b}' } }])
     assert.deepEqual(list('ls > {1..1}')[0].redirects, [{ fd: 1, op: '>', target: '1' }])
-    assert.equal(terminal().run('ls > {a,b}').stderr.trim(), 'error: {a,b}: ambiguous redirect')
+    assert.equal((await terminal().run('ls > {a,b}')).stderr.trim(), 'error: {a,b}: ambiguous redirect')
   })
 
   it("carries a loop's variable, the words after `in` and the list it runs", () => {
@@ -219,10 +219,10 @@ describe('parse() hands back the line as the parser read it', () => {
     assert.equal(list('cat <<EOF\nbody\nEOF')[0].warnings, undefined)
   })
 
-  it('gives the caller a tree of its own, not shared state', () => {
+  it('gives the caller a tree of its own, not shared state', async () => {
     parse('wc -l a.txt').list[0].argv[1] = '-c'
     assert.deepEqual(parse('wc -l a.txt').list[0].argv, ['wc', '-l', 'a.txt'])
-    assert.equal(terminal().run('wc -l a.txt').stdout, '1 a.txt\n')
+    assert.equal((await terminal().run('wc -l a.txt')).stdout, '1 a.txt\n')
   })
 
   for (const line of ['', '   ', '\n\n', '# just a comment']) {
@@ -682,7 +682,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   // Every rewrite above is a claim that the line and the summary do the same
   // thing, so run both and hold it to that: what a caller reads back has to
   // leave the same output, status and directory behind as what they wrote.
-  it('runs the same as the line it rewrote', () => {
+  it('runs the same as the line it rewrote', async () => {
     for (const [written, summarized] of [
       ['wc -l < a.txt', 'cat a.txt | wc -l'],
       ['cat < a.txt', 'cat a.txt'],
@@ -700,8 +700,8 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
       ['f() { cat; }; echo fed | f', 'echo fed | cat'],
       ['for i in a b; do echo $i; done', 'echo a; echo b'],
     ]) {
-      const one = terminal().run(written)
-      const other = terminal().run(summarized)
+      const one = await terminal().run(written)
+      const other = await terminal().run(summarized)
       assert.deepEqual(
         [one.stdout, one.stderr, one.exitCode, one.cwd],
         [other.stdout, other.stderr, other.exitCode, other.cwd],
@@ -893,18 +893,18 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
 
   // Where a line may write belongs to a terminal's filesystem rather than to
   // the line, and a reader has no filesystem to ask: `run()` is what refuses.
-  it('reads a write a read-only terminal would refuse', () => {
+  it('reads a write a read-only terminal would refuse', async () => {
     assert.deepEqual(summarize('ls > out'), [[['ls'], ['>', 'out']]])
     assert.deepEqual(parse('ls > out').unsupported, [])
     const readOnly = createTerminal(SOURCES, { mount: '/src' })
-    assert.deepEqual(readOnly.run('ls > out').unsupported.map((gap) => gap.detail), ['>'])
+    assert.deepEqual((await readOnly.run('ls > out')).unsupported.map((gap) => gap.detail), ['>'])
   })
 
-  it('runs none of it', () => {
+  it('runs none of it', async () => {
     const t = terminal()
     assert.deepEqual(summarize('cd dir; printf x > /tmp/file'), [[['cd', 'dir']], [['printf', 'x'], ['>', '/tmp/file']]])
     assert.equal(t.cwd(), '/src')
-    assert.equal(t.run('test -e /tmp/file').exitCode, 1)
+    assert.equal((await t.run('test -e /tmp/file')).exitCode, 1)
   })
 })
 
@@ -932,10 +932,10 @@ describe('parse() reports a syntax error as run() would, and runs nothing', () =
     ['(ls)(ls)', 'unexpected `(`'],
     ['until a; do b; done; done', 'unexpected `done`'],
   ]) {
-    it(`reports ${JSON.stringify(error)} for ${JSON.stringify(line)}`, () => {
+    it(`reports ${JSON.stringify(error)} for ${JSON.stringify(line)}`, async () => {
       assert.deepEqual(verdict(line), { ok: false, incomplete: false, error })
       assert.deepEqual(list(line), [])
-      assert.equal(terminal().run(line).stderr, `error: ${error}\n`)
+      assert.equal((await terminal().run(line)).stderr, `error: ${error}\n`)
     })
   }
 })
@@ -997,9 +997,9 @@ describe('parse() reports the gaps parsing itself finds', () => {
     'echo a 3> /tmp/out',
     '[[ a =~ b ]]',
   ]) {
-    it(`matches run() on ${JSON.stringify(line)}`, () => {
+    it(`matches run() on ${JSON.stringify(line)}`, async () => {
       const parsed = parse(line)
-      const run = terminal().run(line)
+      const run = await terminal().run(line)
       assert.equal(parsed.ok, false)
       assert.deepEqual(parsed.unsupported, run.unsupported)
       assert.equal(run.stderr, `error: ${parsed.error}\n`)
@@ -1008,75 +1008,75 @@ describe('parse() reports the gaps parsing itself finds', () => {
 
   // Reading `&` is bash's grammar, which the parser has. Handing a list to
   // the background is the terminal's, which has nowhere to put one.
-  it('reads `&` and leaves the backgrounding to run()', () => {
+  it('reads `&` and leaves the backgrounding to run()', async () => {
     const result = parse('echo a & echo b')
     assert.deepEqual({ ok: result.ok, unsupported: result.unsupported }, { ok: true, unsupported: [] })
     assert.deepEqual(result.list, [
       { type: 'command', background: true, argv: ['echo', 'a'] },
       { type: 'command', op: ';', argv: ['echo', 'b'] },
     ])
-    assert.deepEqual(terminal().run('echo a & echo b').unsupported, [
+    assert.deepEqual((await terminal().run('echo a & echo b')).unsupported, [
       { kind: 'feature', command: null, detail: '&', message: 'background processes (`&`) are not supported' },
     ])
   })
 
   // Dispatch, expansion and the commands themselves are never reached here.
   for (const line of ['frobnicate', 'ls --frobnicate', 'echo a > /etc/passwd', 'echo `while true; do :; done`', 'sed -e "s/a/b/w f" a.txt', 'cat <(ls)']) {
-    it(`leaves ${JSON.stringify(line)} to run()`, () => {
+    it(`leaves ${JSON.stringify(line)} to run()`, async () => {
       assert.deepEqual(parse(line).unsupported, [])
-      assert.ok(terminal().run(line).unsupported.length > 0)
+      assert.ok((await terminal().run(line)).unsupported.length > 0)
     })
   }
 
   // A write policy is a filesystem's, so the one reading is never asked for
   // it: the line reads here, and the terminal that cannot take the write says
   // so where it would have done it.
-  it("leaves the terminal's own write policy to run()", () => {
+  it("leaves the terminal's own write policy to run()", async () => {
     const readOnly = createTerminal(SOURCES, { mount: '/src' })
     assert.equal(parse('echo a > out').ok, true)
     assert.deepEqual(parse('echo a > out').unsupported, [])
-    assert.deepEqual(readOnly.run('echo a > out').unsupported, [{ kind: 'feature', command: null, detail: '>', message: '`>` cannot write to `out`: the filesystem is read-only' }])
-    assert.deepEqual(readOnly.run('echo a > /dev/null').unsupported, [])
+    assert.deepEqual((await readOnly.run('echo a > out')).unsupported, [{ kind: 'feature', command: null, detail: '>', message: '`>` cannot write to `out`: the filesystem is read-only' }])
+    assert.deepEqual((await readOnly.run('echo a > /dev/null')).unsupported, [])
     assert.equal(parse('echo a > /tmp/out').ok, true)
   })
 })
 
 describe('parse() changes nothing', () => {
-  it('leaves the working directory, variables and overlay alone', () => {
+  it('leaves the working directory, variables and overlay alone', async () => {
     const t = terminal()
-    t.run('value=kept')
+    await t.run('value=kept')
     const line = 'cd dir; value=changed; printf written > /tmp/file; rm a.txt'
     assert.equal(parse(line).ok, true)
     assert.equal(t.cwd(), '/src')
-    assert.equal(t.run('printf "%s" "$value"').stdout, 'kept')
-    assert.equal(t.run('test -e /tmp/file').exitCode, 1)
-    assert.equal(t.run('test -e a.txt').exitCode, 0)
+    assert.equal((await t.run('printf "%s" "$value"')).stdout, 'kept')
+    assert.equal((await t.run('test -e /tmp/file')).exitCode, 1)
+    assert.equal((await t.run('test -e a.txt')).exitCode, 0)
   })
 
-  it('reads a line that would have ended the shell', () => {
+  it('reads a line that would have ended the shell', async () => {
     const t = terminal()
     assert.deepEqual(commandNames(parse('exit 7').list), ['exit'])
-    assert.equal(t.run('echo still here').stdout, 'still here\n')
+    assert.equal((await t.run('echo still here')).stdout, 'still here\n')
   })
 
-  it('reports the same verdict however often it is asked', () => {
+  it('reports the same verdict however often it is asked', async () => {
     const t = terminal()
     const first = parse('for f in a; do cat "$f"; done')
     assert.deepEqual(parse('for f in a; do cat "$f"; done'), first)
-    t.run('cd dir')
+    await t.run('cd dir')
     assert.deepEqual(parse('for f in a; do cat "$f"; done'), first)
   })
 
   // A definition read is not a definition made: reading a line that would
   // name a body leaves the shell with no name it did not already have.
-  it('defines nothing by reading a definition', () => {
+  it('defines nothing by reading a definition', async () => {
     const t = terminal()
     parse('bench() { ls; }; bench')
     summarize('other() { ls; }; other')
     assert.deepEqual(t.complete('be'), [])
     assert.deepEqual(t.complete('oth'), [])
     for (const name of ['bench', 'other']) {
-      const r = t.run(name)
+      const r = await t.run(name)
       assert.equal(r.exitCode, 127, name)
       assert.deepEqual(r.unsupported.map((gap) => gap.detail), [name], name)
     }
@@ -1084,9 +1084,9 @@ describe('parse() changes nothing', () => {
 
   // The summary of a line is read the same way the tree is, so it changes as
   // little: a loop it summarizes runs no turn, and a `cd` moves nothing.
-  it('runs none of a line it summarizes either', () => {
+  it('runs none of a line it summarizes either', async () => {
     const t = terminal()
-    t.run('value=kept')
+    await t.run('value=kept')
     assert.deepEqual(summarize('cd dir; value=changed; rm a.txt'), [
       [['cd', 'dir']],
       [[{ type: 'assignments', assignments: [{ name: 'value', value: 'changed' }] }]],
@@ -1095,8 +1095,8 @@ describe('parse() changes nothing', () => {
     summarize('while true; do rm a.txt; done')
     summarize('for f in a.txt; do rm "$f"; done')
     assert.equal(t.cwd(), '/src')
-    assert.equal(t.run('printf "%s" "$value"').stdout, 'kept')
-    assert.equal(t.run('test -e a.txt').exitCode, 0)
+    assert.equal((await t.run('printf "%s" "$value"')).stdout, 'kept')
+    assert.equal((await t.run('test -e a.txt')).exitCode, 0)
   })
 })
 
@@ -1107,7 +1107,7 @@ describe('summarize() says what the line it read would do', () => {
   // A summary is a claim: run what it describes and the line it describes,
   // and the two leave the same output, status and directory behind. Every
   // corpus command that reads back as plain tokens is held to that.
-  it('runs each corpus command the way its summary says', () => {
+  it('runs each corpus command the way its summary says', async () => {
     let checked = 0
     for (const { command } of CORPUS) {
       let summary
@@ -1115,8 +1115,8 @@ describe('summarize() says what the line it read would do', () => {
       const rebuilt = writtenBack(summary)
       if (rebuilt === null) continue
       checked++
-      const written = terminal().run(command)
-      const said = terminal().run(rebuilt)
+      const written = await terminal().run(command)
+      const said = await terminal().run(rebuilt)
       assert.deepEqual(
         [said.stdout, said.exitCode, said.cwd],
         [written.stdout, written.exitCode, written.cwd],
@@ -1145,11 +1145,11 @@ describe('summarize() says what the line it read would do', () => {
     ["echo 'a b' | cat", "echo 'a b'"],
     ["echo 'a b' | cat -n", "echo 'a b' | cat -n"],
   ]) {
-    it(`writes ${JSON.stringify(command)} back as the line it runs`, () => {
+    it(`writes ${JSON.stringify(command)} back as the line it runs`, async () => {
       const rebuilt = writtenBack(summarize(command))
       assert.equal(rebuilt, expected)
-      const written = terminal().run(command)
-      const said = terminal().run(rebuilt)
+      const written = await terminal().run(command)
+      const said = await terminal().run(rebuilt)
       assert.deepEqual([said.stdout, said.stderr, said.exitCode, said.cwd], [written.stdout, written.stderr, written.exitCode, written.cwd])
     })
   }
@@ -1157,14 +1157,14 @@ describe('summarize() says what the line it read would do', () => {
 
 describe('parse() settles every command in the source-analysis corpus', () => {
   for (const { id, purpose, command } of CORPUS) {
-    it(`${id}. ${purpose}`, () => {
+    it(`${id}. ${purpose}`, async () => {
       const parsed = parse(command)
       assert.deepEqual({ ok: parsed.ok, error: parsed.error, unsupported: parsed.unsupported }, { ok: true, error: null, unsupported: [] }, command)
       const names = commandNames(parsed.list)
       assert.ok(names.length > 0, command)
       for (const name of names) {
         assert.equal(typeof name, 'string', `${command}: ${JSON.stringify(name)}`)
-        assert.equal(terminal().run(`which ${name}`).exitCode, 0, `${command}: ${name}`)
+        assert.equal((await terminal().run(`which ${name}`)).exitCode, 0, `${command}: ${name}`)
       }
     })
   }

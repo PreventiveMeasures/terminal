@@ -4,15 +4,15 @@ import { createTerminal } from '@preventive/terminal'
 
 const INPUT = 'x\nx\ny\n'
 const options = { mount: '/repo', writable: '/tmp/' }
-function terminal() {
+async function terminal() {
   const t = createTerminal({ input: INPUT, bad: '\uD800', replacement: '\uFFFD' }, options)
-  assert.equal(t.run('cat /repo/input >/tmp/file').exitCode, 0)
+  assert.equal((await t.run('cat /repo/input >/tmp/file')).exitCode, 0)
   return t
 }
 const expected = (stdout = '', exitCode = 0) => ({ stdout, stderr: '', exitCode, cwd: '/repo', notes: [], unsupported: [] })
 
-function gap(t, command, detail) {
-  const r = t.run(command)
+async function gap(t, command, detail) {
+  const r = await t.run(command)
   assert.equal(r.stdout, '', command)
   assert.ok(r.unsupported.some((entry) => entry.detail === detail), JSON.stringify(r))
   return r
@@ -29,10 +29,10 @@ describe('self-output across command and descriptor families is never a silent s
     'wc -c /repo/input /tmp/file', 'tac /repo/input /tmp/file',
     'wc -c /repo/input - </tmp/file', 'tac /repo/input - </tmp/file',
   ]) {
-    it(command, () => {
-      const t = terminal()
-      gap(t, command + ' 2>/dev/null >>/tmp/file | cat', 'streaming self-output')
-      assert.deepEqual(t.run('cat /tmp/file'), expected(INPUT))
+    it(command, async () => {
+      const t = await terminal()
+      await gap(t, command + ' 2>/dev/null >>/tmp/file | cat', 'streaming self-output')
+      assert.deepEqual(await t.run('cat /tmp/file'), expected(INPUT))
     })
   }
 
@@ -43,18 +43,18 @@ describe('self-output across command and descriptor families is never a silent s
     ['sort /tmp/file', INPUT + 'x\nx\ny\n'],
     ['sort /tmp/file /tmp/file', INPUT + 'x\nx\nx\nx\ny\ny\n'],
   ]) {
-    it(`fully consumed input remains safe: ${command}`, () => {
-      const t = terminal()
-      assert.deepEqual(t.run(command + ' >>/tmp/file'), expected())
-      assert.deepEqual(t.run('cat /tmp/file'), expected(content))
+    it(`fully consumed input remains safe: ${command}`, async () => {
+      const t = await terminal()
+      assert.deepEqual(await t.run(command + ' >>/tmp/file'), expected())
+      assert.deepEqual(await t.run('cat /tmp/file'), expected(content))
     })
   }
 
-  it('observes reads even when an inherited file starts empty', () => {
-    const t = terminal()
-    assert.deepEqual(t.run('>/tmp/file'), expected())
-    gap(t, 'wc -c - - </tmp/file 2>/dev/null >>/tmp/file | cat', 'streaming self-output')
-    assert.deepEqual(t.run('cat /tmp/file'), expected())
+  it('observes reads even when an inherited file starts empty', async () => {
+    const t = await terminal()
+    assert.deepEqual(await t.run('>/tmp/file'), expected())
+    await gap(t, 'wc -c - - </tmp/file 2>/dev/null >>/tmp/file | cat', 'streaming self-output')
+    assert.deepEqual(await t.run('cat /tmp/file'), expected())
   })
 })
 
@@ -67,78 +67,78 @@ describe('diagnostics cannot modify a later input behind a command snapshot', ()
     'wc -c missing /tmp/file', 'tac missing /tmp/file',
     'grep missing missing - </tmp/file', 'wc -c missing - </tmp/file',
   ]) {
-    it(command, () => {
-      const t = terminal()
-      const r = gap(t, command + ' 2>>/tmp/file | cat', 'input modified by diagnostics')
+    it(command, async () => {
+      const t = await terminal()
+      const r = await gap(t, command + ' 2>>/tmp/file | cat', 'input modified by diagnostics')
       assert.equal(r.stderr, '')
       assert.equal(r.exitCode, 0)
-      assert.ok(t.run('cat /tmp/file').stdout.startsWith(INPUT))
+      assert.ok((await t.run('cat /tmp/file')).stdout.startsWith(INPUT))
     })
   }
 
-  it('suppressed grep errors do not modify the input', () => {
-    const t = terminal()
-    assert.deepEqual(t.run('grep -s missing missing /tmp/file 2>>/tmp/file'), expected('', 2))
-    assert.deepEqual(t.run('cat /tmp/file'), expected(INPUT))
+  it('suppressed grep errors do not modify the input', async () => {
+    const t = await terminal()
+    assert.deepEqual(await t.run('grep -s missing missing /tmp/file 2>>/tmp/file'), expected('', 2))
+    assert.deepEqual(await t.run('cat /tmp/file'), expected(INPUT))
   })
 
-  it('an unrelated diagnostic file does not block normal results', () => {
-    const t = terminal()
-    assert.deepEqual(t.run('grep x missing /tmp/file 2>/tmp/errors'), expected('/tmp/file:x\n/tmp/file:x\n', 2))
-    assert.deepEqual(t.run('cat /tmp/file'), expected(INPUT))
-    assert.match(t.run('cat /tmp/errors').stdout, /missing/u)
+  it('an unrelated diagnostic file does not block normal results', async () => {
+    const t = await terminal()
+    assert.deepEqual(await t.run('grep x missing /tmp/file 2>/tmp/errors'), expected('/tmp/file:x\n/tmp/file:x\n', 2))
+    assert.deepEqual(await t.run('cat /tmp/file'), expected(INPUT))
+    assert.match((await t.run('cat /tmp/errors')).stdout, /missing/u)
   })
 })
 
 describe('byte-backed writes reject unrepresentable text and preserve surrounding execution', () => {
   for (const redirect of ['>/tmp/file', '>>/tmp/file']) {
-    it(redirect, () => {
-      const t = terminal()
-      const result = t.run(`echo before; cat /repo/bad 2>/dev/null ${redirect}; echo after`)
+    it(redirect, async () => {
+      const t = await terminal()
+      const result = await t.run(`echo before; cat /repo/bad 2>/dev/null ${redirect}; echo after`)
       assert.equal(result.stdout, 'before\nafter\n')
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
       assert.deepEqual(result.unsupported.map((entry) => entry.detail), ['unpaired surrogate'])
-      assert.deepEqual(t.run('cat /tmp/file'), expected(redirect.startsWith('>>') ? INPUT : ''))
+      assert.deepEqual(await t.run('cat /tmp/file'), expected(redirect.startsWith('>>') ? INPUT : ''))
     })
   }
 
-  it('the actual Unicode replacement character remains valid file content', () => {
-    const t = terminal()
-    assert.deepEqual(t.run('cat /repo/replacement >/tmp/file; cat /tmp/file'), expected('\uFFFD'))
+  it('the actual Unicode replacement character remains valid file content', async () => {
+    const t = await terminal()
+    assert.deepEqual(await t.run('cat /repo/replacement >/tmp/file; cat /tmp/file'), expected('\uFFFD'))
   })
 
-  it('an in-place malformed replacement preserves the input and its backup name', () => {
-    const t = terminal()
-    const r = t.run(`sed -i.bak 's/x/\uD800/' /tmp/file 2>/dev/null | cat`)
+  it('an in-place malformed replacement preserves the input and its backup name', async () => {
+    const t = await terminal()
+    const r = await t.run(`sed -i.bak 's/x/\uD800/' /tmp/file 2>/dev/null | cat`)
     assert.equal(r.exitCode, 0)
     assert.equal(r.stderr, '')
     assert.deepEqual(r.unsupported.map((entry) => entry.detail), ['unpaired surrogate'])
-    assert.deepEqual(t.run('cat /tmp/file'), expected(INPUT))
-    assert.deepEqual(t.run('test -f /tmp/file.bak'), expected('', 1))
+    assert.deepEqual(await t.run('cat /tmp/file'), expected(INPUT))
+    assert.deepEqual(await t.run('test -f /tmp/file.bak'), expected('', 1))
   })
 })
 
 describe('closed stdout errors retain their ordered diagnostic events', () => {
-  it('rm reports its failed verbose output after removing the file', () => {
-    const t = terminal()
-    assert.deepEqual(t.run('rm -v /tmp/file 1>&-'), {
+  it('rm reports its failed verbose output after removing the file', async () => {
+    const t = await terminal()
+    assert.deepEqual(await t.run('rm -v /tmp/file 1>&-'), {
       ...expected('', 1), stderr: 'rm: write error: Bad file descriptor\n',
     })
-    assert.deepEqual(t.run('test -f /tmp/file'), expected('', 1))
+    assert.deepEqual(await t.run('test -f /tmp/file'), expected('', 1))
   })
 
-  it('a prior operand error survives alongside the write error', () => {
-    const t = terminal()
-    assert.deepEqual(t.run('rm -v /tmp/missing /tmp/file 1>&-'), {
+  it('a prior operand error survives alongside the write error', async () => {
+    const t = await terminal()
+    assert.deepEqual(await t.run('rm -v /tmp/missing /tmp/file 1>&-'), {
       ...expected('', 1), stderr: "rm: cannot remove '/tmp/missing': No such file or directory\nrm: write error: Bad file descriptor\n",
     })
   })
 
-  it('redirects the write error through the active stderr descriptor', () => {
-    const t = terminal()
-    assert.deepEqual(t.run('rm -v /tmp/file 1>&- 2>/tmp/errors'), expected('', 1))
-    assert.deepEqual(t.run('cat /tmp/errors'), expected('rm: write error: Bad file descriptor\n'))
+  it('redirects the write error through the active stderr descriptor', async () => {
+    const t = await terminal()
+    assert.deepEqual(await t.run('rm -v /tmp/file 1>&- 2>/tmp/errors'), expected('', 1))
+    assert.deepEqual(await t.run('cat /tmp/errors'), expected('rm: write error: Bad file descriptor\n'))
   })
 })
 
@@ -149,15 +149,15 @@ describe('external child commands report their own closed-output failure', () =>
     ["printf argument | xargs echo 1>&-", 123],
     ["printf argument | xargs xargs echo 1>&-", 123],
   ]) {
-    it(command, () => {
-      const t = terminal()
-      assert.deepEqual(t.run(command), { ...expected('', status), stderr: 'echo: write error: Bad file descriptor\n' })
+    it(command, async () => {
+      const t = await terminal()
+      assert.deepEqual(await t.run(command), { ...expected('', status), stderr: 'echo: write error: Bad file descriptor\n' })
     })
   }
 
-  it('a failed -exec predicate still permits an OR fallback without failing find', () => {
-    const t = terminal()
-    assert.deepEqual(t.run('find /repo/input -exec echo {} \\; -o -exec true \\; 1>&-'), {
+  it('a failed -exec predicate still permits an OR fallback without failing find', async () => {
+    const t = await terminal()
+    assert.deepEqual(await t.run('find /repo/input -exec echo {} \\; -o -exec true \\; 1>&-'), {
       ...expected(), stderr: 'echo: write error: Bad file descriptor\n',
     })
   })

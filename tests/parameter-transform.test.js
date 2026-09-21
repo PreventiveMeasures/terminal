@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 // match_upattern, pat_subst, parameter_brace_patsub, and quote_string_for_repl.
 // The upstream new-exp.tests/new-exp16.sub fixtures cover these same families.
 const expected = (stdout = '', exitCode = 0) => ({ stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [] })
-const check = (source, stdout, files = {}) => assert.deepEqual(createTerminal(files).run(source), expected(stdout), source)
+const check = async (source, stdout, files = {}) => assert.deepEqual(await createTerminal(files).run(source), expected(stdout), source)
 
 describe('scalar substring bounds and arithmetic', () => {
   for (const [expression, result] of [
@@ -19,7 +19,7 @@ describe('scalar substring bounds and arithmetic', () => {
     ['0x2:010', 'cdef'], ['2#10:2', 'cd'], ['~0', 'f'],
     ['9223372036854775807', ''], [' -9223372036854775808', ''],
   ]) {
-    it(expression, () => { check('x=abcdef; printf "%s" "${x:' + expression + '}"', result) })
+    it(expression, async () => { await check('x=abcdef; printf "%s" "${x:' + expression + '}"', result) })
   }
 
   for (const [source, stdout] of [
@@ -39,12 +39,12 @@ describe('scalar substring bounds and arithmetic', () => {
     ['x="a b c"; printf "<%s>" ${x:2} "${x:2}"', '<b><c><b c>'],
     ['x="*.txt"; printf "<%s>" ${x:0} "${x:0}"', '<a.txt><b.txt><*.txt>'],
   ]) {
-    it(source, () => { check(source, stdout, { 'a.txt': '', 'b.txt': '' }) })
+    it(source, async () => { await check(source, stdout, { 'a.txt': '', 'b.txt': '' }) })
   }
 
-  it('reports invalid negative lengths as ordinary errors and stops expansion', () => {
+  it('reports invalid negative lengths as ordinary errors and stops expansion', async () => {
     for (const expression of ['2:-5', '0:-7', '6:-1']) {
-      const actual = createTerminal({}).run('x=abcdef; printf "%s" "${x:' + expression + '}"; echo unexpected')
+      const actual = await createTerminal({}).run('x=abcdef; printf "%s" "${x:' + expression + '}"; echo unexpected')
       assert.equal(actual.stdout, '')
       assert.equal(actual.exitCode, 1)
       assert.match(actual.stderr, /substring expression < 0/u)
@@ -63,7 +63,7 @@ describe('scalar pattern replacement delimiters and matching', () => {
     ['#a/X', 'Xbcabc'], ['%c/X', 'abcabX'], ['#b/X', 'abcabc'], ['%b/X', 'abcabc'],
     ['#/pre', 'preabcabc'], ['%/post', 'abcabcpost'], ['*/*', '*'], ['/*/X', 'X'],
   ]) {
-    it(expression, () => { check('x=abcabc; printf "%s" "${x/' + expression + '}"', result) })
+    it(expression, async () => { await check('x=abcabc; printf "%s" "${x/' + expression + '}"', result) })
   }
 
   for (const [source, stdout] of [
@@ -91,7 +91,7 @@ describe('scalar pattern replacement delimiters and matching', () => {
     ['HOME=/agent; x=a; printf "%s" "${x/a/~}"', '/agent'],
     ['HOME=/agent; x=a; printf "%s" "${x/a/"~"}"', '~'],
   ]) {
-    it(source, () => { check(source, stdout) })
+    it(source, async () => { await check(source, stdout) })
   }
 })
 
@@ -102,7 +102,7 @@ describe('replacement ampersands retain inner quote and backslash semantics', ()
     [String.raw`"\&"`, String.raw`a\&c`], [String.raw`'\&'`, String.raw`a\&c`],
     [String.raw`\\`, String.raw`a\c`], [String.raw`\q`, 'aqc'], [String.raw`'\q'`, String.raw`a\qc`],
   ]) {
-    it(replacement, () => { check('x=abc; printf "%s" "${x/b/' + replacement + '}"', stdout) })
+    it(replacement, async () => { await check('x=abc; printf "%s" "${x/b/' + replacement + '}"', stdout) })
   }
 
   for (const [source, stdout] of [
@@ -114,7 +114,7 @@ describe('replacement ampersands retain inner quote and backslash semantics', ()
     ["x=abc; r='\\'; printf '%s' \"${x/b/$r\"&\"}\"", String.raw`a\bc`],
     ['x=abc; printf "%s" "${x//?/[&]}"', '[a][b][c]'],
   ]) {
-    it(source, () => { check(source, stdout) })
+    it(source, async () => { await check(source, stdout) })
   }
 })
 
@@ -129,15 +129,15 @@ describe('transforms evaluate selected operands in order', () => {
     ['printf 1 | { x=abc; printf "%s" "${x:$(cat):1}"; cat; }', 'b'],
     ['printf a | { x=abc; printf "%s" "${x/$(cat)/X}"; cat; }', 'Xbc'],
   ]) {
-    it(source, () => { check(source, stdout) })
+    it(source, async () => { await check(source, stdout) })
   }
 
-  it('retains ordinary and unsupported diagnostics from operand commands', () => {
-    const ordinary = createTerminal({}).run('x=abc; printf "%s" "${x/b/$(cat missing)}"')
+  it('retains ordinary and unsupported diagnostics from operand commands', async () => {
+    const ordinary = await createTerminal({}).run('x=abc; printf "%s" "${x/b/$(cat missing)}"')
     assert.equal(ordinary.stdout, 'ac')
     assert.match(ordinary.stderr, /missing: No such file/u)
     assert.deepEqual(ordinary.unsupported, [])
-    const unsupported = createTerminal({}).run('{ x=abc; printf "%s" "${x/b/$(unknown-command)}"; } 2>/dev/null | cat')
+    const unsupported = await createTerminal({}).run('{ x=abc; printf "%s" "${x/b/$(unknown-command)}"; } 2>/dev/null | cat')
     assert.equal(unsupported.stdout, 'ac')
     assert.equal(unsupported.stderr, '')
     assert.equal(unsupported.unsupported[0]?.command, 'unknown-command')
@@ -153,21 +153,21 @@ describe('unsupported scalar transform cases always reach diagnostics', () => {
     'x=café; printf "%s" "${x//?/X}"', 'x=abc; printf "%s" "${x/[[.a.]]/X}"',
     'x=abc; printf "%s" "${x/[a-é]/X}"',
   ]) {
-    it(source, () => {
-      const actual = createTerminal({}).run('{ ' + source + '; } 2>/dev/null | cat')
+    it(source, async () => {
+      const actual = await createTerminal({}).run('{ ' + source + '; } 2>/dev/null | cat')
       assert.equal(actual.stdout, '')
       assert.equal(actual.stderr, '')
       assert.ok(actual.unsupported.length > 0)
     })
   }
 
-  it('bounds excessive wildcard search and replacement output', () => {
+  it('bounds excessive wildcard search and replacement output', async () => {
     const term = createTerminal({})
     for (const source of [
       `x=${'a'.repeat(600)}; printf '%s' "\${x/*z/X}"`,
       `x=${'a'.repeat(5000)}; r='${'&'.repeat(5000)}'; printf '%s' "\${x/*/$r}"`,
     ]) {
-      const actual = term.run(source)
+      const actual = await term.run(source)
       assert.equal(actual.stdout, '')
       assert.ok(actual.unsupported.some((note) => /work limit/u.test(note.message)))
     }

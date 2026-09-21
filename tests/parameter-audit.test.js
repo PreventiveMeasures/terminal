@@ -6,17 +6,17 @@ import { unsupportedNote } from '../src/unsupported.js'
 
 describe('parameter names require a complete identifier', () => {
   for (const ending of ['\n', '\r', '\u2028', '\u2029']) {
-    it(`rejects trailing ${JSON.stringify(ending)} in a length expression`, () => {
+    it(`rejects trailing ${JSON.stringify(ending)} in a length expression`, async () => {
       assert.throws(() => parseParameter('#x' + ending), (error) => unsupportedNote(error)?.detail === '${')
-      const result = createTerminal({}).run('echo "${#x' + ending + '}"')
+      const result = await createTerminal({}).run('echo "${#x' + ending + '}"')
       assert.equal(result.stdout, '')
       assert.notEqual(result.exitCode, 0)
       assert.equal(result.unsupported[0]?.detail, '${')
     })
   }
 
-  it('continues to accept an escaped newline at the end of the name', () => {
-    const result = createTerminal({}).run('x=abc; echo "${#x\\\n}"')
+  it('continues to accept an escaped newline at the end of the name', async () => {
+    const result = await createTerminal({}).run('x=abc; echo "${#x\\\n}"')
     assert.equal(result.stdout, '3\n')
     assert.equal(result.stderr, '')
     assert.deepEqual(result.unsupported, [])
@@ -40,8 +40,8 @@ describe('parameter patterns preserve POSIX class syntax and quotes', () => {
     ["x='d]tail'; printf '%s' \"${x#[[':'digit:]]}\"","tail"],
     ["x=abc; p='[[:di\\git:]]'; printf '%s' \"${x#${p}}\"","abc"],
   ]) {
-    it(command, () => {
-      const result = createTerminal({}).run(command)
+    it(command, async () => {
+      const result = await createTerminal({}).run(command)
       assert.equal(result.stdout, stdout)
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
@@ -63,8 +63,8 @@ describe('parameter evaluation in heredocs and shell state', () => {
     ["unset IFS; printf \"<%s>\" \"${IFS+set}\" \"${IFS-fallback}\"","<><fallback>"],
     ["IFS=; printf \"<%s>\" \"${IFS+set}\" \"${IFS:-fallback}\"","<set><fallback>"],
   ]) {
-    it(command, () => {
-      const result = createTerminal({}).run(command)
+    it(command, async () => {
+      const result = await createTerminal({}).run(command)
       assert.equal(result.stdout, stdout)
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)
@@ -76,8 +76,8 @@ describe('parameter evaluation in heredocs and shell state', () => {
 describe('ANSI-C contents that would change quoted parameter boundaries', () => {
   for (const content of ["$'a}b'","$'a\\'b'"]) {
     for (const prefix of ['', 'x=kept; ']) {
-      it(`${prefix}quoted default ${content}`, () => {
-        const result = createTerminal({}).run(prefix + 'printf "%s" "${x:-' + content + '}"')
+      it(`${prefix}quoted default ${content}`, async () => {
+        const result = await createTerminal({}).run(prefix + 'printf "%s" "${x:-' + content + '}"')
         assert.equal(result.stdout, '')
         assert.notEqual(result.exitCode, 0)
         assert.ok(result.unsupported.some((entry) => entry.kind === 'feature'))
@@ -91,8 +91,8 @@ describe('ANSI-C contents that would change quoted parameter boundaries', () => 
     ["x='a}brest'; printf '%s' \"${x#$'a}b'}\"","rest"],
     ["x=\"a'brest\"; printf '%s' \"${x#$'a\\'b'}\"","rest"],
   ]) {
-    it(command, () => {
-      const result = createTerminal({}).run(command)
+    it(command, async () => {
+      const result = await createTerminal({}).run(command)
       assert.equal(result.stdout, stdout)
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)

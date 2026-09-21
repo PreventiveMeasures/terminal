@@ -132,7 +132,7 @@ function start(session) {
   })
 }
 
-function evaluate(session, server, input, callback) {
+async function evaluate(session, server, input, callback) {
   // Lines already buffered from a pipe still arrive after a close.
   if (session.closing) return callback(null)
   // In a terminal, readline returns a multiline entry with its lines joined by
@@ -151,7 +151,7 @@ function evaluate(session, server, input, callback) {
   const parsed = attempt(() => parse(line))
   session.unfinished = parsed?.incomplete ? parsed.error : null
   if (session.unfinished) return callback(new repl.Recoverable(new Error(session.unfinished)))
-  const result = attempt(() => session.terminal.run(line))
+  const result = await attempt(() => session.terminal.run(line))
   if (!result) return callback(null)
   session.exitCode = result.exitCode
   report(session, result)
@@ -215,9 +215,14 @@ function prompt(session, cwd) {
 
 // run() and complete() report their own failures; anything thrown is a bug in
 // the terminal itself, which a session being used to find bugs should show.
+// A line is waited for here, where whatever it answers with — a result or a
+// bug — is reported the same way either way.
 const attempt = (call) => {
-  try { return call() } catch (e) { note(styleText('red', `INTERNAL: ${e?.stack ?? e}`, { stream: process.stderr })); return null }
+  try { return unwrap(call()) } catch (e) { return internal(e) }
 }
+
+const unwrap = (answer) => (typeof answer?.then === 'function' ? answer.then(null, internal) : answer)
+const internal = (e) => { note(styleText('red', `INTERNAL: ${e?.stack ?? e}`, { stream: process.stderr })); return null }
 
 const decode = (decoder, data) => { try { return decoder.decode(data) } catch { return null } }
 const fail = (message) => { process.stderr.write(message); process.exit(2) }

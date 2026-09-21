@@ -12,29 +12,29 @@ const terminal = (program, files = {}) => createTerminal({ program, input: 'aAa\
 
 describe('sed write filenames in script files', () => {
   for (const prefix of ['w', 's/a/X/w']) {
-    it(`uses the filename before NUL for ${prefix}`, () => {
+    it(`uses the filename before NUL for ${prefix}`, async () => {
       const t = terminal(`${prefix} /tmp/out\0ignored; p\np`)
       const text = prefix === 'w' ? 'aAa\n' : 'XAa\n'
-      assert.deepEqual(t.run('sed -nf /src/program /src/input'), expected(text))
-      assert.deepEqual(t.run('cat /tmp/out'), expected(text))
+      assert.deepEqual(await t.run('sed -nf /src/program /src/input'), expected(text))
+      assert.deepEqual(await t.run('cat /tmp/out'), expected(text))
     })
 
-    it(`rejects an empty C-string filename for ${prefix}`, () => {
+    it(`rejects an empty C-string filename for ${prefix}`, async () => {
       const t = terminal(`${prefix} \0/tmp/out`)
-      assert.deepEqual(t.run('sed -f /src/program /src/input'), expected('', 'sed: missing filename in r/R/w/W commands\n', 1))
-      assert.deepEqual(t.run('test -e /tmp/out'), expected('', '', 1))
+      assert.deepEqual(await t.run('sed -f /src/program /src/input'), expected('', 'sed: missing filename in r/R/w/W commands\n', 1))
+      assert.deepEqual(await t.run('test -e /tmp/out'), expected('', '', 1))
     })
   }
 
-  it('shares the resulting filename between standalone and substitution writes', () => {
+  it('shares the resulting filename between standalone and substitution writes', async () => {
     const t = terminal('w /tmp/out\0first\ns/a/X/w /tmp/out\0second')
-    assert.deepEqual(t.run('sed -nf /src/program /src/input'), expected())
-    assert.deepEqual(t.run('cat /tmp/out'), expected('aAa\nXAa\n'))
+    assert.deepEqual(await t.run('sed -nf /src/program /src/input'), expected())
+    assert.deepEqual(await t.run('cat /tmp/out'), expected('aAa\nXAa\n'))
   })
 
-  it('recognizes the standard-output special file before a NUL suffix', () => {
+  it('recognizes the standard-output special file before a NUL suffix', async () => {
     const t = terminal('w /dev/stdout\0suffix')
-    assert.deepEqual(t.run('sed -nf /src/program /src/input'), expected('aAa\n'))
+    assert.deepEqual(await t.run('sed -nf /src/program /src/input'), expected('aAa\n'))
   })
 })
 
@@ -51,30 +51,30 @@ describe('sed case-insensitive previous-regex state', () => {
     ['s/a/X/i;s/A/Y/', 'XYa\n'],
   ]
   for (const [program, stdout] of cases) {
-    it(program, () => assert.deepEqual(terminal(program).run('sed -f /src/program /src/input'), expected(stdout)))
+    it(program, async () => assert.deepEqual(await terminal(program).run('sed -f /src/program /src/input'), expected(stdout)))
   }
 
-  it('checks unavailable captures on the first substitution reuse of an address', () => {
+  it('checks unavailable captures on the first substitution reuse of an address', async () => {
     const t = terminal('/a/Is//\\1/')
-    assert.deepEqual(t.run('sed -f /src/program /src/input'), expected('', 'sed: invalid reference \\1 in replacement\n', 1))
+    assert.deepEqual(await t.run('sed -f /src/program /src/input'), expected('', 'sed: invalid reference \\1 in replacement\n', 1))
   })
 
-  it('does not validate a previous regex on a skipped substitution', () => {
+  it('does not validate a previous regex on a skipped substitution', async () => {
     const t = terminal('/z/Is//\\1/')
-    assert.deepEqual(t.run('sed -f /src/program /src/input'), expected('aAa\n'))
+    assert.deepEqual(await t.run('sed -f /src/program /src/input'), expected('aAa\n'))
   })
 })
 
 describe('copy, hold-space editing, and explicit writes compose', () => {
   for (const ending of ['', '\n']) {
-    it(`preserves the final terminator ${JSON.stringify(ending)}`, () => {
+    it(`preserves the final terminator ${JSON.stringify(ending)}`, async () => {
       const t = terminal('', { input: 'One\nTWO\nTHREE' + ending })
-      assert.deepEqual(t.run('cp /src/input /tmp/input'), expected())
-      assert.deepEqual(t.run("sed -i -e '1h;1!H;$!d;g;s/two/X/Ig' -e 'w /tmp/snapshot' /tmp/input"), expected())
-      assert.deepEqual(t.run('cat /tmp/input'), expected('One\nX\nTHREE' + ending))
-      assert.deepEqual(t.run('cat /tmp/snapshot'), expected('One\nX\nTHREE' + ending))
-      assert.deepEqual(t.run("sed -n 'N;P;D' /tmp/input"), expected('One\nX\n'))
-      assert.deepEqual(t.run('cat /src/input'), expected('One\nTWO\nTHREE' + ending))
+      assert.deepEqual(await t.run('cp /src/input /tmp/input'), expected())
+      assert.deepEqual(await t.run("sed -i -e '1h;1!H;$!d;g;s/two/X/Ig' -e 'w /tmp/snapshot' /tmp/input"), expected())
+      assert.deepEqual(await t.run('cat /tmp/input'), expected('One\nX\nTHREE' + ending))
+      assert.deepEqual(await t.run('cat /tmp/snapshot'), expected('One\nX\nTHREE' + ending))
+      assert.deepEqual(await t.run("sed -n 'N;P;D' /tmp/input"), expected('One\nX\n'))
+      assert.deepEqual(await t.run('cat /src/input'), expected('One\nTWO\nTHREE' + ending))
     })
   }
 })

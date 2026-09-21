@@ -14,8 +14,8 @@ const FILES = {
 const READ_ERROR = 'cat: missing: No such file or directory\n'
 const NUL_WARNING = 'warning: command substitution: ignored null byte in input\n'
 
-function check(command, stdout, exitCode = 0, stderr = '', notes = []) {
-  assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd: '/', notes, unsupported: [] }, command)
+async function check(command, stdout, exitCode = 0, stderr = '', notes = []) {
+  assert.deepEqual(await createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd: '/', notes, unsupported: [] }, command)
 }
 
 describe('command substitution — Bash file shorthand', () => {
@@ -31,10 +31,10 @@ describe('command substitution — Bash file shorthand', () => {
   ]
   for (const [command, stdout] of cases) it(command, () => check(command, stdout))
 
-  it('reports missing or directory input without marking it unsupported', () => {
-    check('x=$(<missing)', '', 1, 'error: missing: No such file or directory\n')
-    check('x=$(<dir)', '', 1, 'error: dir: Is a directory\n')
-    check('echo "$(<missing)"', '\n', 0, 'error: missing: No such file or directory\n')
+  it('reports missing or directory input without marking it unsupported', async () => {
+    await check('x=$(<missing)', '', 1, 'error: missing: No such file or directory\n')
+    await check('x=$(<dir)', '', 1, 'error: dir: Is a directory\n')
+    await check('echo "$(<missing)"', '\n', 0, 'error: missing: No such file or directory\n')
   })
 })
 
@@ -78,8 +78,8 @@ describe('command substitution — expansion order and stderr', () => {
   ]
   for (const [command, stdout, exitCode, stderr, notes] of cases) it(command, () => check(command, stdout, exitCode, stderr, notes))
 
-  it('keeps unsupported metadata even when an enclosing group suppresses assignment stderr', () => {
-    const r = createTerminal(FILES).run('{ x=$(grep --unknown x input); } 2>/dev/null')
+  it('keeps unsupported metadata even when an enclosing group suppresses assignment stderr', async () => {
+    const r = await createTerminal(FILES).run('{ x=$(grep --unknown x input); } 2>/dev/null')
     assert.deepEqual(r, {
       stdout: '', stderr: '', exitCode: 2, cwd: '/',
       notes: [], unsupported: [{ kind: 'option', command: 'grep', detail: '--unknown', message: 'grep: unknown option: --unknown' }],
@@ -101,5 +101,5 @@ describe('command substitution — NUL output', () => {
     ['x=$(cat nul) 2>/dev/null; echo "$x"', 'ab\nc\n', NUL_WARNING, 3],
     ['echo "$(cat nul >&2)"', '\n', FILES.nul, 0],
   ]
-  for (const [command, stdout, stderr, count] of cases) it(command, () => check(command, stdout, 0, stderr, count ? [`command substitution: discarded ${count} NUL ${count === 1 ? 'byte' : 'bytes'}.`] : []))
+  for (const [command, stdout, stderr, count] of cases) it(command, async () => await check(command, stdout, 0, stderr, count ? [`command substitution: discarded ${count} NUL ${count === 1 ? 'byte' : 'bytes'}.`] : []))
 })

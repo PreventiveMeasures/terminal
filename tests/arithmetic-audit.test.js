@@ -58,8 +58,8 @@ describe('arithmetic skipped-branch evaluation', () => {
   }
 
   for (const expression of ['1 || a[0]', '1 ? 2 : a[1]=3', '1 || 08', '1 || (a=)', '1 ? 2 : 3=4']) {
-    it('does not conceal excluded syntax: ' + expression, () => {
-      const result = createTerminal({}).run(`echo $(( ${expression} )) 2>/dev/null | cat`)
+    it('does not conceal excluded syntax: ' + expression, async () => {
+      const result = await createTerminal({}).run(`echo $(( ${expression} )) 2>/dev/null | cat`)
       assert.equal(result.stdout, '')
       assert.ok(result.unsupported.some(({ detail }) => detail.startsWith('arithmetic ')), JSON.stringify(result))
     })
@@ -76,8 +76,8 @@ describe('arithmetic source-defined boundaries', () => {
   }
 
   for (const expression of ['++7', '--7', '4+++a', '4---a', '+--+!!0', '1<<-1', '1>>64']) {
-    it('diagnoses intentionally excluded Bash syntax or platform-dependent shifts: ' + expression, () => {
-      const result = createTerminal({}).run(`echo $(( ${expression} ))`)
+    it('diagnoses intentionally excluded Bash syntax or platform-dependent shifts: ' + expression, async () => {
+      const result = await createTerminal({}).run(`echo $(( ${expression} ))`)
       assert.equal(result.stdout, '')
       assert.notEqual(result.exitCode, 0)
       assert.ok(result.unsupported.some(({ detail }) => detail.startsWith('arithmetic ')))
@@ -93,8 +93,8 @@ describe('unmodeled Bash state cannot silently become zero or unset', () => {
       ['echo ${' + name + ':-fallback}', '$' + name],
       [`[[ -v ${name} ]]`, '$' + name],
     ]) {
-      it(command, () => {
-        const result = createTerminal({}).run(command)
+      it(command, async () => {
+        const result = await createTerminal({}).run(command)
         assert.equal(result.stdout, '')
         assert.notEqual(result.exitCode, 0)
         assert.ok(result.stderr.includes(name))
@@ -111,8 +111,8 @@ describe('unmodeled Bash state cannot silently become zero or unset', () => {
     ['{ echo ${SHLVL:-0}; } 2>/dev/null | cat', '$SHLVL'],
     ['[[ -v HISTCMD ]] 2>/dev/null | cat', '$HISTCMD'],
   ]) {
-    it('keeps diagnostics after hidden stderr and successful pipeline: ' + command, () => {
-      const result = createTerminal({}).run(command)
+    it('keeps diagnostics after hidden stderr and successful pipeline: ' + command, async () => {
+      const result = await createTerminal({}).run(command)
       assert.equal(result.stdout, '')
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)

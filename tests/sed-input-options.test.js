@@ -24,14 +24,14 @@ const FILES = {
   '-z': 's/a/A/',
 }
 
-function check(command, stdout, files = FILES) {
-  assert.deepEqual(createTerminal(files).run(command), {
+async function check(command, stdout, files = FILES) {
+  assert.deepEqual(await createTerminal(files).run(command), {
     stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
   }, command)
 }
 
-function ordinaryError(command, exitCode, pattern) {
-  const actual = createTerminal(FILES).run(command)
+async function ordinaryError(command, exitCode, pattern) {
+  const actual = await createTerminal(FILES).run(command)
   assert.equal(actual.stdout, '')
   assert.equal(actual.exitCode, exitCode)
   assert.match(actual.stderr, pattern)
@@ -64,36 +64,36 @@ describe('sed script files preserve source order and script boundaries', () => {
   for (const [command, stdout] of cases) it(command, () => check(command, stdout))
 
   for (const path of ['missing-script', 'scripts']) {
-    it(`script read failure aborts before processing input: ${path}`, () => {
-      ordinaryError(`sed -f scripts/replace -f ${path} input`, 4, new RegExp(path, 'u'))
+    it(`script read failure aborts before processing input: ${path}`, async () => {
+      await ordinaryError(`sed -f scripts/replace -f ${path} input`, 4, new RegExp(path, 'u'))
     })
   }
-  it('keeps malformed script contents an ordinary syntax error', () => {
-    ordinaryError('sed -f scripts/broken input', 1, /unterminated/u)
+  it('keeps malformed script contents an ordinary syntax error', async () => {
+    await ordinaryError('sed -f scripts/broken input', 1, /unterminated/u)
   })
-  it('does not combine incomplete commands across script sources', () => {
-    ordinaryError("sed -f scripts/broken -e '/A/' input", 1, /unterminated/u)
+  it('does not combine incomplete commands across script sources', async () => {
+    await ordinaryError("sed -f scripts/broken -e '/A/' input", 1, /unterminated/u)
   })
   for (const option of ['-f', '--file']) {
-    it(`missing ${option} argument is an ordinary option error`, () => {
-      ordinaryError('sed ' + option, 1, /requires an argument/u)
+    it(`missing ${option} argument is an ordinary option error`, async () => {
+      await ordinaryError('sed ' + option, 1, /requires an argument/u)
     })
   }
   for (const option of ['--null-data=value', '--separate=value', '--quiet=value']) {
-    it(`rejects an argument supplied to ${option}`, () => {
-      ordinaryError(`sed ${option} -f scripts/replace input`, 1, /doesn't allow an argument/u)
+    it(`rejects an argument supplied to ${option}`, async () => {
+      await ordinaryError(`sed ${option} -f scripts/replace input`, 1, /doesn't allow an argument/u)
     })
   }
-  it('attributes unsupported script contents to sed rather than -f', () => {
+  it('attributes unsupported script contents to sed rather than -f', async () => {
     const terminal = createTerminal(FILES)
-    const actual = terminal.run('sed -f scripts/unsupported input')
+    const actual = await terminal.run('sed -f scripts/unsupported input')
     assert.equal(actual.exitCode, 1)
     assert.equal(actual.stdout, '')
     assert.deepEqual(actual.unsupported.map(({ kind, command, detail }) => ({ kind, command, detail })), [
       { kind: 'feature', command: 'sed', detail: 'script' },
     ])
     assert.equal(actual.stderr, actual.unsupported[0].message + '\n')
-    const hidden = terminal.run('sed -f scripts/unsupported input 2>/dev/null | cat')
+    const hidden = await terminal.run('sed -f scripts/unsupported input 2>/dev/null | cat')
     assert.equal(hidden.stderr, '')
     assert.equal(hidden.exitCode, 0)
     assert.deepEqual(hidden.unsupported, actual.unsupported)
@@ -169,8 +169,8 @@ describe('sed separates file addresses and active ranges', () => {
   ]
   for (const [command, stdout] of cases) it(command, () => check(command, stdout))
 
-  it('does not lose per-file state resets when an input cannot be opened', () => {
-    const actual = createTerminal(FILES).run("sed -sn '$p' first missing second")
+  it('does not lose per-file state resets when an input cannot be opened', async () => {
+    const actual = await createTerminal(FILES).run("sed -sn '$p' first missing second")
     assert.equal(actual.stdout, 'b\nd\n')
     assert.equal(actual.exitCode, 2)
     assert.match(actual.stderr, /missing: No such file or directory/u)

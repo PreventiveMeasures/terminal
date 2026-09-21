@@ -3,16 +3,16 @@ import { describe, it } from 'node:test'
 
 import { createTerminal } from '@preventive/terminal'
 
-function check(program, stdout, files = {}, operands = '', exitCode = 0) {
+async function check(program, stdout, files = {}, operands = '', exitCode = 0) {
   const terminal = createTerminal({ 'program.awk': program, ...files })
-  assert.deepEqual(terminal.run(`awk -f program.awk ${operands}`), {
+  assert.deepEqual(await terminal.run(`awk -f program.awk ${operands}`), {
     stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [],
   })
 }
 
 describe('awk runtime optimization regressions', () => {
-  it('resolves names in each function frame and restores recursive parameters', () => {
-    check(`
+  it('resolves names in each function frame and restores recursive parameters', async () => {
+    await check(`
       function globalValue() { return value }
       function localValue(value) { return value ":" globalValue() }
       function recurse(value) {
@@ -27,8 +27,8 @@ describe('awk runtime optimization regressions', () => {
     `, 'one:global two:global\n2:1:leaf:global:1:2 global\n')
   })
 
-  it('accepts scalar and array arguments on separate calls to the same function', () => {
-    check(`
+  it('accepts scalar and array arguments on separate calls to the same function', async () => {
+    await check(`
       function size(value) { return length(value) }
       BEGIN {
         values[1] = "first"; values[2] = "second"
@@ -37,8 +37,8 @@ describe('awk runtime optimization regressions', () => {
     `, '3 2 5 0\n')
   })
 
-  it('shares an initially untyped array through separate parameter references', () => {
-    check(`
+  it('shares an initially untyped array through separate parameter references', async () => {
+    await check(`
       function seed(a) { a["x"] = 1 }
       function forward(a, b) {
         seed(a)
@@ -56,8 +56,8 @@ describe('awk runtime optimization regressions', () => {
     `, '3 3\n1 2 3\n3 3\n3 2\n')
   })
 
-  it('evaluates incrementing array target subscripts exactly once', () => {
-    check(`
+  it('evaluates incrementing array target subscripts exactly once', async () => {
+    await check(`
       function key() { calls++; return "row" }
       BEGIN {
         i = 1; values[1] = 10; values[2] = 20
@@ -70,8 +70,8 @@ describe('awk runtime optimization regressions', () => {
     `, '3 13 21 2 1 6\n')
   })
 
-  it('preserves integer and numeric-string keys while CONVFMT changes fractional keys', () => {
-    check(`
+  it('preserves integer and numeric-string keys while CONVFMT changes fractional keys', async () => {
+    await check(`
       BEGIN {
         CONVFMT = "%.1f"
         values[-0] = "zero"
@@ -92,8 +92,8 @@ describe('awk runtime optimization regressions', () => {
     `, 'zero safe large\nzero safe large\nfirst second\nspelled numeric 1\n', { numbers: '01\n' }, 'numbers')
   })
 
-  it('creates missing array entries without reordering repeated undefined reads', () => {
-    check(`
+  it('creates missing array entries without reordering repeated undefined reads', async () => {
+    await check(`
       BEGIN {
         values["first"]; values["second"]; values["third"] = 3
         values["first"]; values["second"]
@@ -104,8 +104,8 @@ describe('awk runtime optimization regressions', () => {
     `, '4 [first][second][third][new] 0 4\n')
   })
 
-  it('rebuilds records after compound field and NF updates', () => {
-    check(`
+  it('rebuilds records after compound field and NF updates', async () => {
+    await check(`
       BEGIN {
         $0 = "10 20 30"; OFS = ":"; i = 1
         $(i++) += 5
@@ -119,8 +119,8 @@ describe('awk runtime optimization regressions', () => {
     `, '15:21:30:3:3\n15:21:2\n[15:21::]:4\n')
   })
 
-  it('unwinds nested function parameters across next, nextfile, and exit', () => {
-    check(`
+  it('unwinds nested function parameters across next, nextfile, and exit', async () => {
+    await check(`
       function inner(flag, tag) {
         if (flag == "skip") next
         if (flag == "file") nextfile

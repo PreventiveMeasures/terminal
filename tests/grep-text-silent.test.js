@@ -19,8 +19,8 @@ const FILTER_NOTES = [
   'grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/dir/two.js".',
 ]
 
-function check(command, stdout, exitCode = 0, stderr = '', files = FILES, notes = []) {
-  assert.deepEqual(createTerminal(files).run(command), {
+async function check(command, stdout, exitCode = 0, stderr = '', files = FILES, notes = []) {
+  assert.deepEqual(await createTerminal(files).run(command), {
     stdout, stderr, exitCode, cwd: '/', notes, unsupported: [],
   }, command)
 }
@@ -45,30 +45,30 @@ describe('grep — force binary input to text', () => {
   ]
   for (const [command, stdout, notes] of cases) it(command, () => check(command, stdout, 0, '', FILES, notes))
 
-  it('retains ordinary no-match status when binary input is treated as text', () => {
-    check('grep -a absent binary', '', 1)
-    check('grep -aq absent binary', '', 1)
+  it('retains ordinary no-match status when binary input is treated as text', async () => {
+    await check('grep -a absent binary', '', 1)
+    await check('grep -aq absent binary', '', 1)
   })
 
-  it('processes NUL beyond the binary-detection buffer limit', () => {
+  it('processes NUL beyond the binary-detection buffer limit', async () => {
     const files = { binary: 'hit\n' + 'x'.repeat(100000) + '\0\n' }
-    check('grep -am1 hit binary', 'hit\n', 0, '', files)
-    check('grep -ac . binary', '2\n', 0, '', files)
+    await check('grep -am1 hit binary', 'hit\n', 0, '', files)
+    await check('grep -ac . binary', '2\n', 0, '', files)
   })
 
   for (const options of ['-Ia', '-I -a', '-I --text', '-aIa', '--text -I -a']) {
-    it(`the last text option wins: ${options}`, () => {
-      check(`grep ${options} hit binary`, 'hit\0tail\nhit\0last\n')
-      check(`grep ${options} -q hit binary`, '')
+    it(`the last text option wins: ${options}`, async () => {
+      await check(`grep ${options} hit binary`, 'hit\0tail\nhit\0last\n')
+      await check(`grep ${options} -q hit binary`, '')
     })
   }
 
   for (const options of ['-aI', '-a -I', '--text -I', '-IaI']) {
-    it(`the last binary exclusion wins: ${options}`, () => {
-      check(`grep ${options} hit binary`, '', 1, '', FILES, BINARY_NOTES)
-      check(`grep ${options} -q hit binary`, '', 1, '', FILES, BINARY_NOTES)
-      check(`grep ${options} -c hit binary`, '0\n', 1, '', FILES, BINARY_NOTES)
-      check(`grep ${options} -L hit binary`, 'binary\n', 1, '', FILES, BINARY_NOTES)
+    it(`the last binary exclusion wins: ${options}`, async () => {
+      await check(`grep ${options} hit binary`, '', 1, '', FILES, BINARY_NOTES)
+      await check(`grep ${options} -q hit binary`, '', 1, '', FILES, BINARY_NOTES)
+      await check(`grep ${options} -c hit binary`, '0\n', 1, '', FILES, BINARY_NOTES)
+      await check(`grep ${options} -L hit binary`, 'binary\n', 1, '', FILES, BINARY_NOTES)
     })
   }
 })
@@ -95,14 +95,14 @@ describe('grep — suppress input read errors', () => {
   ]
   for (const [command, stdout, exitCode, notes] of cases) it(command, () => check(command, stdout, exitCode, '', FILES, notes))
 
-  it('leaves read errors visible unless suppression was requested', () => {
-    check('grep -a hit missing binary', 'binary:hit\0tail\nbinary:hit\0last\n', 2,
+  it('leaves read errors visible unless suppression was requested', async () => {
+    await check('grep -a hit missing binary', 'binary:hit\0tail\nbinary:hit\0last\n', 2,
       'grep: missing: No such file or directory\n')
   })
 
-  it('does not suppress invalid-pattern or invalid-option-argument errors', () => {
+  it('does not suppress invalid-pattern or invalid-option-argument errors', async () => {
     for (const command of ["grep -s '[' good", 'grep -s -m-1 hit good', 'grep --no-messages --text=yes hit good']) {
-      const result = createTerminal(FILES).run(command)
+      const result = await createTerminal(FILES).run(command)
       assert.equal(result.stdout, '', command)
       assert.equal(result.exitCode, 2, command)
       assert.match(result.stderr, /^grep: .+\n$/u, command)
@@ -110,7 +110,7 @@ describe('grep — suppress input read errors', () => {
     }
   })
 
-  it('does not suppress unsupported options, regex features, binary behavior, or locale diagnostics', () => {
+  it('does not suppress unsupported options, regex features, binary behavior, or locale diagnostics', async () => {
     const gaps = [
       ['grep -s --unknown hit good', 'option', '--unknown'],
       [String.raw`grep -s '\d' good`, 'feature', 'regex escape'],
@@ -120,7 +120,7 @@ describe('grep — suppress input read errors', () => {
       ['grep -sq hit missing binary', 'feature', 'binary input'],
     ]
     for (const [command, kind, detail] of gaps) {
-      const result = createTerminal(FILES).run(command)
+      const result = await createTerminal(FILES).run(command)
       assert.equal(result.stdout, '', command)
       assert.equal(result.exitCode, 2, command)
       assert.match(result.stderr, /^grep: .+\n$/u, command)
@@ -128,8 +128,8 @@ describe('grep — suppress input read errors', () => {
     }
   })
 
-  it('keeps unsupported metadata through stderr redirection and a successful following stage', () => {
-    const result = createTerminal(FILES).run("grep -asi '\\(x\\)\\1' unicode 2>/dev/null | true")
+  it('keeps unsupported metadata through stderr redirection and a successful following stage', async () => {
+    const result = await createTerminal(FILES).run("grep -asi '\\(x\\)\\1' unicode 2>/dev/null | true")
     const message = 'grep: case-insensitive matching with backreferences on non-ASCII input is not supported'
     assert.deepEqual(result, {
       stdout: '', stderr: '', exitCode: 0, cwd: '/',

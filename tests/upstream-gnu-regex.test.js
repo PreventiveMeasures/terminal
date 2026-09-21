@@ -83,18 +83,18 @@ describe('Spencer portable vectors through GNU grep syntax', () => {
     if (pattern.includes('\n') || input.includes('\n')) continue
     const modes = v.flags.includes('&') ? ['', 'E'] : [v.flags.includes('b') ? '' : v.flags.includes('m') ? 'F' : 'E']
     for (const mode of modes) {
-      it(`line ${v.line}, ${mode || 'BRE'}: ${v.pattern}`, () => {
+      it(`line ${v.line}, ${mode || 'BRE'}: ${v.pattern}`, async () => {
         const terminal = createTerminal({ input: input + '\n' })
         const command = `grep -a${mode}${v.flags.includes('i') ? 'i' : ''} -e ${quote(pattern)} input`
         const gap = GREP_GAPS.get(v.line)
         const applies = gap && (mode === 'E' || gap !== 'GNU regex syntax')
-        if (applies) { checkGap(terminal.run(command), gap); return }
+        if (applies) { checkGap(await terminal.run(command), gap); return }
         const span = expectedSpan(v)
-        assert.deepEqual(terminal.run(command), result(span ? input + '\n' : '', span ? 0 : 1))
+        assert.deepEqual(await terminal.run(command), result(span ? input + '\n' : '', span ? 0 : 1))
         if (!span || span.start === span.end || /\\[1-9]/u.test(pattern)) return
         // First nonempty extent isolates the upstream oracle even when grep -o
         // emits additional nonoverlapping matches from the same selected line.
-        const only = terminal.run(command.replace('grep ', 'grep -o ') + ' | head -1')
+        const only = await terminal.run(command.replace('grep ', 'grep -o ') + ' | head -1')
         const total = REPEATED_MATCHES.get(v.line)
         const notes = total ? [`head: selected 1 of ${total} lines from standard input.`] : []
         assert.deepEqual(only, result(input.slice(span.start, span.end) + '\n', 0, notes))
@@ -105,24 +105,24 @@ describe('Spencer portable vectors through GNU grep syntax', () => {
 
 describe('Spencer ERE vectors through AWK match and boolean matching', () => {
   for (const v of PORTABLE.filter((entry) => !/[bm]/u.test(entry.flags))) {
-    it(`line ${v.line}: ${v.pattern}`, () => {
+    it(`line ${v.line}: ${v.pattern}`, async () => {
       const input = decode(v.input), pattern = decode(v.pattern), span = expectedSpan(v)
       const program = `BEGIN { IGNORECASE=${v.flags.includes('i') ? 1 : 0}; s=${JSON.stringify(input)}; r=${JSON.stringify(pattern)}; print (s ~ r), match(s,r), RLENGTH }`
       const stdout = span ? `1 ${span.start + 1} ${span.end - span.start}\n` : '0 0 -1\n'
-      assert.deepEqual(createTerminal({}).run('awk ' + quote(program)), result(stdout))
+      assert.deepEqual(await createTerminal({}).run('awk ' + quote(program)), result(stdout))
     })
   }
 })
 
 describe('Spencer captures preserve their extent or diagnose unsupported ties', () => {
   for (const v of PORTABLE.filter((entry) => entry.captures && !/[bm]/u.test(entry.flags))) {
-    it(`line ${v.line}: ${v.pattern}`, () => {
+    it(`line ${v.line}: ${v.pattern}`, async () => {
       const input = decode(v.input), span = expectedSpan(v)
       const re = new AwkRegex(decode(v.pattern), v.flags.includes('i'))
       if (re.captureShape.unsafe) {
         assert.throws(() => re.groups(input, span.start, span.end), (error) => error.gap === 'regex capture semantics')
         const program = `BEGIN { print gensub(${JSON.stringify(decode(v.pattern))}, ${JSON.stringify('\\1')}, 1, ${JSON.stringify(input)}) }`
-        checkGap(createTerminal({}).run('awk ' + quote(program)), 'regex capture semantics')
+        checkGap(await createTerminal({}).run('awk ' + quote(program)), 'regex capture semantics')
         return
       }
       const found = re.groups(input, span.start, span.end)
@@ -147,8 +147,8 @@ describe('Spencer compilation errors shared with GNU grep', () => {
   for (const v of VECTORS.filter((entry) => entry.flags.includes('C') && SHARED_ERRORS.has(entry.input))) {
     const modes = v.flags.includes('&') ? ['', 'E'] : [v.flags.includes('b') ? '' : 'E']
     for (const mode of modes) {
-      it(`line ${v.line}, ${mode || 'BRE'}: ${v.pattern}`, () => {
-        const actual = createTerminal({ input: 'abc\n' }).run(`grep -a${mode} -e ${quote(decode(v.pattern))} input`)
+      it(`line ${v.line}, ${mode || 'BRE'}: ${v.pattern}`, async () => {
+        const actual = await createTerminal({ input: 'abc\n' }).run(`grep -a${mode} -e ${quote(decode(v.pattern))} input`)
         assert.equal(actual.stdout, '')
         assert.equal(actual.exitCode, 2)
         assert.notEqual(actual.stderr, '')
@@ -188,39 +188,39 @@ const REGRESSIONS = [
 
 describe('GNU regex regressions exposed by the upstream audit', () => {
   for (const [command, input, stdout] of REGRESSIONS) {
-    it(command, () => {
-      assert.deepEqual(createTerminal({ input }).run(command), result(stdout))
+    it(command, async () => {
+      assert.deepEqual(await createTerminal({ input }).run(command), result(stdout))
     })
   }
   for (const pattern of [String.raw`(a)*\1`, String.raw`(a)?\1`, String.raw`(a)|b\1`, String.raw`((a)?b)+\2`, String.raw`^(a*)+\1$`, String.raw`^(a*){2}\1$`]) {
-    it(`diagnoses conditional reference: ${pattern}`, () => {
-      checkGap(createTerminal({ input: 'a\nb\n' }).run(`grep -E -e ${quote(pattern)} input`), 'conditional backreference')
+    it(`diagnoses conditional reference: ${pattern}`, async () => {
+      checkGap(await createTerminal({ input: 'a\nb\n' }).run(`grep -E -e ${quote(pattern)} input`), 'conditional backreference')
     })
   }
   for (const pattern of [String.raw`(a)\1]`, String.raw`a{z}(b)\1`, String.raw`(a)\1{`]) {
-    it(`diagnoses GNU syntax gaps beside valid references: ${pattern}`, () => {
-      checkGap(createTerminal({ input: 'aa]\nbb\naa{\n' }).run(`grep -E -e ${quote(pattern)} input`), 'GNU regex syntax')
+    it(`diagnoses GNU syntax gaps beside valid references: ${pattern}`, async () => {
+      checkGap(await createTerminal({ input: 'aa]\nbb\naa{\n' }).run(`grep -E -e ${quote(pattern)} input`), 'GNU regex syntax')
     })
   }
   for (const [mode, pattern] of [['-E', 'a{,32768}'], ['', String.raw`a\{,32768\}`]]) {
-    it(`checks GNU repetition bounds with an omitted minimum: ${pattern}`, () => {
-      const actual = createTerminal({ input: 'a\n' }).run(`grep ${mode} -e ${quote(pattern)} input`)
+    it(`checks GNU repetition bounds with an omitted minimum: ${pattern}`, async () => {
+      const actual = await createTerminal({ input: 'a\n' }).run(`grep ${mode} -e ${quote(pattern)} input`)
       assert.equal(actual.exitCode, 2)
       assert.match(actual.stderr, /Regular expression too big/u)
       assert.deepEqual(actual.unsupported, [])
     })
   }
   for (const pattern of [String.raw`(a)\1(`, String.raw`(a)\1[`, String.raw`(a)\1{2,1}`]) {
-    it(`invalid syntax stays an ordinary error beside valid references: ${pattern}`, () => {
-      const actual = createTerminal({ input: 'aa\n' }).run(`grep -E -e ${quote(pattern)} input`)
+    it(`invalid syntax stays an ordinary error beside valid references: ${pattern}`, async () => {
+      const actual = await createTerminal({ input: 'aa\n' }).run(`grep -E -e ${quote(pattern)} input`)
       assert.equal(actual.exitCode, 2)
       assert.notEqual(actual.stderr, '')
       assert.deepEqual(actual.unsupported, [])
     })
   }
   for (const pattern of [String.raw`(\1a)`, String.raw`\1(a)`, String.raw`(a)(b\2)`, String.raw`((a)\1)`]) {
-    it(`rejects reference before group closes: ${pattern}`, () => {
-      const actual = createTerminal({ input: 'a\nab\n' }).run(`grep -E -e ${quote(pattern)} input`)
+    it(`rejects reference before group closes: ${pattern}`, async () => {
+      const actual = await createTerminal({ input: 'a\nab\n' }).run(`grep -E -e ${quote(pattern)} input`)
       assert.equal(actual.exitCode, 2)
       assert.match(actual.stderr, /[Ii]nvalid back reference/u)
       assert.deepEqual(actual.unsupported, [])

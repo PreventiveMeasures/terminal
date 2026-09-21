@@ -35,17 +35,17 @@ describe('sed substitutes literal newlines continued within a script', () => {
     [`s/a/b${continued}c/`, 'a\0a\0', 'b\nc\0b\nc\0', '-z'],
   ]
   for (const [script, input, stdout, flags = ''] of cases) {
-    it(JSON.stringify(script) + ' ' + flags, () => {
+    it(JSON.stringify(script) + ' ' + flags, async () => {
       const files = { input, program: script }
       for (const command of [`sed ${flags} ${quote(script)} input`, `sed ${flags} -e ${quote(script)} input`, `sed ${flags} -f program input`]) {
-        assert.deepEqual(createTerminal(files).run(command), result(stdout), command)
+        assert.deepEqual(await createTerminal(files).run(command), result(stdout), command)
       }
     })
   }
-  it('retains shell versus sed newline quoting semantics', () => {
+  it('retains shell versus sed newline quoting semantics', async () => {
     const terminal = createTerminal({ input: 'a\n' })
-    assert.deepEqual(terminal.run('sed "s/a/b\\\nc/" input'), result('bc\n'))
-    assert.deepEqual(terminal.run("sed 's/a/b\\\nc/' input"), result('b\nc\n'))
+    assert.deepEqual(await terminal.run('sed "s/a/b\\\nc/" input'), result('bc\n'))
+    assert.deepEqual(await terminal.run("sed 's/a/b\\\nc/' input"), result('b\nc\n'))
   })
 })
 
@@ -56,30 +56,30 @@ describe('sed distinguishes malformed multiline syntax from unsupported features
     `s/[[:a\nlpha:]]/X/`, `/a\nb/p`, `/[a${continued}b]/p`,
   ]
   for (const script of scripts) {
-    it(`rejects ${JSON.stringify(script)} before producing output`, () => {
-      const actual = createTerminal({ input: 'a\n', program: script }).run('sed -e p -f program input')
+    it(`rejects ${JSON.stringify(script)} before producing output`, async () => {
+      const actual = await createTerminal({ input: 'a\n', program: script }).run('sed -e p -f program input')
       assert.equal(actual.exitCode, 1)
       assert.equal(actual.stdout, '')
       assert.match(actual.stderr, /unterminated/u)
       assert.deepEqual(actual.unsupported, [])
     })
   }
-  it('cannot finish a partial substitution in a later expression or script file', () => {
+  it('cannot finish a partial substitution in a later expression or script file', async () => {
     const files = { input: 'a\n', first: 's/a/b\\', second: 'c/' }
     for (const command of [
       "sed -e 's/a/b\\' -e 'c/' input", 'sed -f first -f second input',
       "sed -e 's/a/b\\' -f second input", "sed -f first -e 'c/' input",
     ]) {
-      const actual = createTerminal(files).run(command)
+      const actual = await createTerminal(files).run(command)
       assert.equal(actual.exitCode, 1)
       assert.equal(actual.stdout, '')
       assert.match(actual.stderr, /unterminated/u)
       assert.deepEqual(actual.unsupported, [])
     }
   })
-  it('reports remaining unsupported replacement modes after a valid continuation', () => {
+  it('reports remaining unsupported replacement modes after a valid continuation', async () => {
     const command = `sed ${quote(`s/a/b${continued}\\U&/`)} input 2>/dev/null | cat`
-    const actual = createTerminal({ input: 'a\n' }).run(command)
+    const actual = await createTerminal({ input: 'a\n' }).run(command)
     assert.equal(actual.exitCode, 0)
     assert.equal(actual.stderr, '')
     assert.equal(actual.unsupported.length, 1)
@@ -108,12 +108,12 @@ describe('sed zero escapes have distinct regex and replacement meanings', () => 
     [String.raw`s0x0\\0`, 'x\n', '\\\n'],
   ]
   for (const [script, input, stdout, flags = ''] of cases) {
-    it(JSON.stringify(script) + ' ' + flags, () => {
-      assert.deepEqual(createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`), result(stdout))
+    it(JSON.stringify(script) + ' ' + flags, async () => {
+      assert.deepEqual(await createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`), result(stdout))
     })
   }
-  it('keeps unsupported zero escapes inside bracket expressions on diagnostics', () => {
-    const actual = createTerminal({ input: '0\\\n' }).run(String.raw`sed 's/[\0]/X/g' input 2>/dev/null | cat`)
+  it('keeps unsupported zero escapes inside bracket expressions on diagnostics', async () => {
+    const actual = await createTerminal({ input: '0\\\n' }).run(String.raw`sed 's/[\0]/X/g' input 2>/dev/null | cat`)
     assert.equal(actual.exitCode, 0)
     assert.equal(actual.stderr, '')
     assert.equal(actual.unsupported.length, 1)

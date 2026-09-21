@@ -3,8 +3,8 @@ import { describe, it } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { createTerminal } from '@preventive/terminal'
 
-function check(t, command, stdout, cwd = t.cwd()) {
-  assert.deepEqual(t.run(command), { stdout, stderr: '', exitCode: 0, cwd, notes: [], unsupported: [] }, command)
+async function check(t, command, stdout, cwd = t.cwd()) {
+  assert.deepEqual(await t.run(command), { stdout, stderr: '', exitCode: 0, cwd, notes: [], unsupported: [] }, command)
 }
 
 const options = { mount: '/work [x]', cwd: '/work [x]', home: '/work [x]/home', writable: '/tmp/' }
@@ -17,61 +17,61 @@ const argsCommand = ({ args }) => JSON.stringify(args)
 // https://raw.githubusercontent.com/gitGNU/gnu_bash/master/general.c
 describe('mounted home expansion respects empty quoted fragments', () => {
   for (const operand of ["''~", '""~', "~''", '~""', "''~/note", '""~/note', "~''/note", '~""/note', '~user""/note', '~u"ser"/note', String.raw`~u\ser/note`]) {
-    it(operand, () => {
+    it(operand, async () => {
       const t = createTerminal({}, options)
       const expected = operand.replaceAll("'", '').replaceAll('"', '').replaceAll('\\', '')
-      check(t, `printf '%s\\n' ${operand}`, expected + '\n')
+      await check(t, `printf '%s\\n' ${operand}`, expected + '\n')
     })
   }
 
   for (const assignment of ["X=''~", 'X=""~', "X=~''", 'X=~""', "X=left:''~/note", "X=left:~''/note"]) {
-    it(assignment, () => {
+    it(assignment, async () => {
       const t = createTerminal({}, options)
       const expected = assignment.slice(2).replaceAll("'", '').replaceAll('"', '')
-      check(t, `${assignment}; printf '%s\\n' "$X"`, expected + '\n')
+      await check(t, `${assignment}; printf '%s\\n' "$X"`, expected + '\n')
     })
   }
 
-  it('expands only unquoted assignment components', () => {
+  it('expands only unquoted assignment components', async () => {
     const t = createTerminal({}, options)
-    check(t, 'X=""~:~/:~""; printf "%s\\n" "$X"', '~:/work [x]/home/:~\n')
-    check(t, 'export X=""~:~/:~""; printf "%s\\n" "$X"', '~:/work [x]/home/:~\n')
+    await check(t, 'X=""~:~/:~""; printf "%s\\n" "$X"', '~:/work [x]/home/:~\n')
+    await check(t, 'export X=""~:~/:~""; printf "%s\\n" "$X"', '~:/work [x]/home/:~\n')
   })
 
-  it('keeps an empty quoted filename fragment after the first slash valid', () => {
+  it('keeps an empty quoted filename fragment after the first slash valid', async () => {
     const t = createTerminal({ 'home/note': 'home\n', '~/note': 'literal\n' }, options)
-    check(t, `cat ~/''note; cat ''~/note; cat ~''/note`, 'home\nliteral\nliteral\n')
-    check(t, 'HOME=/tmp; printf "%s\\n" ~ ""~ ~"" ~/""note', '/tmp\n~\n~\n/tmp/note\n')
+    await check(t, `cat ~/''note; cat ''~/note; cat ~''/note`, 'home\nliteral\nliteral\n')
+    await check(t, 'HOME=/tmp; printf "%s\\n" ~ ""~ ~"" ~/""note', '/tmp\n~\n~\n/tmp/note\n')
   })
 })
 
 describe('mounted sources and custom filesystem views remain isolated', () => {
-  it('accepts a Map from another JavaScript realm without losing every file', () => {
+  it('accepts a Map from another JavaScript realm without losing every file', async () => {
     const sources = runInNewContext('new Map([["../file", "content"], ["/dir/child", "child"]])')
     assert.equal(sources instanceof Map, false)
     const t = createTerminal(sources, options)
-    check(t, 'cat file dir/child', 'contentchild')
-    check(t, 'find . -type f', './dir/child\n./file\n')
+    await check(t, 'cat file dir/child', 'contentchild')
+    await check(t, 'find . -type f', './dir/child\n./file\n')
   })
 
   for (const map of [false, true]) {
-    it(`snapshots ${map ? 'Map' : 'object'} sources without merging writable files`, () => {
+    it(`snapshots ${map ? 'Map' : 'object'} sources without merging writable files`, async () => {
       const entries = [['file', 'original'], ['dir/child', 'child']]
       const sources = map ? new Map(entries) : Object.fromEntries(entries)
       const t = createTerminal(sources, options)
       if (map) { sources.set('file', 'changed'); sources.set('added', 'new'); sources.delete('dir/child') }
       else { sources.file = 'changed'; sources.added = 'new'; delete sources['dir/child'] }
-      check(t, 'cat file dir/child; printf overlay >/tmp/file; cat /tmp/file', 'originalchildoverlay')
-      check(t, 'ls', 'dir\nfile\n')
+      await check(t, 'cat file dir/child; printf overlay >/tmp/file; cat /tmp/file', 'originalchildoverlay')
+      await check(t, 'ls', 'dir\nfile\n')
       assert.deepEqual(map ? [...sources] : Object.entries(sources), [['file', 'changed'], ['added', 'new']])
     })
   }
 
-  it('treats an object source named entries as a file, not a Map iterator', () => {
-    check(createTerminal({ entries: 'file', 'dir/leaf': 'leaf' }, options), 'cat entries dir/leaf', 'fileleaf')
+  it('treats an object source named entries as a file, not a Map iterator', async () => {
+    await check(createTerminal({ entries: 'file', 'dir/leaf': 'leaf' }, options), 'cat entries dir/leaf', 'fileleaf')
   })
 
-  it('does not expose cached source or writable directory arrays to a handler', () => {
+  it('does not expose cached source or writable directory arrays to a handler', async () => {
     const sources = { file: 'source', 'dir/leaf': 'leaf' }
     const t = createTerminal(sources, {
       ...options,
@@ -88,22 +88,22 @@ describe('mounted sources and custom filesystem views remain isolated', () => {
         listing: ({ fs }) => JSON.stringify(fs.listDir('/tmp')),
       },
     })
-    check(t, 'printf writable >/tmp/file; mutate; cat file /tmp/file', 'sourcewritable')
-    check(t, 'ls; ls /tmp', 'dir\nfile\nfile\n')
-    check(t, 'find . /tmp -type f', './dir/leaf\n./file\n/tmp/file\n')
-    check(t, "printf '%s\\n' ./* /tmp/*", './dir\n./file\n/tmp/file\n')
+    await check(t, 'printf writable >/tmp/file; mutate; cat file /tmp/file', 'sourcewritable')
+    await check(t, 'ls; ls /tmp', 'dir\nfile\nfile\n')
+    await check(t, 'find . /tmp -type f', './dir/leaf\n./file\n/tmp/file\n')
+    await check(t, "printf '%s\\n' ./* /tmp/*", './dir\n./file\n/tmp/file\n')
     assert.deepEqual(t.complete('cat /tmp/f'), ['cat /tmp/file'])
-    check(t, 'listing', '{"dirs":[],"files":["file"],"links":[]}')
-    check(t, 'rm /tmp/file; listing', '{"dirs":[],"files":[],"links":[]}')
+    await check(t, 'listing', '{"dirs":[],"files":["file"],"links":[]}')
+    await check(t, 'rm /tmp/file; listing', '{"dirs":[],"files":[],"links":[]}')
     assert.deepEqual(sources, { file: 'source', 'dir/leaf': 'leaf' })
   })
 
   for (const [path, error] of [['file/../dir', 'Not a directory'], ['file/', 'Not a directory'], ['missing/../dir', 'No such file or directory']]) {
-    it(`custom fs.listDir retains the lookup error for ${path}`, () => {
+    it(`custom fs.listDir retains the lookup error for ${path}`, async () => {
       const t = createTerminal({ file: 'file', 'dir/leaf': 'leaf' }, {
         ...options, commands: { listing: ({ fs, args }) => { fs.listDir(args[0]) } },
       })
-      assert.deepEqual(t.run(`listing ${path}`), {
+      assert.deepEqual(await t.run(`listing ${path}`), {
         stdout: '', stderr: `listing: ${path}: ${error}\n`, exitCode: 1, cwd: options.cwd, notes: [], unsupported: [],
       })
       assert.deepEqual(t.complete(`cat ${path}/l`), [])
@@ -136,14 +136,16 @@ describe('completion preserves literal mounted filenames and typed prefixes', ()
   })
 
   for (const name of names) {
-    it(`produces an executable completion for ${JSON.stringify(name)}`, () => {
+    it(`produces an executable completion for ${JSON.stringify(name)}`, async () => {
       const t = fixture()
       const suggestions = t.complete('args ')
-      const selected = suggestions.filter((line) => t.run(line).stdout === JSON.stringify([name.startsWith('-') ? './' + name : name]))
+      const wanted = JSON.stringify([name.startsWith('-') ? './' + name : name])
+      const selected = []
+      for (const line of suggestions) if ((await t.run(line)).stdout === wanted) selected.push(line)
       assert.equal(selected.length, 1, name)
       assert.ok(selected[0].startsWith('args '))
-      check(t, selected[0], JSON.stringify([name.startsWith('-') ? './' + name : name]))
-      check(t, 'cat ' + selected[0].slice('args '.length), name)
+      await check(t, selected[0], JSON.stringify([name.startsWith('-') ? './' + name : name]))
+      await check(t, 'cat ' + selected[0].slice('args '.length), name)
     })
   }
 
@@ -159,22 +161,22 @@ describe('completion preserves literal mounted filenames and typed prefixes', ()
     ['args "double', 'double"name'], [String.raw`args "back\\n`, 'back\\name'],
     ['args "line\nn', 'line\nname'], ['args cr\rn', 'cr\rname'], ['args wide\u2003n', 'wide\u2003name'],
   ]) {
-    it(`retains the prefix ${JSON.stringify(prefix)}`, () => {
+    it(`retains the prefix ${JSON.stringify(prefix)}`, async () => {
       const t = fixture()
       const suggestions = t.complete(prefix)
       assert.equal(suggestions.length, 1)
       assert.ok(suggestions[0].startsWith(prefix), suggestions[0])
-      check(t, suggestions[0], JSON.stringify([name]))
+      await check(t, suggestions[0], JSON.stringify([name]))
     })
   }
 
-  it('does not reinterpret quoted previous operands as command boundaries', () => {
+  it('does not reinterpret quoted previous operands as command boundaries', async () => {
     const t = fixture()
     for (const prior of ['literal|pipe', 'literal;semi', 'literal\nnewline', 'literal(and)', 'literal&&and']) {
       const prefix = `args ${quote(prior)} spa`
       const suggestions = t.complete(prefix)
       assert.equal(suggestions.length, 1, prefix)
-      check(t, suggestions[0], JSON.stringify([prior, 'space name']))
+      await check(t, suggestions[0], JSON.stringify([prior, 'space name']))
     }
   })
 
@@ -187,35 +189,35 @@ describe('completion preserves literal mounted filenames and typed prefixes', ()
     assert.deepEqual(t.complete('cat|gre'), ['cat|grep'])
   })
 
-  it('completes quoted cd operands as directories and protects odd path components', () => {
+  it('completes quoted cd operands as directories and protects odd path components', async () => {
     const t = createTerminal({ 'dir [a];/leaf name': 'leaf', 'dir file': 'file' }, options)
     const prefix = "'cd' 'dir "
     assert.deepEqual(t.complete(prefix), ["'cd' 'dir [a];/'"])
-    check(t, t.complete(prefix)[0], '', '/work [x]/dir [a];')
+    await check(t, t.complete(prefix)[0], '', '/work [x]/dir [a];')
     const command = t.complete('cat leaf')[0]
-    check(t, command, 'leaf')
+    await check(t, command, 'leaf')
   })
 
-  it('distinguishes literal tildes from the configured home in completion', () => {
+  it('distinguishes literal tildes from the configured home in completion', async () => {
     const t = createTerminal({ 'home/note': 'home', '~/note': 'literal', '~user/note': 'user' }, options)
     for (const prefix of ["cat '~/n", 'cat "~/n', String.raw`cat \~/n`, "cat ''~/n", "cat ~''/n"]) {
       const suggestions = t.complete(prefix)
       assert.equal(suggestions.length, 1, prefix)
       assert.ok(suggestions[0].startsWith(prefix))
-      check(t, suggestions[0], 'literal')
+      await check(t, suggestions[0], 'literal')
     }
-    check(t, t.complete('cat ~/n')[0], 'home')
+    await check(t, t.complete('cat ~/n')[0], 'home')
     assert.deepEqual(t.complete('cat ~'), ['cat ~/'])
     assert.deepEqual(t.complete('cat ~user/n'), [])
   })
 
-  it('reads configured homes literally even when their names are shell syntax', () => {
+  it('reads configured homes literally even when their names are shell syntax', async () => {
     const home = '/work [x]/home *; "quote"'
     const t = createTerminal({ 'home *; "quote"/note [a]': 'home', 'home x/note a': 'wrong' }, { ...options, home })
     const suggestion = t.complete('cat ~/note')[0]
     assert.ok(suggestion.startsWith('cat ~/note'))
-    check(t, suggestion, 'home')
-    check(t, 'cd; pwd', home + '\n', home)
+    await check(t, suggestion, 'home')
+    await check(t, 'cd; pwd', home + '\n', home)
   })
 
   it('suppresses candidates requiring evaluation or an unfinished escape', () => {
@@ -229,34 +231,34 @@ describe('completion preserves literal mounted filenames and typed prefixes', ()
 
 describe('assignment recognition retains empty quotes before the equals sign', () => {
   for (const operand of ["''LONG=value", '""LONG=value', "L''ONG=value", 'LO""NG=value', "LONG''=value", 'LONG""=value', "LONG'='value", String.raw`LONG\=value`, '"LONG"=value']) {
-    it(`${operand} remains a command word`, () => {
+    it(`${operand} remains a command word`, async () => {
       const t = createTerminal({}, options)
-      check(t, 'LONG=original', '')
-      const result = t.run(`${operand} echo unexpected`)
+      await check(t, 'LONG=original', '')
+      const result = await t.run(`${operand} echo unexpected`)
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 127)
       assert.equal(result.cwd, options.cwd)
       assert.match(result.stderr, /^LONG=value: command not found\./u)
       assert.deepEqual(result.unsupported, [{ kind: 'command', command: 'LONG=value', detail: 'LONG=value', message: result.stderr.trimEnd() }])
-      check(t, 'printf "%s" "$LONG"', 'original')
+      await check(t, 'printf "%s" "$LONG"', 'original')
     })
   }
 
   for (const [operand, expected] of [["LONG=''", ''], ['LONG=""', ''], ["LONG=''value", 'value'], ['LONG=""value', 'value'], ["LONG=value''", 'value'], ["LONG=val''ue", 'value']]) {
-    it(`${operand} keeps empty quotes in the value valid`, () => {
+    it(`${operand} keeps empty quotes in the value valid`, async () => {
       const t = createTerminal({}, options)
-      check(t, `${operand}; printf '<%s>' "$LONG"`, '<' + expected + '>')
+      await check(t, `${operand}; printf '<%s>' "$LONG"`, '<' + expected + '>')
     })
   }
 
-  it('recognizes an empty value before a special builtin', () => {
+  it('recognizes an empty value before a special builtin', async () => {
     const t = createTerminal({}, options)
-    check(t, "LONG=before; LONG='' export LONG; printf '<%s>' \"$LONG\"", '<>')
+    await check(t, "LONG=before; LONG='' export LONG; printf '<%s>' \"$LONG\"", '<>')
   })
 
-  it('retains ordinary splitting for export operands with a quoted assignment prefix', () => {
+  it('retains ordinary splitting for export operands with a quoted assignment prefix', async () => {
     const t = createTerminal({}, options)
-    check(t, "V='one two'; export ''LONG=$V; printf '<%s>' \"$LONG\"", '<one>')
-    check(t, "V='one two'; export LONG=$V; printf '<%s>' \"$LONG\"", '<one two>')
+    await check(t, "V='one two'; export ''LONG=$V; printf '<%s>' \"$LONG\"", '<one>')
+    await check(t, "V='one two'; export LONG=$V; printf '<%s>' \"$LONG\"", '<one two>')
   })
 })

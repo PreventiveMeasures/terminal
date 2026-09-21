@@ -42,66 +42,66 @@ describe('literal command-substitution syntax errors abort outer parsing', () =>
     'cat <<$(if true)\nbody\n$(if true)',
     'cat <<"$(if true)"\nbody\n$(if true)',
   ]) {
-    it(command, () => {
+    it(command, async () => {
       const terminal = createTerminal({})
-      terminal.run('value=present')
-      syntaxError(terminal.run(command))
-      assert.deepEqual(terminal.run('echo "$? $value"'), expected('2 present\n'))
+      await terminal.run('value=present')
+      syntaxError(await terminal.run(command))
+      assert.deepEqual(await terminal.run('echo "$? $value"'), expected('2 present\n'))
     })
   }
 
-  it('does not execute sibling substitutions or any command in the malformed input unit', () => {
+  it('does not execute sibling substitutions or any command in the malformed input unit', async () => {
     const calls = []
     const terminal = createTerminal({}, { commands: { probe: ({ args }) => { calls.push(args); return 'called\n' } } })
-    syntaxError(terminal.run('probe before; probe "$(probe inner)" "$(if true)"; probe after'))
+    syntaxError(await terminal.run('probe before; probe "$(probe inner)" "$(if true)"; probe after'))
     assert.deepEqual(calls, [])
   })
 
-  it('does not execute pipeline stages before finding a malformed substitution', () => {
+  it('does not execute pipeline stages before finding a malformed substitution', async () => {
     const calls = []
     const terminal = createTerminal({}, { commands: { probe: () => { calls.push('probe'); return 'called\n' } } })
-    syntaxError(terminal.run('probe | echo $(if true) | probe'))
+    syntaxError(await terminal.run('probe | echo $(if true) | probe'))
     assert.deepEqual(calls, [])
   })
 
-  it('does not split a multiline brace group into independently executable units', () => {
+  it('does not split a multiline brace group into independently executable units', async () => {
     const calls = []
     const terminal = createTerminal({}, { commands: { probe: () => { calls.push('probe'); return '' } } })
-    syntaxError(terminal.run('{\nprobe\necho $(if true)\n}'))
+    syntaxError(await terminal.run('{\nprobe\necho $(if true)\n}'))
     assert.deepEqual(calls, [])
   })
 
-  it('does not truncate a redirect or write from a preceding substitution in the same unit', () => {
+  it('does not truncate a redirect or write from a preceding substitution in the same unit', async () => {
     const terminal = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
-    terminal.run('printf original >/tmp/output')
-    syntaxError(terminal.run('echo "$(printf changed >/tmp/output)" "$(if true)" >/tmp/output'))
-    assert.deepEqual(terminal.run('cat /tmp/output'), mounted('original'))
+    await terminal.run('printf original >/tmp/output')
+    syntaxError(await terminal.run('echo "$(printf changed >/tmp/output)" "$(if true)" >/tmp/output'))
+    assert.deepEqual(await terminal.run('cat /tmp/output'), mounted('original'))
   })
 })
 
 describe('substitution parse errors preserve earlier complete input units', () => {
-  it('keeps earlier output and assignments, and skips all following input', () => {
+  it('keeps earlier output and assignments, and skips all following input', async () => {
     const terminal = createTerminal({})
-    syntaxError(terminal.run('value=kept; echo before\necho $(if true)\nvalue=lost; echo after'), 'before\n')
-    assert.deepEqual(terminal.run('echo "$? $value"'), expected('2 kept\n'))
+    syntaxError(await terminal.run('value=kept; echo before\necho $(if true)\nvalue=lost; echo after'), 'before\n')
+    assert.deepEqual(await terminal.run('echo "$? $value"'), expected('2 kept\n'))
   })
 
-  it('keeps earlier file writes and callbacks but no malformed-unit side effects', () => {
+  it('keeps earlier file writes and callbacks but no malformed-unit side effects', async () => {
     const calls = []
     const terminal = createTerminal({}, {
       mount: '/repo', writable: '/tmp/',
       commands: { probe: ({ args }) => { calls.push(args); return args.join(' ') + '\n' } },
     })
     const command = 'printf kept >/tmp/output; probe before\nprintf lost >/tmp/output; probe "$(if true)"\nprobe after'
-    syntaxError(terminal.run(command), 'before\n')
+    syntaxError(await terminal.run(command), 'before\n')
     assert.deepEqual(calls, [['before']])
-    assert.deepEqual(terminal.run('cat /tmp/output'), mounted('kept'))
+    assert.deepEqual(await terminal.run('cat /tmp/output'), mounted('kept'))
   })
 
-  it('resumes normally on a new run after the rejected input', () => {
+  it('resumes normally on a new run after the rejected input', async () => {
     const terminal = createTerminal({})
-    syntaxError(terminal.run('echo $(if true)'))
-    assert.deepEqual(terminal.run('echo ready'), expected('ready\n'))
+    syntaxError(await terminal.run('echo $(if true)'))
+    assert.deepEqual(await terminal.run('echo ready'), expected('ready\n'))
   })
 })
 
@@ -120,17 +120,17 @@ describe('runtime substitution status remains distinct from parse errors', () =>
     ['cat <<EOF\n\\$(if true)\nEOF', '$(if true)\n', 0],
     ['false && cat <<EOF\n$(if true)\nEOF\necho after', 'after\n', 0],
   ]) {
-    it(command, () => assert.deepEqual(createTerminal({}).run(command), expected(stdout, exitCode)))
+    it(command, async () => assert.deepEqual(await createTerminal({}).run(command), expected(stdout, exitCode)))
   }
 
-  it('retains ordinary inner command failures while the outer echo succeeds', () => {
-    assert.deepEqual(createTerminal({}).run('echo "$(cat missing)"; echo after'), {
+  it('retains ordinary inner command failures while the outer echo succeeds', async () => {
+    assert.deepEqual(await createTerminal({}).run('echo "$(cat missing)"; echo after'), {
       ...expected('\nafter\n'), stderr: 'cat: missing: No such file or directory\n',
     })
   })
 
-  it('reserves 127 for command lookup failure and keeps its diagnostic', () => {
-    const result = createTerminal({}).run('value=$(unavailable_command)')
+  it('reserves 127 for command lookup failure and keeps its diagnostic', async () => {
+    const result = await createTerminal({}).run('value=$(unavailable_command)')
     assert.equal(result.stdout, '')
     assert.equal(result.exitCode, 127)
     assert.ok(result.unsupported.some(({ kind, command }) => kind === 'command' && command === 'unavailable_command'))
@@ -143,18 +143,18 @@ describe('runtime heredoc substitution syntax gaps retain diagnostics', () => {
     'printf ignored <<EOF\n$(if true)\nEOF',
     'cat <<EOF\n$((1 + $(if true)))\nEOF',
   ]) {
-    it(command, () => {
-      const result = createTerminal({}).run(command)
+    it(command, async () => {
+      const result = await createTerminal({}).run(command)
       assert.equal(result.stdout, '')
       assert.notEqual(result.exitCode, 0)
       assert.ok(result.unsupported.some(({ kind, detail }) => kind === 'feature' && detail === 'command substitution syntax'), JSON.stringify(result))
     })
   }
 
-  it('does not call a custom command after its input expansion fails', () => {
+  it('does not call a custom command after its input expansion fails', async () => {
     const calls = []
     const terminal = createTerminal({}, { commands: { probe: () => { calls.push('probe'); return 'called\n' } } })
-    const result = terminal.run('probe <<EOF\n$(if true)\nEOF')
+    const result = await terminal.run('probe <<EOF\n$(if true)\nEOF')
     assert.deepEqual(calls, [])
     assert.equal(result.stdout, '')
     assert.ok(result.unsupported.some(({ detail }) => detail === 'command substitution syntax'))
@@ -165,8 +165,8 @@ describe('runtime heredoc substitution syntax gaps retain diagnostics', () => {
     '{ cat <<EOF\n$(if true)\nEOF\n} 2>/dev/null | true',
     'echo "$(cat 2>/dev/null <<EOF\n$(if true)\nEOF\n)" | true',
   ]) {
-    it('survives hidden stderr and successful pipeline: ' + command, () => {
-      const result = createTerminal({}).run(command)
+    it('survives hidden stderr and successful pipeline: ' + command, async () => {
+      const result = await createTerminal({}).run(command)
       assert.equal(result.stdout, '')
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)

@@ -35,178 +35,179 @@ const sha256sum = {
 const withSha = (opts = {}) => createTerminal(SOURCES, { commands: { sha256sum }, ...opts })
 
 describe('createTerminal — opts.commands: a wired sha256sum', () => {
-  it('hashes file operands, one `HASH  NAME` line each', () => {
+  it('hashes file operands, one `HASH  NAME` line each', async () => {
     const t = withSha()
-    assert.equal(t.run('sha256sum a.txt').stdout, `${HELLO_SHA}  a.txt\n`)
-    assert.equal(t.run('sha256sum a.txt').exitCode, 0)
+    assert.equal((await t.run('sha256sum a.txt')).stdout, `${HELLO_SHA}  a.txt\n`)
+    assert.equal((await t.run('sha256sum a.txt')).exitCode, 0)
     assert.equal(
-      t.run('sha256sum a.txt b.txt').stdout,
+      (await t.run('sha256sum a.txt b.txt')).stdout,
       `${HELLO_SHA}  a.txt\n${sha256('world\n')}  b.txt\n`,
     )
   })
 
-  it('reads stdin when it has no operands, naming the input `-`', () => {
+  it('reads stdin when it has no operands, naming the input `-`', async () => {
     const t = withSha()
-    assert.equal(t.run('cat a.txt | sha256sum').stdout, `${HELLO_SHA}  -\n`)
+    assert.equal((await t.run('cat a.txt | sha256sum')).stdout, `${HELLO_SHA}  -\n`)
     // Bare `sha256sum` at the head of a pipeline gets empty stdin,
     // and hashing the empty string is a real answer, not an error.
-    assert.equal(t.run('sha256sum').stdout, `${sha256('')}  -\n`)
-    assert.equal(t.run('sha256sum').exitCode, 0)
+    assert.equal((await t.run('sha256sum')).stdout, `${sha256('')}  -\n`)
+    assert.equal((await t.run('sha256sum')).exitCode, 0)
   })
 
-  it('operands arrive expanded: globs and braces resolve before the handler sees them', () => {
+  it('operands arrive expanded: globs and braces resolve before the handler sees them', async () => {
     const t = withSha()
-    assert.equal(t.run('sha256sum *.txt').stdout, t.run('sha256sum a.txt b.txt').stdout)
-    assert.equal(t.run('sha256sum {a,b}.txt').stdout, t.run('sha256sum a.txt b.txt').stdout)
-    assert.equal(t.run('sha256sum src/*.js').stdout, t.run('sha256sum src/x.js src/y.js').stdout)
+    assert.equal((await t.run('sha256sum *.txt')).stdout, (await t.run('sha256sum a.txt b.txt')).stdout)
+    assert.equal((await t.run('sha256sum {a,b}.txt')).stdout, (await t.run('sha256sum a.txt b.txt')).stdout)
+    assert.equal((await t.run('sha256sum src/*.js')).stdout, (await t.run('sha256sum src/x.js src/y.js')).stdout)
   })
 
-  it('honors the cwd, including inside a subshell', () => {
+  it('honors the cwd, including inside a subshell', async () => {
     const t = withSha({ cwd: '/src' })
-    assert.equal(t.run('sha256sum x.js').stdout, `${sha256('const x = 1\n')}  x.js\n`)
-    assert.equal(t.run('sha256sum /a.txt').stdout, `${HELLO_SHA}  /a.txt\n`)
+    assert.equal((await t.run('sha256sum x.js')).stdout, `${sha256('const x = 1\n')}  x.js\n`)
+    assert.equal((await t.run('sha256sum /a.txt')).stdout, `${HELLO_SHA}  /a.txt\n`)
     // The subshell's cwd change reaches the handler and is then rolled back.
-    assert.equal(t.run('(cd /; sha256sum a.txt)').stdout, `${HELLO_SHA}  a.txt\n`)
+    assert.equal((await t.run('(cd /; sha256sum a.txt)')).stdout, `${HELLO_SHA}  a.txt\n`)
     assert.equal(t.cwd(), '/src')
   })
 
-  it('partial failure: reads what it can, one stderr line per miss, exit 1', () => {
+  it('partial failure: reads what it can, one stderr line per miss, exit 1', async () => {
     const t = withSha()
-    const r = t.run('sha256sum a.txt nope.txt src')
+    const r = await t.run('sha256sum a.txt nope.txt src')
     assert.equal(r.stdout, `${HELLO_SHA}  a.txt\n`)
     assert.equal(r.stderr, 'sha256sum: nope.txt: No such file or directory\nsha256sum: src: Is a directory\n')
     assert.equal(r.exitCode, 1)
   })
 
-  it('composes downstream, upstream, and through the shell forms', () => {
+  it('composes downstream, upstream, and through the shell forms', async () => {
     const t = withSha()
     // Downstream of a pipe.
-    assert.equal(t.run('sha256sum a.txt | cut -d " " -f 1').stdout, `${HELLO_SHA}\n`)
-    assert.equal(t.run('sha256sum *.txt | wc -l').stdout, '2\n')
+    assert.equal((await t.run('sha256sum a.txt | cut -d " " -f 1')).stdout, `${HELLO_SHA}\n`)
+    assert.equal((await t.run('sha256sum *.txt | wc -l')).stdout, '2\n')
     // Dispatched by xargs, which goes through the same registry.
-    assert.equal(t.run('echo a.txt | xargs sha256sum').stdout, `${HELLO_SHA}  a.txt\n`)
+    assert.equal((await t.run('echo a.txt | xargs sha256sum')).stdout, `${HELLO_SHA}  a.txt\n`)
     // find -exec, the other command-dispatching surface.
-    assert.equal(t.run("find . -name a.txt -exec sha256sum {} ';'").stdout, `${HELLO_SHA}  ./a.txt\n`)
+    assert.equal((await t.run("find . -name a.txt -exec sha256sum {} ';'")).stdout, `${HELLO_SHA}  ./a.txt\n`)
     // Exit status gates `&&` / `||` like any other command's.
-    assert.equal(t.run('sha256sum a.txt >/dev/null && echo ok').stdout, 'ok\n')
-    assert.equal(t.run('sha256sum nope 2>/dev/null || echo failed').stdout, 'failed\n')
+    assert.equal((await t.run('sha256sum a.txt >/dev/null && echo ok')).stdout, 'ok\n')
+    assert.equal((await t.run('sha256sum nope 2>/dev/null || echo failed')).stdout, 'failed\n')
     // Redirects apply to a wired command's streams too.
-    assert.equal(t.run('sha256sum nope 2>&1 | wc -l').stdout, '1\n')
+    assert.equal((await t.run('sha256sum nope 2>&1 | wc -l')).stdout, '1\n')
   })
 
-  it('is reachable under the bin prefixes, like a built-in', () => {
+  it('is reachable under the bin prefixes, like a built-in', async () => {
     const t = withSha()
-    assert.equal(t.run('/usr/bin/sha256sum a.txt').stdout, `${HELLO_SHA}  a.txt\n`)
-    assert.equal(t.run('/bin/sha256sum a.txt').exitCode, 0)
+    assert.equal((await t.run('/usr/bin/sha256sum a.txt')).stdout, `${HELLO_SHA}  a.txt\n`)
+    assert.equal((await t.run('/bin/sha256sum a.txt')).exitCode, 0)
   })
 })
 
 describe('createTerminal — opts.commands: the handler contract', () => {
-  const run = (spec, line) => createTerminal(SOURCES, { commands: { probe: spec } }).run(line)
+  const run = async (spec, line) => await createTerminal(SOURCES, { commands: { probe: spec } }).run(line)
 
-  it('a returned string is stdout with exit 0', () => {
-    assert.deepEqual(run(() => 'hi\n', 'probe'), { stdout: 'hi\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+  it('a returned string is stdout with exit 0', async () => {
+    assert.deepEqual(await run(() => 'hi\n', 'probe'), { stdout: 'hi\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 
-  it('returning nothing is a silent success, so a no-op handler works', () => {
-    assert.deepEqual(run(() => {}, 'probe'), { stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
-    assert.deepEqual(run(() => null, 'probe'), { stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+  it('returning nothing is a silent success, so a no-op handler works', async () => {
+    assert.deepEqual(await run(() => {}, 'probe'), { stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+    assert.deepEqual(await run(() => null, 'probe'), { stdout: '', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
   })
 
-  it('a returned object fills in its missing fields', () => {
+  it('a returned object fills in its missing fields', async () => {
     assert.deepEqual(
-      run(() => ({ stderr: 'bad\n', exitCode: 3 }), 'probe'),
+      await run(() => ({ stderr: 'bad\n', exitCode: 3 }), 'probe'),
       { stdout: '', stderr: 'bad\n', exitCode: 3, cwd: '/', notes: [], unsupported: [] },
     )
-    assert.equal(run(() => ({ stdout: 'x' }), 'probe').exitCode, 0)
+    assert.equal((await run(() => ({ stdout: 'x' }), 'probe')).exitCode, 0)
     // A non-zero status from a handler gates the rest of the line.
-    assert.equal(run(() => ({ exitCode: 2 }), 'probe || echo caught').stdout, 'caught\n')
+    assert.equal((await run(() => ({ exitCode: 2 }), 'probe || echo caught')).stdout, 'caught\n')
   })
 
-  it('a throwing handler surfaces as `name: message`, exit 1 — run() never throws', () => {
-    const r = run(() => { throw new Error('boom') }, 'probe')
+  it('a throwing handler surfaces as `name: message`, exit 1 — run() never throws', async () => {
+    const r = await run(() => { throw new Error('boom') }, 'probe')
     assert.equal(r.stdout, '')
     assert.equal(r.stderr, 'probe: boom\n')
     assert.equal(r.exitCode, 1)
     // And the failure is contained: the next gated step still runs.
-    assert.equal(run(() => { throw new Error('boom') }, 'probe 2>/dev/null || echo after').stdout, 'after\n')
+    assert.equal((await run(() => { throw new Error('boom') }, 'probe 2>/dev/null || echo after')).stdout, 'after\n')
   })
 
-  it('rejects a promise instead of stringifying it into the stream', () => {
-    // The engine is synchronous end-to-end — one stage's stdout is
-    // the next stage's stdin, immediately — so there is nowhere to
-    // await. Without the guard this would pipe `[object Promise]`.
-    const r = run(() => Promise.resolve('hi\n'), 'probe')
-    assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /probe: invalid result: commands are synchronous/u)
-    assert.equal(r.stdout, '')
-    assert.doesNotMatch(run(() => Promise.resolve('hi\n'), 'probe | cat').stdout, /Promise/u)
-    // The check is structural, so an `async run` — which returns a
-    // promise without ever saying so — is caught the same way.
-    const asyncRun = async () => { await Promise.resolve(); return 'hi\n' }
-    assert.match(run(asyncRun, 'probe').stderr, /commands are synchronous/u)
+  it('waits for a handler that answers with a promise, wherever the line put it', async () => {
+    // A line waits for a command that has to, so a handler may be one: what
+    // it promises is what it answered, and the stage after it reads that
+    // rather than `[object Promise]`.
+    assert.deepEqual(await run(() => Promise.resolve('hi\n'), 'probe'), { stdout: 'hi\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+    assert.equal((await run(() => Promise.resolve('hi\n'), 'probe | cat')).stdout, 'hi\n')
+    const asyncRun = async () => { await Promise.resolve(); return { stdout: 'later\n', exitCode: 3 } }
+    assert.deepEqual(await run(asyncRun, 'probe'), { stdout: 'later\n', stderr: '', exitCode: 3, cwd: '/', notes: [], unsupported: [] })
+    // What it resolves to is read as any other answer is, and a promise that
+    // fails fails the command, where a throw would have failed it.
+    assert.match((await run(() => Promise.resolve(['a\n']), 'probe')).stderr, /invalid result: expected a string or an object, got an array/u)
+    const failing = await run(() => { throw new Error('boom') }, 'probe')
+    assert.equal(failing.stderr, 'probe: boom\n')
+    assert.equal(failing.exitCode, 1)
   })
 
-  it('a handler that throws a non-Error still gets a `name: reason` line, and the line survives it', () => {
+  it('a handler that throws a non-Error still gets a `name: reason` line, and the line survives it', async () => {
     // Wired handlers are third-party code, so anything can come out of
     // a throw. A bare `e.message` would report `probe: undefined` for a
     // thrown string, and on `throw null` the catch itself would throw —
     // unwinding past the pipeline, losing stdout the earlier step had
     // already produced and skipping the `||` that should have caught it.
     const thrower = (value) => () => { throw value }
-    assert.equal(run(thrower('oops'), 'probe').stderr, 'probe: oops\n')
-    const r = createTerminal(SOURCES, { commands: { probe: thrower(null) } })
+    assert.equal((await run(thrower('oops'), 'probe')).stderr, 'probe: oops\n')
+    const r = await createTerminal(SOURCES, { commands: { probe: thrower(null) } })
       .run('echo before && probe || echo after')
     assert.equal(r.stdout, 'before\nafter\n')
     assert.equal(r.stderr, 'probe: null\n')
     assert.equal(r.exitCode, 0)
   })
 
-  it('rejects an object carrying none of the result fields, instead of reading it as empty success', () => {
+  it('rejects an object carrying none of the result fields, instead of reading it as empty success', async () => {
     // The realistic slip is one `.join('')` short of the doc example:
     // an array of output lines, or a digest still in binary form. Left
     // to the destructure these are exit 0 with no output and nothing on
     // stderr — the corruption-far-from-its-cause this normalizer exists
     // to prevent.
-    assert.match(run(() => ['a\n', 'b\n'], 'probe').stderr, /invalid result: expected a string or an object, got an array/u)
-    assert.match(run(() => ({ out: 'hi' }), 'probe').stderr, /invalid result: unknown field `out` \(known: stdout, stderr, exitCode\)/u)
-    assert.match(run(() => ({}), 'probe').stderr, /invalid result: an object with none of stdout, stderr, exitCode/u)
-    assert.match(run(() => new Uint8Array([1, 2]), 'probe').stderr, /invalid result: unknown field `0`/u)
+    assert.match((await run(() => ['a\n', 'b\n'], 'probe')).stderr, /invalid result: expected a string or an object, got an array/u)
+    assert.match((await run(() => ({ out: 'hi' }), 'probe')).stderr, /invalid result: unknown field `out` \(known: stdout, stderr, exitCode\)/u)
+    assert.match((await run(() => ({}), 'probe')).stderr, /invalid result: an object with none of stdout, stderr, exitCode/u)
+    assert.match((await run(() => new Uint8Array([1, 2]), 'probe')).stderr, /invalid result: unknown field `0`/u)
     for (const bad of [() => ['a\n'], () => ({ out: 'hi' }), () => ({})]) {
-      assert.equal(run(bad, 'probe').exitCode, 1)
-      assert.equal(run(bad, 'probe').stdout, '')
+      assert.equal((await run(bad, 'probe')).exitCode, 1)
+      assert.equal((await run(bad, 'probe')).stdout, '')
     }
   })
 
-  it('terminates a wired stderr line, so consecutive errors do not fuse', () => {
+  it('terminates a wired stderr line, so consecutive errors do not fuse', async () => {
     // util.js's `err()` pins this for every builtin; a wired command's
     // stderr goes through the same convention rather than verbatim.
     const spec = () => ({ stderr: 'oops', exitCode: 1 })
     const t = createTerminal(SOURCES, { commands: { probe: spec } })
-    assert.equal(t.run('probe; probe').stderr, 'oops\noops\n')
-    assert.equal(t.run('probe; cat missing').stderr, 'oops\ncat: missing: No such file or directory\n')
-    assert.equal(t.run('probe 2>&1 | wc -l').stdout, '1\n')
+    assert.equal((await t.run('probe; probe')).stderr, 'oops\noops\n')
+    assert.equal((await t.run('probe; cat missing')).stderr, 'oops\ncat: missing: No such file or directory\n')
+    assert.equal((await t.run('probe 2>&1 | wc -l')).stdout, '1\n')
     // An already-terminated line is left alone, and empty stays empty.
-    assert.equal(run(() => ({ stderr: 'done\n' }), 'probe').stderr, 'done\n')
-    assert.equal(run(() => ({ stdout: 'x' }), 'probe').stderr, '')
+    assert.equal((await run(() => ({ stderr: 'done\n' }), 'probe')).stderr, 'done\n')
+    assert.equal((await run(() => ({ stdout: 'x' }), 'probe')).stderr, '')
   })
 
-  it('rejects result fields of the wrong type rather than coercing them', () => {
-    assert.match(run(() => 42, 'probe').stderr, /probe: invalid result: expected a string or an object \(got number\)/u)
-    assert.match(run(() => ({ stdout: 42 }), 'probe').stderr, /invalid result: stdout must be a string \(got number\)/u)
-    assert.match(run(() => ({ stderr: [] }), 'probe').stderr, /invalid result: stderr must be a string \(got object\)/u)
-    assert.match(run(() => ({ exitCode: 1.5 }), 'probe').stderr, /invalid result: exitCode must be a non-negative integer/u)
-    assert.match(run(() => ({ exitCode: -1 }), 'probe').stderr, /invalid result: exitCode must be a non-negative integer/u)
-    assert.match(run(() => ({ exitCode: '0' }), 'probe').stderr, /invalid result: exitCode must be a non-negative integer/u)
+  it('rejects result fields of the wrong type rather than coercing them', async () => {
+    assert.match((await run(() => 42, 'probe')).stderr, /probe: invalid result: expected a string or an object \(got number\)/u)
+    assert.match((await run(() => ({ stdout: 42 }), 'probe')).stderr, /invalid result: stdout must be a string \(got number\)/u)
+    assert.match((await run(() => ({ stderr: [] }), 'probe')).stderr, /invalid result: stderr must be a string \(got object\)/u)
+    assert.match((await run(() => ({ exitCode: 1.5 }), 'probe')).stderr, /invalid result: exitCode must be a non-negative integer/u)
+    assert.match((await run(() => ({ exitCode: -1 }), 'probe')).stderr, /invalid result: exitCode must be a non-negative integer/u)
+    assert.match((await run(() => ({ exitCode: '0' }), 'probe')).stderr, /invalid result: exitCode must be a non-negative integer/u)
   })
 
-  it('io carries the registered name, expanded args, stdin and cwd', () => {
+  it('io carries the registered name, expanded args, stdin and cwd', async () => {
     const seen = []
     const t = createTerminal(SOURCES, {
       commands: { probe: { pipe: true, run: (io) => { seen.push(io); return '' } } },
     })
-    t.run('cd src')
-    t.run('echo piped | probe -n *.js literal')
+    await t.run('cd src')
+    await t.run('echo piped | probe -n *.js literal')
     assert.equal(seen.length, 1)
     const io = seen[0]
     assert.equal(io.name, 'probe')
@@ -215,7 +216,7 @@ describe('createTerminal — opts.commands: the handler contract', () => {
     assert.equal(io.cwd, '/src')
   })
 
-  it('io.cwd is a snapshot — a handler cannot move the terminal', () => {
+  it('io.cwd is a snapshot — a handler cannot move the terminal', async () => {
     const t = createTerminal(SOURCES, {
       commands: {
         probe: (io) => {
@@ -224,19 +225,19 @@ describe('createTerminal — opts.commands: the handler contract', () => {
         },
       },
     })
-    t.run('cd src')
-    assert.equal(t.run('probe').exitCode, 0)
+    await t.run('cd src')
+    assert.equal((await t.run('probe')).exitCode, 0)
     assert.equal(t.cwd(), '/src')
-    assert.equal(t.run('pwd').stdout, '/src\n')
+    assert.equal((await t.run('pwd')).stdout, '/src\n')
   })
 
-  it('io.readInputs is the shared file/stdin model, addressable by absolute or relative path', () => {
+  it('io.readInputs is the shared file/stdin model, addressable by absolute or relative path', async () => {
     let seen
     const t = createTerminal(SOURCES, {
       commands: { probe: (io) => { seen = io.readInputs(io.args); return '' } },
     })
-    t.run('cd src')
-    t.run('probe x.js ../a.txt /b.txt')
+    await t.run('cd src')
+    await t.run('probe x.js ../a.txt /b.txt')
     assert.deepEqual(seen.inputs, [
       { name: 'x.js', content: 'const x = 1\n', kind: 'file' },
       { name: '../a.txt', content: 'hello\n', kind: 'file' },
@@ -245,12 +246,12 @@ describe('createTerminal — opts.commands: the handler contract', () => {
     assert.equal(seen.stderr, '')
     assert.equal(seen.failed, false)
     // Errors are named after the registered command, not a generic label.
-    t.run('probe missing.js')
+    await t.run('probe missing.js')
     assert.equal(seen.stderr, 'probe: missing.js: No such file or directory\n')
     assert.equal(seen.failed, true)
   })
 
-  it('io.readInputs carries every operand in `entries`, readable or not', () => {
+  it('io.readInputs carries every operand in `entries`, readable or not', async () => {
     // `inputs` is the readable subset a filter wants; `entries` keeps
     // the unreadable operands in place with their kind, which is how
     // head/tail decide to banner a directory operand but not a missing
@@ -259,7 +260,7 @@ describe('createTerminal — opts.commands: the handler contract', () => {
     const t = createTerminal(SOURCES, {
       commands: { probe: (io) => { seen = io.readInputs(io.args); return '' } },
     })
-    t.run('probe a.txt src nope.txt')
+    await t.run('probe a.txt src nope.txt')
     assert.deepEqual(seen.entries.map((e) => [e.name, e.kind]), [
       ['a.txt', 'file'],
       ['src', 'dir'],
@@ -269,12 +270,12 @@ describe('createTerminal — opts.commands: the handler contract', () => {
     assert.equal(seen.failed, true)
     // With no operands the single stdin input reads as a file, and is
     // the same object in both lists.
-    t.run('echo piped | probe')
+    await t.run('echo piped | probe')
     assert.deepEqual(seen.entries, [{ name: null, content: 'piped\n', kind: 'file' }])
     assert.deepEqual(seen.inputs, seen.entries)
   })
 
-  it('io.cwd, io.fs and io.readInputs resolve against the same directory', () => {
+  it('io.cwd, io.fs and io.readInputs resolve against the same directory', async () => {
     // The snapshot is taken once per call, so a handler that keeps its
     // `io` — or that re-enters run() through the terminal handle the
     // embedder holds — can never see `io.cwd` say one directory while
@@ -283,52 +284,52 @@ describe('createTerminal — opts.commands: the handler contract', () => {
     const t = createTerminal({ 'a.txt': 'TOP\n', 'src/a.txt': 'NESTED\n' }, {
       commands: { probe: (arg) => { io = arg; return '' } },
     })
-    t.run('probe')
-    t.run('cd src')
+    await t.run('probe')
+    await t.run('cd src')
     assert.equal(io.cwd, '/')
     assert.equal(io.fs.resolve('a.txt'), '/a.txt')
     assert.equal(io.readInputs(['a.txt']).inputs[0].content, 'TOP\n')
     // The next call sees the new cwd, consistently across all three.
-    t.run('probe')
+    await t.run('probe')
     assert.equal(io.cwd, '/src')
     assert.equal(io.fs.resolve('a.txt'), '/src/a.txt')
     assert.equal(io.readInputs(['a.txt']).inputs[0].content, 'NESTED\n')
   })
 
-  it('io.readInputs rejects a bare string instead of reading it character by character', () => {
+  it('io.readInputs rejects a bare string instead of reading it character by character', async () => {
     const t = createTerminal(SOURCES, { commands: { probe: (io) => { io.readInputs(io.args[0]); return '' } } })
-    const r = t.run('probe a.txt')
+    const r = await t.run('probe a.txt')
     assert.equal(r.exitCode, 1)
     assert.equal(r.stderr, 'probe: readInputs: expected an array of paths, got a string: a.txt\n')
   })
 })
 
 describe('createTerminal — opts.commands: the io.fs view', () => {
-  const inspect = (line, fn) => {
+  const inspect = async (line, fn) => {
     let out
     const t = createTerminal(SOURCES, { commands: { probe: (io) => { out = fn(io); return '' } } })
-    t.run(line)
+    await t.run(line)
     return out
   }
 
-  it('resolves relative paths against the cwd and normalizes absolute ones', () => {
-    assert.equal(inspect('cd src; probe', (io) => io.fs.resolve('x.js')), '/src/x.js')
-    assert.equal(inspect('cd src; probe', (io) => io.fs.resolve('../a.txt')), '/a.txt')
-    assert.equal(inspect('probe', (io) => io.fs.resolve('/src/./y.js')), '/src/y.js')
+  it('resolves relative paths against the cwd and normalizes absolute ones', async () => {
+    assert.equal(await inspect('cd src; probe', (io) => io.fs.resolve('x.js')), '/src/x.js')
+    assert.equal(await inspect('cd src; probe', (io) => io.fs.resolve('../a.txt')), '/a.txt')
+    assert.equal(await inspect('probe', (io) => io.fs.resolve('/src/./y.js')), '/src/y.js')
   })
 
-  it('exposes reads, existence checks, listings and walks', () => {
-    assert.equal(inspect('cd src; probe', (io) => io.fs.readFile('x.js')), 'const x = 1\n')
-    assert.equal(inspect('probe', (io) => io.fs.readFile('nope')), undefined)
-    assert.equal(inspect('probe', (io) => io.fs.isFile('a.txt')), true)
-    assert.equal(inspect('probe', (io) => io.fs.isFile('src')), false)
-    assert.equal(inspect('probe', (io) => io.fs.isDir('src')), true)
-    assert.deepEqual(inspect('probe', (io) => io.fs.listDir('/')), { dirs: ['src'], files: ['a.txt', 'b.txt'], links: [] })
-    assert.deepEqual(inspect('probe', (io) => io.fs.walkFiles('src')), ['/src/x.js', '/src/y.js'])
-    assert.deepEqual(inspect('probe', (io) => io.fs.walkFiles('/nope')), [])
+  it('exposes reads, existence checks, listings and walks', async () => {
+    assert.equal(await inspect('cd src; probe', (io) => io.fs.readFile('x.js')), 'const x = 1\n')
+    assert.equal(await inspect('probe', (io) => io.fs.readFile('nope')), undefined)
+    assert.equal(await inspect('probe', (io) => io.fs.isFile('a.txt')), true)
+    assert.equal(await inspect('probe', (io) => io.fs.isFile('src')), false)
+    assert.equal(await inspect('probe', (io) => io.fs.isDir('src')), true)
+    assert.deepEqual(await inspect('probe', (io) => io.fs.listDir('/')), { dirs: ['src'], files: ['a.txt', 'b.txt'], links: [] })
+    assert.deepEqual(await inspect('probe', (io) => io.fs.walkFiles('src')), ['/src/x.js', '/src/y.js'])
+    assert.deepEqual(await inspect('probe', (io) => io.fs.walkFiles('/nope')), [])
   })
 
-  it('listings are copies — a handler cannot corrupt the shared directory index', () => {
+  it('listings are copies — a handler cannot corrupt the shared directory index', async () => {
     const t = createTerminal(SOURCES, {
       commands: {
         probe: (io) => {
@@ -339,24 +340,24 @@ describe('createTerminal — opts.commands: the io.fs view', () => {
         },
       },
     })
-    t.run('probe')
-    assert.equal(t.run('ls').stdout, 'a.txt\nb.txt\nsrc\n')
+    await t.run('probe')
+    assert.equal((await t.run('ls')).stdout, 'a.txt\nb.txt\nsrc\n')
   })
 
-  it('listDir fails in the shape a built-in would, naming the operand as typed', () => {
+  it('listDir fails in the shape a built-in would, naming the operand as typed', async () => {
     // createFs's own throw says "not a directory" for a path that is
     // not there at all, and quotes the resolved absolute form of a
     // relatively-typed operand — neither is what a handler should
     // surface to the user.
     const t = createTerminal(SOURCES, { commands: { probe: (io) => io.fs.listDir(io.args[0]) && '' } })
-    assert.equal(t.run('probe nope').stderr, 'probe: nope: No such file or directory\n')
-    assert.equal(t.run('probe a.txt').stderr, 'probe: a.txt: Not a directory\n')
-    assert.equal(t.run('probe src').exitCode, 0)
+    assert.equal((await t.run('probe nope')).stderr, 'probe: nope: No such file or directory\n')
+    assert.equal((await t.run('probe a.txt')).stderr, 'probe: a.txt: Not a directory\n')
+    assert.equal((await t.run('probe src')).exitCode, 0)
   })
 
-  it('is read-only: the source tree cannot be written through it', () => {
+  it('is read-only: the source tree cannot be written through it', async () => {
     const t = createTerminal(SOURCES, { commands: { probe: (io) => Object.keys(io.fs).join(',') + '\n' } })
-    assert.equal(t.run('probe').stdout, 'resolve,isFile,isDir,isLink,readLink,readFile,isBytes,readBytes,listDir,walkFiles\n')
+    assert.equal((await t.run('probe')).stdout, 'resolve,isFile,isDir,isLink,readLink,readFile,isBytes,readBytes,listDir,walkFiles\n')
   })
 })
 
@@ -374,7 +375,7 @@ describe('createTerminal — opts.commands: registry integration', () => {
     assert.equal(all.indexOf('sha256sum'), all.length - 3)
   })
 
-  it('`pipe: true` offers the command as a pipe target; without it, it stays out', () => {
+  it('`pipe: true` offers the command as a pipe target; without it, it stays out', async () => {
     const t = createTerminal(SOURCES, {
       commands: { sha256sum, standalone: () => '' },
     })
@@ -382,55 +383,55 @@ describe('createTerminal — opts.commands: registry integration', () => {
     assert.deepEqual(t.complete('cat a.txt | stand'), [])
     // Still dispatchable in a pipeline — `pipe` is a completion hint,
     // not an access control.
-    assert.equal(t.run('cat a.txt | standalone').exitCode, 0)
+    assert.equal((await t.run('cat a.txt | standalone')).exitCode, 0)
   })
 
-  it('which resolves wired commands', () => {
+  it('which resolves wired commands', async () => {
     const t = withSha()
-    assert.equal(t.run('which sha256sum').stdout, '/usr/bin/sha256sum\n')
-    assert.equal(t.run('which sha256sum cat').exitCode, 0)
+    assert.equal((await t.run('which sha256sum')).stdout, '/usr/bin/sha256sum\n')
+    assert.equal((await t.run('which sha256sum cat')).exitCode, 0)
   })
 
-  it('appears in the "Available: …" hint, after the builtins', () => {
-    const hint = withSha().run('frobnicate').stderr
+  it('appears in the "Available: …" hint, after the builtins', async () => {
+    const hint = (await withSha().run('frobnicate')).stderr
     assert.equal(hint.trimEnd().endsWith(', sha256sum'), true, hint)
     assert.match(hint, /^frobnicate: command not found\. Available: ls, cd, cat/u)
   })
 
-  it('`hidden: true` keeps it dispatchable but out of completion and the hint', () => {
+  it('`hidden: true` keeps it dispatchable but out of completion and the hint', async () => {
     const t = createTerminal(SOURCES, {
       commands: { md5sum: { hidden: true, pipe: true, run: () => 'stub\n' } },
     })
-    assert.equal(t.run('md5sum a.txt').stdout, 'stub\n')
-    assert.equal(t.run('cat a.txt | md5sum').stdout, 'stub\n')
-    assert.equal(t.run('which md5sum').stdout, '/usr/bin/md5sum\n')
+    assert.equal((await t.run('md5sum a.txt')).stdout, 'stub\n')
+    assert.equal((await t.run('cat a.txt | md5sum')).stdout, 'stub\n')
+    assert.equal((await t.run('which md5sum')).stdout, '/usr/bin/md5sum\n')
     assert.deepEqual(t.complete('md5'), [])
     assert.deepEqual(t.complete('cat | md5'), [])
-    assert.doesNotMatch(t.run('frobnicate').stderr, /md5sum/u)
+    assert.doesNotMatch((await t.run('frobnicate')).stderr, /md5sum/u)
   })
 
-  it('accepts a Map, like `sources` does', () => {
+  it('accepts a Map, like `sources` does', async () => {
     const t = createTerminal(SOURCES, { commands: new Map([['sha256sum', sha256sum]]) })
-    assert.equal(t.run('sha256sum a.txt').stdout, `${HELLO_SHA}  a.txt\n`)
+    assert.equal((await t.run('sha256sum a.txt')).stdout, `${HELLO_SHA}  a.txt\n`)
   })
 
-  it('wiring is per terminal — nothing leaks into other instances', () => {
+  it('wiring is per terminal — nothing leaks into other instances', async () => {
     const wired = withSha()
     const plain = createTerminal(SOURCES)
-    assert.equal(wired.run('sha256sum a.txt').exitCode, 0)
-    assert.equal(plain.run('sha256sum a.txt').exitCode, 127)
-    assert.match(plain.run('sha256sum a.txt').stderr, /command not found/u)
+    assert.equal((await wired.run('sha256sum a.txt')).exitCode, 0)
+    assert.equal((await plain.run('sha256sum a.txt')).exitCode, 127)
+    assert.match((await plain.run('sha256sum a.txt')).stderr, /command not found/u)
     assert.deepEqual(plain.complete('sha'), [])
-    assert.equal(plain.run('which sha256sum').stdout, 'sha256sum not found\n')
+    assert.equal((await plain.run('which sha256sum')).stdout, 'sha256sum not found\n')
     // …and the shared default registry is not mutated by either.
-    assert.equal(createTerminal(SOURCES).run('sha256sum').exitCode, 127)
+    assert.equal((await createTerminal(SOURCES).run('sha256sum')).exitCode, 127)
   })
 
-  it('a name is only reachable as itself: no PATH lookup, no partial match', () => {
+  it('a name is only reachable as itself: no PATH lookup, no partial match', async () => {
     const t = withSha()
-    assert.equal(t.run('sha256').exitCode, 127)
-    assert.equal(t.run('sha256sum2').exitCode, 127)
-    assert.equal(t.run('./sha256sum a.txt').exitCode, 127)
+    assert.equal((await t.run('sha256')).exitCode, 127)
+    assert.equal((await t.run('sha256sum2')).exitCode, 127)
+    assert.equal((await t.run('./sha256sum a.txt')).exitCode, 127)
   })
 })
 
@@ -468,7 +469,7 @@ describe('createTerminal — opts.commands: wiring errors throw at construction'
     assert.throws(build({ probe: { run: () => '', piped: true } }), /unknown option `piped`/u)
   })
 
-  it('refuses a `commands` that is not a plain object or a Map', () => {
+  it('refuses a `commands` that is not a plain object or a Map', async () => {
     assert.throws(build('sha256sum'), /opts\.commands must be an object or a Map \(got string\)/u)
     assert.throws(build(() => ''), /opts\.commands must be an object or a Map \(got function\)/u)
     // An array's keys are indices, and `0` is a legal command name
@@ -487,17 +488,17 @@ describe('createTerminal — opts.commands: wiring errors throw at construction'
     // Omitted / empty is fine and leaves the builtins alone.
     assert.doesNotThrow(build())
     assert.doesNotThrow(build({}))
-    assert.equal(createTerminal(SOURCES, { commands: {} }).run('cat a.txt').stdout, 'hello\n')
+    assert.equal((await createTerminal(SOURCES, { commands: {} }).run('cat a.txt')).stdout, 'hello\n')
   })
 
-  it('accepts a Map-like whose `entries` is its own, as a cross-realm Map appears here', () => {
+  it('accepts a Map-like whose `entries` is its own, as a cross-realm Map appears here', async () => {
     // A Map built in an iframe, a worker, or a second copy of the
     // bundle fails `instanceof Map`, and `Object.entries` of a Map is
     // empty — so an instanceof test would hand back a terminal with
     // nothing wired and no diagnostic.
     const foreign = { entries: () => new Map([['sha256sum', sha256sum]]).entries() }
     const t = createTerminal(SOURCES, { commands: foreign })
-    assert.equal(t.run('sha256sum a.txt').stdout, `${HELLO_SHA}  a.txt\n`)
+    assert.equal((await t.run('sha256sum a.txt')).stdout, `${HELLO_SHA}  a.txt\n`)
   })
 
   it('refuses a non-string command name, which completion could not handle', () => {
@@ -508,7 +509,7 @@ describe('createTerminal — opts.commands: wiring errors throw at construction'
     assert.throws(build(new Map([[Symbol('x'), () => '']])), /command names must be strings \(got symbol\)/u)
   })
 
-  it('reads `run` once, so an accessor cannot pass validation and store something else', () => {
+  it('reads `run` once, so an accessor cannot pass validation and store something else', async () => {
     // Reading twice would let a getter answer with a function for the
     // check and a non-function for the store — exactly the deferred
     // dispatch-time failure this validation exists to prevent.
@@ -517,7 +518,7 @@ describe('createTerminal — opts.commands: wiring errors throw at construction'
       commands: { probe: { get run() { return reads++ ? 'not a function' : () => 'ok\n' } } },
     })
     assert.equal(reads, 1)
-    assert.equal(t.run('probe').stdout, 'ok\n')
+    assert.equal((await t.run('probe')).stdout, 'ok\n')
   })
 
   it('refuses descriptor options hung on a bare handler function', () => {
@@ -534,13 +535,13 @@ describe('createTerminal — opts.commands: wiring errors throw at construction'
 })
 
 describe('createTerminal — opts.commands: the io surface is the whole contract', () => {
-  it('a handler is handed exactly the documented fields — no engine internals', () => {
+  it('a handler is handed exactly the documented fields — no engine internals', async () => {
     // The internal ctx carries the command registry, `dispatch`, and a
     // live mutable cwd. None of it reaches a wired command: `io` is
     // what the embedder builds against, so it is what stays stable.
     let keys
     const t = createTerminal(SOURCES, { commands: { probe: (io) => { keys = Object.keys(io); return '' } } })
-    t.run('probe')
+    await t.run('probe')
     assert.deepEqual(keys, ['name', 'args', 'stdin', 'cwd', 'fs', 'readInputs'])
   })
 })

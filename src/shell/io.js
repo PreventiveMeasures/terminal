@@ -39,10 +39,10 @@ export function createIoGuard(fs) {
       try { return fn() } finally { scope.bufferReads = previous }
     },
     setReads(identities) { if (active) active.reads = identities },
-    run(name, fn) {
+    async run(name, fn) {
       const parent = active
       active = { name, reads: [], parent }
-      try { return fn() } finally { active = parent }
+      try { return await fn() } finally { active = parent }
     },
     output(result, io, fn) {
       const previous = output

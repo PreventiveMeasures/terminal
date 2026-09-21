@@ -18,8 +18,8 @@ const hidden = (line) => {
 
 function examples(rows) {
   for (const [name, command, stdout, stderr, names = ['MISSING'], exitCode = 0, notes = []] of rows) {
-    it(name, () => {
-      assert.deepEqual(terminal().run(command), {
+    it(name, async () => {
+      assert.deepEqual(await terminal().run(command), {
         stdout, stderr, exitCode, cwd: '/',
         notes, unsupported: names.map((variable) => ({ kind: 'feature', command: null, detail: '$' + variable, message: warning(variable).trimEnd() })),
       }, command)
@@ -39,9 +39,9 @@ describe('expansion diagnostics follow lexical order', () => {
     ['a failed substitution does not change a successful ordinary command status', 'true "$MISSING$(cat nope)"', '', missing + nope],
   ])
 
-  it('a process parameter refuses before a later substitution runs', () => {
+  it('a process parameter refuses before a later substitution runs', async () => {
     const message = 'error: shell parameter $ is not supported (this terminal runs no process)'
-    assert.deepEqual(terminal().run('echo "$$$(cat nope)"'), {
+    assert.deepEqual(await terminal().run('echo "$$$(cat nope)"'), {
       stdout: '', stderr: message + '\n', exitCode: 1, cwd: '/',
       notes: [], unsupported: [{ kind: 'feature', command: null, detail: '$$', message: message.slice('error: '.length) }],
     })
@@ -109,8 +109,8 @@ describe('diagnostics emitted before later expansion failures remain visible', (
     ['later loop word expansion failure', 'for x in "$MISSING" ~someone; do echo unexpected; done', missing + tildeError],
     ['earlier substitution and warning before a later failure', 'echo "$(cat nope)$MISSING" ~someone', nope + missing + tildeError],
   ]) {
-    it(name, () => {
-      const result = terminal().run(command)
+    it(name, async () => {
+      const result = await terminal().run(command)
       assert.equal(result.stdout, '')
       assert.equal(result.stderr, expected)
       assert.equal(result.exitCode, 1)
@@ -118,16 +118,16 @@ describe('diagnostics emitted before later expansion failures remain visible', (
     })
   }
 
-  it('keeps a warning before word splitting rejects unsupported IFS', () => {
-    const result = terminal().run('IFS=:; echo $MISSING "$(cat nope)"')
+  it('keeps a warning before word splitting rejects unsupported IFS', async () => {
+    const result = await terminal().run('IFS=:; echo $MISSING "$(cat nope)"')
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, missing + 'error: custom IFS separators are not supported\n')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.unsupported.map((entry) => entry.detail), ['$MISSING', 'IFS'])
   })
 
-  it('preserves both unsupported entries when enclosing redirects hide a later failure', () => {
-    const result = terminal().run('{ echo "$MISSING" ~someone; } 2>/dev/null | cat')
+  it('preserves both unsupported entries when enclosing redirects hide a later failure', async () => {
+    const result = await terminal().run('{ echo "$MISSING" ~someone; } 2>/dev/null | cat')
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)

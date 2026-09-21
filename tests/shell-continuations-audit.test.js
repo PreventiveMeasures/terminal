@@ -27,48 +27,48 @@ describe('continued shell control and redirection operators', () => {
     [`( ${continuation}(echo yes))`, 'yes\n'],
     [`true &${continuation.repeat(3)}& echo yes`, 'yes\n'],
   ]) {
-    it(JSON.stringify(command), () => assert.deepEqual(terminal().run(command), expected(stdout, stderr)))
+    it(JSON.stringify(command), async () => assert.deepEqual(await terminal().run(command), expected(stdout, stderr)))
   }
 
-  it('keeps a descriptor prefix attached to its redirect', () => {
+  it('keeps a descriptor prefix attached to its redirect', async () => {
     const shell = terminal()
-    assert.deepEqual(shell.run(`echo hi 2${continuation}>/tmp/error`), expected('hi\n'))
-    assert.deepEqual(shell.run('cat /tmp/error'), expected(''))
-    const error = shell.run(`cat /repo/missing 2${continuation}>/tmp/error`)
+    assert.deepEqual(await shell.run(`echo hi 2${continuation}>/tmp/error`), expected('hi\n'))
+    assert.deepEqual(await shell.run('cat /tmp/error'), expected(''))
+    const error = await shell.run(`cat /repo/missing 2${continuation}>/tmp/error`)
     assert.equal(error.stdout, '')
     assert.equal(error.stderr, '')
     assert.equal(error.exitCode, 1)
     assert.deepEqual(error.unsupported, [])
-    assert.match(shell.run('cat /tmp/error').stdout, /cat:.*missing/u)
+    assert.match((await shell.run('cat /tmp/error')).stdout, /cat:.*missing/u)
   })
 
   for (const operator of ['>>', '&>>']) {
-    it('preserves append mode for ' + operator, () => {
+    it('preserves append mode for ' + operator, async () => {
       const shell = terminal()
-      assert.deepEqual(shell.run(`printf first >/tmp/output; printf second ${insertContinuations(operator)}/tmp/output; cat /tmp/output`), expected('firstsecond'))
+      assert.deepEqual(await shell.run(`printf first >/tmp/output; printf second ${insertContinuations(operator)}/tmp/output; cat /tmp/output`), expected('firstsecond'))
     })
   }
 
   for (const operator of ['&>', '&>>']) {
-    it('combines both output streams for ' + operator, () => {
-      assert.deepEqual(terminal().run(`{ printf out; printf err >&2; } ${insertContinuations(operator)}/tmp/output; cat /tmp/output`), expected('outerr'))
+    it('combines both output streams for ' + operator, async () => {
+      assert.deepEqual(await terminal().run(`{ printf out; printf err >&2; } ${insertContinuations(operator)}/tmp/output; cat /tmp/output`), expected('outerr'))
     })
   }
 
-  it('preserves explicit overwrite mode', () => {
-    assert.deepEqual(terminal().run(`printf old >/tmp/output; printf new ${insertContinuations('>|')}/tmp/output; cat /tmp/output`), expected('new'))
+  it('preserves explicit overwrite mode', async () => {
+    assert.deepEqual(await terminal().run(`printf old >/tmp/output; printf new ${insertContinuations('>|')}/tmp/output; cat /tmp/output`), expected('new'))
   })
 
-  it('preserves a continued stderr pipeline', () => {
-    const result = terminal().run(`cat /repo/missing ${insertContinuations('|&')} cat`)
+  it('preserves a continued stderr pipeline', async () => {
+    const result = await terminal().run(`cat /repo/missing ${insertContinuations('|&')} cat`)
     assert.match(result.stdout, /cat:.*missing/u)
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)
     assert.deepEqual(result.unsupported, [])
   })
 
-  it('closes the continued output descriptor', () => {
-    const result = terminal().run(`printf hi ${insertContinuations('1>&-')}`)
+  it('closes the continued output descriptor', async () => {
+    const result = await terminal().run(`printf hi ${insertContinuations('1>&-')}`)
     assert.equal(result.stdout, '')
     assert.match(result.stderr, /write error/u)
     assert.equal(result.exitCode, 1)
@@ -89,7 +89,7 @@ describe('continued heredoc operators and substitution boundaries', () => {
     [`printf '%s' "$(cat <<$${continuation}"END"\n)body\nEND\n)"`, ')body'],
     [`printf '%s' "$(printf '%s' $${continuation}${String.raw`'a\'b)'`})"`, "a'b)"],
   ]) {
-    it(JSON.stringify(command), () => assert.deepEqual(terminal().run(command), expected(stdout)))
+    it(JSON.stringify(command), async () => assert.deepEqual(await terminal().run(command), expected(stdout)))
   }
 })
 
@@ -102,7 +102,7 @@ describe('continuation recognition respects literal and quoted text', () => {
     [`echo hi '2'${continuation}>/tmp/output; cat /tmp/output`, 'hi 2\n'],
     [`echo hi cat2${continuation}>/tmp/output; cat /tmp/output`, 'hi cat2\n'],
   ]) {
-    it(JSON.stringify(command), () => assert.deepEqual(terminal().run(command), expected(stdout)))
+    it(JSON.stringify(command), async () => assert.deepEqual(await terminal().run(command), expected(stdout)))
   }
 })
 
@@ -118,8 +118,8 @@ describe('continued unsupported constructs retain their diagnostics', () => {
     ['printf hi >&1\rword', 'redirect target'],
     ['printf hi >&1\u00A0word', 'redirect target'],
   ]) {
-    it(JSON.stringify(command), () => {
-      const result = terminal().run(command)
+    it(JSON.stringify(command), async () => {
+      const result = await terminal().run(command)
       assert.ok(result.unsupported.some((note) => note.detail === detail), JSON.stringify(result))
     })
   }

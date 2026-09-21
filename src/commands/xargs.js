@@ -3,7 +3,7 @@ import { parseArgs } from '../args.js'
 import { consumeStdin, err, ok, parseNonNegativeInt, splitLines } from '../util.js'
 import { unsupported } from '../unsupported.js'
 
-export function xargs(stdin, tokens, ctx) {
+export async function xargs(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, {
     short: ['r', '0'], valueShort: ['n', 'I'], stopAtFirstPositional: true,
   })
@@ -32,7 +32,8 @@ export function xargs(stdin, tokens, ctx) {
     const args = replace === undefined
       ? [...baseArgs, ...items.slice(i, i + size)]
       : baseArgs.map((arg) => arg.replaceAll(replace, item))
-    const r = ctx.dispatch(cmd, args, '')
+    // oxlint-disable-next-line no-await-in-loop -- one batch after the last, as xargs runs them.
+    const r = await ctx.dispatch(cmd, args, '')
     stdout += r.stdout; stderr += r.stderr
     if (r.exitCode === 255) return { stdout, stderr: stderr + 'xargs: ' + cmd + ': exited with status 255; aborting\n', exitCode: 124 }
     if (r.exitCode === 127 && !ctx.hasCommand(ctx.registry.resolveCommand(cmd))) return { stdout, stderr, exitCode: 127 }

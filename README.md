@@ -20,16 +20,18 @@ const terminal = createTerminal({
   'README.md': '# demo\n',
 })
 
-terminal.run('grep -rn oak src').stdout  // 'src/app.js:1:export const name = "oak"\n'
-terminal.complete('cat src/a')           // ['cat src/app.js']
-terminal.run('cd src; wc -l app.js')     // { stdout: '1 app.js\n', exitCode: 0, cwd: '/src', … }
+(await terminal.run('grep -rn oak src')).stdout  // 'src/app.js:1:export const name = "oak"\n'
+terminal.complete('cat src/a')                  // ['cat src/app.js']
+await terminal.run('cd src; wc -l app.js')      // { stdout: '1 app.js\n', exitCode: 0, cwd: '/src', … }
 ```
 
-`run(line)` is synchronous and returns `{ stdout, stderr, exitCode, cwd,
-unsupported, notes }`; `runAsync(line)` is that same line awaited, for a caller
-who would rather await a result than take one — and the only call that can wait
-for work a line cannot do for itself. Lines given to one terminal run in the
-order they were given, each waiting for the one before it. Variables
+`run(line)` answers with a promise of `{ stdout, stderr, exitCode, cwd,
+unsupported, notes }`, because a command may have work the runtime does rather
+than this code — `gzip` waits on a compression stream — and the line waits for
+it where it meets it. One line runs at a time over a tree: a line handed to a
+terminal, or to a fork of it, while another is in flight takes its turn rather
+than starting in the gap that one left, so lines run in the order they were
+given whether or not each call is awaited. Variables
 and the working directory persist across calls. `complete(line)` returns
 full-line replacements, ready to drop in. Reading a
 line without running it is a separate entry point,
@@ -47,7 +49,7 @@ line without running it is a separate entry point,
   listing passed over, a depth-limited traversal, input shortened by `head`.
 
 ```js
-terminal.run('shopt -s nullglob').unsupported
+(await terminal.run('shopt -s nullglob')).unsupported
 // [{ kind: 'feature', command: 'shopt', detail: 'shopt', message: 'shopt: `shopt` is not supported' }]
 ```
 
@@ -67,8 +69,8 @@ must live outside it. The overlay starts as one directory, and `mkdir` and
 ```js
 const terminal = createTerminal({ input: 'b\na\n' }, { mount: '/repo', writable: '/tmp/' })
 
-terminal.run('sort input > /tmp/out; cat /tmp/out').stdout  // 'a\nb\n'
-terminal.run('echo x > out').exitCode                       // 1, and `>` refuses on the feed
+(await terminal.run('sort input > /tmp/out; cat /tmp/out')).stdout  // 'a\nb\n'
+(await terminal.run('echo x > out')).exitCode                       // 1, and `>` refuses on the feed
 ```
 
 ## Forking
@@ -81,13 +83,13 @@ commands are the parent's own, not copies of them.
 
 ```js
 const terminal = createTerminal({ 'src/app.js': 'x\n' }, { mount: '/repo', writable: '/tmp/' })
-terminal.run('cd src; TAG=v2')
+await terminal.run('cd src; TAG=v2')
 
-const worker = terminal.fork()           // starts in /repo/src, with TAG set
-worker.run('cd /repo; TAG=v3; echo $TAG > /tmp/tag')
+const worker = terminal.fork()                  // starts in /repo/src, with TAG set
+await worker.run('cd /repo; TAG=v3; echo $TAG > /tmp/tag')
 
-terminal.run('pwd; echo $TAG').stdout    // '/repo/src\nv2\n' — the parent did not move
-terminal.run('cat /tmp/tag').stdout      // 'v3\n' — /tmp/ is the one thing they share
+(await terminal.run('pwd; echo $TAG')).stdout   // '/repo/src\nv2\n' — the parent did not move
+(await terminal.run('cat /tmp/tag')).stdout     // 'v3\n' — /tmp/ is the one thing they share
 ```
 
 Afterwards the two run independently: neither one's `cd`, assignment, `unset`
@@ -111,9 +113,9 @@ front of the home you just set, is the odd shape, not the useful one.
 ```js
 const other = terminal.fork({ inherit: false, home: '/home/ada', user: 'ada' })
 
-other.run('echo ~; whoami').stdout  // '/home/ada\nada\n' — the home it was given
-other.run('echo $TAG').unsupported  // [{ …, detail: '$TAG' }] — nothing of the parent's is set
-other.cwd()                         // '/repo/src' — where it stands is `cwd`'s business, not `inherit`'s
+(await other.run('echo ~; whoami')).stdout  // '/home/ada\nada\n' — the home it was given
+(await other.run('echo $TAG')).unsupported  // [{ …, detail: '$TAG' }] — nothing of the parent's is set
+other.cwd()                                 // '/repo/src' — where it stands is `cwd`'s business, not `inherit`'s
 ```
 
 ## License

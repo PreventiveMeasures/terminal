@@ -21,25 +21,25 @@ describe('unopened descriptors fail during command execution', () => {
     ['echo before; echo bad >&3 2>/dev/null; echo after', 'before\nafter\n', badFd, 0],
     ['echo "$((n=3))" >&3; printf "%s" "$n"', '3', badFd, 0],
   ]) {
-    it(command, () => {
-      const result = terminal().run(command)
+    it(command, async () => {
+      const result = await terminal().run(command)
       assert.deepEqual(result, { stdout, stderr, exitCode, cwd: '/src', notes: [], unsupported: [] })
     })
   }
 
-  it('preserves earlier redirect writes and does not apply later redirects', () => {
+  it('preserves earlier redirect writes and does not apply later redirects', async () => {
     const t = terminal()
-    t.run('printf keep >/tmp/earlier; printf keep >/tmp/later')
-    const earlier = t.run('echo bad >/tmp/earlier >&3')
-    const later = t.run('echo bad >&3 >/tmp/later')
+    await t.run('printf keep >/tmp/earlier; printf keep >/tmp/later')
+    const earlier = await t.run('echo bad >/tmp/earlier >&3')
+    const later = await t.run('echo bad >&3 >/tmp/later')
     for (const result of [earlier, later]) {
       assert.equal(result.stdout, '')
       assert.equal(result.stderr, badFd)
       assert.equal(result.exitCode, 1)
       assert.deepEqual(result.unsupported, [])
     }
-    assert.equal(t.run('cat /tmp/earlier').stdout, '')
-    assert.equal(t.run('cat /tmp/later').stdout, 'keep')
+    assert.equal((await t.run('cat /tmp/earlier')).stdout, '')
+    assert.equal((await t.run('cat /tmp/later')).stdout, 'keep')
   })
 })
 
@@ -52,14 +52,14 @@ describe('substitution descriptor failures retain normal command status rules', 
     ['echo before\nx=$(echo prefix; echo bad >&3)\nprintf "<%s><%s>" "$?" "$x"', 'before\n<1><prefix>', 0],
     ['x=$(echo "$(echo bad >&3)"); printf "<%s><%s>" "$?" "$x"', '<0><>', 0],
   ]) {
-    it(command, () => {
-      const result = terminal().run(command)
+    it(command, async () => {
+      const result = await terminal().run(command)
       assert.deepEqual(result, { stdout, stderr: badFd, exitCode, cwd: '/src', notes: [], unsupported: [] })
     })
   }
 
-  it('does not evaluate command substitutions in a skipped command', () => {
-    const result = terminal().run('true || echo "$(echo bad >&3)"; false && echo "$(echo bad >&3)"')
+  it('does not evaluate command substitutions in a skipped command', async () => {
+    const result = await terminal().run('true || echo "$(echo bad >&3)"; false && echo "$(echo bad >&3)"')
     assert.deepEqual(result, { stdout: '', stderr: '', exitCode: 1, cwd: '/src', notes: [], unsupported: [] })
   })
 })

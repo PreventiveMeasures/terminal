@@ -151,22 +151,22 @@ const CASES = [
 
 describe('sed — substitutions from agent logs', () => {
   for (const { purpose, command, input, stdout } of CASES) {
-    it(purpose, () => {
-      assert.deepEqual(createTerminal({ input }).run(`cat input | ${command}`), {
+    it(purpose, async () => {
+      assert.deepEqual(await createTerminal({ input }).run(`cat input | ${command}`), {
         stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
       }, command)
     })
   }
 
-  it('expands the shell variable in the exact quoted prefix substitution', () => {
+  it('expands the shell variable in the exact quoted prefix substitution', async () => {
     const command = String.raw`f=src/file.ts; cat input | sed "s|^|$f:|"`
-    assert.deepEqual(createTerminal({ input: 'one\n\nlast' }).run(command), {
+    assert.deepEqual(await createTerminal({ input: 'one\n\nlast' }).run(command), {
       stdout: 'src/file.ts:one\nsrc/file.ts:\nsrc/file.ts:last',
       stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 
-  it('applies both substitutions before sorting and counting the exact grep pipeline', () => {
+  it('applies both substitutions before sorting and counting the exact grep pipeline', async () => {
     const files = {
       'b/x/alpha/one.js': 'a\nnone\na\n',
       'b/x/alpha/two.js': 'a\n',
@@ -175,7 +175,7 @@ describe('sed — substitutions from agent logs', () => {
       'b/x/empty/one.js': 'none\n',
     }
     const command = String.raw`grep -rn "a" b/ | sed 's#.*x/##; s#/[^/]*$##' | sort | uniq -c`
-    assert.deepEqual(createTerminal(files).run(command), {
+    assert.deepEqual(await createTerminal(files).run(command), {
       stdout: '      3 alpha\n      2 beta\n',
       stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })

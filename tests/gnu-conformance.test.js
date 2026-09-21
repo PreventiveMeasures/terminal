@@ -105,15 +105,15 @@ const CLASS_MEMBERS = [
 
 describe('GNU conformance — bracket contents are members, not syntax', () => {
   for (const [command, stdout] of CLASS_MEMBERS) {
-    it(command, () => {
-      const r = run(command)
+    it(command, async () => {
+      const r = await run(command)
       assert.deepEqual(r.unsupported, [], command + ': refusing the pattern does not count as matching it')
       assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout, stderr: '', exitCode: 0 })
     })
   }
 
-  it("an interval outside the class is still bounded: grep -E 'a{40000}' g", () => {
-    const r = run("grep -E 'a{40000}' g")
+  it("an interval outside the class is still bounded: grep -E 'a{40000}' g", async () => {
+    const r = await run("grep -E 'a{40000}' g")
     assert.equal(r.exitCode, 2)
     assert.equal(r.stderr, 'grep: Regular expression too big\n')
   })
@@ -121,8 +121,8 @@ describe('GNU conformance — bracket contents are members, not syntax', () => {
 
 describe('GNU conformance — POSIX quantifier stacking', () => {
   for (const [command, stdout] of STACKED) {
-    it(command, () => {
-      const r = run(command)
+    it(command, async () => {
+      const r = await run(command)
       assert.deepEqual(r.unsupported, [], command + ': refusing the pattern does not count as matching it')
       assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout, stderr: '', exitCode: 0 })
     })
@@ -131,8 +131,8 @@ describe('GNU conformance — POSIX quantifier stacking', () => {
 
 describe('GNU conformance — patterns GNU rejects', () => {
   for (const [command, message] of REJECTED) {
-    it(command, () => {
-      const r = run(command)
+    it(command, async () => {
+      const r = await run(command)
       assert.equal(r.exitCode, 2)
       assert.equal(r.stdout, '')
       assert.equal(r.stderr, `grep: ${message}\n`)
@@ -145,8 +145,8 @@ describe('GNU conformance — patterns GNU rejects', () => {
 
 describe('GNU conformance — bracket and interval forms that stay legal', () => {
   for (const [command, stdout, exitCode = 0] of ACCEPTED) {
-    it(command, () => {
-      const r = run(command)
+    it(command, async () => {
+      const r = await run(command)
       assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout, stderr: '', exitCode })
     })
   }
@@ -177,36 +177,36 @@ describe('GNU conformance — stacked quantifiers do not nest', () => {
     })
   }
 
-  it('a pattern needing ambiguous nesting is refused, not shipped', () => {
+  it('a pattern needing ambiguous nesting is refused, not shipped', async () => {
     // `(a{2,5})*` has no single-quantifier equivalent, so it would have to
     // nest a variable-length body under an unbounded repeat.
-    const r = run("grep -cE 'a{2,5}*' f")
+    const r = await run("grep -cE 'a{2,5}*' f")
     assert.equal(r.exitCode, 2)
     assert.deepEqual(r.unsupported.map((u) => u.detail), ['GNU regex syntax'])
   })
 
-  it('a fixed repeat count is not a fixed width when the atom varies', () => {
+  it('a fixed repeat count is not a fixed width when the atom varies', async () => {
     // `(a|aa){3}` covers 3 to 6 characters, so repeating it unboundedly is
     // ambiguous even though the count is exact. Refusing is what keeps
     // this from running for minutes: 36 characters took 1.2s when only
     // the count was checked, and each further one doubled it.
     const t = createTerminal({ long: 'a'.repeat(400) + 'c\n' })
     const started = hrtime.bigint()
-    const r = t.run("grep -cE '(a|aa){3}{2,}b' long")
+    const r = await t.run("grep -cE '(a|aa){3}{2,}b' long")
     const ms = Number(hrtime.bigint() - started) / 1e6
     assert.equal(r.exitCode, 2)
     assert.deepEqual(r.unsupported.map((u) => u.detail), ['GNU regex syntax'])
     assert.ok(ms < 1000, `took ${ms.toFixed(0)}ms`)
     // A single-character atom still nests, and stays linear.
-    assert.equal(t.run("grep -cE 'a{3}{2,}b' long").stdout, '0\n')
+    assert.equal((await t.run("grep -cE 'a{3}{2,}b' long")).stdout, '0\n')
   })
 
-  it('a stacked quantifier over a long non-match stays linear', () => {
+  it('a stacked quantifier over a long non-match stays linear', async () => {
     // Exponential before the fold: 24 characters took ~220ms, and each
     // further character doubled it.
     const t = createTerminal({ long: 'a'.repeat(4000) + 'c\n' })
     const started = hrtime.bigint()
-    assert.equal(t.run("grep -cE 'a+*b' long").stdout, '0\n')
+    assert.equal((await t.run("grep -cE 'a+*b' long")).stdout, '0\n')
     const ms = Number(hrtime.bigint() - started) / 1e6
     assert.ok(ms < 1000, `took ${ms.toFixed(0)}ms`)
   })
@@ -222,14 +222,14 @@ describe('GNU conformance — line continuation inside a reference', () => {
     ['echo "a\\\nb"', 'ab\n'],
   ]
   for (const [command, stdout] of CONTINUED) {
-    it(JSON.stringify(command), () => {
-      const r = run(command)
+    it(JSON.stringify(command), async () => {
+      const r = await run(command)
       assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout, stderr: '', exitCode: 0 })
     })
   }
 
-  it('single quotes still keep a backslash-newline literal', () => {
-    assert.equal(run("echo 'a\\\nb'").stdout, 'a\\\nb\n')
+  it('single quotes still keep a backslash-newline literal', async () => {
+    assert.equal((await run("echo 'a\\\nb'")).stdout, 'a\\\nb\n')
   })
 })
 
@@ -292,42 +292,42 @@ describe('GNU conformance — what a reader says it could not read', () => {
     ['sed -n p d', 'sed: read error on d: Is a directory\n', 4],
   ]
   for (const [command, stderr, exitCode] of EXACT) {
-    it(JSON.stringify(command), () => {
-      const r = diagnose(command)
+    it(JSON.stringify(command), async () => {
+      const r = await diagnose(command)
       assert.deepEqual({ stderr: r.stderr, exitCode: r.exitCode }, { stderr, exitCode })
     })
   }
 
   // A directory is also where sed stops: it opens no operand after one, where
   // a missing file only costs its own read.
-  it('stops sed where GNU stops it, and reads on where GNU reads on', () => {
-    assert.deepEqual(diagnose('sed -n p d f'), { ...diagnose('sed -n p d f'), stdout: '', stderr: 'sed: read error on d: Is a directory\n', exitCode: 4 })
-    assert.equal(diagnose('sed -n p f d f').stdout, 'hi\n')
-    assert.equal(diagnose('sed -n p missing f').stdout, 'hi\n')
-    assert.equal(diagnose('sed -n p missing f').exitCode, 2)
-    assert.equal(diagnose('sed -n p missing d').stderr, "sed: can't read missing: No such file or directory\nsed: read error on d: Is a directory\n")
-    assert.equal(diagnose('sed -n p d missing').stderr, 'sed: read error on d: Is a directory\n')
+  it('stops sed where GNU stops it, and reads on where GNU reads on', async () => {
+    assert.deepEqual(await diagnose('sed -n p d f'), { ...await diagnose('sed -n p d f'), stdout: '', stderr: 'sed: read error on d: Is a directory\n', exitCode: 4 })
+    assert.equal((await diagnose('sed -n p f d f')).stdout, 'hi\n')
+    assert.equal((await diagnose('sed -n p missing f')).stdout, 'hi\n')
+    assert.equal((await diagnose('sed -n p missing f')).exitCode, 2)
+    assert.equal((await diagnose('sed -n p missing d')).stderr, "sed: can't read missing: No such file or directory\nsed: read error on d: Is a directory\n")
+    assert.equal((await diagnose('sed -n p d missing')).stderr, 'sed: read error on d: Is a directory\n')
   })
 
   // A directory costs only its own read everywhere else, and the operands
   // after it are still opened.
-  it('reads past a directory wherever GNU does', () => {
-    assert.equal(diagnose('cat d f').stdout, 'hi\n')
-    assert.equal(diagnose('nl d f').stdout, '     1\thi\n')
-    assert.equal(diagnose('head -n 1 d f').stdout, '==> d <==\n\n==> f <==\nhi\n')
+  it('reads past a directory wherever GNU does', async () => {
+    assert.equal((await diagnose('cat d f')).stdout, 'hi\n')
+    assert.equal((await diagnose('nl d f')).stdout, '     1\thi\n')
+    assert.equal((await diagnose('head -n 1 d f')).stdout, '==> d <==\n\n==> f <==\nhi\n')
   })
 
   // gawk's own warning is a sentence, not strerror, and stays lowercase.
-  it('a directory operand keeps awk\u2019s lowercase warning', () => {
-    assert.equal(diagnose('awk 1 d').stderr, "awk: warning: command line argument `d' is a directory: skipped\n")
+  it('a directory operand keeps awk\u2019s lowercase warning', async () => {
+    assert.equal((await diagnose('awk 1 d')).stderr, "awk: warning: command line argument `d' is a directory: skipped\n")
   })
 
   // A custom command reaching a non-directory through the exposed fs fails
   // in the shape a built-in would, so it capitalizes the same way.
-  it('a custom command reads the same reason back', () => {
+  it('a custom command reads the same reason back', async () => {
     const t = createTerminal(files, { commands: { probe: (io) => io.fs.listDir(io.args[0]) && '' } })
-    assert.equal(t.run('probe missing').stderr, 'probe: missing: No such file or directory\n')
-    assert.equal(t.run('probe f').stderr, 'probe: f: Not a directory\n')
+    assert.equal((await t.run('probe missing')).stderr, 'probe: missing: No such file or directory\n')
+    assert.equal((await t.run('probe f')).stderr, 'probe: f: Not a directory\n')
   })
 })
 
@@ -339,7 +339,7 @@ describe('GNU conformance — what a tool says it could not read on the command 
   // read the way strtoul reads one, so a leading blank or `+` belongs to the
   // number. Every line below is what coreutils 9.4 printed in the C locale.
   const rows = { pairs: 'b 2\na 1\n' }
-  const key = (spec) => createTerminal(rows).run(`sort -k'${spec}' pairs`)
+  const key = async (spec) => await createTerminal(rows).run(`sort -k'${spec}' pairs`)
 
   const SPECS = [
     ['0', "sort: field number is zero: invalid field specification '0'\n"],
@@ -373,53 +373,53 @@ describe('GNU conformance — what a tool says it could not read on the command 
     ['1.1.1', "sort: stray character in field spec: invalid field specification '1.1.1'\n"],
   ]
   for (const [spec, stderr] of SPECS) {
-    it(`sort -k${JSON.stringify(spec)}`, () => {
-      const r = key(spec)
+    it(`sort -k${JSON.stringify(spec)}`, async () => {
+      const r = await key(spec)
       assert.deepEqual({ stderr: r.stderr, exitCode: r.exitCode }, { stderr, exitCode: 2 })
       assert.deepEqual(r.unsupported, [])
     })
   }
 
-  it('reads a field count the way strtoul reads one', () => {
+  it('reads a field count the way strtoul reads one', async () => {
     // A leading blank and a `+` both belong to the number, and an end offset
     // of zero ends the key where a key with no end offset ends.
     const sorted = 'a 1\nb 2\n'
     for (const spec of [' 1', '+1', '+1b', ' 1n', '1,2.0', '1n,2r', '2,1']) {
-      const r = key(spec)
+      const r = await key(spec)
       assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout: sorted, stderr: '', exitCode: 0 }, spec)
     }
   })
 
-  it('separates a key GNU has from a key nobody has, and exits alike on both', () => {
+  it('separates a key GNU has from a key nobody has, and exits alike on both', async () => {
     // A modifier GNU knows and a character offset are both things this
     // cannot sort by; a letter GNU does not know is the stray character it
     // calls it. Only what the caller is told differs — sort exits 2 either way.
     for (const [gap, detail] of [['1g', '-k1g'], ['1.2', '-k1.2'], ['1.2b', '-k1.2b']]) {
-      const r = key(gap)
+      const r = await key(gap)
       assert.deepEqual(r.unsupported.map((u) => u.detail), [detail], gap)
       assert.equal(r.exitCode, 2, gap)
     }
-    assert.equal(key('1z').exitCode, 2)
-    assert.equal(createTerminal(rows).run("sort -t'ab' pairs").stderr, "sort: multi-character tab 'ab'\n")
-    assert.equal(createTerminal(rows).run("sort -t'ab' pairs").exitCode, 2)
+    assert.equal((await key('1z')).exitCode, 2)
+    assert.equal((await createTerminal(rows).run("sort -t'ab' pairs")).stderr, "sort: multi-character tab 'ab'\n")
+    assert.equal((await createTerminal(rows).run("sort -t'ab' pairs")).exitCode, 2)
   })
 
   // coreutils exits 1 when it cannot read the command line at all. `grep`
   // exits 2, and so does awk. This exited 2 for every one of them.
-  it('exits the way the tool does when the command line will not read', () => {
+  it('exits the way the tool does when the command line will not read', async () => {
     const files = { f: 'hi\n', pairs: 'a 1\n' }
     for (const [command, exitCode] of [
       ['seq', 1], ['cut pairs', 1], ['cut -c1 -f1 pairs', 1], ['tr a', 1], ['which', 1],
       ['basename', 1], ['dirname', 1], ['printf', 1], ['cp f', 1], ['rm', 1], ['realpath', 1],
       ['grep', 2], ['awk', 2],
     ]) {
-      const r = createTerminal(files).run(command)
+      const r = await createTerminal(files).run(command)
       assert.equal(r.exitCode, exitCode, command)
       assert.notEqual(r.stderr, '', command)
     }
     // The synopsis stands in for GNU's `Try '<tool> --help'`, which this
     // terminal has no --help to offer.
-    assert.match(createTerminal(files).run('seq').stderr, /^usage: seq /u)
+    assert.match((await createTerminal(files).run('seq')).stderr, /^usage: seq /u)
   })
 })
 
@@ -450,8 +450,8 @@ describe('GNU conformance — printf reads its operands the way GNU does', () =>
     ["printf '%d' \"a'b\"", '0', "printf: 'a\\'b': expected a numeric value\n", 1],
   ]
   for (const [command, stdout, stderr, exitCode] of OPERANDS) {
-    it(JSON.stringify(command), () => {
-      assert.deepEqual(createTerminal({}).run(command), { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
+    it(JSON.stringify(command), async () => {
+      assert.deepEqual(await createTerminal({}).run(command), { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
     })
   }
 
@@ -475,8 +475,8 @@ describe('GNU conformance — printf reads its operands the way GNU does', () =>
     ['b\\u0041\\ugX', 'bA', 'printf: missing hexadecimal number in escape\n', 1],
   ]
   for (const [format, stdout, stderr, exitCode] of ESCAPES) {
-    it(`printf ${JSON.stringify(format)}`, () => {
-      const r = createTerminal({}).run(`printf ${JSON.stringify(format)}`)
+    it(`printf ${JSON.stringify(format)}`, async () => {
+      const r = await createTerminal({}).run(`printf ${JSON.stringify(format)}`)
       assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout, stderr, exitCode })
     })
   }
@@ -489,7 +489,7 @@ describe('GNU conformance — what cut and tr say about a list they cannot read'
   // way too. Recorded from coreutils 9.4 in the C locale; GNU adds a
   // `Try 'cut --help'` line, which this terminal has no --help to back.
   const rows = { pairs: 'a 1\n' }
-  const list = (option, spec) => createTerminal(rows).run(`cut -${option} '${spec}' pairs`)
+  const list = async (option, spec) => await createTerminal(rows).run(`cut -${option} '${spec}' pairs`)
 
   const LISTS = [
     ['5-2', 'cut: invalid decreasing range', 'cut: invalid decreasing range'],
@@ -509,25 +509,25 @@ describe('GNU conformance — what cut and tr say about a list they cannot read'
     ['1-99999999999999999999', "cut: byte/character offset '99999999999999999999' is too large", "cut: field number '99999999999999999999' is too large"],
   ]
   for (const [spec, positions, fields] of LISTS) {
-    it(`cut ${JSON.stringify(spec)}`, () => {
-      assert.deepEqual([list('c', spec).stderr, list('c', spec).exitCode], [positions + '\n', 1], spec)
-      assert.deepEqual([list('f', spec).stderr, list('f', spec).exitCode], [fields + '\n', 1], spec)
+    it(`cut ${JSON.stringify(spec)}`, async () => {
+      assert.deepEqual([(await list('c', spec)).stderr, (await list('c', spec)).exitCode], [positions + '\n', 1], spec)
+      assert.deepEqual([(await list('f', spec)).stderr, (await list('f', spec)).exitCode], [fields + '\n', 1], spec)
     })
   }
 
-  it('reads the lists GNU reads', () => {
+  it('reads the lists GNU reads', async () => {
     for (const [spec, stdout] of [['1', 'a\n'], ['2-3', ' 1\n'], ['1-', 'a 1\n'], ['1,3', 'a1\n'], ['3,1', 'a1\n']]) {
-      assert.deepEqual([list('c', spec).stdout, list('c', spec).exitCode], [stdout, 0], spec)
+      assert.deepEqual([(await list('c', spec)).stdout, (await list('c', spec)).exitCode], [stdout, 0], spec)
     }
   })
 
-  it('names a reversed range and an empty set the way tr names them', () => {
-    const fed = (command) => createTerminal({}).run(`printf 'abc\\n' | ${command}`)
-    assert.equal(fed("tr 'c-a' x").stderr, "tr: range-endpoints of 'c-a' are in reverse collating sequence order\n")
-    assert.equal(fed("tr 'a' ''").stderr, 'tr: when not truncating set1, string2 must be non-empty\n')
-    assert.equal(fed("tr '' 'a'").stdout, 'abc\n')
-    assert.equal(fed("tr 'abc' 'x'").stdout, 'xxx\n')
-    assert.equal(fed("tr 'a-' x").stdout, 'xbc\n')
+  it('names a reversed range and an empty set the way tr names them', async () => {
+    const fed = async (command) => await createTerminal({}).run(`printf 'abc\\n' | ${command}`)
+    assert.equal((await fed("tr 'c-a' x")).stderr, "tr: range-endpoints of 'c-a' are in reverse collating sequence order\n")
+    assert.equal((await fed("tr 'a' ''")).stderr, 'tr: when not truncating set1, string2 must be non-empty\n')
+    assert.equal((await fed("tr '' 'a'")).stdout, 'abc\n')
+    assert.equal((await fed("tr 'abc' 'x'")).stdout, 'xxx\n')
+    assert.equal((await fed("tr 'a-' x")).stdout, 'xbc\n')
   })
 })
 
@@ -537,25 +537,25 @@ describe('GNU conformance — a call awk finds when it runs one', () => {
   // is never called at all. gawk finds it when the call runs, so what ran
   // before it still stands, and it exits 2 rather than 1. Recorded from
   // GNU Awk 5.2.1.
-  const awked = (program) => createTerminal({ input: 'oak\n' }).run(`awk '${program}' input`)
+  const awked = async (program) => await createTerminal({ input: 'oak\n' }).run(`awk '${program}' input`)
 
-  it('runs everything up to the call, then fails on it', () => {
-    const r = awked('BEGIN {print "a"; print foo(1)}')
+  it('runs everything up to the call, then fails on it', async () => {
+    const r = await awked('BEGIN {print "a"; print foo(1)}')
     assert.deepEqual([r.stdout, r.exitCode], ['a\n', 2])
     assert.equal(r.stderr, 'awk: function `foo` not defined\n')
   })
 
-  it('runs a program whose call is never reached', () => {
-    assert.deepEqual([awked('BEGIN {if (0) print foo(1); print "b"}').stdout, awked('BEGIN {if (0) print foo(1); print "b"}').exitCode], ['b\n', 0])
-    assert.deepEqual([awked('BEGIN {print "c"} function g(){ return foo() }').stdout, awked('BEGIN {print "c"} function g(){ return foo() }').exitCode], ['c\n', 0])
+  it('runs a program whose call is never reached', async () => {
+    assert.deepEqual([(await awked('BEGIN {if (0) print foo(1); print "b"}')).stdout, (await awked('BEGIN {if (0) print foo(1); print "b"}')).exitCode], ['b\n', 0])
+    assert.deepEqual([(await awked('BEGIN {print "c"} function g(){ return foo() }')).stdout, (await awked('BEGIN {print "c"} function g(){ return foo() }')).exitCode], ['c\n', 0])
   })
 
   // The table a call is looked up in is the program's own, so a name JS would
   // answer for is a name nothing defines — the ones every JS object carries
   // included.
-  it('looks a call up in the program and nowhere else', () => {
+  it('looks a call up in the program and nowhere else', async () => {
     for (const name of ['eval', 'Function', 'require', 'constructor', '__proto__', 'toString']) {
-      const r = awked(`BEGIN { print ${name}("1+1") }`)
+      const r = await awked(`BEGIN { print ${name}("1+1") }`)
       assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', `awk: function \`${name}\` not defined\n`, 2], name)
     }
   })
@@ -565,17 +565,17 @@ describe('GNU conformance — an unmatched quote in xargs input', () => {
   // The message named the command, and so did dispatch, so it came back as
   // `xargs: xargs: unmatched quote`. GNU names which quote it was and what
   // to do about it. Recorded from findutils 4.9.
-  const fed = (line) => createTerminal({}).run(line)
+  const fed = async (line) => await createTerminal({}).run(line)
 
-  it('names the quote, once', () => {
-    assert.deepEqual(fed(`printf "a'b\\n" | xargs echo`), {
+  it('names the quote, once', async () => {
+    assert.deepEqual(await fed(`printf "a'b\\n" | xargs echo`), {
       stdout: '',
       stderr: 'xargs: unmatched single quote; by default quotes are special to xargs unless you use the -0 option\n',
       exitCode: 1, cwd: '/', notes: [], unsupported: [],
     })
-    assert.equal(fed(`printf 'a"b\\n' | xargs echo`).stderr, 'xargs: unmatched double quote; by default quotes are special to xargs unless you use the -0 option\n')
+    assert.equal((await fed(`printf 'a"b\\n' | xargs echo`)).stderr, 'xargs: unmatched double quote; by default quotes are special to xargs unless you use the -0 option\n')
     // `-0` is what the message points at, and it reads the quote as text.
-    assert.equal(fed(`printf "a'b\\n" | xargs -0 echo`).stdout, "a'b\n\n")
+    assert.equal((await fed(`printf "a'b\\n" | xargs -0 echo`)).stdout, "a'b\n\n")
   })
 })
 
@@ -603,15 +603,15 @@ describe('GNU conformance — a conditional bash rejects too', () => {
     ['[[ a == b ]] extra', 'error: unexpected token after `]]`\n'],
   ]
   for (const [command, stderr] of MALFORMED) {
-    it(JSON.stringify(command), () => {
-      assert.deepEqual(createTerminal({}).run(command), {
+    it(JSON.stringify(command), async () => {
+      assert.deepEqual(await createTerminal({}).run(command), {
         stdout: '', stderr, exitCode: 2, cwd: '/', notes: [], unsupported: [],
       })
     })
   }
 
   // The other half of the boundary: these run in bash, so each is a gap.
-  it('still names what bash runs and this cannot', () => {
+  it('still names what bash runs and this cannot', async () => {
     const files = { 'plain.txt': 'x\n', 'empty.txt': '' }
     for (const [command, detail] of [
       ['[[ a < b ]]', '[[ <'],
@@ -620,7 +620,7 @@ describe('GNU conformance — a conditional bash rejects too', () => {
       ['[[ plain.txt -nt empty.txt ]]', '[[ -nt'],
       ['[[ a == @(a|b) ]]', '[[ extglob'],
     ]) {
-      const r = createTerminal(files).run(command)
+      const r = await createTerminal(files).run(command)
       assert.deepEqual(r.unsupported.map((u) => u.detail), [detail], command)
       assert.equal(r.exitCode, 1, command)
     }
@@ -633,11 +633,11 @@ describe('GNU conformance — sort -o', () => {
   // documented way to sort a file in place; and it writes nothing at all
   // when something goes wrong, leaving the named file as it was. Recorded
   // from coreutils 9.4 in the C locale.
-  const staged = (command) => {
+  const staged = async (command) => {
     const terminal = createTerminal({ seed: 'x\n' }, { mount: '/src', writable: '/tmp/' })
     const setup = 'cd /tmp; mkdir adir; printf "b\\na\\n" > input; printf "d\\nc\\n" > input2; printf "OLD\\n" > out; '
-    const result = terminal.run(setup + command)
-    return { ...result, file: terminal.run('cat /tmp/out 2>/dev/null').stdout }
+    const result = await terminal.run(setup + command)
+    return { ...result, file: (await terminal.run('cat /tmp/out 2>/dev/null')).stdout }
   }
 
   const SORTED = [
@@ -653,8 +653,8 @@ describe('GNU conformance — sort -o', () => {
     ['sort -o out', ''],
   ]
   for (const [command, file] of SORTED) {
-    it(JSON.stringify(command), () => {
-      const r = staged(command)
+    it(JSON.stringify(command), async () => {
+      const r = await staged(command)
       assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.file], ['', '', 0, file])
     })
   }
@@ -666,31 +666,31 @@ describe('GNU conformance — sort -o', () => {
     ['sort -o nodir/x input', 'sort: open failed: nodir/x: No such file or directory\n'],
   ]
   for (const [command, stderr] of REFUSED) {
-    it(JSON.stringify(command), () => {
-      const r = staged(command)
+    it(JSON.stringify(command), async () => {
+      const r = await staged(command)
       // Nothing is written, so the named file keeps what it held.
       assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.file], ['', stderr, 2, 'OLD\n'])
     })
   }
 
-  it('sorts a file in place, reading all of it first', () => {
-    const r = staged('sort -o input input; cat input')
+  it('sorts a file in place, reading all of it first', async () => {
+    const r = await staged('sort -o input input; cat input')
     assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['a\nb\n', '', 0])
-    assert.deepEqual([staged('sort input -o input; cat input').stdout], ['a\nb\n'])
+    assert.deepEqual([(await staged('sort input -o input; cat input')).stdout], ['a\nb\n'])
   })
 
-  it('writes the two device names that are not files', () => {
-    assert.deepEqual([staged('sort -o /dev/null input').stdout, staged('sort -o /dev/null input').file], ['', 'OLD\n'])
-    assert.equal(staged('sort -o /dev/stdout input').stdout, 'a\nb\n')
+  it('writes the two device names that are not files', async () => {
+    assert.deepEqual([(await staged('sort -o /dev/null input')).stdout, (await staged('sort -o /dev/null input')).file], ['', 'OLD\n'])
+    assert.equal((await staged('sort -o /dev/stdout input')).stdout, 'a\nb\n')
   })
 
   // A mount this terminal cannot write to is the one open failure GNU has no
   // wording for, since it never meets one; it reads as the reason it is.
-  it('refuses a path outside the writable overlay, and says why', () => {
+  it('refuses a path outside the writable overlay, and says why', async () => {
     const terminal = createTerminal({ input: 'b\na\n' }, { mount: '/src', writable: '/tmp/' })
-    const r = terminal.run('sort -o input input')
+    const r = await terminal.run('sort -o input input')
     assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', 'sort: open failed: input: Read-only file system\n', 2])
     assert.deepEqual(r.unsupported.map((u) => u.detail), ['-o'])
-    assert.equal(terminal.run('cat input').stdout, 'b\na\n')
+    assert.equal((await terminal.run('cat input')).stdout, 'b\na\n')
   })
 })

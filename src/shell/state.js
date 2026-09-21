@@ -11,8 +11,12 @@ export function isolated(ctx, fn) {
 }
 
 // Restore exactly the scoped fields, including when nested execution throws.
-export function withState(ctx, state, fn) {
+// What it scopes lives on the context rather than on a call stack, so it is
+// restored when the work is done rather than when the call returns: a command
+// that waits holds its state across the wait. Only one line runs at a time,
+// so nothing else is looking at those fields while it does.
+export async function withState(ctx, state, fn) {
   const saved = Object.fromEntries(Object.keys(state).map((key) => [key, ctx[key]]))
   Object.assign(ctx, state)
-  try { return fn() } finally { Object.assign(ctx, saved) }
+  try { return await fn() } finally { Object.assign(ctx, saved) }
 }

@@ -17,8 +17,8 @@ describe('awk escaped Unicode characters', () => {
     [String.raw`awk 'BEGIN { print split("a😀b", a, /[\😀]/), a[1], a[2] }'`, '', '2 a b\n'],
   ]
   for (const [command, input, stdout] of cases) {
-    it(command, () => {
-      assert.deepEqual(createTerminal({ input }).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+    it(command, async () => {
+      assert.deepEqual(await createTerminal({ input }).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
     })
   }
 

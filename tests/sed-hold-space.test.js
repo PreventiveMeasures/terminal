@@ -9,7 +9,7 @@ const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
 const result = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
 // A writable overlay needs a mount away from `/`, and cwd follows the mount.
 const mounted = (...args) => ({ ...result(...args), cwd: '/src' })
-const run = (script, input, flags = '') => createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
+const run = async (script, input, flags = '') => await createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`)
 
 describe('sed hold commands copy, append, and exchange complete records', () => {
   const cases = [
@@ -31,15 +31,15 @@ describe('sed hold commands copy, append, and exchange complete records', () => 
   ]
   for (const nul of [false, true]) {
     for (const [script, input, stdout] of cases) {
-      it(`${nul ? '-z ' : ''}${script}`, () => {
+      it(`${nul ? '-z ' : ''}${script}`, async () => {
         const convert = (text) => nul ? text.replaceAll('\n', '\0') : text
-        assert.deepEqual(run(script, convert(input), nul ? '-z' : ''), result(convert(stdout)))
+        assert.deepEqual(await run(script, convert(input), nul ? '-z' : ''), result(convert(stdout)))
       })
     }
   }
   for (const kind of ['g', 'G', 'h', 'H', 'x']) {
-    it(`${kind} does not write by itself under -n`, () => assert.deepEqual(run(kind, 'a\n', '-n'), result()))
-    it(`${kind} does not create a cycle on empty input`, () => assert.deepEqual(run(kind, ''), result()))
+    it(`${kind} does not write by itself under -n`, async () => assert.deepEqual(await run(kind, 'a\n', '-n'), result()))
+    it(`${kind} does not create a cycle on empty input`, async () => assert.deepEqual(await run(kind, ''), result()))
   }
 })
 
@@ -57,10 +57,10 @@ describe('sed hold buffers carry missing record terminators', () => {
     ['1h;2G', 'a\nb', 'a\nb\na\n'],
     ['h;g;p', 'a', 'a\na'],
   ]) {
-    it(script, () => assert.deepEqual(run(script, input), result(stdout)))
+    it(script, async () => assert.deepEqual(await run(script, input), result(stdout)))
   }
-  it('appends the NUL delimiter and copies a missing final NUL under -z', () => {
-    assert.deepEqual(run('h;G', 'a', '-z'), result('a\0a'))
+  it('appends the NUL delimiter and copies a missing final NUL under -z', async () => {
+    assert.deepEqual(await run('h;G', 'a', '-z'), result('a\0a'))
   })
 })
 
@@ -73,59 +73,59 @@ describe('sed hold space participates in addressed blocks and branches', () => {
     ['1h;1!G', '', 'alpha\nbeta\nalpha\ngamma\nalpha\n'],
     ['1{h;b end};g;:end', '', 'alpha\nalpha\nalpha\n'],
   ]) {
-    it(script, () => assert.deepEqual(run(script, 'alpha\nbeta\ngamma\n', flags), result(stdout)))
+    it(script, async () => assert.deepEqual(await run(script, 'alpha\nbeta\ngamma\n', flags), result(stdout)))
   }
   for (const kind of ['g', 'G', 'h', 'H', 'x']) {
-    it(`${kind} preserves a successful substitution for t`, () => {
+    it(`${kind} preserves a successful substitution for t`, async () => {
       const script = `s/a/A/;${kind};t yes;s/.*/BAD/;b;:yes;s/.*/GOOD/`
-      assert.deepEqual(run(script, 'a\n'), result('GOOD\n'))
+      assert.deepEqual(await run(script, 'a\n'), result('GOOD\n'))
     })
-    it(`${kind} does not create a successful substitution for T`, () => {
+    it(`${kind} does not create a successful substitution for T`, async () => {
       const script = `${kind};T yes;s/.*/BAD/;b;:yes;s/.*/GOOD/`
-      assert.deepEqual(run(script, 'a\n'), result('GOOD\n'))
+      assert.deepEqual(await run(script, 'a\n'), result('GOOD\n'))
     })
   }
-  it('loading held text keeps the successful-substitution flag despite undoing its text', () => {
-    assert.deepEqual(run('h;s/a/A/;g;t yes;s/.*/BAD/;:yes', 'a\n'), result('a\n'))
+  it('loading held text keeps the successful-substitution flag despite undoing its text', async () => {
+    assert.deepEqual(await run('h;s/a/A/;g;t yes;s/.*/BAD/;:yes', 'a\n'), result('a\n'))
   })
 })
 
 describe('sed hold state is local to one invocation and respects separate files', () => {
   const files = { first: 'a\n', empty: '', second: 'b\n' }
-  it('retains held text across ordinary file operands', () => {
-    assert.deepEqual(createTerminal(files).run("sed '1h;2g' first empty second"), result('a\na\n'))
+  it('retains held text across ordinary file operands', async () => {
+    assert.deepEqual(await createTerminal(files).run("sed '1h;2g' first empty second"), result('a\na\n'))
   })
-  it('clears hold contents before each separate file', () => {
-    assert.deepEqual(createTerminal(files).run("sed -s '1x' first empty second"), result('\n\n'))
+  it('clears hold contents before each separate file', async () => {
+    assert.deepEqual(await createTerminal(files).run("sed -s '1x' first empty second"), result('\n\n'))
   })
-  it('retains only the hold terminator when separate files reset its length', () => {
+  it('retains only the hold terminator when separate files reset its length', async () => {
     const t = createTerminal({ first: 'one', second: 'two\n' })
-    assert.deepEqual(t.run("sed -sn '/one/h;/two/{g;s/^/X/;p}' first second"), result('X'))
+    assert.deepEqual(await t.run("sed -sn '/one/h;/two/{g;s/^/X/;p}' first second"), result('X'))
   })
-  it('resets hold contents when files are edited in place', () => {
+  it('resets hold contents when files are edited in place', async () => {
     const t = createTerminal({}, { mount: '/src/', writable: '/tmp/' })
-    t.run("printf 'a\\n' >/tmp/first; printf 'b\\n' >/tmp/second")
-    assert.deepEqual(t.run("sed -i '1x' /tmp/first /tmp/second"), mounted())
-    assert.deepEqual(t.run('cat /tmp/first /tmp/second'), mounted('\n\n'))
+    await t.run("printf 'a\\n' >/tmp/first; printf 'b\\n' >/tmp/second")
+    assert.deepEqual(await t.run("sed -i '1x' /tmp/first /tmp/second"), mounted())
+    assert.deepEqual(await t.run('cat /tmp/first /tmp/second'), mounted('\n\n'))
   })
-  it('preserves the hold terminator across separate in-place executions', () => {
+  it('preserves the hold terminator across separate in-place executions', async () => {
     const t = createTerminal({}, { mount: '/src/', writable: '/tmp/' })
-    t.run("printf one >/tmp/first; printf 'two\\n' >/tmp/second")
-    assert.deepEqual(t.run("sed -i '/one/h;/two/{g;s/^/X/}' /tmp/first /tmp/second"), mounted())
-    assert.deepEqual(t.run('cat /tmp/first /tmp/second'), mounted('oneX'))
+    await t.run("printf one >/tmp/first; printf 'two\\n' >/tmp/second")
+    assert.deepEqual(await t.run("sed -i '/one/h;/two/{g;s/^/X/}' /tmp/first /tmp/second"), mounted())
+    assert.deepEqual(await t.run('cat /tmp/first /tmp/second'), mounted('oneX'))
   })
-  it('starts with fresh hold contents and terminator in the next invocation', () => {
+  it('starts with fresh hold contents and terminator in the next invocation', async () => {
     const t = createTerminal({ input: 'a' })
-    assert.deepEqual(t.run('sed h input'), result('a'))
-    assert.deepEqual(t.run('sed g input'), result('\n'))
+    assert.deepEqual(await t.run('sed h input'), result('a'))
+    assert.deepEqual(await t.run('sed g input'), result('\n'))
   })
 })
 
 describe('sed limits both pattern and hold space with unsuppressible diagnostics', () => {
   for (const [script, detail] of [['h;:again;H;b again', 'hold space limit'], ['h;:again;G;h;b again', 'pattern space limit']]) {
-    it(detail, () => {
+    it(detail, async () => {
       const t = createTerminal({ input: 'x'.repeat(1024 * 1024) + '\n' })
-      const actual = t.run(`sed -n ${quote(script)} input 2>/dev/null | cat`)
+      const actual = await t.run(`sed -n ${quote(script)} input 2>/dev/null | cat`)
       assert.equal(actual.stdout, '')
       assert.equal(actual.stderr, '')
       assert.equal(actual.exitCode, 0)

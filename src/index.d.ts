@@ -104,15 +104,16 @@ export interface CommandResult {
 
 /**
  * A wired command's implementation. Returning a string is shorthand for that
- * stdout with exit 0, and returning nothing is a silent success. Must be
- * synchronous — the engine feeds one stage's stdout to the next with no await
- * point, so a returned promise is rejected rather than stringified into the
- * stream. Throwing is fine, and the thrown value need not be an `Error`: its
- * message (or the value itself) surfaces as a `name: reason` stderr line with
- * exit 1, exactly like a built-in command's internal error, leaving the rest
- * of the command line to run its gates normally.
+ * stdout with exit 0, and returning nothing is a silent success. It may also
+ * answer with a promise of either: the line waits for it where it stands, as
+ * it waits for any command with work of its own, and the stage after it reads
+ * what the promise resolved to. Throwing is fine, and the thrown value need
+ * not be an `Error`: its message (or the value itself) surfaces as a
+ * `name: reason` stderr line with exit 1, exactly like a built-in command's
+ * internal error, leaving the rest of the command line to run its gates
+ * normally. A promise that rejects fails the command the same way.
  */
-export type CommandRun = (io: CommandIo) => string | CommandResult | void
+export type CommandRun = (io: CommandIo) => string | CommandResult | void | Promise<string | CommandResult | void>
 
 /**
  * A wired command with its registry metadata. A bare {@link CommandRun} is
@@ -414,20 +415,20 @@ export interface Terminal {
    * and globs with bracket expressions. Other expansion operators, arrays,
    * and `[[ … =~ … ]]` report unsupported diagnostics. Variables and the
    * working directory persist across calls.
-   */
-  run(line: string): RunResult
-  /**
-   * {@link Terminal.run}, handed back as a promise: the same line, run the
-   * same way, for a caller who would rather await a result than take one —
-   * and the only call that can wait for work a line cannot do for itself.
    *
-   * The line runs once the promise the call returns is being waited on, not
-   * at the call itself. Lines given to one terminal still run in the order
-   * they were given, each waiting for the one before it, so two calls made
-   * without awaiting the first are safe; a `run` between them is not, since
-   * it runs where it stands. What `run` would throw, this rejects with.
+   * A line is run when the call is made and answered with a promise,
+   * because a command may have work the runtime does rather than this code —
+   * `gzip` waits on a compression stream — and the line waits for it where
+   * it meets it. One line runs at a time over a tree: a line handed to this
+   * terminal, or to a fork of it, while another is in flight takes its turn
+   * rather than starting in the gap that one left, so calls made without
+   * awaiting the first still run in the order they were made. A line run
+   * from inside a command — a wired handler calling `run` — is part of the
+   * line already running, and runs where it stands rather than waiting for
+   * a turn it is itself holding. A failing line is reported in the result,
+   * as before; the promise rejects only with what `run` would have thrown.
    */
-  runAsync(line: string): Promise<RunResult>
+  run(line: string): Promise<RunResult>
   /** Current working directory. */
   cwd(): string
   /**

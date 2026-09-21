@@ -17,45 +17,45 @@ const terminal = () => createTerminal(FILES, { commands: { args: ({ args }) => J
 // https://git.savannah.gnu.org/cgit/bash.git/tree/make_cmd.c?h=bash-5.2
 describe('Bash here-document EOF handling', () => {
   for (const [suffix, stdout] of [['', ''], ['\n', ''], ['\ntext', 'text\n'], ['\ntext\n', 'text\n'], ['\n\n', '\n'], ['\n\\\n', ''], ['\ntext\\\n', 'text\n']]) {
-    it(`does not invent a record at EOF: ${JSON.stringify(suffix)}`, () => {
-      assert.deepEqual(terminal().run('cat <<END' + suffix), {
+    it(`does not invent a record at EOF: ${JSON.stringify(suffix)}`, async () => {
+      assert.deepEqual(await terminal().run('cat <<END' + suffix), {
         stdout, stderr: "warning: here-document delimited by end-of-file (wanted `END')\n",
         exitCode: 0, cwd: '/', notes: [], unsupported: [],
       })
     })
   }
-  it('warns before applying command redirects', () => {
-    const result = terminal().run('cat <<END 2>/dev/null | head -1\ntext\n')
+  it('warns before applying command redirects', async () => {
+    const result = await terminal().run('cat <<END 2>/dev/null | head -1\ntext\n')
     assert.equal(result.stdout, 'text\n')
     assert.match(result.stderr, /here-document.*end-of-file/u)
     assert.deepEqual(result.unsupported, [])
   })
-  it('accepts a delimiter without a final newline', () => {
-    assert.deepEqual(terminal().run('cat <<END\ntext\nEND'), {
+  it('accepts a delimiter without a final newline', async () => {
+    assert.deepEqual(await terminal().run('cat <<END\ntext\nEND'), {
       stdout: 'text\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
   for (const separator of ['\n', ';\n', '; # comment\n']) {
-    it(`keeps earlier commands before a later heredoc warning: ${JSON.stringify(separator)}`, () => {
-      const result = terminal().run('echo before >&2' + separator + 'cat <<END\ntext\n')
+    it(`keeps earlier commands before a later heredoc warning: ${JSON.stringify(separator)}`, async () => {
+      const result = await terminal().run('echo before >&2' + separator + 'cat <<END\ntext\n')
       assert.equal(result.stdout, 'text\n')
       assert.equal(result.stderr, "before\nwarning: here-document delimited by end-of-file (wanted `END')\n")
       assert.deepEqual(result.unsupported, [])
     })
   }
-  it('warns before commands on the same input line', () => {
-    const result = terminal().run('echo before >&2; cat <<END\ntext\n')
+  it('warns before commands on the same input line', async () => {
+    const result = await terminal().run('echo before >&2; cat <<END\ntext\n')
     assert.equal(result.stdout, 'text\n')
     assert.equal(result.stderr, "warning: here-document delimited by end-of-file (wanted `END')\nbefore\n")
   })
-  it('warns about skipped commands without changing their gate status', () => {
-    const result = terminal().run('false && cat <<END\ntext\n')
+  it('warns about skipped commands without changing their gate status', async () => {
+    const result = await terminal().run('false && cat <<END\ntext\n')
     assert.equal(result.exitCode, 1)
     assert.equal(result.stdout, '')
     assert.match(result.stderr, /here-document.*end-of-file/u)
   })
-  it('does not warn about input after exit on an earlier line', () => {
-    assert.deepEqual(terminal().run('exit 7\ncat <<END\ntext\n'), {
+  it('does not warn about input after exit on an earlier line', async () => {
+    assert.deepEqual(await terminal().run('exit 7\ncat <<END\ntext\n'), {
       stdout: '', stderr: '', exitCode: 7, cwd: '/', notes: [], unsupported: [],
     })
   })
@@ -63,8 +63,8 @@ describe('Bash here-document EOF handling', () => {
 
 function cases(rows) {
   for (const [name, command, stdout, exitCode = 0, stderr = ''] of rows) {
-    it(name, () => {
-      assert.deepEqual(terminal().run(command), { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] }, command)
+    it(name, async () => {
+      assert.deepEqual(await terminal().run(command), { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] }, command)
     })
   }
 }
@@ -88,8 +88,8 @@ describe('ANSI-C source boundaries and control escapes', () => {
   cases([
     ['ANSI-C control backslash forms a heredoc delimiter', String.raw`cat <<$'\c\\'` + '\ntext\n\u001C\n', 'text\n'],
   ])
-  it('does not let control decoding close an unterminated source quote', () => {
-    const result = terminal().run(String.raw`args $'\c\'`)
+  it('does not let control decoding close an unterminated source quote', async () => {
+    const result = await terminal().run(String.raw`args $'\c\'`)
     assert.equal(result.exitCode, 2)
     assert.match(result.stderr, /unterminated single quote/u)
     assert.deepEqual(result.unsupported, [])
@@ -222,8 +222,8 @@ describe('upstream shell audit — explicit unsupported constructs', () => {
     ['braced ANSI-C hexadecimal escape', String.raw`echo $'\x{41}'`, 'ANSI-C hexadecimal escape'],
   ]
   for (const [name, command, detail] of rows) {
-    it(name, () => {
-      const r = terminal().run(command)
+    it(name, async () => {
+      const r = await terminal().run(command)
       assert.equal(r.stdout, '', command)
       assert.notEqual(r.stderr, '', command)
       assert.notEqual(r.exitCode, 0, command)
@@ -231,16 +231,16 @@ describe('upstream shell audit — explicit unsupported constructs', () => {
     })
   }
 
-  it('retains a builtin gap from a failed condition when stderr is discarded', () => {
-    const r = terminal().run('if read value; then echo lost; else echo kept; fi 2>/dev/null')
+  it('retains a builtin gap from a failed condition when stderr is discarded', async () => {
+    const r = await terminal().run('if read value; then echo lost; else echo kept; fi 2>/dev/null')
     assert.equal(r.stdout, 'kept\n')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)
     assert.deepEqual(r.unsupported.map(({ kind, detail }) => [kind, detail]), [['feature', 'read']])
   })
 
-  it('retains a gap from a captured command even when the result is discarded', () => {
-    const r = terminal().run('{ echo "$(local x=one)" | true; } 2>/dev/null')
+  it('retains a gap from a captured command even when the result is discarded', async () => {
+    const r = await terminal().run('{ echo "$(local x=one)" | true; } 2>/dev/null')
     assert.equal(r.stdout, '')
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)

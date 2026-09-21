@@ -20,8 +20,8 @@ const sed = (script, input = 'input', flags = '') => `sed ${flags} ${quote(scrip
 
 function examples(rows) {
   for (const [name, command, stdout, exitCode = 0] of rows) {
-    it(name, () => {
-      assert.deepEqual(createTerminal(FILES).run(command), {
+    it(name, async () => {
+      assert.deepEqual(await createTerminal(FILES).run(command), {
         stdout, stderr: '', exitCode, cwd: '/', notes: [], unsupported: [],
       }, command)
     })
@@ -80,8 +80,8 @@ describe('sed q reads files and shared stdin only when needed', () => {
     [sed('$p;q7', 'single missing'), 'item\nitem\n'],
     [sed('$!q7', 'single empty missing later'), 'item\n'],
   ]) {
-    it(`encountered read errors override quit status: ${command}`, () => {
-      const result = createTerminal(FILES).run(command)
+    it(`encountered read errors override quit status: ${command}`, async () => {
+      const result = await createTerminal(FILES).run(command)
       assert.equal(result.stdout, stdout)
       assert.equal(result.exitCode, 2)
       assert.match(result.stderr, /missing: No such file or directory/u)
@@ -175,8 +175,8 @@ describe('sed y transliterates once per input character', () => {
 
 describe('sed control command syntax errors are ordinary failures', () => {
   for (const script of ['1,2q', 'q-1', 'q+1', 'q junk', '=3', '!!p', '1!!d', '}', '{', '1}', '{2}p', 'y/a/AB/', 'y/ab/A/', 'y/a/b', 'y/a/b/g', String.raw`y/a/\c/`]) {
-    it(script, () => {
-      const result = createTerminal(FILES).run(sed(script))
+    it(script, async () => {
+      const result = await createTerminal(FILES).run(sed(script))
       assert.equal(result.stdout, '')
       assert.notEqual(result.exitCode, 0)
       assert.notEqual(result.stderr, '')
@@ -184,8 +184,8 @@ describe('sed control command syntax errors are ordinary failures', () => {
     })
   }
 
-  it('refuses the C locale rather than transliterate bytes', () => {
-    const result = createTerminal(FILES).run('LC_ALL=C ' + sed('y/a/Φ/', 'left'))
+  it('refuses the C locale rather than transliterate bytes', async () => {
+    const result = await createTerminal(FILES).run('LC_ALL=C ' + sed('y/a/Φ/', 'left'))
     assert.deepEqual([result.stdout, result.exitCode, result.unsupported.map((entry) => entry.detail)], ['', 1, ['LC_ALL']])
   })
 })
@@ -198,20 +198,20 @@ describe('sed control commands retain unsupported diagnostics', () => {
     [sed('q;F'), 'script'],
     [sed(String.raw`y/\xFF/X/`, 'left'), 'partial UTF-8 byte sequence'],
   ]) {
-    it(command, () => {
-      const direct = createTerminal(FILES).run(command)
+    it(command, async () => {
+      const direct = await createTerminal(FILES).run(command)
       assert.notEqual(direct.exitCode, 0)
       assert.notEqual(direct.stderr, '')
       assert.deepEqual(direct.unsupported.map((entry) => entry.detail), [detail])
-      const hidden = createTerminal(FILES).run(`${command} 2>/dev/null | cat`)
+      const hidden = await createTerminal(FILES).run(`${command} 2>/dev/null | cat`)
       assert.equal(hidden.stderr, '')
       assert.equal(hidden.exitCode, 0)
       assert.deepEqual(hidden.unsupported, direct.unsupported)
     })
   }
 
-  it('an unsupported compiled command does not consume shared stdin', () => {
-    const result = createTerminal(FILES).run("cat input | { sed 'q;F' 2>/dev/null; cat; }")
+  it('an unsupported compiled command does not consume shared stdin', async () => {
+    const result = await createTerminal(FILES).run("cat input | { sed 'q;F' 2>/dev/null; cat; }")
     assert.equal(result.stdout, FILES.input)
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)

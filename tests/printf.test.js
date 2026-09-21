@@ -5,8 +5,8 @@ import { createTerminal } from '@preventive/terminal'
 
 const FILES = { 'src/a.js': 'alpha\n', 'src/b.js': 'beta\n', 'two words': 'spaced\n' }
 
-function check(line, stdout) {
-  const result = createTerminal(FILES).run(line)
+async function check(line, stdout) {
+  const result = await createTerminal(FILES).run(line)
   assert.equal(result.stdout, stdout, line)
   assert.equal(result.stderr, '', line)
   assert.equal(result.exitCode, 0, line)
@@ -125,11 +125,11 @@ describe('printf floating-point conversions', () => {
 })
 
 describe('printf in shell workflows', () => {
-  it('is discoverable as a command', () => {
+  it('is discoverable as a command', async () => {
     const terminal = createTerminal(FILES)
     assert.deepEqual(terminal.complete('pri'), ['printf'])
-    assert.equal(terminal.run('which printf').stdout, '/usr/bin/printf\n')
-    assert.match(terminal.run('unknown').stderr, /\bprintf\b/u)
+    assert.equal((await terminal.run('which printf')).stdout, '/usr/bin/printf\n')
+    assert.match((await terminal.run('unknown')).stderr, /\bprintf\b/u)
   })
 
   for (const [line, stdout] of [
@@ -144,8 +144,8 @@ describe('printf in shell workflows', () => {
     it(line, () => check(line, stdout))
   }
 
-  it('can write only to stderr', () => {
-    const result = createTerminal(FILES).run(String.raw`printf '%s\n' diagnostic >&2`)
+  it('can write only to stderr', async () => {
+    const result = await createTerminal(FILES).run(String.raw`printf '%s\n' diagnostic >&2`)
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, 'diagnostic\n')
     assert.equal(result.exitCode, 0)
@@ -161,8 +161,8 @@ describe('printf ordinary failures preserve numeric prefix conversions', () => {
     ["printf '[%d]' 12.5", '[12]'],
     ["printf '[%.1f][%d]' 1.5oops 7", '[1.5][7]'],
   ]) {
-    it(line, () => {
-      const result = createTerminal(FILES).run(line)
+    it(line, async () => {
+      const result = await createTerminal(FILES).run(line)
       assert.equal(result.stdout, stdout)
       assert.notEqual(result.exitCode, 0)
       assert.match(result.stderr, /printf:/u)
@@ -170,16 +170,16 @@ describe('printf ordinary failures preserve numeric prefix conversions', () => {
     })
   }
 
-  it('requires a format operand', () => {
-    const result = createTerminal(FILES).run('printf')
+  it('requires a format operand', async () => {
+    const result = await createTerminal(FILES).run('printf')
     assert.equal(result.stdout, '')
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /printf/u)
     assert.deepEqual(result.unsupported, [])
   })
 
-  it('retains literal output before an invalid format', () => {
-    const result = createTerminal(FILES).run("printf 'before%y' value")
+  it('retains literal output before an invalid format', async () => {
+    const result = await createTerminal(FILES).run("printf 'before%y' value")
     assert.equal(result.stdout, 'before')
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /invalid format/u)
@@ -210,26 +210,26 @@ describe('printf unsupported diagnostics', () => {
     String.raw`printf '%b' '\xff'`,
     String.raw`printf '%.1b' '\xc3\xa9'`,
   ]) {
-    it(`${line} survives stderr redirection and a successful pipeline`, () => {
-      const plain = createTerminal(FILES).run(line)
+    it(`${line} survives stderr redirection and a successful pipeline`, async () => {
+      const plain = await createTerminal(FILES).run(line)
       assert.notEqual(plain.exitCode, 0)
       assert.notEqual(plain.stderr, '')
       assert.equal(plain.unsupported.length, 1)
       assert.equal(plain.unsupported[0].command, 'printf')
-      const hidden = createTerminal(FILES).run(`${line} 2>/dev/null | cat`)
+      const hidden = await createTerminal(FILES).run(`${line} 2>/dev/null | cat`)
       assert.equal(hidden.stderr, '')
       assert.equal(hidden.exitCode, 0)
       assert.deepEqual(hidden.unsupported, plain.unsupported)
     })
   }
 
-  it('retains an unsupported format when preceding bytes cannot be represented', () => {
+  it('retains an unsupported format when preceding bytes cannot be represented', async () => {
     const line = String.raw`printf '\xff%q' value`
-    const result = createTerminal(FILES).run(line)
+    const result = await createTerminal(FILES).run(line)
     assert.notEqual(result.exitCode, 0)
     assert.deepEqual(result.unsupported.map((entry) => entry.detail).sort(), ['%q', 'partial UTF-8 byte sequence'])
     assert.ok(result.unsupported.every((entry) => entry.command === 'printf'))
-    const hidden = createTerminal(FILES).run(`${line} 2>/dev/null | cat`)
+    const hidden = await createTerminal(FILES).run(`${line} 2>/dev/null | cat`)
     assert.equal(hidden.stderr, '')
     assert.equal(hidden.exitCode, 0)
     assert.deepEqual(hidden.unsupported, result.unsupported)

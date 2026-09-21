@@ -37,17 +37,17 @@ describe('writable tmp output redirection', () => {
     ['(echo data >/tmp/out); cat /tmp/out', 'data\n'],
   ]
   for (const [command, stdout] of cases) {
-    it(command, () => assert.deepEqual(terminal().run(command), expected(stdout)))
+    it(command, async () => assert.deepEqual(await terminal().run(command), expected(stdout)))
   }
-  it('relative targets use the current directory', () => {
-    assert.deepEqual(terminal().run('cd /tmp; echo data >out; cat out'), expected('data\n', 0, '', [], '/tmp'))
+  it('relative targets use the current directory', async () => {
+    assert.deepEqual(await terminal().run('cd /tmp; echo data >out; cat out'), expected('data\n', 0, '', [], '/tmp'))
   })
-  it('output survives across run calls and stays separate from source files', () => {
+  it('output survives across run calls and stays separate from source files', async () => {
     const t = terminal()
-    assert.deepEqual(t.run('cat /src/a.txt >/tmp/out'), expected())
-    assert.deepEqual(t.run('echo tail >>/tmp/out'), expected())
-    assert.deepEqual(t.run('cat /tmp/out'), expected(FILES['a.txt'] + 'tail\n'))
-    assert.deepEqual(t.run('cat /src/a.txt'), expected(FILES['a.txt']))
+    assert.deepEqual(await t.run('cat /src/a.txt >/tmp/out'), expected())
+    assert.deepEqual(await t.run('echo tail >>/tmp/out'), expected())
+    assert.deepEqual(await t.run('cat /tmp/out'), expected(FILES['a.txt'] + 'tail\n'))
+    assert.deepEqual(await t.run('cat /src/a.txt'), expected(FILES['a.txt']))
     assert.deepEqual(FILES, { 'a.txt': 'alpha\nbeta\nalpha\n', 'b.txt': 'gamma\n' })
   })
 })
@@ -55,62 +55,62 @@ describe('writable tmp output redirection', () => {
 describe('writable stderr and combined redirects', () => {
   const message = 'cat: missing: No such file or directory\n'
   for (const redirect of ['2>', '&>', '2>>', '&>>']) {
-    it(redirect, () => {
+    it(redirect, async () => {
       const t = terminal()
       const append = redirect.endsWith('>>')
-      assert.deepEqual(t.run('echo prefix >/tmp/errors'), expected())
-      assert.deepEqual(t.run(`cat missing ${redirect}/tmp/errors`), expected('', 1))
-      assert.deepEqual(t.run('cat /tmp/errors'), expected((append ? 'prefix\n' : '') + message))
+      assert.deepEqual(await t.run('echo prefix >/tmp/errors'), expected())
+      assert.deepEqual(await t.run(`cat missing ${redirect}/tmp/errors`), expected('', 1))
+      assert.deepEqual(await t.run('cat /tmp/errors'), expected((append ? 'prefix\n' : '') + message))
     })
   }
-  it('combined redirects preserve explicit command ordering', () => {
-    assert.deepEqual(terminal().run('{ echo first; cat missing; echo last; } &>/tmp/out; cat /tmp/out'), expected('first\n' + message + 'last\n'))
+  it('combined redirects preserve explicit command ordering', async () => {
+    assert.deepEqual(await terminal().run('{ echo first; cat missing; echo last; } &>/tmp/out; cat /tmp/out'), expected('first\n' + message + 'last\n'))
   })
-  it('writing stdout does not suppress a separate stderr', () => {
-    assert.deepEqual(terminal().run('cat missing >/tmp/out'), expected('', 1, message))
+  it('writing stdout does not suppress a separate stderr', async () => {
+    assert.deepEqual(await terminal().run('cat missing >/tmp/out'), expected('', 1, message))
   })
-  it('redirected command failures retain their exit status', () => {
-    assert.deepEqual(terminal().run('cat missing 2>/tmp/errors; echo $?'), expected('1\n'))
+  it('redirected command failures retain their exit status', async () => {
+    assert.deepEqual(await terminal().run('cat missing 2>/tmp/errors; echo $?'), expected('1\n'))
   })
 })
 
 describe('writable redirect failures remain ordinary or unsupported as appropriate', () => {
   for (const path of ['/tmp', '/tmp/', '/tmp/missing/out', '/tmp/out/']) {
-    it(`ordinary open failure: ${path}`, () => {
-      const result = terminal().run(`echo data >${path}`)
+    it(`ordinary open failure: ${path}`, async () => {
+      const result = await terminal().run(`echo data >${path}`)
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 1)
       assert.notEqual(result.stderr, '')
       assert.deepEqual(result.unsupported, [])
     })
   }
-  it('redirect glob ambiguity does not overwrite either match', () => {
+  it('redirect glob ambiguity does not overwrite either match', async () => {
     const t = terminal()
-    t.run('echo first >/tmp/a; echo second >/tmp/b')
-    const result = t.run('echo bad >/tmp/*')
+    await t.run('echo first >/tmp/a; echo second >/tmp/b')
+    const result = await t.run('echo bad >/tmp/*')
     assert.equal(result.exitCode, 1)
     assert.match(result.stderr, /ambiguous redirect/u)
     assert.deepEqual(result.unsupported, [])
-    assert.deepEqual(t.run('cat /tmp/a /tmp/b'), expected('first\nsecond\n'))
+    assert.deepEqual(await t.run('cat /tmp/a /tmp/b'), expected('first\nsecond\n'))
   })
-  it('read-only source files still refuse writes with diagnostics', () => {
+  it('read-only source files still refuse writes with diagnostics', async () => {
     const t = terminal()
-    const result = t.run('echo before; echo bad >/src/a.txt')
+    const result = await t.run('echo before; echo bad >/src/a.txt')
     assert.equal(result.stdout, 'before\n')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['>'])
-    assert.deepEqual(t.run('cat /src/a.txt'), expected(FILES['a.txt']))
+    assert.deepEqual(await t.run('cat /src/a.txt'), expected(FILES['a.txt']))
   })
-  it('unsupported command diagnostics survive writing stderr to a file', () => {
+  it('unsupported command diagnostics survive writing stderr to a file', async () => {
     const t = terminal()
     const message = 'wc: unknown option: --bogus'
     const unsupported = [{ kind: 'option', command: 'wc', detail: '--bogus', message }]
-    assert.deepEqual(t.run('wc --bogus 2>/tmp/errors | cat'), expected('', 0, '', unsupported))
-    assert.deepEqual(t.run('cat /tmp/errors'), expected(message + '\n'))
+    assert.deepEqual(await t.run('wc --bogus 2>/tmp/errors | cat'), expected('', 0, '', unsupported))
+    assert.deepEqual(await t.run('cat /tmp/errors'), expected(message + '\n'))
   })
   for (const options of [{}, { writable: false }, { writable: undefined }]) {
-    it(`default read-only parsing remains unchanged: ${JSON.stringify(options)}`, () => {
-      const result = createTerminal(FILES, options).run('echo before; echo data >/tmp/out')
+    it(`default read-only parsing remains unchanged: ${JSON.stringify(options)}`, async () => {
+      const result = await createTerminal(FILES, options).run('echo before; echo data >/tmp/out')
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 1)
       assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['>'])
@@ -120,38 +120,38 @@ describe('writable redirect failures remain ordinary or unsupported as appropria
 
 describe('streaming commands cannot silently consume their own new output', () => {
   for (const reader of ['head -n 10', 'grep alpha', 'egrep alpha', 'fgrep alpha', "sed -n p", "awk '{print}'"]) {
-    it(reader, () => {
+    it(reader, async () => {
       const t = terminal()
-      t.run('cat /src/a.txt >/tmp/out')
-      const result = t.run(`${reader} /tmp/out >>/tmp/out`)
+      await t.run('cat /src/a.txt >/tmp/out')
+      const result = await t.run(`${reader} /tmp/out >>/tmp/out`)
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 1)
       assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['streaming self-output'])
-      assert.deepEqual(t.run('cat /tmp/out'), expected(FILES['a.txt']))
+      assert.deepEqual(await t.run('cat /tmp/out'), expected(FILES['a.txt']))
     })
   }
-  it('a consumed redirected input receives the same explicit diagnostic', () => {
+  it('a consumed redirected input receives the same explicit diagnostic', async () => {
     const t = terminal()
-    t.run('cat /src/a.txt >/tmp/out')
-    const result = t.run('head </tmp/out >>/tmp/out')
+    await t.run('cat /src/a.txt >/tmp/out')
+    const result = await t.run('head </tmp/out >>/tmp/out')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['streaming self-output'])
   })
-  it('no-output readers retain their normal status', () => {
+  it('no-output readers retain their normal status', async () => {
     const t = terminal()
-    t.run('cat /src/a.txt >/tmp/out')
-    assert.deepEqual(t.run('grep -q alpha /tmp/out >>/tmp/out'), expected())
-    assert.deepEqual(t.run('head -n 0 /tmp/out >>/tmp/out'), { ...expected(), notes: ['head: selected 0 of 3 lines from "/tmp/out".'] })
-    assert.deepEqual(t.run('grep absent /tmp/out >>/tmp/out'), expected('', 1))
+    await t.run('cat /src/a.txt >/tmp/out')
+    assert.deepEqual(await t.run('grep -q alpha /tmp/out >>/tmp/out'), expected())
+    assert.deepEqual(await t.run('head -n 0 /tmp/out >>/tmp/out'), { ...expected(), notes: ['head: selected 0 of 3 lines from "/tmp/out".'] })
+    assert.deepEqual(await t.run('grep absent /tmp/out >>/tmp/out'), expected('', 1))
   })
-  it('command substitution finishes reading before the outer append', () => {
+  it('command substitution finishes reading before the outer append', async () => {
     const t = terminal()
-    t.run('echo alpha >/tmp/out')
-    assert.deepEqual(t.run('echo "$(grep alpha /tmp/out)" >>/tmp/out; cat /tmp/out'), expected('alpha\nalpha\n'))
+    await t.run('echo alpha >/tmp/out')
+    assert.deepEqual(await t.run('echo "$(grep alpha /tmp/out)" >>/tmp/out; cat /tmp/out'), expected('alpha\nalpha\n'))
   })
-  it('sort may buffer a file before appending its sorted copy', () => {
+  it('sort may buffer a file before appending its sorted copy', async () => {
     const t = terminal()
-    t.run("printf 'b\\na\\n' >/tmp/out")
-    assert.deepEqual(t.run('sort /tmp/out >>/tmp/out; cat /tmp/out'), expected('b\na\na\nb\n'))
+    await t.run("printf 'b\\na\\n' >/tmp/out")
+    assert.deepEqual(await t.run('sort /tmp/out >>/tmp/out; cat /tmp/out'), expected('b\na\na\nb\n'))
   })
 })

@@ -145,7 +145,7 @@ parse('rg foo | wc -l').list[0].stages.map((stage) => stage.argv[0])  // ['rg', 
 
 So it never refuses a redirect. Where a line may write is a property of a
 terminal's filesystem rather than of the line: `echo a > out` reads here, and
-`createTerminal(sources).run('echo a > out')` is what refuses it when nothing
+`await createTerminal(sources).run('echo a > out')` is what refuses it when nothing
 may be written.
 
 Only parsing happens, so only parsing's answers come back. Whether a command

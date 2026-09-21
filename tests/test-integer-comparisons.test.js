@@ -15,17 +15,17 @@ const FILES = { lines: 'hit\nmiss\nhit\n' }
 const invocation = (name, expression) => `${name} ${expression}${name === '[' ? ' ]' : ''}`
 const result = (exitCode, stdout = '', stderr = '', unsupported = [], notes = []) => ({ stdout, stderr, exitCode, cwd: '/', notes, unsupported })
 
-function check(expression, exitCode) {
+async function check(expression, exitCode) {
   for (const name of COMMANDS) {
     const command = invocation(name, expression)
-    assert.deepEqual(createTerminal(FILES).run(command), result(exitCode), command)
+    assert.deepEqual(await createTerminal(FILES).run(command), result(exitCode), command)
   }
 }
 
-function invalid(expression, operand) {
+async function invalid(expression, operand) {
   for (const name of COMMANDS) {
     const command = invocation(name, expression)
-    assert.deepEqual(createTerminal(FILES).run(command), result(2, '', `${name}: ${operand}: integer expression expected\n`), command)
+    assert.deepEqual(await createTerminal(FILES).run(command), result(2, '', `${name}: ${operand}: integer expression expected\n`), command)
   }
 }
 
@@ -46,11 +46,11 @@ describe('test and [ compare signed decimal integers exactly', () => {
   ]
   for (const [left, right, trueOperators] of comparisons) {
     for (const operator of OPERATORS) {
-      it(`${left} ${operator} ${right}`, () => {
+      it(`${left} ${operator} ${right}`, async () => {
         const expression = `${quote(left)} ${operator} ${quote(right)}`
         const exitCode = trueOperators.includes(operator) ? 0 : 1
-        check(expression, exitCode)
-        check('! ' + expression, exitCode === 0 ? 1 : 0)
+        await check(expression, exitCode)
+        await check('! ' + expression, exitCode === 0 ? 1 : 0)
       })
     }
   }
@@ -69,9 +69,9 @@ describe('test integer signs, decimal zeros and whitespace', () => {
     ['-' + '0'.repeat(1000), '0'],
   ]
   for (const [input, expected] of cases) {
-    it(`${JSON.stringify(input.length > 80 ? input.slice(0, 40) + '…' : input)} equals ${expected}`, () => {
-      check(`${quote(input)} -eq ${quote(expected)}`, 0)
-      check(`${quote(expected)} -ne ${quote(input)}`, 1)
+    it(`${JSON.stringify(input.length > 80 ? input.slice(0, 40) + '…' : input)} equals ${expected}`, async () => {
+      await check(`${quote(input)} -eq ${quote(expected)}`, 0)
+      await check(`${quote(expected)} -ne ${quote(input)}`, 1)
     })
   }
 })
@@ -87,16 +87,16 @@ describe('invalid test integers are ordinary errors, including overflow', () => 
     '9'.repeat(1000),
   ]
   for (const operand of operands) {
-    it(`rejects ${JSON.stringify(operand.length > 80 ? operand.slice(0, 40) + '…' : operand)}`, () => {
-      invalid(`${quote(operand)} -eq 0`, operand)
-      invalid(`0 -eq ${quote(operand)}`, operand)
+    it(`rejects ${JSON.stringify(operand.length > 80 ? operand.slice(0, 40) + '…' : operand)}`, async () => {
+      await invalid(`${quote(operand)} -eq 0`, operand)
+      await invalid(`0 -eq ${quote(operand)}`, operand)
     })
   }
   for (const operator of OPERATORS) {
-    it(`${operator} validates both operands before comparison or negation`, () => {
-      invalid(`bad ${operator} worse`, 'bad')
-      invalid(`1 ${operator} worse`, 'worse')
-      invalid(`! bad ${operator} 0`, 'bad')
+    it(`${operator} validates both operands before comparison or negation`, async () => {
+      await invalid(`bad ${operator} worse`, 'bad')
+      await invalid(`1 ${operator} worse`, 'worse')
+      await invalid(`! bad ${operator} 0`, 'bad')
     })
   }
 })
@@ -108,13 +108,13 @@ describe('integer predicates respect test argument-count precedence', () => {
     ['! 0 -ne 0', 0], ['! 0 -eq 0', 1], ['! ! -eq', 0],
   ]) it(expression, () => check(expression, exitCode))
 
-  it('a three-argument binary comparison takes precedence over !', () => {
-    invalid('! -eq 0', '!')
-    invalid('-n -eq 0', '-n')
+  it('a three-argument binary comparison takes precedence over !', async () => {
+    await invalid('! -eq 0', '!')
+    await invalid('-n -eq 0', '-n')
   })
   for (const command of ['test 1 -eq', '[ 1 -eq ]', '[ 1 -eq 1', 'test -- 1 -eq 1']) {
-    it(`retains ordinary expression syntax errors: ${command}`, () => {
-      const actual = createTerminal(FILES).run(command)
+    it(`retains ordinary expression syntax errors: ${command}`, async () => {
+      const actual = await createTerminal(FILES).run(command)
       assert.equal(actual.exitCode, 2)
       assert.notEqual(actual.stderr, '')
       assert.deepEqual(actual.unsupported, [])
@@ -141,7 +141,7 @@ describe('integer comparisons in shell control flow and status checks', () => {
     ['/usr/bin/test 1 -eq 1 && /bin/[ 2 -gt 1 ] && echo aliases', 'aliases\n'],
   ]
   for (const [command, stdout, notes = []] of cases) {
-    it(command, () => assert.deepEqual(createTerminal(FILES).run(command), result(0, stdout, '', [], notes)))
+    it(command, async () => assert.deepEqual(await createTerminal(FILES).run(command), result(0, stdout, '', [], notes)))
   }
 })
 
@@ -154,12 +154,12 @@ describe('unimplemented test operations still reach diagnostics', () => {
   ]) {
     for (const name of COMMANDS) {
       const command = invocation(name, expression)
-      it(command, () => {
+      it(command, async () => {
         const terminal = createTerminal(FILES)
         const message = `${name}: ${detail} is not supported`
         const unsupported = [{ kind: 'feature', command: name, detail, message }]
-        assert.deepEqual(terminal.run(command), result(2, '', message + '\n', unsupported))
-        assert.deepEqual(terminal.run(command + ' 2>/dev/null | cat'), result(0, '', '', unsupported))
+        assert.deepEqual(await terminal.run(command), result(2, '', message + '\n', unsupported))
+        assert.deepEqual(await terminal.run(command + ' 2>/dev/null | cat'), result(0, '', '', unsupported))
       })
     }
   }

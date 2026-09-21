@@ -1,6 +1,8 @@
-// Caller-provided synchronous commands. Handlers receive a limited I/O view,
-// not the mutable execution context; malformed descriptors/results fail
-// explicitly rather than becoming a successful command with missing output.
+// Caller-provided commands. Handlers receive a limited I/O view, not the
+// mutable execution context; malformed descriptors/results fail explicitly
+// rather than becoming a successful command with missing output. A handler
+// may answer with a promise, which the line waits for as it waits for any
+// other command that has to.
 
 import { lookup, resolve } from './fs.js'
 import { consumeStdin, ok, readBytesOf, readInputs } from './util.js'
@@ -109,7 +111,29 @@ function invoke(name, run, stdin, tokens, ctx) {
       return readInputs(name, [...paths], stdin, scope)
     },
   }
-  return normalizeResult(run(io))
+  // A handler is the one place a line is run from inside a line: what it
+  // calls `run` for is part of the line that reached it, so that call runs
+  // where it stands rather than waiting for the turn this one is holding.
+  // The mark is held for as long as the handler is, promise and all.
+  const holding = hold(ctx)
+  let waiting = false
+  try {
+    const answer = run(io)
+    // What a handler promises is what it answers: a line waits for it where
+    // it stands, and a promise that fails fails the command, as a throw does.
+    if (typeof answer?.then !== 'function') return normalizeResult(answer)
+    waiting = true
+    return answer.then(normalizeResult).finally(holding)
+  } finally { if (!waiting) holding() }
+}
+
+// One mark, taken back once: a handler that answers at once gives it up where
+// it returned, and one that waits gives it up where it settled.
+function hold(ctx) {
+  const lock = ctx.lock
+  if (!lock) return () => {}
+  lock.depth++
+  return () => { lock.depth-- }
 }
 
 // Resolve against the captured cwd; copy listings to protect shared indexes.
@@ -151,10 +175,6 @@ function normalizeResult(result) {
   if (typeof result === 'string') return ok(result)
   if (typeof result !== 'object') {
     throw new TypeError(`invalid result: expected a string or an object (got ${typeof result})`)
-  }
-  // Pipelines are synchronous; a promise has no point at which to be awaited.
-  if (typeof result.then === 'function') {
-    throw new TypeError('invalid result: commands are synchronous, a promise cannot be awaited')
   }
   if (Array.isArray(result)) {
     throw new TypeError('invalid result: expected a string or an object, got an array (join the lines first)')

@@ -8,15 +8,15 @@ const note = (name, exitCode, skipped, search = false) =>
   `${name}: exited ${exitCode}, so ${skipped === 1 ? 'the command' : `the ${skipped} commands`} after && did not run.` +
   (search && exitCode === 1 ? ' A search that selects no lines exits 1, which is not a failure.' : '')
 
-const notesOf = (command) => createTerminal(FILES).run(command).notes
+const notesOf = async (command) => (await createTerminal(FILES).run(command)).notes
 
 describe('a failing command that cancels the rest of an && chain says so', () => {
   // Spelled out once, so a change to the message has to be made here too.
-  it('reads as a sentence', () => {
-    assert.deepEqual(notesOf("grep -n -A 75 -B 15 'nope' a.txt && cat b.txt && cat c.txt"),
+  it('reads as a sentence', async () => {
+    assert.deepEqual(await notesOf("grep -n -A 75 -B 15 'nope' a.txt && cat b.txt && cat c.txt"),
       ['grep: exited 1, so the 2 commands after && did not run. ' +
        'A search that selects no lines exits 1, which is not a failure.'])
-    assert.deepEqual(notesOf('cat missing.txt && cat b.txt'),
+    assert.deepEqual(await notesOf('cat missing.txt && cat b.txt'),
       ['cat: exited 1, so the command after && did not run.'])
   })
 
@@ -43,19 +43,19 @@ describe('a failing command that cancels the rest of an && chain says so', () =>
     // A surviving `||` branch does not undo what the `&&` gate cancelled.
     ['grep nope a.txt && cat b.txt || echo fallback', note('grep', 1, 1, true)],
   ]) {
-    it(command, () => assert.deepEqual(notesOf(command), [expected]))
+    it(command, async () => assert.deepEqual(await notesOf(command), [expected]))
   }
 
-  it('counts only the steps the gate actually skipped', () => {
-    const result = createTerminal(FILES).run('cat missing && cat b.txt && cat a.txt; echo tail')
+  it('counts only the steps the gate actually skipped', async () => {
+    const result = await createTerminal(FILES).run('cat missing && cat b.txt && cat a.txt; echo tail')
     assert.equal(result.stdout, 'tail\n')
     assert.deepEqual(result.notes, [note('cat', 1, 2)])
   })
 
-  it('reports each chain in a line separately, and identical ones once', () => {
-    assert.deepEqual(notesOf('cat missing && cat b.txt; grep nope a.txt && cat c.txt'),
+  it('reports each chain in a line separately, and identical ones once', async () => {
+    assert.deepEqual(await notesOf('cat missing && cat b.txt; grep nope a.txt && cat c.txt'),
       [note('cat', 1, 1), note('grep', 1, 1, true)])
-    assert.deepEqual(notesOf('cat missing && cat b.txt; cat missing && cat b.txt'), [note('cat', 1, 1)])
+    assert.deepEqual(await notesOf('cat missing && cat b.txt; cat missing && cat b.txt'), [note('cat', 1, 1)])
   })
 })
 
@@ -75,7 +75,7 @@ describe('nothing is said where the gate stopped nothing', () => {
     '! grep oak a.txt && cat b.txt',
     '! grep nope a.txt && cat b.txt',
   ]) {
-    it(command, () => assert.deepEqual(notesOf(command), []))
+    it(command, async () => assert.deepEqual(await notesOf(command), []))
   }
 })
 
@@ -92,12 +92,12 @@ describe('a command whose only product is a status is being used as intended', (
     'grep -nq nope a.txt && cat b.txt',
     'grep -qn nope a.txt && cat b.txt',
   ]) {
-    it(command, () => assert.deepEqual(notesOf(command), []))
+    it(command, async () => assert.deepEqual(await notesOf(command), []))
   }
 
-  it('still reports a search asked for with other flags', () => {
-    assert.deepEqual(notesOf('grep -in nope a.txt && cat b.txt'), [note('grep', 1, 1, true)])
-    assert.deepEqual(notesOf('grep -A 75 -B 15 nope a.txt && cat b.txt'), [note('grep', 1, 1, true)])
+  it('still reports a search asked for with other flags', async () => {
+    assert.deepEqual(await notesOf('grep -in nope a.txt && cat b.txt'), [note('grep', 1, 1, true)])
+    assert.deepEqual(await notesOf('grep -A 75 -B 15 nope a.txt && cat b.txt'), [note('grep', 1, 1, true)])
   })
 })
 
@@ -110,8 +110,8 @@ describe('the note follows the run, not the output', () => {
     'value=$(cat missing && cat b.txt); true',
     'for f in a.txt; do cat missing && cat $f; done',
   ]) {
-    it(command, () => {
-      const result = createTerminal(FILES).run(command)
+    it(command, async () => {
+      const result = await createTerminal(FILES).run(command)
       assert.deepEqual(result.notes, [note('cat', 1, 1)])
       assert.deepEqual(result.unsupported, [])
     })
@@ -121,81 +121,81 @@ describe('the note follows the run, not the output', () => {
   // it cancelled, and the discarded read error is reported in its own right.
   const discarded = "cat: No such file or directory: \"missing\"."
   for (const command of ['cat missing 2>/dev/null && cat b.txt', '{ cat missing && cat b.txt; } 2>/dev/null']) {
-    it(command, () => assert.deepEqual(notesOf(command), [note('cat', 1, 1), discarded]))
+    it(command, async () => assert.deepEqual(await notesOf(command), [note('cat', 1, 1), discarded]))
   }
 
-  it('blames the stage whose status the gate read, not an earlier one', () => {
+  it('blames the stage whose status the gate read, not an earlier one', async () => {
     // The pipeline failed because `cat` could not open its input; `grep`
     // succeeded, and naming it would also have called its status benign.
-    assert.deepEqual(notesOf('grep oak a.txt | cat < missingfile && cat b.txt'), [])
-    assert.deepEqual(notesOf('cat a.txt | cat < missingfile && cat b.txt'), [])
+    assert.deepEqual(await notesOf('grep oak a.txt | cat < missingfile && cat b.txt'), [])
+    assert.deepEqual(await notesOf('cat a.txt | cat < missingfile && cat b.txt'), [])
   })
 
-  it('does not blame a command that only ran inside an expansion', () => {
+  it('does not blame a command that only ran inside an expansion', async () => {
     // `echo` ran during substitution and exited 0; the step failed on its
     // redirect, before reaching a command of its own.
-    assert.deepEqual(notesOf('cat $(echo a.txt) < missingfile && cat b.txt'), [])
-    assert.deepEqual(notesOf('cat a.txt > $(echo out) && cat b.txt'), [])
+    assert.deepEqual(await notesOf('cat $(echo a.txt) < missingfile && cat b.txt'), [])
+    assert.deepEqual(await notesOf('cat a.txt > $(echo out) && cat b.txt'), [])
   })
 
-  it('resolves a bin prefix before exempting a command', () => {
+  it('resolves a bin prefix before exempting a command', async () => {
     for (const command of ['/bin/false && echo yes', '/usr/bin/test -f nope && echo yes',
       '/bin/[ -f nope ] && echo yes', '/bin/grep -q nope a.txt && cat b.txt']) {
-      assert.deepEqual(notesOf(command), [], command)
+      assert.deepEqual(await notesOf(command), [], command)
     }
-    assert.deepEqual(notesOf('/bin/cat missing && cat b.txt'),
+    assert.deepEqual(await notesOf('/bin/cat missing && cat b.txt'),
       ['/bin/cat: exited 1, so the command after && did not run.'])
   })
 
-  it('reads -q the way grep reads it', () => {
+  it('reads -q the way grep reads it', async () => {
     // `-query` is the pattern here, not a quiet flag, so the gate really did
     // cancel something.
     const search = note('grep', 1, 1, true)
-    assert.deepEqual(notesOf('grep -e -query a.txt && cat b.txt'), [search])
-    assert.deepEqual(notesOf('grep -- -query a.txt && cat b.txt'), [search])
-    assert.deepEqual(notesOf('grep -A 3 nope a.txt && cat b.txt'), [search])
-    assert.deepEqual(notesOf('grep -q nope a.txt && cat b.txt'), [])
+    assert.deepEqual(await notesOf('grep -e -query a.txt && cat b.txt'), [search])
+    assert.deepEqual(await notesOf('grep -- -query a.txt && cat b.txt'), [search])
+    assert.deepEqual(await notesOf('grep -A 3 nope a.txt && cat b.txt'), [search])
+    assert.deepEqual(await notesOf('grep -q nope a.txt && cat b.txt'), [])
   })
 
-  it('leaves an && chain read for its status alone', () => {
+  it('leaves an && chain read for its status alone', async () => {
     // An `if` condition is a gate by construction, like `test` is.
-    assert.deepEqual(notesOf('if cat missing && cat b.txt; then echo yes; else echo no; fi'), [])
-    assert.deepEqual(notesOf('if cat a.txt && cat missing; then echo yes; else echo no; fi'), [])
+    assert.deepEqual(await notesOf('if cat missing && cat b.txt; then echo yes; else echo no; fi'), [])
+    assert.deepEqual(await notesOf('if cat a.txt && cat missing; then echo yes; else echo no; fi'), [])
     // Its body is ordinary work again.
-    assert.deepEqual(notesOf('if true; then cat missing && cat b.txt; fi'), [note('cat', 1, 1)])
+    assert.deepEqual(await notesOf('if true; then cat missing && cat b.txt; fi'), [note('cat', 1, 1)])
   })
 
-  it('counts the operands of &&, compound commands included', () => {
-    assert.deepEqual(notesOf('cat missing && { cat b.txt; cat c.txt; } && cat a.txt'), [note('cat', 1, 2)])
+  it('counts the operands of &&, compound commands included', async () => {
+    assert.deepEqual(await notesOf('cat missing && { cat b.txt; cat c.txt; } && cat a.txt'), [note('cat', 1, 2)])
   })
 
-  it('does not carry blame into or out of a reentrant run', () => {
+  it('does not carry blame into or out of a reentrant run', async () => {
     let inner
     const terminal = createTerminal(FILES, {
-      commands: { probe: () => { inner = terminal.run('cat a.txt'); return { exitCode: 3 } } },
+      commands: { probe: async () => { inner = await terminal.run('cat a.txt'); return { exitCode: 3 } } },
     })
-    const result = terminal.run('probe && cat b.txt')
+    const result = await terminal.run('probe && cat b.txt')
     assert.deepEqual(inner.notes, [])
     assert.deepEqual(result.notes, ['probe: exited 3, so the command after && did not run.'])
   })
 
-  it('says nothing when the step failed before dispatching a command', () => {
+  it('says nothing when the step failed before dispatching a command', async () => {
     // A refused redirect never reaches a command, so there is none to blame;
     // the refusal is already on the diagnostic feed.
-    const result = createTerminal(FILES).run('cat a.txt > out && cat b.txt')
+    const result = await createTerminal(FILES).run('cat a.txt > out && cat b.txt')
     assert.deepEqual(result.notes, [])
     assert.equal(result.unsupported.length, 1)
   })
 
-  it('does not carry a chain into a later run', () => {
+  it('does not carry a chain into a later run', async () => {
     const terminal = createTerminal(FILES)
-    assert.deepEqual(terminal.run('cat missing && cat b.txt').notes, [note('cat', 1, 1)])
-    assert.deepEqual(terminal.run('cat b.txt').notes, [])
-    assert.deepEqual(terminal.run('cat a.txt && cat b.txt').notes, [])
+    assert.deepEqual((await terminal.run('cat missing && cat b.txt')).notes, [note('cat', 1, 1)])
+    assert.deepEqual((await terminal.run('cat b.txt')).notes, [])
+    assert.deepEqual((await terminal.run('cat a.txt && cat b.txt')).notes, [])
   })
 
-  it('leaves output and status exactly as they were', () => {
-    const result = createTerminal(FILES).run("grep -n 'nope' a.txt && cat b.txt")
+  it('leaves output and status exactly as they were', async () => {
+    const result = await createTerminal(FILES).run("grep -n 'nope' a.txt && cat b.txt")
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 1)

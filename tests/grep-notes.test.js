@@ -26,27 +26,27 @@ describe('grep notes identify actual binary input skips', () => {
     ['grep -aI hit binary', '', 1],
     ['grep --text -I hit binary', '', 1],
   ]) {
-    it(command, () => {
-      assert.deepEqual(createTerminal(FILES).run(command), expected(stdout, [binaryNote(['/binary'])], { exitCode }))
+    it(command, async () => {
+      assert.deepEqual(await createTerminal(FILES).run(command), expected(stdout, [binaryNote(['/binary'])], { exitCode }))
     })
   }
 
   for (const command of ['grep -a hit binary', 'grep -Ia hit binary', 'grep -I --text hit binary']) {
-    it('does not claim a binary omission when text mode wins: ' + command, () => {
-      assert.deepEqual(createTerminal(FILES).run(command), expected('hit\0tail\n'))
+    it('does not claim a binary omission when text mode wins: ' + command, async () => {
+      assert.deepEqual(await createTerminal(FILES).run(command), expected('hit\0tail\n'))
     })
   }
 
   for (const command of ['grep -I hit good', 'grep -Iq hit good binary', 'grep -Im0 hit binary', 'grep -ILm0 hit binary']) {
-    it('does not report binary input which was not skipped: ' + command, () => {
-      const result = createTerminal(FILES).run(command)
+    it('does not report binary input which was not skipped: ' + command, async () => {
+      const result = await createTerminal(FILES).run(command)
       assert.deepEqual(result.notes, [])
       assert.deepEqual(result.unsupported, [])
     })
   }
 
-  it('keeps unsupported default binary handling in the diagnostic channel', () => {
-    const result = createTerminal(FILES).run('grep hit binary 2>/dev/null | true')
+  it('keeps unsupported default binary handling in the diagnostic channel', async () => {
+    const result = await createTerminal(FILES).run('grep hit binary 2>/dev/null | true')
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)
@@ -60,25 +60,25 @@ describe('grep notes identify actual binary input skips', () => {
     'cat binary | grep -I hit /dev/stdin',
     'grep -I hit <binary',
   ]) {
-    it('describes binary standard input: ' + command, () => {
-      assert.deepEqual(createTerminal(FILES).run(command), expected('', [BINARY_STDIN], { exitCode: 1 }))
+    it('describes binary standard input: ' + command, async () => {
+      assert.deepEqual(await createTerminal(FILES).run(command), expected('', [BINARY_STDIN], { exitCode: 1 }))
     })
   }
 
-  it('attributes redirected writable input to its known absolute path', () => {
+  it('attributes redirected writable input to its known absolute path', async () => {
     const terminal = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
-    const result = terminal.run("printf 'hit\\0tail\\n' >/tmp/binary; grep -I hit </tmp/binary")
+    const result = await terminal.run("printf 'hit\\0tail\\n' >/tmp/binary; grep -I hit </tmp/binary")
     assert.deepEqual(result, expected('', [binaryNote(['/tmp/binary'])], { exitCode: 1, cwd: '/repo' }))
   })
 
-  it('deduplicates actual file aliases and retains normal count output', () => {
-    const result = createTerminal(FILES).run('grep -Ic hit binary ./binary /binary')
+  it('deduplicates actual file aliases and retains normal count output', async () => {
+    const result = await createTerminal(FILES).run('grep -Ic hit binary ./binary /binary')
     assert.deepEqual(result, expected('binary:0\n./binary:0\n/binary:0\n', [binaryNote(['/binary'])], { exitCode: 1 }))
   })
 
-  it('retains earlier skipped inputs when later binary detection is unsupported', () => {
+  it('retains earlier skipped inputs when later binary detection is unsupported', async () => {
     const terminal = createTerminal({ ...FILES, late: 'hit\n' + 'x'.repeat(96 * 1024) + '\0' })
-    const result = terminal.run('grep -I hit binary late 2>/dev/null | true')
+    const result = await terminal.run('grep -I hit binary late 2>/dev/null | true')
     assert.deepEqual(result.notes, [binaryNote(['/binary'])])
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)
@@ -90,71 +90,71 @@ describe('grep notes identify entries omitted by filename and directory filters'
   const sources = { 'dir/a.ts': 'hit\n', 'dir/b.js': 'hit\n', 'dir/vendor/deep/c.ts': 'hit\n', 'dir/vendor/nested/d.js': 'hit\n' }
 
   for (const filters of ['--include="*.ts"', '--exclude="*.js"']) {
-    it('collects file and directory omissions together: ' + filters, () => {
-      const result = createTerminal(sources).run('grep -r hit dir ' + filters + ' --exclude-dir=vendor')
+    it('collects file and directory omissions together: ' + filters, async () => {
+      const result = await createTerminal(sources).run('grep -r hit dir ' + filters + ' --exclude-dir=vendor')
       assert.deepEqual(result, expected('dir/a.ts:hit\n', [excludedNote(['/dir/b.js', '/dir/vendor'])]))
     })
   }
 
-  it('counts only the first excluded ancestor without its unvisited descendants', () => {
-    const result = createTerminal(sources).run('grep -r hit dir --exclude-dir=vendor --exclude-dir=nested')
+  it('counts only the first excluded ancestor without its unvisited descendants', async () => {
+    const result = await createTerminal(sources).run('grep -r hit dir --exclude-dir=vendor --exclude-dir=nested')
     assert.deepEqual(result, expected('dir/a.ts:hit\ndir/b.js:hit\n', [excludedNote(['/dir/vendor'])]))
   })
 
-  it('reports empty directories actually excluded during recursion', () => {
-    const result = createTerminal({}, { mount: '/empty' }).run('grep -r hit / --exclude-dir=empty')
+  it('reports empty directories actually excluded during recursion', async () => {
+    const result = await createTerminal({}, { mount: '/empty' }).run('grep -r hit / --exclude-dir=empty')
     assert.deepEqual(result, expected('', [excludedNote(['/empty'])], { exitCode: 1, cwd: '/empty' }))
   })
 
-  it('preserves named start-directory trailing-slash matching rules', () => {
+  it('preserves named start-directory trailing-slash matching rules', async () => {
     const terminal = createTerminal(sources)
-    assert.deepEqual(terminal.run('grep -r hit dir/vendor --exclude-dir=vendor'), expected('', [excludedNote(['/dir/vendor'])], { exitCode: 1 }))
-    assert.deepEqual(terminal.run('grep -rh hit dir/vendor/ --exclude-dir=vendor'), expected('hit\nhit\n'))
+    assert.deepEqual(await terminal.run('grep -r hit dir/vendor --exclude-dir=vendor'), expected('', [excludedNote(['/dir/vendor'])], { exitCode: 1 }))
+    assert.deepEqual(await terminal.run('grep -rh hit dir/vendor/ --exclude-dir=vendor'), expected('hit\nhit\n'))
   })
 
-  it('does not apply directory filters to file operands or their parent directories', () => {
-    const result = createTerminal(sources).run('grep -r hit dir/vendor/deep/c.ts --exclude-dir=vendor --exclude-dir=c.ts')
+  it('does not apply directory filters to file operands or their parent directories', async () => {
+    const result = await createTerminal(sources).run('grep -r hit dir/vendor/deep/c.ts --exclude-dir=vendor --exclude-dir=c.ts')
     assert.deepEqual(result, expected('hit\n'))
   })
 
-  it('includes explicit operands in file-filter notes and deduplicates path spellings', () => {
-    const result = createTerminal(sources).run('grep hit dir/b.js ./dir/b.js /dir/b.js --include="*.ts"')
+  it('includes explicit operands in file-filter notes and deduplicates path spellings', async () => {
+    const result = await createTerminal(sources).run('grep hit dir/b.js ./dir/b.js /dir/b.js --include="*.ts"')
     assert.deepEqual(result, expected('', [excludedNote(['/dir/b.js'])], { exitCode: 1 }))
   })
 
-  it('honors the final matching include/exclude rule without claiming overridden skips', () => {
-    const result = createTerminal({ 'a.ts': 'hit\n', 'b.js': 'hit\n', 'c.txt': 'hit\n' })
+  it('honors the final matching include/exclude rule without claiming overridden skips', async () => {
+    const result = await createTerminal({ 'a.ts': 'hit\n', 'b.js': 'hit\n', 'c.txt': 'hit\n' })
       .run('grep -rh hit . --include="*" --exclude="*.ts" --include=a.ts --exclude="*.js"')
     assert.deepEqual(result, expected('hit\nhit\n', [excludedNote(['/b.js'])]))
   })
 
-  it('does not report filters which exclude no entries', () => {
-    const result = createTerminal(sources).run('grep -rh hit dir --include="*" --exclude="*.missing" --exclude-dir=missing')
+  it('does not report filters which exclude no entries', async () => {
+    const result = await createTerminal(sources).run('grep -rh hit dir --include="*" --exclude="*.missing" --exclude-dir=missing')
     assert.deepEqual(result, expected('hit\nhit\nhit\nhit\n'))
   })
 
-  it('does not count nonexistent operands or unnamed stdin as filename exclusions', () => {
-    const result = createTerminal(FILES).run('cat good | grep hit - missing --include="*.ts"')
+  it('does not count nonexistent operands or unnamed stdin as filename exclusions', async () => {
+    const result = await createTerminal(FILES).run('cat good | grep hit - missing --include="*.ts"')
     assert.deepEqual(result, expected('(standard input):hit\n', [], { stderr: 'grep: missing: No such file or directory\n', exitCode: 2 }))
   })
 
-  it('counts binary files excluded by name only in the rule category', () => {
-    const result = createTerminal({ 'bad.bin': 'hit\0\n', 'good.txt': 'hit\n' }).run('grep -rIh hit . --include="*.txt"')
+  it('counts binary files excluded by name only in the rule category', async () => {
+    const result = await createTerminal({ 'bad.bin': 'hit\0\n', 'good.txt': 'hit\n' }).run('grep -rIh hit . --include="*.txt"')
     assert.deepEqual(result, expected('hit\n', [excludedNote(['/bad.bin'])]))
   })
 
-  it('keeps binary and rule omissions as separate explanations', () => {
-    const result = createTerminal({ 'bad.txt': 'hit\0\n', 'skip.js': 'hit\n', 'good.txt': 'hit\n' }).run('grep -rIh hit . --include="*.txt"')
+  it('keeps binary and rule omissions as separate explanations', async () => {
+    const result = await createTerminal({ 'bad.txt': 'hit\0\n', 'skip.js': 'hit\n', 'good.txt': 'hit\n' }).run('grep -rIh hit . --include="*.txt"')
     assert.deepEqual(result, expected('hit\n', [binaryNote(['/bad.txt']), excludedNote(['/skip.js'])]))
   })
 
-  it('reports earlier exclusions but not later unvisited operands after quiet success', () => {
-    const result = createTerminal({ 'a.js': 'hit\n', 'b.ts': 'hit\n', 'c.js': 'hit\n' }).run('grep -q hit a.js b.ts c.js --include="*.ts"')
+  it('reports earlier exclusions but not later unvisited operands after quiet success', async () => {
+    const result = await createTerminal({ 'a.js': 'hit\n', 'b.ts': 'hit\n', 'c.js': 'hit\n' }).run('grep -q hit a.js b.ts c.js --include="*.ts"')
     assert.deepEqual(result, expected('', [excludedNote(['/a.js'])]))
   })
 
-  it('retains earlier filename omissions when a later filename is unsupported', () => {
-    const result = createTerminal({ 'a.skip': 'hit\n', é: 'hit\n' }).run('grep -r hit . --include="[a-z]" 2>/dev/null | true')
+  it('retains earlier filename omissions when a later filename is unsupported', async () => {
+    const result = await createTerminal({ 'a.skip': 'hit\n', é: 'hit\n' }).run('grep -r hit . --include="[a-z]" 2>/dev/null | true')
     assert.deepEqual(result.notes, [excludedNote(['/a.skip'])])
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)
@@ -165,24 +165,24 @@ describe('grep notes identify entries omitted by filename and directory filters'
 describe('grep omission notes retain bounded paths and run scope', () => {
   for (const count of [9, 10]) {
     for (const binary of [true, false]) {
-      it('formats ' + count + ' omitted ' + (binary ? 'binary files' : 'filtered entries'), () => {
+      it('formats ' + count + ' omitted ' + (binary ? 'binary files' : 'filtered entries'), async () => {
         const paths = Array.from({ length: count }, (_, i) => '/file' + i)
         const files = Object.fromEntries(paths.map((path) => [path, binary ? 'hit\0\n' : 'hit\n']))
         const command = binary ? 'grep -rI hit .' : 'grep -r hit . --exclude="*"'
-        assert.deepEqual(createTerminal(files).run(command), expected('', [binary ? binaryNote(paths) : excludedNote(paths)], { exitCode: 1 }))
+        assert.deepEqual(await createTerminal(files).run(command), expected('', [binary ? binaryNote(paths) : excludedNote(paths)], { exitCode: 1 }))
       })
     }
   }
 
-  it('quotes paths and sorts them by code point independently of operand order', () => {
+  it('quotes paths and sorts them by code point independently of operand order', async () => {
     const paths = ['/line\nbreak', '/quote"', '/slash\\', '/\uE000', '/😀']
-    const result = createTerminal(Object.fromEntries(paths.toReversed().map((path) => [path, 'hit\0\n']))).run('grep -rI hit .')
+    const result = await createTerminal(Object.fromEntries(paths.toReversed().map((path) => [path, 'hit\0\n']))).run('grep -rI hit .')
     assert.deepEqual(result, expected('', [binaryNote(paths)], { exitCode: 1 }))
   })
 
-  it('uses mounted absolute paths while preserving relative output spelling', () => {
+  it('uses mounted absolute paths while preserving relative output spelling', async () => {
     const terminal = createTerminal({ 'dir/bad': 'hit\0\n', 'dir/good': 'hit\n' }, { mount: '/work [x]', cwd: '/work [x]/dir' })
-    assert.deepEqual(terminal.run('grep -I hit bad good'), expected('good:hit\n', [binaryNote(['/work [x]/dir/bad'])], { cwd: '/work [x]/dir' }))
+    assert.deepEqual(await terminal.run('grep -I hit bad good'), expected('good:hit\n', [binaryNote(['/work [x]/dir/bad'])], { cwd: '/work [x]/dir' }))
   })
 
   for (const [command, stdout] of [
@@ -194,8 +194,8 @@ describe('grep omission notes retain bounded paths and run scope', () => {
     ["printf '%s\\n' binary | xargs grep -I hit", ''],
     ['for path in binary binary; do grep -I hit "$path"; done', ''],
   ]) {
-    it('retains notes through nested execution: ' + command, () => {
-      const result = createTerminal(FILES).run(command)
+    it('retains notes through nested execution: ' + command, async () => {
+      const result = await createTerminal(FILES).run(command)
       assert.deepEqual(result.notes, [binaryNote(['/binary'])])
       assert.equal(result.stdout, stdout)
       assert.equal(result.stderr, '')
@@ -203,23 +203,23 @@ describe('grep omission notes retain bounded paths and run scope', () => {
     })
   }
 
-  it('preserves normal errors and notes despite hidden stderr', () => {
+  it('preserves normal errors and notes despite hidden stderr', async () => {
     const terminal = createTerminal(FILES)
-    assert.deepEqual(terminal.run('grep -I hit binary missing'), expected('', [binaryNote(['/binary'])], {
+    assert.deepEqual(await terminal.run('grep -I hit binary missing'), expected('', [binaryNote(['/binary'])], {
       stderr: 'grep: missing: No such file or directory\n', exitCode: 2,
     }))
     // The unreadable operand is only on the notes channel now that its own
     // diagnostic went to /dev/null.
-    assert.deepEqual(terminal.run('grep -I hit binary missing 2>/dev/null | true'),
+    assert.deepEqual(await terminal.run('grep -I hit binary missing 2>/dev/null | true'),
       expected('', [binaryNote(['/binary']), "grep: No such file or directory: \"missing\"."]))
   })
 
-  it('deduplicates messages per run and keeps later runs independent', () => {
+  it('deduplicates messages per run and keeps later runs independent', async () => {
     const terminal = createTerminal(FILES)
-    const first = terminal.run('grep -I hit binary; grep -I hit binary')
+    const first = await terminal.run('grep -I hit binary; grep -I hit binary')
     assert.deepEqual(first.notes, [binaryNote(['/binary'])])
     assert.ok(Object.isFrozen(first.notes))
-    assert.deepEqual(terminal.run('grep hit good'), expected('hit\n'))
+    assert.deepEqual(await terminal.run('grep hit good'), expected('hit\n'))
     assert.deepEqual(first.notes, [binaryNote(['/binary'])])
   })
 })

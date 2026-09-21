@@ -12,15 +12,15 @@ describe('declaration arguments use the original command syntax', () => {
     '$cmd', '$(printf export)', '${cmd}', '${missing:-export}',
     '"export"', "'export'", 'ex"port"', '\\export', 'export""', "$'export'",
   ]) {
-    it(`splits an unquoted assignment argument of ${command}`, () => {
-      const result = createTerminal({}).run(`cmd=export; value='a b'; ${command} X=$value; printf '<%s>' "$X"`)
+    it(`splits an unquoted assignment argument of ${command}`, async () => {
+      const result = await createTerminal({}).run(`cmd=export; value='a b'; ${command} X=$value; printf '<%s>' "$X"`)
       assert.deepEqual(result, success('<a>'))
     })
   }
 
   for (const command of ['export', 'ex\\\nport']) {
-    it(`retains assignment expansion for ${JSON.stringify(command)}`, () => {
-      const result = createTerminal({}).run(`value='a b'; ${command} X=$value; printf '<%s>' "$X"`)
+    it(`retains assignment expansion for ${JSON.stringify(command)}`, async () => {
+      const result = await createTerminal({}).run(`value='a b'; ${command} X=$value; printf '<%s>' "$X"`)
       assert.deepEqual(result, success('<a b>'))
     })
   }
@@ -33,8 +33,8 @@ describe('declaration arguments use the original command syntax', () => {
     ['cmd=export; $cmd X=${value:=a b}; printf "<%s><%s>" "$X" "$value"', '<a><a b>'],
     ['export X=${value:=a b}; printf "<%s><%s>" "$X" "$value"', '<a b><a b>'],
   ]) {
-    it(command, () => {
-      assert.deepEqual(createTerminal(files).run(command), success(stdout))
+    it(command, async () => {
+      assert.deepEqual(await createTerminal(files).run(command), success(stdout))
     })
   }
 })
@@ -58,14 +58,14 @@ describe('brace expansion removes declaration assignment flags', () => {
     ['echo X={one,two}:~', 'X=one:~ X=two:~\n'],
     ['echo ~/{one,two}', '/one /two\n'],
   ]) {
-    it(command, () => {
-      assert.deepEqual(createTerminal(files).run(command), success(stdout))
+    it(command, async () => {
+      assert.deepEqual(await createTerminal(files).run(command), success(stdout))
     })
   }
 
-  it('uses the same brace and tilde order for a single redirect target', () => {
+  it('uses the same brace and tilde order for a single redirect target', async () => {
     const t = createTerminal({}, { mount: '/src', writable: '/tmp/' })
-    const actual = t.run('cd /tmp; printf kept >X={1..1}:~; cat "X=1:~"')
+    const actual = await t.run('cd /tmp; printf kept >X={1..1}:~; cat "X=1:~"')
     assert.deepEqual(actual, { ...success('kept'), cwd: '/tmp' })
   })
 })

@@ -26,8 +26,8 @@ const sed = (script, input = 'input', flags = '') => `sed ${flags} ${quote(scrip
 
 function examples(rows) {
   for (const [name, command, stdout] of rows) {
-    it(name, () => {
-      assert.deepEqual(createTerminal(FILES).run(command), {
+    it(name, async () => {
+      assert.deepEqual(await createTerminal(FILES).run(command), {
         stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
       }, command)
     })
@@ -148,8 +148,8 @@ describe('sed editing text comes from expressions and script files', () => {
   ])
 
   for (const script of ['a', 'i', 'c', '2a', '2i', '2c']) {
-    it(`missing text is an ordinary syntax error: ${script}`, () => {
-      const result = createTerminal(FILES).run(sed(script, 'single'))
+    it(`missing text is an ordinary syntax error: ${script}`, async () => {
+      const result = await createTerminal(FILES).run(sed(script, 'single'))
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 1)
       assert.notEqual(result.stderr, '')

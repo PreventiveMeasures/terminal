@@ -44,7 +44,7 @@ describe('conditional keywords and compound expansion boundaries', () => {
     ['argv "${@}" "$@" "$*"', '[""]'],
     ['argv "${missing:-$((2 + 3))}" "${other:-$(printf x)}"', '["5","x"]'],
   ]) {
-    it(command, () => { assert.deepEqual(terminal().run(command), success(stdout), command) })
+    it(command, async () => { assert.deepEqual(await terminal().run(command), success(stdout), command) })
   }
 })
 
@@ -63,7 +63,7 @@ describe('parameter words preserve empty arguments, field splitting, and glob qu
     ["argv ${missing:-'{a,b}'}", ['{a,b}']],
     ['argv ${missing:-""}suffix', ['suffix']],
   ]) {
-    it(command, () => { assert.deepEqual(terminal().run(command), success(JSON.stringify(args)), command) })
+    it(command, async () => { assert.deepEqual(await terminal().run(command), success(JSON.stringify(args)), command) })
   }
 })
 
@@ -80,16 +80,16 @@ describe('unsupported expansion paths retain independent diagnostics', () => {
     'printf "%s" "$(printf "%s" "${x@Q}")" 2>/dev/null | cat',
     '[[ ${x:-$((1 / 0))} == anything ]] 2>/dev/null | cat',
   ]) {
-    it(command, () => {
-      const result = terminal().run(command)
+    it(command, async () => {
+      const result = await terminal().run(command)
       assert.equal(result.stdout, '', command)
       assert.ok(result.unsupported.length > 0, command)
     })
   }
 
-  it('does not silently execute [[ as a conditional after a leading redirect', () => {
+  it('does not silently execute [[ as a conditional after a leading redirect', async () => {
     for (const command of ['</dev/null [[ -f a.txt ]] && printf wrong', 'printf "%s" "$(</dev/null [[ -f a.txt ]] && printf wrong)"']) {
-      const result = terminal().run(command)
+      const result = await terminal().run(command)
       assert.equal(result.stdout, '', command)
       assert.ok(result.unsupported.length > 0, command)
       assert.match(result.stderr, /command not found/u, command)
@@ -108,8 +108,8 @@ describe('selected parameter operands reject unavailable expansions', () => {
     'argv "${missing:-$\'$(printf lost)\'}"',
     'argv "${missing:-$\'\\\\$RANDOM\'}"',
   ]) {
-    it(command, () => {
-      const result = terminal().run(command)
+    it(command, async () => {
+      const result = await terminal().run(command)
       assert.equal(result.stdout, '')
       assert.notEqual(result.exitCode, 0)
       assert.ok(result.unsupported.length > 0)

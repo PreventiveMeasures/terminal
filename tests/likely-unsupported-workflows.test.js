@@ -50,8 +50,8 @@ it('covers exactly 100 distinct realistic agent commands', () => {
 describe('100 likely agent commands — unsupported channel', () => {
   for (const [i, c] of CASES.entries()) {
     describe((i + 1) + '. ' + c.purpose, () => {
-      it(c.command, () => {
-        const result = createTerminal(FILES).run(c.command)
+      it(c.command, async () => {
+        const result = await createTerminal(FILES).run(c.command)
         checkDiagnostics(result, c.expected, c.command)
         if (!c.quietStatus) assert.notEqual(result.exitCode, 0, c.command)
         assert.notEqual(result.stderr, '', c.command)
@@ -62,9 +62,9 @@ describe('100 likely agent commands — unsupported channel', () => {
         ['subshell with discarded output and error recovery', (line) => '( ' + line + '\n) >/dev/null 2>&1 || true'],
         ['repeated execution with deduplicated diagnostics', (line) => 'for audit_item in one two; do { ' + line + '\n}; done 2>/dev/null | true'],
       ]) {
-        it(context, () => {
+        it(context, async () => {
           const line = wrap(c.command)
-          const result = createTerminal(FILES).run(line)
+          const result = await createTerminal(FILES).run(line)
           checkDiagnostics(result, c.expected, line)
           if (c.parseTime) {
             // Parsing happens before shell redirects can be installed.
@@ -85,27 +85,27 @@ describe('likely agent commands — diagnostic boundaries', () => {
     ['name=src/index.js; echo "${name//\\//_}"', 'src_index.js\n'],
     ['file=src/index.js; echo "${file:0:3}"', 'src\n'],
   ]) {
-    it(command, () => {
-      assert.deepEqual(createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+    it(command, async () => {
+      assert.deepEqual(await createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
     })
   }
 
-  it('accepts the reported find -exec spelling with an escaped semicolon', () => {
+  it('accepts the reported find -exec spelling with an escaped semicolon', async () => {
     const t = createTerminal({ 'a.txt': 'one\ntwo\n', 'sub/a.txt': 'three\n', 'other.txt': 'ignored\n' })
     const command = String.raw`find . -name "a.txt" -exec wc -l {} \;`
-    assert.deepEqual(t.run(command), {
+    assert.deepEqual(await t.run(command), {
       stdout: '2 ./a.txt\n1 ./sub/a.txt\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
-    assert.deepEqual(t.run(command), t.run(String.raw`find . -name "a.txt" -exec wc -l {} ';'`))
+    assert.deepEqual(await t.run(command), await t.run(String.raw`find . -name "a.txt" -exec wc -l {} ';'`))
   })
 
-  it('accepts the reported BRE alternation with literal quoted parentheses', () => {
+  it('accepts the reported BRE alternation with literal quoted parentheses', async () => {
     const t = createTerminal({
       'dir/a.txt': 'b.a\nc.a\nX("b")\nXb\nother\n',
       'dir/skip.js': 'b.a\n', 'dir/sub/b.txt': 'bza\ncza\n',
     })
     const command = String.raw`grep -rn "b.a\|c.a\|X(\"b\")" dir/ --include=*.txt`
-    assert.deepEqual(t.run(command), {
+    assert.deepEqual(await t.run(command), {
       stdout: 'dir/a.txt:1:b.a\ndir/a.txt:2:c.a\ndir/a.txt:3:X("b")\ndir/sub/b.txt:1:bza\ndir/sub/b.txt:2:cza\n',
       stderr: '', exitCode: 0, cwd: '/', unsupported: [], notes: [
         'glob: no paths matched "--include=*.txt"; the pattern was left literal.',
@@ -114,7 +114,7 @@ describe('likely agent commands — diagnostic boundaries', () => {
     })
   })
 
-  it('keeps valid source analysis free of false unsupported entries', () => {
+  it('keeps valid source analysis free of false unsupported entries', async () => {
     for (const line of [
       'find src -type f -name "*.js" -print',
       String.raw`find src -type f -exec wc -l {} \;`,
@@ -124,40 +124,40 @@ describe('likely agent commands — diagnostic boundaries', () => {
       'sort data/names.txt | uniq -c',
       "awk -F '\\t' 'NR > 1 {sum += $2} END {print sum}' data/metrics.tsv",
     ]) {
-      const result = createTerminal(FILES).run(line)
+      const result = await createTerminal(FILES).run(line)
       assert.deepEqual(result.unsupported, [], line)
       assert.equal(result.stderr, '', line)
       assert.equal(result.exitCode, 0, line)
     }
   })
 
-  it('keeps ordinary errors off the implementation-gap channel', () => {
+  it('keeps ordinary errors off the implementation-gap channel', async () => {
     for (const line of [
       'cat missing.js', 'cd src/index.js', 'grep NEVER_PRESENT src/index.js',
       'find src -name', "find src -exec wc -l '{}'",
       'cut -f0 data/metrics.tsv', 'head -nINVALID README.md',
       "awk 'BEGIN {print (}'", 'cat src/index.js |',
     ]) {
-      const result = createTerminal(FILES).run(line)
+      const result = await createTerminal(FILES).run(line)
       assert.deepEqual(result.unsupported, [], line)
       assert.notEqual(result.exitCode, 0, line)
     }
   })
 
-  it('reports only commands actually executed', () => {
+  it('reports only commands actually executed', async () => {
     for (const c of CASES.filter((entry) => !entry.parseTime)) {
       const line = 'false && { ' + c.command + '\n}'
-      const result = createTerminal(FILES).run(line)
+      const result = await createTerminal(FILES).run(line)
       assert.deepEqual(result.unsupported, [], line)
       assert.equal(result.stderr, '', line)
       assert.equal(result.exitCode, 1, line)
     }
   })
 
-  it('retains separate diagnostics in encounter order through nested dispatch', () => {
+  it('retains separate diagnostics in encounter order through nested dispatch', async () => {
     const t = createTerminal(FILES)
     const line = String.raw`{ find src -type f -exec grep -P '(?>TODO)' {} \; ; cat data/paths.txt | xargs sed -i 's/TODO/DONE/g'; jq '.scripts' package.json; } 2>/dev/null | true`
-    const r = t.run(line)
+    const r = await t.run(line)
     assert.equal(r.stderr, '')
     assert.equal(r.exitCode, 0)
     assert.deepEqual(identities(r), [
@@ -165,6 +165,6 @@ describe('likely agent commands — diagnostic boundaries', () => {
       { kind: 'feature', command: 'sed', detail: '-i' },
       { kind: 'command', command: 'jq', detail: 'jq' },
     ])
-    assert.deepEqual(t.run('cat package.json').unsupported, [], 'feeds reset between runs')
+    assert.deepEqual((await t.run('cat package.json')).unsupported, [], 'feeds reset between runs')
   })
 })
