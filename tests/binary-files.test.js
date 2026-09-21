@@ -170,6 +170,9 @@ describe('a source entry can be the bytes of a file spelt in base64', () => {
       assert.throws(() => terminal({ f: { format: 'base64', data } }), undecodable, JSON.stringify(data))
     }
     assert.throws(() => terminal({ f: { format: 'hex', data: '01' } }), /source "f" declares format "hex"; the only format is \{ format: 'base64', data \}/u)
+    // `data` alone is a declaration with its format left off, not a value to
+    // pass over: the file would otherwise simply not be there.
+    assert.throws(() => terminal({ f: { data: 'AQ==' } }), /source "f" declares format null; the only format is \{ format: 'base64', data \}/u)
     assert.throws(() => terminal({ f: { format: 'base64', data: PNG } }), /source "f" must declare its base64 as a string in `data`/u)
     assert.throws(() => terminal({ f: { format: 'base64' } }), /source "f" must declare its base64 as a string in `data`/u)
   })

@@ -306,9 +306,9 @@ function sourceEntries(sources) {
 // symbolic link, `{ type: 'link', target }`, or bytes spelt in base64,
 // `{ format: 'base64', data }`, for a tree that arrives serialized as text.
 // A value that declares neither stays ignored, as every non-string value was
-// before links existed; one that says `type`, `target` or `format` is a
-// deliberate declaration, so a misspelled one is refused rather than dropped
-// into a tree where the entry would simply not be there.
+// before links existed; one that says `type`, `target`, `format` or `data`
+// is a deliberate declaration, so a misspelled one is refused rather than
+// dropped into a tree where the entry would simply not be there.
 function sourceEntry(value, key) {
   if (typeof value === 'string') return { content: value }
   // A `Uint8Array` — or any other one-byte view, `Buffer` among them — is the
@@ -319,7 +319,7 @@ function sourceEntry(value, key) {
   if (value instanceof ArrayBuffer) {
     throw new TypeError(`createTerminal: source ${JSON.stringify(key)} is an ArrayBuffer; declare a file's bytes as a Uint8Array over it`)
   }
-  if (value.format !== undefined) return { content: encodedContent(value, key) }
+  if (value.format !== undefined || value.data !== undefined) return { content: encodedContent(value, key) }
   if (value.type === undefined && value.target === undefined) return null
   const name = JSON.stringify(key)
   if (value.type !== 'link') {
@@ -342,7 +342,7 @@ const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw](?:==)?|[A-Za-z0-9+/
 function encodedContent(value, key) {
   const name = JSON.stringify(key)
   if (value.format !== 'base64') {
-    throw new TypeError(`createTerminal: source ${name} declares format ${JSON.stringify(value.format)}; the only format is { format: 'base64', data }`)
+    throw new TypeError(`createTerminal: source ${name} declares format ${JSON.stringify(value.format ?? null)}; the only format is { format: 'base64', data }`)
   }
   if (typeof value.data !== 'string') throw new TypeError(`createTerminal: source ${name} must declare its base64 as a string in \`data\``)
   if (!BASE64.test(value.data)) throw new TypeError(`createTerminal: source ${name} declares base64 that does not decode`)
