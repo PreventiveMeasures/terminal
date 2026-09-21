@@ -79,6 +79,14 @@ function terminal(ctx, label) {
   if (!ctx.fs.isDir(ctx.cwd)) throw new Error(`${label}: cwd is not a directory: ${ctx.cwd}`)
   return {
     run: (line) => safeRun(line, ctx),
+    // The same line, run the same way, handed back as a promise: the call to
+    // write against where a caller would rather await a result than take one.
+    // Nothing here waits for anything yet, so the line has already run by the
+    // time the promise is returned, and what `run` would throw this rejects
+    // with, which is what makes it the entry point rather than a wrapper a
+    // caller writes themselves.
+    // oxlint-disable-next-line require-await -- the async surface of synchronous work, with nothing to await yet.
+    runAsync: async (line) => safeRun(line, ctx),
     cwd: () => ctx.cwd,
     complete: (line) => complete(line, ctx, ctx.registry),
     fork: (opts) => fork(ctx, opts),
