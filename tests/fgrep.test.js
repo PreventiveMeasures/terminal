@@ -41,10 +41,11 @@ describe('fgrep compatibility alias', () => {
     await check("find src -name '*.ts' -exec fgrep -n a.b {} ';'", '1:a.b\n1:a.b\n')
   })
 
-  it('resolves through which, stays hidden, and rejects custom overrides', async () => {
+  it('resolves through which and completes, stays out of the hint, and rejects custom overrides', async () => {
     const terminal = createTerminal(FILES)
     assert.equal((await terminal.run('which fgrep')).stdout, '/usr/bin/fgrep\n')
-    for (const prefix of ['', '/usr/bin/', 'cat input | ']) assert.deepEqual(terminal.complete(prefix + 'fgr'), [])
+    // Completed like any other command the terminal has, announced or not.
+    for (const prefix of ['', '/usr/bin/', 'cat input | ']) assert.deepEqual(terminal.complete(prefix + 'fgr'), [prefix + 'fgrep'])
     assert.doesNotMatch((await terminal.run('unknown-command')).stderr, /\bfgrep\b/u)
     for (const commands of [{ fgrep: () => 'wrong' }, new Map([['fgrep', () => 'wrong']])]) {
       assert.throws(() => createTerminal(FILES, { commands }), /fgrep: cannot redefine a built-in command/u)

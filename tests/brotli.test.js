@@ -60,7 +60,7 @@ describe('brotli reads what the real tool wrote', () => {
     const missing = await t.run('nosuchcommand')
     assert.match(missing.stderr, /command not found\. Available: /u)
     assert.doesNotMatch(missing.stderr, /brotli/u)
-    assert.deepEqual(t.complete('brot'), [])
+    assert.deepEqual(t.complete('brot'), ['brotli'])
   })
 
   it('says what brotli says, without a command in front of it', async () => {

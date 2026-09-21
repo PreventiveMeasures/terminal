@@ -58,10 +58,11 @@ describe('egrep compatibility alias', () => {
       '2:export const alpha = 1\n3:export function beta() {}\n1:export const delta = 2\n')
   })
 
-  it('resolves through which while remaining hidden from completion and hints', async () => {
+  it('resolves through which and completes, while staying out of the hint', async () => {
     const terminal = createTerminal(FILES)
     assert.equal((await terminal.run('which egrep')).stdout, '/usr/bin/egrep\n')
-    for (const prefix of ['', '/usr/bin/', 'cat input | ']) assert.deepEqual(terminal.complete(prefix + 'egr'), [])
+    // Completed like any other command the terminal has, announced or not.
+    for (const prefix of ['', '/usr/bin/', 'cat input | ']) assert.deepEqual(terminal.complete(prefix + 'egr'), [prefix + 'egrep'])
     assert.doesNotMatch((await terminal.run('unknown-command')).stderr, /\begrep\b/u)
   })
 

@@ -31,6 +31,15 @@ const COMMAND_ORDER = [
   'xargs', 'echo', 'printf', 'test', 'cp', 'rm', 'mkdir', 'touch', 'ln', 'diff', 'patch',
   'pwd', 'seq', 'which', 'basename', 'dirname',
 ]
+// Announced or not, a command is a command to complete: what a terminal
+// offers is what it has, and the list in `command not found` is the shorter
+// question of what it announces. The unannounced ones follow the announced,
+// so a prefix both answer to offers the everyday one first. The shell's own
+// builtins stay out of it: `cd` is announced with the rest, and the others
+// are the shell's syntax rather than something a terminal hands out.
+const UNANNOUNCED = Object.keys(BUILTIN_COMMANDS).filter((name) => !SHELL_ONLY.has(name) && !Object.hasOwn(VISIBLE_COMMANDS, name)).sort()
+// The unannounced readers, which belong after a pipe as the announced ones do.
+const UNANNOUNCED_PIPE = new Set(['brotli', 'egrep', 'fgrep', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd'])
 const BUILTIN_NAMES = orderedCommandNames()
 
 // Only commands that consume stdin are offered after a pipe.
@@ -82,17 +91,19 @@ export function createRegistry(commands) {
   const custom = defineCommands(commands, isBuiltin)
   const handlers = Object.freeze({ __proto__: null, ...BUILTIN_COMMANDS, ...custom.handlers })
   const has = (name) => Boolean(handlers[name])
-  const names = Object.freeze([...BUILTIN_NAMES, ...custom.names])
+  const names = Object.freeze([...BUILTIN_NAMES, ...UNANNOUNCED, ...custom.names])
   return Object.freeze({
     commands: handlers,
     names,
-    pipeNames: Object.freeze([...PIPE_NAMES, ...custom.pipeNames]),
+    pipeNames: Object.freeze([...PIPE_NAMES, ...UNANNOUNCED.filter((name) => UNANNOUNCED_PIPE.has(name)), ...custom.pipeNames]),
     binPrefixes: BIN_PREFIXES,
     has,
     shellOnly: (name) => SHELL_ONLY.has(name),
     resolveCommand: (name) => resolveCommand(name, has),
     chainRole: (argv) => chainRole(argv, has),
-    known: names.join(', '),
+    // What the terminal says it has when a name is not one of them: the
+    // commands it announces, which is not every command it answers to.
+    known: [...BUILTIN_NAMES, ...custom.names].join(', '),
   })
 }
 

@@ -56,12 +56,14 @@ describe('gzip decompresses what a runtime inflated for it', () => {
     const bins = ['/usr/bin/gzip', '/bin/gzip', '/usr/local/bin/gzip']
     const answers = await Promise.all(bins.map(async (name) => await t.run(`${name} -dc data.gz`)))
     for (const answer of answers) assert.deepEqual(answer, result('alpha\nbeta\n'))
-    // It is not one of the commands this terminal offers, so it is not in the
-    // list of them either.
+    // It is not one of the commands this terminal announces, so it is not in
+    // the list of them — and is completed all the same, in command position
+    // and after a pipe, since the terminal has it.
     const missing = await t.run('nosuchcommand')
     assert.match(missing.stderr, /command not found\. Available: /u)
     assert.doesNotMatch(missing.stderr, /gzip/u)
-    assert.deepEqual(t.complete('gzi'), [])
+    assert.deepEqual(t.complete('gzi'), ['gzip'])
+    assert.deepEqual(t.complete('cat data.gz | gz'), ['cat data.gz | gzip'])
   })
 
   it('says what GNU says of what is not a member', async () => {
