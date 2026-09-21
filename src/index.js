@@ -10,6 +10,7 @@ import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
 import { discardedNotes, err, missingPathNote, reason } from './util.js'
 import { complete } from './complete.js'
+import { warmDecompression } from './decompress.js'
 import { commandSubstitution } from './shell/capture.js'
 import { BindingMap, isolated, withState } from './shell/state.js'
 import { commandWriteError, createIoGuard, routeExternalOutput, runSteps } from './shell/run.js'
@@ -22,7 +23,11 @@ export function createTerminal(sources, opts = {}) {
   // filesystem rather than to a terminal: a fork over the same tree shares it.
   // The tree has no clock of its own, so the moment it was made stands in:
   // `ls -l` dates every entry to it, and a fork, being the same tree, keeps it.
-  const shared = { fs, io: createIoGuard(fs), mount, writable, registry, createdAt: Date.now() }
+  // What a runtime inflated of this tree's compressed files, kept by what was
+  // inflated rather than by where it was read: the work is done once however
+  // many lines read it, a copy of a file reads the same answer as the file,
+  // and a fork over the same tree shares both.
+  const shared = { fs, io: createIoGuard(fs), mount, writable, registry, createdAt: Date.now(), decompressed: new Map() }
   return terminal(context(shared, { cwd, home, user: opts.user ?? 'user', locale, ...freshSession() }), 'createTerminal')
 }
 
@@ -56,9 +61,9 @@ function fork(parent, opts = {}) {
 // whoever is running a line, so every terminal starts with a set of its own.
 // stdinLeft tracks consumption within a command list; stdinOrigin allows
 // /dev/stdin to reopen a redirected file independently of that offset.
-function context({ fs, io, mount, writable, registry, createdAt }, session) {
+function context({ fs, io, mount, writable, registry, createdAt, decompressed }, session) {
   const ctx = {
-    fs, io, mount, writable, registry, createdAt, ...session, calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
+    fs, io, mount, writable, registry, createdAt, decompressed, ...session, calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
     loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinOrigin: null, stdinHandle: null, stdinLeft: '',
     unsupported: createUnsupportedFeed(), notes: new Set(),
   }
@@ -77,16 +82,28 @@ function context({ fs, io, mount, writable, registry, createdAt }, session) {
 // error names the call that made it.
 function terminal(ctx, label) {
   if (!ctx.fs.isDir(ctx.cwd)) throw new Error(`${label}: cwd is not a directory: ${ctx.cwd}`)
+  // A terminal is one place, so the lines given to it run one after another
+  // however many are in the air: a second `runAsync` waits for the first
+  // rather than overtaking it while that one waits for work of its own.
+  let queue = Promise.resolve()
   return {
     run: (line) => safeRun(line, ctx),
     // The same line, run the same way, handed back as a promise: the call to
-    // write against where a caller would rather await a result than take one.
-    // Nothing here waits for anything yet, so the line has already run by the
-    // time the promise is returned, and what `run` would throw this rejects
-    // with, which is what makes it the entry point rather than a wrapper a
-    // caller writes themselves.
-    // oxlint-disable-next-line require-await -- the async surface of synchronous work, with nothing to await yet.
-    runAsync: async (line) => safeRun(line, ctx),
+    // write against where a caller would rather await a result than take one,
+    // and the only one that can wait for work a line cannot do for itself —
+    // what a runtime inflates rather than this code (./decompress.js). The
+    // line itself runs as it does under `run`, and what `run` would throw
+    // this rejects with.
+    runAsync(line) {
+      const answer = queue.then(async () => {
+        await warmDecompression(line, ctx)
+        return safeRun(line, ctx)
+      })
+      // A line that failed is still a line that ended: the next one waits for
+      // this to finish rather than for it to succeed.
+      queue = answer.then(() => null, () => null)
+      return answer
+    },
     cwd: () => ctx.cwd,
     complete: (line) => complete(line, ctx, ctx.registry),
     fork: (opts) => fork(ctx, opts),
