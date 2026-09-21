@@ -22,7 +22,10 @@ describe('upstream base64 standard byte vectors', () => {
     it(`raw ${hex || 'empty'}`, () => {
       const bytes = bytesFromHex(hex)
       assert.deepEqual(decodeBase64(input), { bytes, valid: true })
-      assert.deepEqual(decodeBase64(input.replaceAll('=', '')), { bytes, valid: true })
+      // Taking the padding off does not take the bytes with it: GNU writes
+      // what it recovered and calls the input invalid, which is what a group
+      // of four short of its padding is.
+      assert.deepEqual(decodeBase64(input.replaceAll('=', '')), { bytes, valid: !input.includes('=') })
     })
   }
 
@@ -34,7 +37,7 @@ describe('upstream base64 standard byte vectors', () => {
       const bytes = Uint8Array.from([...Array.from({ length: i }, () => [0, 1, 2]).flat(), ...tail])
       const input = 'AAEC'.repeat(i) + ['', 'fw==', 'gP8='][i % 3]
       assert.deepEqual(decodeBase64(input), { bytes, valid: true })
-      assert.deepEqual(decodeBase64(input.replaceAll('=', '')), { bytes, valid: true })
+      assert.deepEqual(decodeBase64(input.replaceAll('=', '')), { bytes, valid: !input.includes('=') })
     })
   }
 
@@ -64,7 +67,7 @@ describe('all upstream string rejection vectors with GNU decoding expectations',
   it('pins the full string corpus, including its repeated padding vector', () => {
     assert.equal(corpus.rejected.length, 58)
     assert.equal(new Set(corpus.rejected.map(({ input }) => input)).size, 57)
-    assert.equal(corpus.rejected.filter(({ valid }) => valid).length, 6)
+    assert.equal(corpus.rejected.filter(({ valid }) => valid).length, 9)
   })
 
   for (const [index, { input, hex, valid }] of corpus.rejected.entries()) {
@@ -74,7 +77,11 @@ describe('all upstream string rejection vectors with GNU decoding expectations',
   }
 
   it('preserves recoverable bytes even though the strict codec rejects the entire input', async () => {
-    const t = createTerminal({ input: 'aa==' })
+    // `aa==` spells `i` and a bit the last byte has no room for. The codec
+    // will not read it; GNU does, and so does this, by the reading below it.
+    assert.deepEqual(await createTerminal({ input: 'aa==' }).run('base64 -d input'), result('i'))
+    // `aa=` is that group short of its padding: recovered, and invalid.
+    const t = createTerminal({ input: 'aa=' })
     assert.deepEqual(await t.run('base64 -d input'), result('i', 1, 'base64: invalid input\n'))
     assert.deepEqual(await t.run('base64 -d input 2>&1'), result('ibase64: invalid input\n', 1))
   })
@@ -92,9 +99,9 @@ describe('GNU stream rules around the strict base64 codec', () => {
     ['Y W\tJ\rj\u00A0', false, [], false],
     ['Y W\tJ\rj\u00A0', true, [97, 98, 99], true],
     ['YQ==Yg==Yw==', false, [97, 98, 99], true],
-    ['YQ==Yg==Yw', false, [97, 98, 99], true],
+    ['YQ==Yg==Yw', false, [97, 98, 99], false],
     ['YQ==Yg==Yw=', false, [97, 98, 99], false],
-    ['YQ==Yg==Yx==', false, [97, 98, 99], false],
+    ['YQ==Yg==Yx==', false, [97, 98, 99], true],
     ['YQ==Yg==Y!', false, [97, 98], false],
     ['YQ==Yg==Y!w==', true, [97, 98, 99], true],
     ['YQ=! =Yg==', true, [97, 98], true],
@@ -120,7 +127,7 @@ describe('base64 byte boundaries preserve all payload bits', () => {
   it('decodes all 256 byte values and the complete base64 alphabet', () => {
     const { input, hex } = boundaries.allBytes
     assert.deepEqual(decodeBase64(input), { bytes: bytesFromHex(hex), valid: true })
-    assert.deepEqual(decodeBase64(input.replaceAll('=', '')), { bytes: bytesFromHex(hex), valid: true })
+    assert.deepEqual(decodeBase64(input.replaceAll('=', '')), { bytes: bytesFromHex(hex), valid: !input.includes('=') })
   })
 
   for (const { input, hex } of boundaries.boundary) {
@@ -128,16 +135,16 @@ describe('base64 byte boundaries preserve all payload bits', () => {
       const bytes = bytesFromHex(hex)
       const plain = input.replaceAll('=', '')
       assert.deepEqual(decodeBase64(input), { bytes, valid: true })
-      assert.deepEqual(decodeBase64(plain), { bytes, valid: true })
-      // Alter only discarded bits: GNU rejects the group after emitting
-      // its payload. A strict-decoder failure must not lose those bytes.
+      assert.deepEqual(decodeBase64(plain), { bytes, valid: false })
+      // Alter only the discarded bits: GNU does not read them, so the group
+      // spells the same bytes and is the same valid input. Padded it is read;
+      // unpadded it is what was recovered from a group that is not one.
       const padding = '='.repeat(4 - plain.length)
       const last = alphabet.indexOf(plain.at(-1))
       for (let bits = 1; bits < (bytes.length === 1 ? 16 : 4); bits++) {
         const malformed = plain.slice(0, -1) + alphabet[last | bits]
-        for (const suffix of ['', padding]) {
-          assert.deepEqual(decodeBase64(malformed + suffix), { bytes, valid: false }, malformed + suffix)
-        }
+        assert.deepEqual(decodeBase64(malformed + padding), { bytes, valid: true }, malformed + padding)
+        assert.deepEqual(decodeBase64(malformed), { bytes, valid: false }, malformed)
       }
     })
   }

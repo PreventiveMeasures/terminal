@@ -5,9 +5,13 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 
 export const base64 = baseCommand('base64', { encode: toBase64, decode: decodeBase64 })
 
+// The padding is not decoration: coreutils wants every group of four filled
+// out, and writes what it recovered from a group that is not before saying so.
+// The runtime's decoder takes an unpadded tail as readily as a padded one
+// unless it is told otherwise, so it is told.
 export function decodeBase64(input, ignoreGarbage = false) {
   const text = input.replace(ignoreGarbage ? /[^A-Za-z0-9+/=]/gu : /\n/gu, '')
-  try { return { bytes: fromBase64(text), valid: true } } catch (e) {
+  try { return { bytes: fromBase64(text, { padding: true }), valid: true } } catch (e) {
     if (!(e instanceof SyntaxError)) throw e
     return decodePartial(text)
   }
@@ -15,6 +19,9 @@ export function decodeBase64(input, ignoreGarbage = false) {
 
 // GNU accepts concatenated padded blocks and emits recoverable bytes even
 // from a malformed final block. The strict decoder handles the common case.
+// The bits past the last whole byte are not read at all, so a group spelling
+// them differently spells the same bytes — `YR==` is `a`, as `YQ==` is — and
+// a tail that runs out before its padding is what it recovered and invalid.
 function decodePartial(text) {
   const output = new Uint8Array(Math.ceil(text.length / 4) * 3)
   const alphabetRun = /[A-Za-z0-9+/]*/uy
@@ -37,10 +44,8 @@ function decodePartial(text) {
     output[length++] = a << 2 | b >> 4
     if (tail === 3) output[length++] = b << 4 | c >> 2
     const padding = 4 - tail
-    const canonical = (tail === 2 ? b & 15 : c & 3) === 0
     pos += tail
-    if (pos === text.length) { valid = canonical; break }
-    if (!canonical || text.slice(pos, pos + padding) !== '='.repeat(padding)) { valid = false; break }
+    if (text.slice(pos, pos + padding) !== '='.repeat(padding)) { valid = false; break }
     pos += padding
   }
   return { bytes: output.subarray(0, length), valid }
