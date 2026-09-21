@@ -98,6 +98,8 @@ function invoke(name, run, stdin, tokens, ctx) {
   consumeStdin(ctx)
   // Retained I/O views report notes to the run performing the operation.
   const scope = { cwd: ctx.cwd, fs: ctx.fs, mount: ctx.mount, home: ctx.home, get notes() { return ctx.notes }, command: name, stdinFile: ctx.stdinFile, stdinOrigin: ctx.stdinOrigin }
+  let running = true
+  const ended = () => { running = false }
   const io = {
     name,
     args: tokens,
@@ -110,30 +112,29 @@ function invoke(name, run, stdin, tokens, ctx) {
       if (typeof paths === 'string') throw new TypeError(`readInputs: expected an array of paths, got a string: ${paths}`)
       return readInputs(name, [...paths], stdin, scope)
     },
+    // A line run from inside this command, on the terminal it is running in:
+    // part of the line that reached the command rather than a turn of its
+    // own, because the turn is the one this command is holding. The
+    // terminal's own `run` waits for a turn, as every caller of it does, and
+    // a handler waiting there would be waiting for itself — which is why a
+    // handler that re-enters is handed this rather than left to say it some
+    // way that could not be told from anyone else's call.
+    //
+    // It is this command's turn and no other, so a view kept past the command
+    // refuses rather than running a line in the middle of someone else's.
+    run: (line) => {
+      if (!running) throw new Error('run: the command this belongs to has finished, and its turn with it')
+      return ctx.runLine(line)
+    },
   }
-  // A handler is the one place a line is run from inside a line: what it
-  // calls `run` for is part of the line that reached it, so that call runs
-  // where it stands rather than waiting for the turn this one is holding.
-  // The mark is held for as long as the handler is, promise and all.
-  const holding = hold(ctx)
-  let waiting = false
-  try {
-    const answer = run(io)
-    // What a handler promises is what it answers: a line waits for it where
-    // it stands, and a promise that fails fails the command, as a throw does.
-    if (typeof answer?.then !== 'function') return normalizeResult(answer)
-    waiting = true
-    return answer.then(normalizeResult).finally(holding)
-  } finally { if (!waiting) holding() }
-}
-
-// One mark, taken back once: a handler that answers at once gives it up where
-// it returned, and one that waits gives it up where it settled.
-function hold(ctx) {
-  const lock = ctx.lock
-  if (!lock) return () => {}
-  lock.depth++
-  return () => { lock.depth-- }
+  const answer = run(io)
+  // What a handler promises is what it answers: a line waits for it where it
+  // stands, and a promise that fails fails the command, as a throw does.
+  if (typeof answer?.then !== 'function') {
+    ended()
+    return normalizeResult(answer)
+  }
+  return answer.then(normalizeResult).finally(ended)
 }
 
 // Resolve against the captured cwd; copy listings to protect shared indexes.

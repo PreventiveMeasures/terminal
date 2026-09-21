@@ -126,8 +126,8 @@ describe('agent workflows — filesystem and find operands', () => {
   })
   it('reentrant run calls do not inherit the outer input descriptor', async () => {
     const t = createTerminal(FILES, { commands: { nested: {
-      run: async ({ readInputs }) => {
-        assert.equal((await t.run('cat /dev/stdin')).stdout, '')
+      run: async ({ readInputs, run }) => {
+        assert.equal((await run('cat /dev/stdin')).stdout, '')
         return readInputs(['/dev/stdin']).inputs[0].content
       },
     } } })

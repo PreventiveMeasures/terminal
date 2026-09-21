@@ -380,21 +380,37 @@ describe('fork — the self-output guard covers both terminals', () => {
     }
   })
 
-  it('catches a fork writing into a file its parent is streaming', async () => {
+  it('catches a line a command runs writing into a file the line is streaming', async () => {
+    // A command runs its own line inside the turn it is holding, so what it
+    // writes there lands in the middle of whatever the line around it is
+    // reading — which is the guard's business, wherever the write came from.
     const gaps = []
-    let child = null
     const commands = {
-      poke: async () => {
-        const result = await child.run('printf changed >>/tmp/file')
+      poke: async ({ run }) => {
+        const result = await run('printf changed >>/tmp/file')
         gaps.push(...result.unsupported.map(({ detail }) => detail))
         return ''
       },
     }
     const t = terminal({ commands })
-    child = t.fork()
     await check(t, 'cat /repo/src/a.js >/tmp/file')
     await check(t, 'xargs -I{} poke </tmp/file')
     assert.deepEqual(gaps, ['streaming self-output'])
     await check(t, 'cat /tmp/file', 'alpha\n')
+  })
+
+  it('has a fork wait for the line in flight rather than writing into it', async () => {
+    // A fork writing in the middle of a line its parent was streaming is what
+    // the guard used to catch. The turn is the tree's rather than either
+    // terminal's now, so the fork's line waits for the parent's to end and
+    // writes after it, and there is nothing left to catch.
+    const t = terminal()
+    const child = t.fork()
+    await check(t, 'cat /repo/src/a.js >/tmp/file')
+    const streaming = t.run('cut -c1 /tmp/file | cat')
+    const poke = child.run('printf changed >>/tmp/file')
+    assert.deepEqual(await streaming, { stdout: 'a\n', stderr: '', exitCode: 0, cwd: '/repo', notes: [], unsupported: [] })
+    assert.equal((await poke).exitCode, 0)
+    await check(t, 'cat /tmp/file', 'alpha\nchanged')
   })
 })

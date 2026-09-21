@@ -542,6 +542,6 @@ describe('createTerminal — opts.commands: the io surface is the whole contract
     let keys
     const t = createTerminal(SOURCES, { commands: { probe: (io) => { keys = Object.keys(io); return '' } } })
     await t.run('probe')
-    assert.deepEqual(keys, ['name', 'args', 'stdin', 'cwd', 'fs', 'readInputs'])
+    assert.deepEqual(keys, ['name', 'args', 'stdin', 'cwd', 'fs', 'readInputs', 'run'])
   })
 })

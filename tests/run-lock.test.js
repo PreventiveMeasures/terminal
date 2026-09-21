@@ -88,14 +88,41 @@ describe('one line at a time', () => {
     assert.deepEqual(log, ['first', 'second'])
   })
 
+  it('keeps the turn while a wired command of its own is waiting', async () => {
+    // The one a mark on the running command could not tell apart: a consumer
+    // calling `run` while a handler waits is not that handler, and takes its
+    // turn behind it like anyone else.
+    const log = []
+    const mark = ({ args }) => { log.push(args[0]); return '' }
+    const t = terminal(SOURCES, { commands: { slow: slow(log), mark } })
+    const first = t.run('slow a && mark first')
+    // Far enough in for the handler to be in its own wait.
+    await pause(1)
+    const second = t.run('mark second')
+    await Promise.all([first, second])
+    assert.deepEqual(log, ['a in', 'a out', 'first', 'second'])
+  })
+
+  it('gives a kept `run` nothing to run a line in once its command is over', async () => {
+    // The view is this command's turn and no other: kept past the command it
+    // was handed to, it refuses rather than running a line in the middle of
+    // whatever the terminal is doing by then.
+    let kept = null
+    const t = terminal(SOURCES, { commands: { probe: ({ run }) => { kept = run; return '' } } })
+    assert.equal((await t.run('probe')).exitCode, 0)
+    assert.throws(() => kept('echo late'), /run: the command this belongs to has finished/u)
+  })
+
   it('runs a line from inside a command within that command, rather than after it', async () => {
-    // A handler that re-enters `run` is the line already running, one command
-    // further in: waiting for its turn would be waiting for itself.
+    // A handler re-enters through the `run` it was handed: that line is the
+    // one already running, one command further in, and waiting for a turn
+    // there would be waiting for itself. The terminal's own `run` is not
+    // that, and says so by waiting like every other caller.
     const log = []
     let inner = null
     const t = terminal(SOURCES, {
       commands: {
-        outer: async () => { log.push('outer in'); inner = await t.run('wc -l src/lib.js'); log.push('outer out'); return 'done\n' },
+        outer: async ({ run }) => { log.push('outer in'); inner = await run('wc -l src/lib.js'); log.push('outer out'); return 'done\n' },
         slow: slow(log),
       },
     })

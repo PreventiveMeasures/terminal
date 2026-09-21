@@ -175,7 +175,7 @@ describe('notes use absolute filesystem paths and isolated run storage', () => {
   it('isolates reentrant runs and restores the enclosing note collection', async () => {
     let inner
     const terminal = createTerminal({ 'outer/.hidden': '', 'inner/.hidden': '' }, {
-      commands: { reenter: async () => { inner = await terminal.run('ls inner'); return '' } },
+      commands: { reenter: async ({ run }) => { inner = await run('ls inner'); return '' } },
     })
     const result = await terminal.run('ls outer; reenter; ls outer')
     assert.deepEqual(result.notes, [noteFor(['/outer/.hidden'])])

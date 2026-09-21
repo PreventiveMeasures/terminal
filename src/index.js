@@ -25,7 +25,7 @@ export function createTerminal(sources, opts = {}) {
   // The turn a line takes belongs to the tree for the same reason: a line
   // that waits waits in the middle of a filesystem every fork of it shares,
   // so the two take turns over it rather than one starting inside the other.
-  const shared = { fs, io: createIoGuard(fs), mount, writable, registry, createdAt: Date.now(), lock: { turn: Promise.resolve(), depth: 0 } }
+  const shared = { fs, io: createIoGuard(fs), mount, writable, registry, createdAt: Date.now(), lock: { turn: Promise.resolve() } }
   return terminal(context(shared, { cwd, home, user: opts.user ?? 'user', locale, ...freshSession() }), 'createTerminal')
 }
 
@@ -72,6 +72,10 @@ function context({ fs, io, mount, writable, registry, createdAt, lock }, session
   ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)
   ctx.invoke = (name, tokens, stdin) => dispatch(name, tokens, stdin, ctx)
   ctx.substitute = (command, backtick) => commandSubstitution(command, ctx, runSteps, backtick)
+  // The line a wired command runs for itself (custom.js `io.run`): part of
+  // the line that reached it rather than a turn of its own, since the turn is
+  // the one this command is holding.
+  ctx.runLine = (line) => safeRun(line, ctx)
   return ctx
 }
 
@@ -130,12 +134,12 @@ function record(ctx, result, resolved) {
 // one to run.
 function queued(ctx, line) {
   const { lock } = ctx
-  // A line run from inside a command is not a second caller: it is the one
-  // already running, one command further in. A handler that re-enters `run`
-  // would otherwise wait for the turn it is itself holding, so it runs where
-  // it stands — still one command at a time, with the command that called it
-  // waiting on this one.
-  if (lock.depth > 0) return safeRun(line, ctx)
+  // Every caller waits, this one included: which caller a `run` came from is
+  // not a thing that can be read off a call — the handler that is holding the
+  // turn and a consumer that called during its wait arrive here alike — so
+  // nothing here guesses. A command that means to run a line inside its own
+  // turn asks for it with the `run` it was handed (custom.js), which says so
+  // rather than being taken for saying so.
   const answer = lock.turn.then(() => safeRun(line, ctx))
   lock.turn = answer.then(() => null, () => null)
   return answer

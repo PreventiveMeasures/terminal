@@ -116,8 +116,8 @@ describe('discarded NUL notes remain separate from stderr', () => {
 
   it('isolates reentrant notes and retains outer expansion order', async () => {
     let inner
-    const terminal = createTerminal({}, { commands: { reenter: async () => {
-      inner = await terminal.run(String.raw`x=$(printf '\0\0')`)
+    const terminal = createTerminal({}, { commands: { reenter: async ({ run }) => {
+      inner = await run(String.raw`x=$(printf '\0\0')`)
       return ''
     } } })
     const result = await terminal.run(String.raw`{ x=$(printf '\0'); reenter; } 2>/dev/null`)

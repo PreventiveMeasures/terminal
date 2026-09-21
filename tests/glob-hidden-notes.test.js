@@ -220,7 +220,7 @@ describe('pathname notes survive shell execution and remain scoped per run', () 
   it('isolates notes from a reentrant run', async () => {
     let inner
     const terminal = createTerminal({ 'outer/.hidden': '', 'inner/.hidden': '' }, {
-      commands: { reenter: async () => { inner = await terminal.run('printf "%s" inner/*'); return '' } },
+      commands: { reenter: async ({ run }) => { inner = await run('printf "%s" inner/*'); return '' } },
     })
     const result = await terminal.run('printf "%s" outer/*; reenter')
     assert.deepEqual(result.notes, [omission('outer/*', ['/outer/.hidden']), unmatched('outer/*')])

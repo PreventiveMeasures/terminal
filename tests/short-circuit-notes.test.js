@@ -172,7 +172,7 @@ describe('the note follows the run, not the output', () => {
   it('does not carry blame into or out of a reentrant run', async () => {
     let inner
     const terminal = createTerminal(FILES, {
-      commands: { probe: async () => { inner = await terminal.run('cat a.txt'); return { exitCode: 3 } } },
+      commands: { probe: async ({ run }) => { inner = await run('cat a.txt'); return { exitCode: 3 } } },
     })
     const result = await terminal.run('probe && cat b.txt')
     assert.deepEqual(inner.notes, [])

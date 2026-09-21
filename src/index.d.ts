@@ -85,6 +85,22 @@ export interface CommandIo {
   fs: CommandFs
   /** Read each path, collecting errors instead of aborting. Called with no arguments (or an empty list) it yields one nameless input carrying {@link CommandIo.stdin} — the shape a pure filter wants. */
   readInputs(paths?: readonly string[]): CommandInputs
+  /**
+   * Run a line on the terminal this command is running in, inside this
+   * command's turn: it is part of the line that reached the handler rather
+   * than a turn of its own, and it sees the filesystem, the cwd and the
+   * variables as they stand. Its diagnostics are its own — `unsupported` and
+   * `notes` report what happened beneath this call and nothing of the line
+   * around it.
+   *
+   * This is how a handler re-enters, and {@link Terminal.run} is not: that
+   * one waits for a turn, as every caller of it does, and a handler waiting
+   * there would be waiting for the turn it is itself holding. Which caller a
+   * `run` came from cannot be read off the call — the handler and a consumer
+   * that called during its wait arrive alike — so the terminal does not
+   * guess, and a handler says which it is by using this.
+   */
+  run(line: string): Promise<RunResult>
 }
 
 /**
@@ -112,6 +128,9 @@ export interface CommandResult {
  * `name: reason` stderr line with exit 1, exactly like a built-in command's
  * internal error, leaving the rest of the command line to run its gates
  * normally. A promise that rejects fails the command the same way.
+ *
+ * A handler that runs a line of its own uses {@link CommandIo.run}, not the
+ * terminal's — see there for why.
  */
 export type CommandRun = (io: CommandIo) => string | CommandResult | void | Promise<string | CommandResult | void>
 
@@ -422,11 +441,11 @@ export interface Terminal {
    * it meets it. One line runs at a time over a tree: a line handed to this
    * terminal, or to a fork of it, while another is in flight takes its turn
    * rather than starting in the gap that one left, so calls made without
-   * awaiting the first still run in the order they were made. A line run
-   * from inside a command — a wired handler calling `run` — is part of the
-   * line already running, and runs where it stands rather than waiting for
-   * a turn it is itself holding. A failing line is reported in the result,
-   * as before; the promise rejects only with what `run` would have thrown.
+   * awaiting the first still run in the order they were made — a wired
+   * command that waits is waited for like any other, and a handler that
+   * wants to run a line inside its own turn has {@link CommandIo.run} for
+   * it. A failing line is reported in the result, as before; the promise
+   * rejects only with what `run` would have thrown.
    */
   run(line: string): Promise<RunResult>
   /** Current working directory. */

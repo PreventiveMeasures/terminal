@@ -310,7 +310,7 @@ describe('run().unsupported — wired commands', () => {
     // Same isolation runGroup gives the cwd: each run reports the gaps
     // hit beneath it, to whoever made that call.
     let inner = null
-    const t = createTerminal(SOURCES, { commands: { probe: async () => { inner = await t.run('ls -t'); return 'ok\n' } } })
+    const t = createTerminal(SOURCES, { commands: { probe: async ({ run }) => { inner = await run('ls -t'); return 'ok\n' } } })
     const outer = await t.run('probe; frobnicate')
     assert.deepEqual(inner.unsupported.map((u) => u.detail), ['-t'])
     assert.deepEqual(outer.unsupported.map((u) => u.detail), ['frobnicate'])

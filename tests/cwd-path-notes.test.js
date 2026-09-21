@@ -373,7 +373,7 @@ describe('custom commands and writable failures use the shared cwd note path', (
   it('isolates notes from reentrant runs', async () => {
     let inner
     const terminal = createTerminal(SOURCES, { ...OPTIONS, commands: {
-      reenter: async () => { inner = await terminal.run('ls file'); return '' },
+      reenter: async ({ run }) => { inner = await run('ls file'); return '' },
     } })
     const outer = await terminal.run('cat file; reenter; cat file')
     assert.deepEqual(outer.notes, [note('cat', 'file', ['/repo/file'])])
@@ -389,7 +389,7 @@ describe('custom commands and writable failures use the shared cwd note path', (
       const terminal = createTerminal(SOURCES, { ...OPTIONS, commands: {
         save: (io) => { saved = io; return '' },
         use: () => { read(saved); return '' },
-        reenter: async () => { nested = await terminal.run('use'); return '' },
+        reenter: async ({ run }) => { nested = await run('use'); return '' },
       } })
       const first = await terminal.run('save; cd /repo')
       assert.deepEqual(first.notes, [])
