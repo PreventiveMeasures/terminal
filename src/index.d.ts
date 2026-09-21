@@ -410,12 +410,14 @@ export interface Terminal {
   run(line: string): RunResult
   /**
    * {@link Terminal.run}, handed back as a promise: the same line, run the
-   * same way, for a caller who would rather await a result than take one.
+   * same way, for a caller who would rather await a result than take one —
+   * and the only call that can wait for work a line cannot do for itself.
    *
-   * Nothing here waits for anything, so the line has already run by the time
-   * the promise is returned — two calls made without awaiting the first still
-   * run in the order they were made — and what `run` would throw, this
-   * rejects with.
+   * The line runs once the promise the call returns is being waited on, not
+   * at the call itself. Lines given to one terminal still run in the order
+   * they were given, each waiting for the one before it, so two calls made
+   * without awaiting the first are safe; a `run` between them is not, since
+   * it runs where it stands. What `run` would throw, this rejects with.
    */
   runAsync(line: string): Promise<RunResult>
   /** Current working directory. */

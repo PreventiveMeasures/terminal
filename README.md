@@ -26,8 +26,10 @@ terminal.run('cd src; wc -l app.js')     // { stdout: '1 app.js\n', exitCode: 0,
 ```
 
 `run(line)` is synchronous and returns `{ stdout, stderr, exitCode, cwd,
-unsupported, notes }`; `runAsync(line)` is that same line handed back as a
-promise, for a caller who would rather await a result than take one. Variables
+unsupported, notes }`; `runAsync(line)` is that same line awaited, for a caller
+who would rather await a result than take one — and the only call that can wait
+for work a line cannot do for itself. Lines given to one terminal run in the
+order they were given, each waiting for the one before it. Variables
 and the working directory persist across calls. `complete(line)` returns
 full-line replacements, ready to drop in. Reading a
 line without running it is a separate entry point,

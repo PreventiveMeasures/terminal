@@ -12,6 +12,7 @@
     "unicorn"
   ],
   "globals": {
+    "DecompressionStream": "readonly",
     "structuredClone": "readonly"
   },
   "rules": {
