@@ -13,17 +13,20 @@ const WHOLE = Object.freeze([2, 4, 5, 7, 8])
 export const base32 = baseCommand('base32', { encode: (bytes) => toBase32(bytes, { padding: true }), decode: decodeBase32 })
 
 // What base32 wrote is what base32 mostly reads, and the runtime's own decoder
-// reads that: it is asked first, and answers the whole of it. It takes more
-// spellings than coreutils does — a lowercase alphabet, a last group short of
-// eight — so it is only asked about text already in the one shape coreutils
-// accepts, and anything else goes to the reading below, which is coreutils'.
-const PLAIN = /^[A-Z2-7]+={0,6}$/u
+// reads that: it is asked first, and answers the whole of it. Asked for the
+// padding coreutils insists on, the one thing it still takes that coreutils
+// does not is a lowercase alphabet — so what it answers is looked over for
+// that alone, which is cheaper than reading the whole input twice to decide
+// whether to ask. Anything it will not read goes to the reading below, which
+// is coreutils' own: a group at a time, lenient where coreutils is lenient.
+const LOWER = /[a-z]/u
 export function decodeBase32(input, ignoreGarbage = false) {
   const text = input.replace(ignoreGarbage ? /[^A-Z2-7=]/gu : /\n/gu, '')
-  if (text.length % GROUP === 0 && PLAIN.test(text)) {
-    try { return { bytes: fromBase32(text, { padding: true }), valid: true } } catch (e) {
-      if (!(e instanceof SyntaxError)) throw e
-    }
+  try {
+    const bytes = fromBase32(text, { padding: true })
+    if (!LOWER.test(text)) return { bytes, valid: true }
+  } catch (e) {
+    if (!(e instanceof SyntaxError)) throw e
   }
   return decodeGroups(text)
 }
