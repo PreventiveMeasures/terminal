@@ -168,7 +168,7 @@
     "src/writable.js"
   ],
   "scripts": {
-    "lint": "oxlint -c .oxlintrc.json ./src/ ./tests/",
+    "lint": "oxlint -c .oxlintrc.json ./src/ ./tests/ ./bin/",
     "test": "node --test --test-isolation=none ./tests/*.test.js",
     "test:slow": "AWK_SLOW_TESTS=1 node --test --test-isolation=none ./tests/*.test.js"
   },

@@ -13,6 +13,7 @@ import { userInfo } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
 import { colorizeDiff } from './diff-color.js'
 import { createTerminal } from '@preventive/terminal'
+import { parse } from '@preventive/terminal/parse.js'
 import process from 'node:process'
 import repl from 'node:repl'
 import { TextDecoder, styleText } from 'node:util'
@@ -142,10 +143,12 @@ function evaluate(session, server, input, callback) {
   // line and hand the tokenizer the whole thing, newline included.
   if (trailingBackslashes(line) % 2 === 1) return callback(new repl.Recoverable(new Error('line continuation')))
   if (line.trim() === '') return callback(null)
-  // `parse()` runs none of the line, and says when it stops inside a compound
+  // Reading a line runs none of it, and says when it stops inside a compound
   // command or after a gate: collect the next line rather than fail, as a bash
-  // prompt does. Everything else, including a syntax error, is run()'s to report.
-  const parsed = attempt(() => session.terminal.parse(line))
+  // prompt does. Everything else, including a syntax error, is run()'s to
+  // report — including a redirect this filesystem would refuse, which the
+  // reader leaves to the run that would have written it.
+  const parsed = attempt(() => parse(line))
   session.unfinished = parsed?.incomplete ? parsed.error : null
   if (session.unfinished) return callback(new repl.Recoverable(new Error(session.unfinished)))
   const result = attempt(() => session.terminal.run(line))
