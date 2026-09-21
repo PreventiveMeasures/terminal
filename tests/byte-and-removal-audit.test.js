@@ -48,13 +48,14 @@ describe('base64 Unicode cannot silently change input bytes', () => {
 
 describe('base64 malformed streams stop at the first invalid group', () => {
   const cases = [
-    ['Zg==Yg==Zm9v', 'fbfoo', 0], ['Zg==Zg', 'ff', 0], ['Zg==Zg=\n', 'ff', 1],
+    ['Zg==Yg==Zm9v', 'fbfoo', 0], ['Zg==Zg', 'ff', 1], ['Zg==Zg==', 'ff', 0], ['Zg==Zg=\n', 'ff', 1],
     ['Zg==!Zg==', 'f', 1], ['Zg==Zm9v====', 'ffoo', 1], ['Zg==Zm9v=Zg==', 'ffoo', 1],
     ['Zm9vYmFyZ', 'foobar', 1], ['Zm9vYmFyZg=', 'foobarf', 1],
-    ['Zm9vYmFyZh==', 'foobarf', 1], ['Zm9vYmFyZg!Zg==', 'foobarf', 1],
+    // Only the discarded bits differ, which GNU does not read: it accepts these.
+    ['Zm9vYmFyZh==', 'foobarf', 0], ['Zm9vYmFyZg!Zg==', 'foobarf', 1],
     ['Zm9vYmFyZm8!Zg==', 'foobarfo', 1], ['Zm9vYmFyZ!Zg==', 'foobar', 1],
     ['Zg=\t=', 'f', 1], ['Zg==\u00A0', 'f', 1], ['Zg==\u2028', 'f', 1],
-    ['\r\n', '', 1], ['\n \n', '', 1], ['Z\nf\n=\n=', 'e', 1],
+    ['\r\n', '', 1], ['\n \n', '', 1], ['Z\nf\n=\n=', 'e', 0],
   ]
   for (const [input, stdout, exitCode] of cases) {
     it(JSON.stringify(input), async () => {
@@ -62,7 +63,7 @@ describe('base64 malformed streams stop at the first invalid group', () => {
     })
   }
   it('ignores arbitrary nonalphabet characters only when requested', async () => {
-    const t = createTerminal({ input: 'Zg=\t=\u2028Zg\0\u00A0' })
+    const t = createTerminal({ input: 'Zg=\t=\u2028Zg==\0\u00A0' })
     assert.deepEqual(await t.run('base64 -di input'), result('ff'))
   })
   it('retains all preceding output before a late malformed group', async () => {

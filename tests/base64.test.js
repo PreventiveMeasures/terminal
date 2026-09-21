@@ -78,18 +78,22 @@ describe('base64 wrapping options', () => {
 
 describe('base64 decoder validates padding and preserves decoded prefixes', () => {
   const valid = [
-    ['YQ', 'a'], ['YWI', 'ab'], ['YQ==Yg==', 'ab'], ['YQ==YmM=', 'abc'],
-    ['YQ==YmM', 'abc'], ['Y\nQ=\n=\n', 'a'], ['\n\n', ''],
+    ['YQ==Yg==', 'ab'], ['YQ==YmM=', 'abc'], ['Y\nQ=\n=\n', 'a'], ['\n\n', ''],
+    // The bits past the last whole byte are not read, so a group spelling
+    // them differently spells the same bytes. GNU reads these, as it does
+    // `YQ==`; only the padding has to be there.
+    ['YR==', 'a'], ['YWJ=', 'ab'],
   ]
   for (const [input, stdout] of valid) {
     it(JSON.stringify(input), async () => assert.deepEqual(await createTerminal({ input }).run('base64 -d input'), expected(stdout)))
   }
   const invalid = [
+    // A group of four without its padding is what it recovered, and invalid.
+    ['YQ', 'a'], ['YWI', 'ab'], ['YQ==YmM', 'abc'], ['YR', 'a'],
     ['Y', ''], ['=', ''], ['YQ=', 'a'], ['YQ=\n', 'a'], ['YQ===', 'a'],
     ['YQ!ignored', 'a'], ['YWI!ignored', 'ab'], ['Y!Q=', ''],
     ['Zm9v!YmFy', 'foo'], ['YQ==?', 'a'], ['YQ==Y', 'a'],
-    ['YQ==YQ=', 'aa'], ['YR==', 'a'], ['YR', 'a'], ['YWJ=', 'ab'],
-    ['Y Q==', ''], ['YQ ==', 'a'], ['YQ==\r\n', 'a'], ['\tYQ==', ''],
+    ['YQ==YQ=', 'aa'], ['Y Q==', ''], ['YQ ==', 'a'], ['YQ==\r\n', 'a'], ['\tYQ==', ''],
     ['YQ==\0', 'a'], ['YQ==é', 'a'], ['YQ--', 'a'],
   ]
   for (const [input, stdout] of invalid) {

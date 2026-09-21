@@ -27,7 +27,7 @@
     {
       "input": "aa==",
       "hex": "69",
-      "valid": false
+      "valid": true
     },
     {
       "input": " ",
@@ -306,13 +306,13 @@
     },
     {
       "input": "aa==aaaa",
-      "hex": "69",
-      "valid": false
+      "hex": "6969a69a",
+      "valid": true
     },
     {
       "input": "aaa=aaaa",
-      "hex": "69a6",
-      "valid": false
+      "hex": "69a669a69a",
+      "valid": true
     }
   ]
 }
