@@ -2,7 +2,7 @@ import { parseArgs } from '../args.js'
 import { decodeUtf8, encodeUtf8, encodeUtf8Loose, readBytesOf } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
-import { compressBytes, compressionAvailable, decompressBytes, decompressionAvailable } from '../compression.js'
+import { compressBytes, decompressBytes, formatUsable } from '../compression.js'
 
 // gzip, both ways round. The work itself is the runtime's stream rather than
 // this code's (../compression.js), and it answers asynchronously — so the
@@ -15,6 +15,11 @@ import { compressBytes, compressionAvailable, decompressBytes, decompressionAvai
 // overlay is the only place to write — is what compressing is for.
 
 const FORMAT = 'gzip'
+
+// Only where the runtime's streams know the format: a terminal whose streams
+// do not is a terminal without the command, which is what it was before this
+// one was written.
+export const GZIP = formatUsable(FORMAT) ? { gzip } : {}
 
 // A gzip member starts with these two, whatever follows.
 const MAGIC = Object.freeze([0x1f, 0x8b])
@@ -60,7 +65,6 @@ export async function gzip(stdin, tokens, ctx) {
 // terminal cannot carry.
 async function fromStdin(stdin, opts, state) {
   if (opts.decompressing) return dataError(state, stdin === '' ? 'stdin: unexpected end of file' : 'stdin: not in gzip format')
-  if (!compressionAvailable(FORMAT)) return refuse(state, opts)
   // A member of a pipe is the one GNU writes for a pipe: no name, and no
   // moment, because there was no file to take either from.
   return toStdout(await compressBytes(encodeUtf8(stdin), FORMAT), state)
@@ -81,7 +85,6 @@ async function compress(name, path, opts, state) {
   const { ctx } = state
   const suffix = suffixOf(name)
   if (!opts.stdout && suffix !== undefined) return note(state, `${name} already has ${suffix} suffix -- unchanged`)
-  if (!compressionAvailable(FORMAT)) return refuse(state, opts)
   const member = named(await compressBytes(readBytesOf(ctx.fs, path), FORMAT), name.slice(name.lastIndexOf('/') + 1), moment(ctx))
   return opts.stdout ? toStdout(member, state) : toFile(name + SUFFIX, member, name, opts, state)
 }
@@ -118,7 +121,6 @@ async function decompress(name, path, opts, state) {
   // where reading a file to look at its first two bytes would.
   const bytes = ctx.fs.isBytes?.(path) === true ? readBytesOf(ctx.fs, path) : undefined
   if (!looksCompressed(bytes)) return dataError(state, `${name}: ${tooShort(bytes, path, ctx) ? 'unexpected end of file' : 'not in gzip format'}`)
-  if (!decompressionAvailable(FORMAT)) return refuse(state, opts)
   const inflated = await decompressBytes(bytes, FORMAT)
   const suffix = suffixOf(name)
   const written = opts.stdout ? toStdout(inflated.bytes, state)
@@ -142,13 +144,6 @@ function tooShort(bytes, path, ctx) {
   if (bytes !== undefined) return bytes.length < 2
   const text = ctx.fs.readFile(path)
   return text.length < 2 && encodeUtf8Loose(text).length < 2
-}
-
-// A runtime with no such stream does not do the work at all, which is the gap
-// the command reports rather than an answer it does not have.
-function refuse(state, opts) {
-  const [what, stream] = opts.decompressing ? ['decompress', 'DecompressionStream'] : ['compress', 'CompressionStream']
-  state.gap ??= unsupported('feature', 'gzip', `${what}ion`, `gzip: this runtime cannot ${what}: ${stream} is not available`, 1)
 }
 
 const toStdout = (bytes, state) => { state.stdout += decodeUtf8(bytes); return true }

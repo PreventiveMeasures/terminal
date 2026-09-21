@@ -11,12 +11,19 @@
 // cannot have one says so rather than guessing at the bytes.
 
 // Nothing here reaches for a stream it has not first been told is there.
-export function decompressionAvailable(format) {
+function decompressionAvailable(format) {
   try { return typeof DecompressionStream === 'function' && Boolean(new DecompressionStream(format)) } catch { return false }
 }
-export function compressionAvailable(format) {
+function compressionAvailable(format) {
   try { return typeof CompressionStream === 'function' && Boolean(new CompressionStream(format)) } catch { return false }
 }
+
+// Whether a command for this format belongs in the registry at all. A tool
+// that could neither compress nor decompress is no tool, so a terminal whose
+// streams do not know the format does not carry it: the name is not found,
+// which is what it was before the command was written. Asked once, when the
+// registry is built — a runtime does not learn a format later.
+export const formatUsable = (format) => decompressionAvailable(format) && compressionAvailable(format)
 
 // The bytes the stream gives back, and what stopped it where it stopped: what
 // a tool makes of that — the words it uses, and whether it keeps what came

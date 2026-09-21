@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { execPath } from 'node:process'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
@@ -144,35 +146,55 @@ describe('brotli compresses with the stream the runtime has', () => {
   })
 })
 
-describe('brotli where the runtime has no brotli', () => {
-  // The streams are the runtime's, and which formats they know is the
-  // runtime's business: gzip is everywhere they are, brotli only where it was
-  // added. A terminal on a runtime without it says so rather than guessing at
-  // the bytes — and gzip, whose format is still there, is untouched.
-  const withoutBrotli = async (fn) => {
-    const streams = [['CompressionStream', globalThis.CompressionStream], ['DecompressionStream', globalThis.DecompressionStream]]
-    for (const [name, Real] of streams) {
-      globalThis[name] = class extends Real {
-        constructor(format) {
-          if (format === 'brotli') throw new TypeError(`Unsupported compression format: '${format}'`)
-          super(format)
+describe('a compressor is there only where the runtime can do its format', () => {
+  // Which formats a runtime's streams know is the runtime's own business:
+  // gzip is everywhere they are, brotli only where it was added. A terminal
+  // whose streams do not know one does not carry the command that needs it —
+  // the name is not found, which is what it was before either was written.
+  // The registry is built when the module is loaded, so each case is a
+  // terminal made in a runtime that never had the format, which is one
+  // started with the streams already answering for everything else.
+  const withoutFormat = (format) => {
+    const source = `
+      for (const name of ['CompressionStream', 'DecompressionStream']) {
+        const Real = globalThis[name]
+        globalThis[name] = class extends Real {
+          constructor(kind) {
+            if (kind === ${JSON.stringify(format)}) throw new TypeError('Unsupported compression format: ' + kind)
+            super(kind)
+          }
         }
       }
-    }
-    try { return await fn() } finally { for (const [name, Real] of streams) globalThis[name] = Real }
+      const { createTerminal } = await import(${JSON.stringify(import.meta.dirname + '/../src/index.js')})
+      const t = createTerminal({ 'a.txt': 'text\\n' }, { mount: '/repo', writable: '/tmp/' })
+      const answers = {}
+      for (const line of ['gzip -dc a.txt', 'brotli -dc a.txt', '/usr/bin/gzip -dc a.txt', '/usr/bin/brotli -dc a.txt']) {
+        const r = await t.run(line)
+        answers[line] = { exitCode: r.exitCode, head: r.stderr.split('. Available: ')[0], listed: /gzip|brotli/u.test(r.stderr.split('. Available: ')[1] ?? ''), gaps: r.unsupported.map((u) => u.kind + ':' + u.command) }
+      }
+      answers.completion = createTerminal({}).complete('')
+      process.stdout.write(JSON.stringify(answers))
+    `
+    return JSON.parse(execFileSync(execPath, ['--input-type=module', '-e', source], { encoding: 'utf8' }))
   }
 
-  it('reports the gap rather than an answer it does not have', async () => {
-    await withoutBrotli(async () => {
-      const t = terminal()
-      await gap(t, 'brotli -dc data.br', 'decompression', 'brotli: this runtime cannot decompress: DecompressionStream does not do brotli\n')
-      await gap(t, 'cp plain.txt /tmp/p && brotli /tmp/p', 'compression', 'brotli: this runtime cannot compress: CompressionStream does not do brotli\n')
-      // What it could answer without the stream, it still answers.
-      assert.deepEqual(await t.run('brotli -d missing.br'), result('', { stderr: 'failed to open input file [missing.br]: No such file or directory\n', exitCode: 1 }))
-      // gzip is a format every one of these streams knows, and is unaffected.
-      assert.deepEqual(await t.run('cp plain.txt /tmp/g && gzip /tmp/g && gzip -dc /tmp/g.gz'), result('not compressed\n'))
-    })
-    // Put back, the same line answers.
-    assert.deepEqual(await terminal().run('brotli -dc data.br'), result('alpha\nbeta\n'))
+  it('has no brotli where the streams do not know brotli', () => {
+    const answers = withoutFormat('brotli')
+    // Not found, in every spelling, and in nothing the terminal offers. A
+    // path to a name the registry does not have stays the path it was.
+    assert.deepEqual(answers['brotli -dc a.txt'], { exitCode: 127, head: 'brotli: command not found', listed: false, gaps: ['command:brotli'] })
+    assert.deepEqual(answers['/usr/bin/brotli -dc a.txt'], { exitCode: 127, head: '/usr/bin/brotli: command not found', listed: false, gaps: ['command:/usr/bin/brotli'] })
+    assert.ok(!answers.completion.includes('brotli'))
+    // gzip, whose format every such stream knows, is there as ever: a file
+    // that is not a member is the answer it gives, not a missing command.
+    assert.deepEqual(answers['gzip -dc a.txt'], { exitCode: 1, head: '\ngzip: a.txt: not in gzip format\n', listed: false, gaps: [] })
+  })
+
+  it('has no gzip where the streams do not know gzip', () => {
+    const answers = withoutFormat('gzip')
+    assert.deepEqual(answers['gzip -dc a.txt'], { exitCode: 127, head: 'gzip: command not found', listed: false, gaps: ['command:gzip'] })
+    assert.deepEqual(answers['/usr/bin/gzip -dc a.txt'], { exitCode: 127, head: '/usr/bin/gzip: command not found', listed: false, gaps: ['command:/usr/bin/gzip'] })
+    // brotli is a format these streams still know, and answers as it does.
+    assert.deepEqual(answers['brotli -dc a.txt'], { exitCode: 1, head: 'corrupt input [a.txt]\n', listed: false, gaps: [] })
   })
 })

@@ -2,7 +2,7 @@ import { parseArgs } from '../args.js'
 import { decodeUtf8, encodeUtf8, readBytesOf } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
-import { compressBytes, compressionAvailable, decompressBytes, decompressionAvailable } from '../compression.js'
+import { compressBytes, decompressBytes, formatUsable } from '../compression.js'
 
 // brotli, where the runtime's streams know the format. Everything gzip's
 // command says about waiting holds here (../compression.js), and two things
@@ -16,6 +16,10 @@ import { compressBytes, compressionAvailable, decompressBytes, decompressionAvai
 
 const FORMAT = 'brotli'
 const SUFFIX = '.br'
+// Only where the runtime's streams know the format. gzip is everywhere they
+// are; brotli is where it was added, and a terminal whose streams do not know
+// it does not carry the command — the name is not found, as it was before.
+export const BROTLI = formatUsable(FORMAT) ? { brotli } : {}
 // The name brotli gives the input it did not open, which is the console's on
 // the system it was first written for.
 const STDIN = 'con'
@@ -90,8 +94,6 @@ function one(name, stdin, opts, state) {
 // One file's worth of the work the runtime does, and what becomes of it.
 async function through(bytes, name, target, opts, state) {
   const { ctx } = state
-  const available = opts.decompressing ? decompressionAvailable(FORMAT) : compressionAvailable(FORMAT)
-  if (!available) return refuse(state, opts)
   const done = opts.decompressing ? await decompressBytes(bytes, FORMAT) : { bytes: await compressBytes(bytes, FORMAT), error: null }
   // Brotli hands over nothing it could not read to the end: a stream that
   // failed leaves the file it was writing unwritten, and says only that.
@@ -114,15 +116,6 @@ function toFile(target, bytes, state) {
   }
   handle.writeBytes(bytes)
   return true
-}
-
-// A runtime whose streams do not know the format does not do the work at
-// all, which is the gap the command reports rather than an answer it does
-// not have.
-function refuse(state, opts) {
-  const [what, stream] = opts.decompressing ? ['decompress', 'DecompressionStream'] : ['compress', 'CompressionStream']
-  state.gap ??= unsupported('feature', 'brotli', `${what}ion`, `brotli: this runtime cannot ${what}: ${stream} does not do brotli`, 1)
-  return false
 }
 
 // Brotli names what went wrong and nothing else — no command in front of it —
