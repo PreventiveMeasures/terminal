@@ -6765,7 +6765,7 @@ describe('createTerminal — awk', () => {
     assert.equal(await out("awk 'BEGIN { if (0) { print \"a\" }\n\nelse print \"b\" }'"), 'b\n')
     // Constant folding: division by a constant zero is refused when the
     // program is read, even in a branch that never runs.
-    rejects("awk 'BEGIN { if (0) print 2 ^ 3 / 0; print \"never\" }'", /syntax error at line 1: division by zero attempted/u)
+    await rejects("awk 'BEGIN { if (0) print 2 ^ 3 / 0; print \"never\" }'", /error at line 1: division by zero attempted/u)
     await rejects("awk 'BEGIN { print 5 % 0 }'", /division by zero attempted in `%`/u)
     const r = await run("awk 'BEGIN { print \"a\"; x = 0; print 1 / x; print \"b\" }'")
     assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['a\n', 'awk: division by zero attempted\n', 2])
