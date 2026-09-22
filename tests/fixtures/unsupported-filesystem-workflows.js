@@ -6,7 +6,7 @@ const gap = (purpose, command, owner, detail, kind = 'option') => ({
 const unavailable = (purpose, command, owner) => gap(purpose, command, owner, owner, 'command')
 
 export const FILESYSTEM_WORKFLOWS = [
-  gap('Locate unusually large source files', 'find src -type f -size +1M', 'find', '-size'),
+  gap('List matching entries the way ls -l would', String.raw`find src -name '*.js' -ls`, 'find', '-ls'),
   gap('Find files changed during the last week', 'find src -type f -mtime -7', 'find', '-mtime'),
   gap('Match complete test file paths with a regex', String.raw`find test -regex '.*\.test\.js'`, 'find', '-regex'),
   gap('Print file paths alongside their sizes', String.raw`find src -type f -printf '%p\t%s\n'`, 'find', '-printf'),
