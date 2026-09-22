@@ -143,7 +143,7 @@ describe('correctness audit — text, filenames and traversal', () => {
     await gap('seq 0 .5 1', 'non-integer operands')
     await gap('cut -c2 unicode', 'partial UTF-8 byte sequence')
     await gap('head -c2 unicode', 'partial UTF-8 byte sequence')
-    await gap("tr '[:upper:]' '[:lower:]' < a", 'set expressions')
+    await gap("tr '[=a=]' x < a", 'set expressions')
     await gap('tr a b < unicode', 'non-ASCII bytes')
   })
 })

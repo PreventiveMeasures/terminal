@@ -74,6 +74,7 @@
     "src/commands/dump.js",
     "src/commands/echo.js",
     "src/commands/extra.js",
+    "src/commands/filters.js",
     "src/commands/find-parse.js",
     "src/commands/find.js",
     "src/commands/fs-tools.js",
