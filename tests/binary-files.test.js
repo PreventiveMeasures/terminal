@@ -340,16 +340,26 @@ describe('what a file of bytes answers without being read as text', () => {
 
 describe('what a file of bytes cannot be read as', () => {
   it('says which file it is, wherever text is what a command reads', async () => {
-    for (const command of ['head img.png', 'head -c4 img.png', 'tail img.png', 'tac img.png', 'nl img.png', 'uniq img.png', 'sort img.png', 'cut -c1 img.png', 'sed -n p img.png', 'tr a b < img.png']) {
+    for (const command of ['head img.png', 'head -c4 img.png', 'tail img.png', 'tac img.png', 'nl img.png', 'uniq img.png', 'sort img.png', 'cut -c1 img.png', 'sed -n p img.png']) {
       const cmd = command.split(' ')[0]
-      const result = await gap(terminal(), command, 'binary file', `${command.includes('<') ? 'error' : cmd}: ${unreadable('img.png')}`)
+      const result = await gap(terminal(), command, 'binary file', `${cmd}: ${unreadable('img.png')}`)
       assert.equal(result.stdout, '', command)
     }
+    // Redirected in, the file is the command's standard input, and is named
+    // the way a pipe carrying the same bytes is named.
+    await gap(terminal(), 'tr a b < img.png', 'binary file', 'tr: standard input holds bytes that spell no text, and reading them as text is not supported\n')
     await gap(terminal(), 'awk "{print}" img.png', 'binary file', `awk: ${unreadable('img.png')}`)
   })
 
-  it('reaches a redirection the same way', async () => {
-    await gap(terminal(), 'wc -c < img.png', 'binary file', `error: ${unreadable('img.png')}`)
+  it('reaches a redirection the way it reaches a pipe', async () => {
+    // A redirect hands over the bytes, as a pipe does, so what reads bytes
+    // reads them: `wc -c < img.png` is the six the host counts, not a gap.
+    const t = terminal()
+    assert.deepEqual((await t.run('wc -c < img.png')).stdout, '19\n')
+    assert.deepEqual((await t.run('base64 < img.png')).stdout, 'iVBORw0KGgoAAAANSUhEUv/+Cg==\n')
+    assert.deepEqual((await t.run('hexdump -C < img.png')).stdout, '00000000  89 50 4e 47 0d 0a 1a 0a  00 00 00 0d 49 48 44 52  |.PNG........IHDR|\n00000010  ff fe 0a                                          |...|\n00000013\n')
+    // Only a reader of text is left with nothing it can do.
+    await gap(t, 'sort < img.png', 'binary file', 'sort: standard input holds bytes that spell no text, and reading them as text is not supported\n')
   })
 
   it('carries a file of bytes down a pipe, and refuses only where a string is what is left', async () => {

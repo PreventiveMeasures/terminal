@@ -62,7 +62,7 @@ export async function gzip(stdin, tokens, ctx) {
     keep: flags.has('k') || flags.has('keep'),
   }
   const state = { ctx, events: [], stderr: '', status: 0, gap: null }
-  if (positional.length === 0) await fromStdin(stdin, opts, state)
+  if (positional.length === 0) await fromStdin(opts, state)
   // oxlint-disable-next-line no-await-in-loop -- one operand after the last, as gzip takes them.
   else for (const name of positional) await one(name, opts, state)
   if (state.gap) return state.gap
@@ -77,7 +77,10 @@ export async function gzip(stdin, tokens, ctx) {
 // is read the way GNU reads one carrying anything else and always finds the
 // same thing. Compressing reads that pipe as readily as decompressing does —
 // a member is what `gzip | gzip` is handed, and no text spells one.
-async function fromStdin(stdin, opts, state) {
+async function fromStdin(opts, state) {
+  // Read from the context rather than from what the command was handed, so a
+  // second `-` finds the stream where the first left it, which is its end.
+  const stdin = state.ctx.stdinLeft
   const piped = state.ctx.stdinBytes
   // Taking the pipe is taking it: the next command in the list finds it
   // empty, as it would a stdin this one had read to the end.
@@ -93,6 +96,9 @@ async function fromStdin(stdin, opts, state) {
 
 function one(name, opts, state) {
   const { ctx } = state
+  // `-` is the stream, not a file of that name: GNU reads stdin for it and
+  // writes to stdout, there being no file beside which to write the answer.
+  if (name === '-') return fromStdin(opts, state)
   const found = lookupWithNote(ctx, 'gzip', name)
   if (found.error) return fail(state, `${name}: ${found.error}`, 1)
   if (ctx.fs.isDir(found.path)) return fail(state, `${name} is a directory -- ignored`, 2)

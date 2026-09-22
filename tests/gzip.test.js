@@ -282,3 +282,33 @@ describe('gzip reads the pipe it is given, whichever way it is going', () => {
     assert.deepEqual(await t.run('cat plain.txt | { gzip | wc -c; gzip | wc -c; }'), result('35\n20\n'))
   })
 })
+
+// `-` is the stream, not a file of that name: GNU reads stdin for it and
+// writes to stdout, there being no file beside which to write the answer.
+// Recorded from gzip 1.12.
+describe('a dash operand is standard input, for all four names', () => {
+  it('compresses the stream and decompresses it again', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run("echo 'x' | gzip - | gzip -d"), result('x\n'))
+    // No `-c` needed: there is no file to write the member beside.
+    assert.deepEqual(await t.run("echo 'x' | gzip - | wc -c"), result('22\n'))
+    assert.deepEqual(await t.run('cat data.gz | gzip -d -'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('cat data.gz | zcat -'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('cat data.gz | gunzip -'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('cat data.gz | gzcat -'), result('alpha\nbeta\n'))
+  })
+
+  it('reads a file redirected onto the stream', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('zcat - < data.gz'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('gunzip - < data.gz'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('gzip -dc - < data.gz'), result('alpha\nbeta\n'))
+    // A second `-` finds the stream where the first left it, which is its end.
+    assert.deepEqual(await t.run('zcat - - < data.gz'), result('alpha\nbeta\n', { stderr: '\ngzip: stdin: unexpected end of file\n', exitCode: 1 }))
+  })
+
+  it('says of the stream what GNU says of it, not that it has no such file', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run("echo 'x' | zcat - 2>&1"), result('\ngzip: stdin: not in gzip format\n', { exitCode: 1 }))
+  })
+})
