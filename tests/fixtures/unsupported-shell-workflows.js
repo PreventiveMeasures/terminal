@@ -12,9 +12,9 @@ export const SHELL_WORKFLOWS = [
     expected: feature('-r', 'test'),
   },
   {
-    purpose: 'Check that project documentation is nonempty',
-    command: '[ -s README.md ] && head -n 20 README.md',
-    expected: feature('-s', '['),
+    purpose: 'Check that a build script is executable before running it',
+    command: '[ -x scripts/build.sh ] && echo runnable',
+    expected: feature('-x', '['),
   },
   {
     purpose: 'Quote matching source paths for reuse as shell input',

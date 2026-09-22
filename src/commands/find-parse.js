@@ -4,11 +4,11 @@ import { err, parseNonNegativeInt } from '../util.js'
 import { unsupported } from '../unsupported.js'
 import { INT32_MAX } from '../numeric.js'
 
-const VALUE_PRIMARIES = new Set(['name', 'iname', 'type', 'path', 'ipath', 'mindepth', 'maxdepth'])
+const VALUE_PRIMARIES = new Set(['name', 'iname', 'type', 'path', 'ipath', 'lname', 'ilname', 'size', 'mindepth', 'maxdepth'])
 const isTok = (t, name) => t === '-' + name || t === '--' + name
 
 export function parseFindArgs(tokens) {
-  const p = { tokens, i: 0, depth: { minDepth: 0, maxDepth: Number.POSITIVE_INFINITY }, hasAction: false, batches: [], error: null }
+  const p = { tokens, i: 0, depth: { minDepth: 0, maxDepth: Number.POSITIVE_INFINITY, deepestFirst: false }, hasAction: false, batches: [], error: null }
   const starts = []
   if (tokens[0] === '--') p.i++
   // A closing parenthesis is a path until expression parsing has started.
@@ -65,6 +65,12 @@ function parsePrimary(p, level) {
     if (kind === 'print' || kind === 'print0') p.hasAction = true
     return { kind, negate }
   }
+  // `-depth` is the walk's order rather than a question about an entry, so it
+  // holds wherever it is written and is true of everything.
+  if (kind === 'depth' || kind === 'd') {
+    p.depth.deepestFirst = true
+    return { kind: 'true', negate }
+  }
   if (kind === 'exec') {
     const r = consumeExec(p.tokens, p.i - 1, negate)
     if (r.error) { p.error = r.error; return null }
@@ -90,13 +96,31 @@ function valuePredicate(kind, value, negate, depth) {
     const checked = parseTypes(value)
     return checked.error ? checked : { kind, negate, types: checked.types }
   }
+  if (kind === 'size') return parseSize(value, negate)
   if (kind === 'mindepth' || kind === 'maxdepth') {
     const count = parseNonNegativeInt(value, `find: -${kind}`, value, { max: INT32_MAX, digitsOnly: true })
     if (count.error) return count
     depth[kind === 'mindepth' ? 'minDepth' : 'maxDepth'] = count.value
     return { kind: 'true', negate }
   }
-  return { kind, negate, re: compileGlob(value, { ignoreCase: kind === 'iname' || kind === 'ipath' }) }
+  return { kind, negate, re: compileGlob(value, { ignoreCase: kind.startsWith('i') }) }
+}
+
+// A size is a sign, a count, and the unit it is counted in — and what is
+// measured is rounded up to the next whole unit, so `-size 1k` is every file
+// from one byte to a thousand and twenty-four. `b` is the unit when none is
+// given, which is the half-kilobyte block find has always counted in.
+const SIZE_UNITS = { __proto__: null, b: 512, c: 1, w: 2, k: 1024, M: 1048576, G: 1073741824 }
+const SIZE_SPEC = /^([+-]?)(\d+)([a-zA-Z]?)$/u
+
+function parseSize(value, negate) {
+  if (value === '') return { error: err('find: invalid null argument to -size') }
+  const spec = SIZE_SPEC.exec(value)
+  if (!spec || !Number.isSafeInteger(Number(spec[2]))) return { error: err(`find: Invalid argument \`${value}' to -size`) }
+  const [, sign, count, name] = spec
+  const unit = SIZE_UNITS[name === '' ? 'b' : name]
+  if (unit === undefined) return { error: err(`find: invalid -size type \`${name}'`) }
+  return { kind: 'size', negate, sign, count: Number(count), unit }
 }
 
 // The types a path-to-content map can hold: files, the directories its paths

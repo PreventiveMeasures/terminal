@@ -5600,7 +5600,7 @@ describe('createTerminal — complete: corner cases', () => {
     assert.ok(idx('tree') < idx('sort'), 'tree before sort')
     // Path utilities are the tail of what the terminal announces, and the
     // commands it has without announcing them follow, sorted.
-    assert.deepEqual(all.slice(idx('which')), ['which', String.raw`\[`, 'base32', 'basename', 'brotli', 'cp', 'date', 'dirname', 'egrep', 'false', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'ln', 'mkdir', 'od', 'patch', 'rm', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'touch', 'true', 'whoami', 'xxd', 'zcat'])
+    assert.deepEqual(all.slice(idx('which')), ['which', String.raw`\[`, 'base32', 'basename', 'brotli', 'cp', 'date', 'dirname', 'egrep', 'false', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'ln', 'mkdir', 'od', 'patch', 'rm', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'tee', 'touch', 'true', 'whoami', 'xxd', 'zcat'])
   })
 
   it('after `|`, completion only suggests commands that consume stdin', () => {
@@ -5619,10 +5619,10 @@ describe('createTerminal — complete: corner cases', () => {
       assert.ok(c.includes('cat | ' + name), `${name} should be a pipe target`)
     }
     // The unannounced readers are offered there too, after the announced.
-    for (const name of ['base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat']) {
+    for (const name of ['base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'tee', 'xxd', 'zcat']) {
       assert.ok(c.includes('cat | ' + name), `${name} should be a pipe target`)
     }
-    assert.equal(c.length, 33)
+    assert.equal(c.length, 34)
   })
 
   it('pipe-target priority lists grep first', () => {
@@ -5688,7 +5688,7 @@ describe('createTerminal — complete: corner cases', () => {
     assert.deepEqual(t.complete('cat|l'), [])
     // Empty trailing word: full pipe set, each glued to `cat| ` with a space.
     const c = t.complete('cat|')
-    assert.equal(c.length, 33)
+    assert.equal(c.length, 34)
     assert.equal(c[0], 'cat| grep')
     // Every variant has the inserted space — no `cat|grep` leaks through.
     for (const variant of c) assert.ok(variant.startsWith('cat| '), `expected "cat| " prefix on ${variant}`)
@@ -5788,7 +5788,7 @@ describe('createTerminal — complete: corner cases', () => {
     const targets = [
       'grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'xargs', 'awk',
       'tr', 'nl', 'tac', 'hexdump', 'cat', 'base64', 'diff', 'patch',
-      'base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat',
+      'base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'tee', 'xxd', 'zcat',
     ]
     assert.deepEqual(t.complete('cat 1 |'), targets.map((name) => `cat 1 | ${name}`))
     assert.deepEqual(t.complete('cat 1 | '), targets.map((name) => `cat 1 | ${name}`))
@@ -6365,8 +6365,19 @@ describe('createTerminal — awk', () => {
     assert.equal(await out("awk 'BEGIN { print 1e, 1e5x }'"), '1 100000\n')
     assert.equal(await out("awk 'BEGIN { x = 5; print x \" \" x++ \" \" x, ++x, x--, --x; y = 10; y += 5; y -= 3; y *= 2; y /= 4; y %= 4; y ^= 3; print y; a = b = 7; print a, b }'"), '5 5 6 7 7 5\n8\n7 7\n')
     assert.equal(await out("echo '5 7' | awk '{ $1++; ++$2; print; i = 1; print $i++, i, $i }'"), '6 8\n6 1 7\n')
-    await rejects("awk 'BEGIN { print 1 / 0 }'", /division by zero/u)
-    await rejects("awk 'BEGIN { print 1 % 0 }'", /division by zero/u)
+    // Dividing a constant by nought is worked out where the program is read,
+    // and a program that reads is not one with a syntax error in it: gawk
+    // calls that an error, and exits 1 for it where a division it only meets
+    // while running is fatal and exits 2.
+    const folded = await run("awk 'BEGIN { print 1 / 0 }'")
+    assert.deepEqual([folded.stderr, folded.exitCode], ['awk: error at line 1: division by zero attempted\n', 1])
+    const modulo = await run("awk 'BEGIN { print 1 % 0 }'")
+    assert.deepEqual([modulo.stderr, modulo.exitCode], ['awk: error at line 1: division by zero attempted in `%`\n', 1])
+    // Nothing is printed before it, the whole program having been refused.
+    const guarded = await run(String.raw`awk 'BEGIN { if (0) print 1 / 0; print "reached" }'`)
+    assert.deepEqual([guarded.stdout, guarded.exitCode], ['', 1])
+    const met = await run("awk 'BEGIN { x = 0; print 1 / x }'")
+    assert.deepEqual([met.stderr, met.exitCode], ['awk: division by zero attempted\n', 2])
   })
 
   it('string builtins: length, substr, index, split, tolower/toupper, sprintf', async () => {
@@ -6754,7 +6765,7 @@ describe('createTerminal — awk', () => {
     assert.equal(await out("awk 'BEGIN { if (0) { print \"a\" }\n\nelse print \"b\" }'"), 'b\n')
     // Constant folding: division by a constant zero is refused when the
     // program is read, even in a branch that never runs.
-    rejects("awk 'BEGIN { if (0) print 2 ^ 3 / 0; print \"never\" }'", /syntax error at line 1: division by zero attempted/u)
+    await rejects("awk 'BEGIN { if (0) print 2 ^ 3 / 0; print \"never\" }'", /error at line 1: division by zero attempted/u)
     await rejects("awk 'BEGIN { print 5 % 0 }'", /division by zero attempted in `%`/u)
     const r = await run("awk 'BEGIN { print \"a\"; x = 0; print 1 / x; print \"b\" }'")
     assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['a\n', 'awk: division by zero attempted\n', 2])

@@ -4,6 +4,8 @@
 // Double-dash predicate spellings are local extensions, not GNU find syntax.
 
 import { relativeTo, walkTree } from '../fs.js'
+import { BLOCK } from './du-options.js'
+import { encodeUtf8 } from '../util.js'
 import { parseFindArgs } from './find-parse.js'
 import { unsupported } from '../unsupported.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
@@ -11,11 +13,16 @@ import { lookupWithNote, omissionNote } from '../notes.js'
 
 const TYPE_LETTERS = { file: 'f', dir: 'd', link: 'l' }
 
+// What `ls -l` and `du` report of an entry: a directory is a block of its
+// own, a link is as long as the path it holds, and a file is its bytes.
+const sizeOf = (entry, ctx) => (entry.kind === 'dir' ? BLOCK
+  : ctx.fs.fileSize?.(entry.abs) ?? encodeUtf8(ctx.fs.readFile(entry.abs)).length)
+
 export async function find(stdin, tokens, ctx) {
   const parsed = parseFindArgs(tokens)
   if (parsed.error) return parsed.error
   if (stdin !== '' && tokens.some((t) => t === '-exec' || t === '--exec')) return unsupported('feature', 'find', '-exec stdin', 'find: passing shared standard input to -exec is not supported')
-  const { starts, minDepth, maxDepth, groups, batches } = parsed
+  const { starts, minDepth, maxDepth, deepestFirst, groups, batches } = parsed
   const result = emptyOutput()
   const omitted = new Set()
   try {
@@ -31,7 +38,8 @@ export async function find(stdin, tokens, ctx) {
       }
       // walkTree consults pruning after evaluating the current entry.
       const pruned = new Set()
-      for (const entry of walkTree(ctx.fs, startAbs, maxDepth, (path) => !pruned.has(path))) {
+      const walk = walkTree(ctx.fs, startAbs, maxDepth, (path) => !pruned.has(path))
+      for (const entry of deepestFirst ? deepestFirstOrder(walk) : walk) {
         const display = toDisplayPath(start, startAbs, entry.path)
         if (entry.depth >= minDepth) {
           // oxlint-disable-next-line no-await-in-loop -- an entry is tested after the one the walk reached before it.
@@ -57,6 +65,20 @@ export async function find(stdin, tokens, ctx) {
     omissionNote(ctx.notes, { command: 'find', action: 'depth limit omitted contents of', noun: ['directory', 'directories'], paths: omitted })
   }
   return result
+}
+
+// `-depth` turns the walk inside out: what a directory holds is reached
+// before the directory is, and a starting point is the last thing reached.
+// Nothing is read until the whole walk is, so `-prune` has nothing left to
+// prune — which is what GNU says of the two of them together.
+function* deepestFirstOrder(entries) {
+  const open = []
+  for (const entry of entries) {
+    while (open.length > 0 && open.at(-1).depth >= entry.depth) yield open.pop()
+    if (entry.kind === 'dir') open.push(entry)
+    else yield entry
+  }
+  while (open.length > 0) yield open.pop()
 }
 
 // Preserve action output even when negation or a later predicate rejects
@@ -96,6 +118,13 @@ function evalPredicate(p, entry, ctx, result) {
     return dirs.length + files.length + links.length === 0
   }
   if (p.kind === 'path' || p.kind === 'ipath') return p.re.test(entry.path)
+  // A link's own name is one thing and what it holds is another: `-lname`
+  // asks about the second, and nothing that is not a link holds anything.
+  if (p.kind === 'lname' || p.kind === 'ilname') return entry.kind === 'link' && p.re.test(ctx.fs.readLink?.(entry.abs) ?? '')
+  if (p.kind === 'size') {
+    const units = Math.ceil(sizeOf(entry, ctx) / p.unit)
+    return p.sign === '+' ? units > p.count : p.sign === '-' ? units < p.count : units === p.count
+  }
   if (p.kind === 'print' || p.kind === 'print0') {
     collectOutput(result, ctx.flushOutput({ stdout: entry.path + (p.kind === 'print' ? '\n' : '\0'), stderr: '', exitCode: 0 }))
     return true

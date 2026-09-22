@@ -1,9 +1,9 @@
 import { lookup } from '../fs.js'
-import { err, ok } from '../util.js'
+import { encodeUtf8, err, ok } from '../util.js'
 import { UnsupportedError, unsupportedFrom } from '../unsupported.js'
 import { INT64_MAX, INT64_MIN } from '../numeric.js'
 
-const UNARY_GAPS = new Set(['-b', '-c', '-g', '-k', '-p', '-r', '-s', '-t', '-u', '-v', '-w', '-x', '-G', '-N', '-O', '-R', '-S', '-o'])
+const UNARY_GAPS = new Set(['-b', '-c', '-g', '-k', '-p', '-r', '-t', '-u', '-v', '-w', '-x', '-G', '-N', '-O', '-R', '-S', '-o'])
 const BINARY_GAPS = new Set(['-nt', '-ot', '-ef', '<', '>'])
 export const INTEGER_TESTS = {
   __proto__: null,
@@ -44,7 +44,7 @@ function evaluate(tokens, ctx) {
     if (first === '!') return second === ''
     if (first === '-n') return second !== ''
     if (first === '-z') return second === ''
-    if (['-a', '-e', '-f', '-d', '-h', '-L'].includes(first)) return fileTest(first, second, ctx)
+    if (['-a', '-e', '-f', '-d', '-h', '-L', '-s'].includes(first)) return fileTest(first, second, ctx)
     if (UNARY_GAPS.has(first)) gap(first)
     throw new Error(`${first}: unary operator expected`)
   }
@@ -95,8 +95,15 @@ export function fileTest(operator, operand, ctx) {
   if (link) return fs.isLink(path)
   if (operator === '-e' || operator === '-a') return true
   if (operator === '-d') return fs.isDir(path)
+  // `-s` asks how much is there rather than what is: a directory has a size
+  // of its own, an empty file has none, and the sink holds nothing.
+  if (operator === '-s') return fs.isDir(path) || (path !== '/dev/null' && sizeOf(ctx, path) > 0)
   return path !== '/dev/null' && ctx.fs.isFile(path)
 }
+
+// What `ls -l` and `du` report, which is what `-s` asks after: the bytes a
+// file holds, or the path a link holds where the name was not followed.
+const sizeOf = (ctx, path) => ctx.fs.fileSize?.(path) ?? encodeUtf8(ctx.fs.readFile(path)).length
 
 function isStream(path) {
   return STREAMS.has(path) || /^\/dev\/fd\/\d+$/u.test(path)

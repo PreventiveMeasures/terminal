@@ -128,9 +128,9 @@ export const TEXT_WORKFLOWS = [
     expected: [{ kind: 'option', command: 'cut', detail: '--output-delimiter' }],
   },
   {
-    purpose: 'Collapse repeated whitespace classes in documentation',
-    command: String.raw`cat README.md | tr -s '[:space:]'`,
-    expected: [{ kind: 'feature', command: 'tr', detail: 'set expressions' }],
+    purpose: 'Report the longest line in a source file',
+    command: 'wc -L src/index.js',
+    expected: [{ kind: 'option', command: 'wc', detail: '-L' }],
   },
   {
     purpose: 'Remove indentation and collapse blank lines in a source preview',

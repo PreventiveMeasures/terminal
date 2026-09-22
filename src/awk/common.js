@@ -3,11 +3,16 @@
 // A line marks a compile error (exit 1); otherwise it is fatal (exit 2).
 // `gap` names an unsupported feature for the diagnostic channel. Ordinary
 // syntax and runtime errors leave it null.
+// What the parser found, and what kind of thing it was: a program that parses
+// is not a program with a syntax error in it, so what it works out for itself
+// and finds wrong — dividing a constant by nought — is named as gawk names
+// it, an error rather than a syntax error.
 export class AwkError extends Error {
-  constructor(message, line = null, gap = null) {
+  constructor(message, line = null, gap = null, kind = 'syntax error') {
     super(message)
     this.line = line
     this.gap = gap
+    this.kind = kind
   }
 }
 

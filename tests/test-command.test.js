@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
-const FILES = { 'a.txt': 'hello\n', empty: '', 'src/main.js': '', 'src/name with spaces.js': '', 'src/[x].js': '' }
+const FILES = { 'a.txt': 'hello\n', empty: '', 'src/main.js': '', 'src/name with spaces.js': '', 'src/[x].js': '', link: { type: 'link', target: 'a.txt' }, dead: { type: 'link', target: 'gone' } }
 const run = (command) => createTerminal(FILES).run(command)
 
 async function check(command, code) {
@@ -22,6 +22,11 @@ describe('test and [ file predicates', () => {
     ['! -f empty', 1], ['! -f missing', 0], ['! -f a.txt/../empty', 0],
     ['-f /dev/null', 1], ['-e /dev/null', 0], ['-d /dev/null', 1],
     ['-f /dev/./null', 1], ['-f /dev/null/../empty', 1], ['-e /dev/null/', 1],
+    // `-s` asks how much is there: a directory has a size of its own, an
+    // empty file has none, and the sink holds nothing. A link is followed,
+    // so one to nothing is nothing.
+    ['-s a.txt', 0], ['-s empty', 1], ['-s src', 0], ['-s missing', 1],
+    ['-s /dev/null', 1], ['-s ""', 1], ['! -s empty', 0], ['-s link', 0], ['-s dead', 1],
   ]) {
     it(expression, async () => {
       await check('test ' + expression, code)
@@ -83,7 +88,7 @@ describe('test expression argument rules', () => {
 
 describe('test unavailable predicates remain diagnostic', () => {
   for (const [expression, detail] of [
-    ['-r a.txt', '-r'], ['-w a.txt', '-w'], ['-x a.txt', '-x'], ['-s src', '-s'],
+    ['-r a.txt', '-r'], ['-w a.txt', '-w'], ['-x a.txt', '-x'],
     ['-t 1', '-t'], ['-v HOME', '-v'], ['-o errexit', '-o'],
     ['a.txt -nt empty', '-nt'], ['a.txt -ef a.txt', '-ef'],
     ['! -r a.txt', '-r'], ['-f a.txt -a -f empty', 'compound expressions'],
