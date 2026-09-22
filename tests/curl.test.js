@@ -277,6 +277,40 @@ describe('curl follows a redirect where -L asked for it', () => {
     assert.deepEqual(calls.slice(2).map(({ method, body }) => ({ method, body })), [{ method: 'POST', body: 'a=1' }, { method: 'POST', body: 'a=1' }])
   })
 
+  it('leaves the credential behind on a hop to another origin', async (t) => {
+    const calls = serving(t, {
+      '/same': moved('/landed'), '/away': moved('https://elsewhere.test/landed'),
+      '/plain': moved('http://api.test/landed'), '/port': moved('https://api.test:8443/landed'),
+      '/landed': text('landed\n'),
+    })
+    const term = online()
+    const sent = (at) => ({ authorization: calls[at].headers.authorization, cookie: calls[at].headers.cookie, tok: calls[at].headers['x-tok'] })
+    // The origin that was asked for is the origin the credential was for, so
+    // a hop within it carries it and a hop out of it does not — which is what
+    // curl does without `--location-trusted`, and what `fetch` does for a
+    // redirect it follows itself.
+    await term.run(`curl -L -u ada:secret -H 'Cookie: s=1' -H 'X-Tok: keep' ${HOST}/same`)
+    assert.deepEqual(sent(1), { authorization: 'Basic YWRhOnNlY3JldA==', cookie: 's=1', tok: 'keep' })
+    await term.run(`curl -L -u ada:secret -H 'Cookie: s=1' -H 'X-Tok: keep' ${HOST}/away`)
+    assert.equal(calls[3].url, 'https://elsewhere.test/landed')
+    assert.deepEqual(sent(3), { authorization: undefined, cookie: undefined, tok: 'keep' })
+    // A host that stays and a scheme or a port that does not is another
+    // origin too: the credential would be going somewhere else either way.
+    await term.run(`curl -L -u ada:secret ${HOST}/plain`)
+    assert.equal(sent(5).authorization, undefined)
+    await term.run(`curl -L -u ada:secret ${HOST}/port`)
+    assert.equal(sent(7).authorization, undefined)
+    // What is left of the request is what it was: only the credential goes.
+    assert.equal(calls[7].method, 'GET')
+  })
+
+  it('refuses the option that would send the credential anyway', async (t) => {
+    serving(t, { '/away': moved('https://elsewhere.test/landed') })
+    const r = await online().run(`curl -L --location-trusted -u ada:secret ${HOST}/away`)
+    assert.equal(r.exitCode, 2)
+    assert.deepEqual(r.unsupported.map(({ kind, detail }) => ({ kind, detail })), [{ kind: 'option', detail: '--location-trusted' }])
+  })
+
   it('stops at the ceiling rather than going round for ever', async (t) => {
     const calls = serving(t, CHAIN)
     const term = online()

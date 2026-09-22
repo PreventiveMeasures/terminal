@@ -28,6 +28,7 @@ import { fail, gap, readCommandLine } from './curl-options.js'
 // A hop that keeps the method and the body, and one that does not: 303 is a
 // GET afterwards by specification, and 301 and 302 are what every client
 // turned into one long before the specification caught up. curl agrees.
+// What a hop carries of the request it came from is `carried()` below.
 const REDIRECTS = new Set([301, 302, 303, 307, 308])
 const REWRITTEN = new Set([301, 302, 303])
 
@@ -149,15 +150,23 @@ function redirect(response, hop, opts) {
     url,
     method: rewritten ? 'GET' : hop.method,
     body: rewritten ? null : hop.body,
-    headers: rewritten ? withoutBody(hop.headers) : hop.headers,
+    headers: carried(hop.headers, rewritten, url.origin !== hop.url.origin),
   }
 }
 
-// A request that no longer carries a body says nothing about one.
-function withoutBody(headers) {
+// What the next hop takes with it. A request that no longer carries a body
+// says nothing about one; and a hop to another origin carries no credential,
+// because a credential is addressed to the origin it was given for, and the
+// origin it is now being sent to was named by the answer rather than by
+// whoever wrote the line. curl drops them for the same reason without
+// `--location-trusted`, and so does `fetch` for a redirect it follows itself.
+const BODY = Object.freeze(['content-type', 'content-length'])
+const CREDENTIALS = Object.freeze(['authorization', 'cookie', 'proxy-authorization'])
+function carried(headers, rewritten, crossed) {
+  if (!rewritten && !crossed) return headers
   const left = new Headers(headers)
-  left.delete('content-type')
-  left.delete('content-length')
+  if (rewritten) for (const name of BODY) left.delete(name)
+  if (crossed) for (const name of CREDENTIALS) left.delete(name)
   return left
 }
 

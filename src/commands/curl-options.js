@@ -17,7 +17,7 @@ import { unsupported } from '../unsupported.js'
 const SCHEMA = {
   short: ['h', 's', 'S', 'i', 'I', 'L', 'f', 'O', 'k', 'v', 'G', 'n'],
   long: [
-    'help', 'silent', 'show-error', 'no-progress-meter', 'include', 'head', 'location', 'fail', 'remote-name',
+    'help', 'silent', 'show-error', 'no-progress-meter', 'include', 'head', 'location', 'location-trusted', 'fail', 'remote-name',
     'compressed', 'insecure', 'verbose', 'get', 'netrc',
   ],
   valueShort: ['X', 'A', 'm', 'u', 'e', 'b', 'c', 'w', 'x', 'T', 'r', 'C', 'E', 'D', 'F'],
@@ -41,6 +41,7 @@ const REFUSED = new Map([
   ['insecure', 'certificates are the runtime\'s to check, and nothing here can tell it not to'],
   ['v', 'the trace is of a connection this code never sees; `-i` prints the response headers'],
   ['verbose', 'the trace is of a connection this code never sees; `-i` prints the response headers'],
+  ['location-trusted', 'a credential is for the origin it was given for; `-L` follows the hop without it'],
   ['G', 'moving the data into the query string is not implemented; put it in the URL'],
   ['get', 'moving the data into the query string is not implemented; put it in the URL'],
   ['n', 'there is no home directory here to read a `.netrc` from'],

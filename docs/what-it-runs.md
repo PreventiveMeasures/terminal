@@ -253,8 +253,14 @@ What it carries of curl: `-s`, `-S`, `-i`, `-I`, `-L` with `--max-redirs`,
 `--data-ascii` and `--json` — `@file` reading the virtual tree and `@-` the
 pipe — `-o`, `-O`, `-m`, `--compressed`, which the runtime does anyway, and
 `-h`, which lists what this curl carries rather than what curl has.
-Several URLs run one after another, `-o` and `-O` pair with them in the order
-both were written, and the status is the last transfer that failed, in curl's
+A hop `-L` takes carries what the request carried, less what it should not:
+a redirect to another origin — another host, another scheme, another port —
+goes without the `Authorization`, `Cookie` and `Proxy-Authorization` the first
+request had, since a credential is addressed to the origin it was given for
+and the next origin was named by the answer rather than by whoever wrote the
+line. curl drops them for the same reason without `--location-trusted`, which
+is refused here. Several URLs run one after another, `-o` and `-O` pair with
+them in the order both were written, and the status is the last transfer that failed, in curl's
 own numbers: 3 for a URL, 6 for a name that did not resolve, 7 for a
 connection that did not open, 22 for `-f` over a failing status, 23 for an
 output it could not write, 28 for `--max-time`, 47 for the end of a redirect
