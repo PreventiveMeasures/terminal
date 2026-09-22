@@ -2,7 +2,8 @@
 
 A virtual terminal over a virtual filesystem. Give it `{ path: content }` and it
 gives you a shell: bash syntax, GNU-compatible tools, and no way out — no host
-filesystem, no network, no `eval`, no `new Function`, no Node built-ins.
+filesystem, no `eval`, no `new Function`, no Node built-ins, and no network
+unless you [ask for one](#the-network).
 
 ## Install
 
@@ -59,6 +60,35 @@ line without running it is a separate entry point,
   carries, and where each one stops short of the real tool.
 - [The parser](docs/parser.md) — reading a line rather than running it.
 
+## The network
+
+Nothing here reaches outside unless you say so. `network: true` adds `curl`,
+which makes its request with the runtime's own `fetch`; without it there is no
+`curl` at all — the name is not a command, exactly as it was before the command
+was written. How you built the terminal is not something a line running inside
+it is told, or could act on.
+
+```js
+const online = createTerminal(sources, { mount: '/repo', writable: '/tmp/', network: true })
+
+(await online.run('curl -sS https://example.com/status.json | head -c 40')).stdout
+(await online.run('curl -fsSL -o /tmp/page.html https://example.com/')).exitCode
+(await createTerminal(sources).run('curl https://example.com/')).unsupported
+// [{ kind: 'command', command: 'curl', detail: 'curl', message: 'curl: command not found. Available: …' }]
+```
+
+`true` is whatever that `fetch` can reach, over http and https alone — there is
+no allow-list, no proxy and no credential store here, and a request carries
+nothing off the host: no environment, no `.netrc`, no cookie jar. What a
+response holds comes back as bytes, so `curl url > /tmp/f.png` and
+`curl url | sha256sum` read the answer itself. A file it writes goes in the
+`/tmp/` overlay, which is the only place anything here writes.
+
+If you need less than the whole network — an allow-list, a proxy, a signature
+on every request — leave the option off and wire a `curl` of your own through
+`commands`: the name is free while the network is off, and a handler may answer
+with a promise, which the line waits for.
+
 ## Writing
 
 Sources are read-only. Pass `writable: '/tmp/'` for a scratch overlay; the mount
@@ -78,8 +108,8 @@ const terminal = createTerminal({ input: 'b\na\n' }, { mount: '/repo', writable:
 `fork()` gives you a second terminal over the same filesystem, carrying a copy
 of this one's session: its working directory, variables, functions, `set -e`
 and `$?` as they are at the moment of the call. It is the process fork rather than a second
-`createTerminal` — the sources, the mount, the `/tmp/` overlay and the wired
-commands are the parent's own, not copies of them.
+`createTerminal` — the sources, the mount, the `/tmp/` overlay, the network and
+the wired commands are the parent's own, not copies of them.
 
 ```js
 const terminal = createTerminal({ 'src/app.js': 'x\n' }, { mount: '/repo', writable: '/tmp/' })

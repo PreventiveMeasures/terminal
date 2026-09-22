@@ -12,10 +12,16 @@
     "unicorn"
   ],
   "globals": {
+    "AbortSignal": "readonly",
     "CompressionStream": "readonly",
     "crypto": "readonly",
     "DecompressionStream": "readonly",
-    "structuredClone": "readonly"
+    "fetch": "readonly",
+    "Headers": "readonly",
+    "Response": "readonly",
+    "structuredClone": "readonly",
+    "TextDecoder": "readonly",
+    "URL": "readonly"
   },
   "rules": {
     "no-warning-comments": "off",

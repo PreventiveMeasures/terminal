@@ -5,7 +5,8 @@
 // snapshot, mounted at the directory's own resolved path so paths read
 // exactly as they do on the host. Nothing else on the host is visible, and
 // nothing is written back — the snapshot is read-only and /tmp/ is an
-// in-memory overlay.
+// in-memory overlay. Nothing leaves the host either, unless the session was
+// started with `--network`, which is what puts `curl` in it.
 // Not part of the published package; run it as `bin/terminal.js <dir>`.
 
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
@@ -18,7 +19,7 @@ import process from 'node:process'
 import repl from 'node:repl'
 import { TextDecoder, styleText } from 'node:util'
 
-const USAGE = `Usage: bin/terminal.js <path-to-dir>
+const USAGE = `Usage: bin/terminal.js [--network] <path-to-dir>
 
 Reads every file under <path-to-dir> into memory and opens a REPL running the
 virtual terminal over that snapshot, mounted at the directory's own resolved
@@ -33,6 +34,11 @@ Directories exist only where files do, so empty ones are not part of the tree.
 The mounted directory doubles as the session's home, so \`~\` and a bare \`cd\`
 return to it.
 
+\`--network\` adds \`curl\`, which then reaches the real network from this
+session: requests leave the host, and nothing here limits where to. Without
+it there is no \`curl\`, which is the default.
+
+  --network    let \`curl\` make real requests
   -h, --help   show this message
 `
 
@@ -49,9 +55,12 @@ const REASONS = {
 }
 
 function main(argv) {
-  if (argv[0] === '-h' || argv[0] === '--help') { process.stdout.write(USAGE); return }
-  if (argv.length !== 1 || argv[0] === '') fail(USAGE)
-  const root = directoryAt(argv[0])
+  if (argv.includes('-h') || argv.includes('--help')) { process.stdout.write(USAGE); return }
+  // The one flag: everything else on the line is the directory to mount.
+  const network = argv.includes('--network')
+  const operands = argv.filter((arg) => arg !== '--network')
+  if (operands.length !== 1 || operands[0] === '') fail(USAGE)
+  const root = directoryAt(operands[0])
   const mount = posix(root)
   const tree = readTree(root)
   // The overlay refuses a mount that would collide with it; the tree is the
@@ -60,9 +69,9 @@ function main(argv) {
   // cwd and home follow the mount, which is the only tree that exists here: `~`
   // always resolves, a bare `cd` returns to the root of it, and the prompt stays
   // short however deep the host path is.
-  const options = { mount, writable, user: safely(() => userInfo().username, 'user') }
+  const options = { mount, writable, network, user: safely(() => userInfo().username, 'user') }
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY)
-  start({ terminal: createTerminal(tree.sources, options), tree, mount, home: mount, writable, interactive, exitCode: 0, closing: false, unfinished: null })
+  start({ terminal: createTerminal(tree.sources, options), tree, mount, home: mount, writable, network, interactive, exitCode: 0, closing: false, unfinished: null })
 }
 
 function directoryAt(arg) {
@@ -193,6 +202,10 @@ function banner(session) {
   return [
     `${session.mount} mounted from the host: ${sources.size} files, ${size(bytes)}${left}`,
     overlayLine(session),
+    // The one line of the session that is about something outside it, so it
+    // is said where the session says what it is over. A session without the
+    // flag says nothing here: `curl` itself says why it is not there.
+    ...(session.network ? ['curl reaches the real network: requests leave this host'] : []),
   ].join('\n')
 }
 
