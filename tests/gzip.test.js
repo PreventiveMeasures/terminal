@@ -312,3 +312,64 @@ describe('a dash operand is standard input, for all four names', () => {
     assert.deepEqual(await t.run("echo 'x' | zcat - 2>&1"), result('\ngzip: stdin: not in gzip format\n', { exitCode: 1 }))
   })
 })
+
+// What follows a stream's last member is gzip's business rather than the
+// runtime's: a runtime reads those bytes as another member's header, fails on
+// them, and hands back neither them nor what it had already read — where gzip
+// keeps what the members held and says what it made of the rest. Recorded
+// from GNU gzip 1.12 over the same bytes written to disk.
+describe('gzip keeps the members it read, whatever followed them', () => {
+  const joined = (...parts) => {
+    const out = new Uint8Array(parts.reduce((n, part) => n + part.length, 0))
+    let at = 0
+    for (const part of parts) { out.set(part, at); at += part.length }
+    return out
+  }
+  const TAILS = {
+    'junk.gz': joined(GOOD, Buffer.from('junk')),
+    'twice.gz': joined(GOOD, GOOD, Buffer.from('junk')),
+    'pad.gz': joined(GOOD, new Uint8Array(24)),
+    'padded.gz': joined(GOOD, new Uint8Array(6), Buffer.from('!')),
+    'byte.gz': joined(GOOD, Buffer.from('x')),
+    'method.gz': joined(GOOD, Uint8Array.of(0x1f, 0x8b, 0x01), Buffer.from('rest')),
+    'magic.gz': joined(GOOD, Uint8Array.of(0x1f, 0x8b)),
+  }
+  const ignored = (name) => ({ stderr: `\ngzip: ${name}: decompression OK, trailing garbage ignored\n`, exitCode: 2 })
+  const short = (name) => ({ stderr: `\ngzip: ${name}: unexpected end of file\n`, exitCode: 1 })
+
+  it('writes what the members held and warns of the rest', async () => {
+    const t = terminal(TAILS)
+    assert.deepEqual(await t.run('zcat junk.gz'), result('alpha\nbeta\n', ignored('junk.gz')))
+    // Members are read one after another until one of them does not begin,
+    // and what is left over is the same garbage however many came before it.
+    assert.deepEqual(await t.run('zcat twice.gz'), result('alpha\nbeta\nalpha\nbeta\n', ignored('twice.gz')))
+    // Zero bytes are passed over on the way to something that is not one.
+    assert.deepEqual(await t.run('zcat padded.gz'), result('alpha\nbeta\n', ignored('padded.gz')))
+    // A pipe is read out under the name gzip gives one.
+    assert.deepEqual(await t.run('cat junk.gz | gzip -d'), result('alpha\nbeta\n', ignored('stdin')))
+  })
+
+  it('warns rather than errors, so the file beside it is written all the same', async () => {
+    const t = terminal(TAILS)
+    assert.deepEqual(await t.run('cp junk.gz /tmp/x.gz && gzip -d /tmp/x.gz'), result('', ignored('/tmp/x.gz')))
+    // The copy is gone with it, as it is for a member nothing followed.
+    assert.deepEqual(await t.run('cat /tmp/x && ls /tmp'), result('alpha\nbeta\nx\n'))
+  })
+
+  it('passes over a tail of zero bytes without a word', async () => {
+    const t = terminal(TAILS)
+    assert.deepEqual(await t.run('zcat pad.gz'), result('alpha\nbeta\n'))
+  })
+
+  it('reads what it cannot tell from a header as the header it ran out of', async () => {
+    const t = terminal(TAILS)
+    assert.deepEqual(await t.run('zcat byte.gz'), result('alpha\nbeta\n', short('byte.gz')))
+    assert.deepEqual(await t.run('zcat magic.gz'), result('alpha\nbeta\n', short('magic.gz')))
+  })
+
+  it('names a method no member is written with', async () => {
+    const t = terminal(TAILS)
+    assert.deepEqual(await t.run('zcat method.gz'),
+      result('alpha\nbeta\n', { stderr: 'gzip: method.gz: unknown method 1 -- not supported\n', exitCode: 1 }))
+  })
+})

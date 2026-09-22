@@ -2,7 +2,7 @@ import { parseArgs } from '../args.js'
 import { consumeStdin, encodeUtf8, encodeUtf8Loose, readBytesOf } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
-import { compressBytes, decompressBytes, formatUsable } from '../compression.js'
+import { compressBytes, decompressMembers, formatUsable } from '../compression.js'
 
 // gzip, both ways round. The work itself is the runtime's stream rather than
 // this code's (../compression.js), and it answers asynchronously — so the
@@ -39,6 +39,27 @@ const looksCompressed = (bytes) => bytes !== undefined && bytes.length >= 2 && b
 // else is data that is not the deflate stream the header promised.
 const REPORTS = { __proto__: null, 'unexpected end of file': 'unexpected end of file', 'incorrect data check': 'invalid compressed data--crc error' }
 const reportOf = (error) => REPORTS[error] ?? 'invalid compressed data--format violated'
+
+// The method every gzip member is written with, and the only one there is.
+const DEFLATE = 8
+
+// What followed the last whole member decides what gzip says of it. A tail of
+// zero bytes is the padding a block device leaves rather than anything it was
+// meant to read, and it passes over that without a word. Other bytes that
+// begin no member are the garbage it ignores: it decompressed everything it
+// was asked for, so it warns rather than errors and keeps what it wrote. A
+// single byte begins nothing it can tell from a header, so it is the header
+// it ran out of. Bytes that do begin a member are a member it could not read,
+// and it names a method it does not know where the header gives one;
+// anything else is what the stream ran into.
+function trouble(state, name, inflated) {
+  const rest = inflated.rest
+  if (rest === null) return dataError(state, `${name}: ${reportOf(inflated.error)}`)
+  if (rest.every((byte) => byte === 0)) return false
+  if (rest.length >= 2 && !looksCompressed(rest)) return fail(state, `${name}: decompression OK, trailing garbage ignored`, 2, '\n')
+  if (rest.length > 2 && rest[2] !== DEFLATE) return fail(state, `${name}: unknown method ${rest[2]} -- not supported`, 1)
+  return dataError(state, `${name}: ${reportOf(inflated.error)}`)
+}
 
 // The suffixes GNU knows. Decompressing takes one off to name the file it
 // writes, and refuses a name it cannot shorten; compressing reads the same
@@ -154,7 +175,7 @@ async function decompress(name, bytes, opts, state, path = null) {
   const { ctx } = state
   if (!looksCompressed(bytes)) return dataError(state, `${name}: ${tooShort(bytes, path, ctx) ? 'unexpected end of file' : 'not in gzip format'}`)
 
-  const inflated = await decompressBytes(bytes, FORMAT)
+  const inflated = await decompressMembers(bytes, FORMAT)
   const suffix = suffixOf(name)
   const written = opts.stdout ? toStdout(inflated.bytes, state)
     : suffix === undefined ? fail(state, `${name}: unknown suffix -- ignored`, 2)
@@ -164,7 +185,7 @@ async function decompress(name, bytes, opts, state, path = null) {
   // bytes that failed it and this has not: a stream hands nothing over until
   // it is sure of it, so a file whose data is corrupt reports the same error
   // with nothing written before it.
-  if (written && inflated.error) dataError(state, `${name}: ${reportOf(inflated.error)}`)
+  if (written && inflated.error) trouble(state, name, inflated)
 }
 
 const suffixOf = (name) => Object.keys(SUFFIXES).find((end) => name.length > end.length && name.endsWith(end))
