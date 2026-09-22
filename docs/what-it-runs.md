@@ -25,10 +25,11 @@ not.
 `pwd` `seq` `which` `basename` `dirname` — plus your own, via `opts.commands`.
 It has more besides: `gzip`, `gunzip`, `zcat` and `gzcat`, `brotli`, `base32`,
 `od`, `xxd`, `sha1sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shasum`,
-`whoami`, `date`, `true` and `false`. The compressors and the digests are
+`whoami`, `date`, `true` and `false`, and — where the caller asked for a
+network — `curl`. The compressors, the digests and `curl` are
 there only where the runtime can do the work — a format its streams do not
-know, or a crypto it does not have, is a command this terminal does not have
-either.
+know, a crypto it does not have, or no `fetch` at all is a command this
+terminal does not have either.
 
 Every one of them completes. The shorter list is the one a `command not found`
 prints after `Available:`, which is for someone who has just been told a name
@@ -235,6 +236,43 @@ with fuzz, exactly as GNU patch does, with the same messages, reject files,
 inside a writable `/tmp/` overlay; a target anywhere else is refused with an
 unsupported diagnostic, while `--dry-run` and `-o -` work everywhere. Ed
 scripts and git binary patches are refused the same way.
+
+`curl` is the one command that reaches outside, and the one no terminal has
+unless it was asked for: `createTerminal` takes `network: true`, and without
+it the name is not a command — what says so says the network was never asked
+for rather than that `curl` was never written. It makes its request with the
+runtime's own `fetch`, over http and https alone; every other scheme, on the
+URL or on a redirect it was told to follow, is refused as the protocol this
+terminal does not speak, `file:` included. A request carries what the command
+line gave it and nothing off the host: no environment, no `.netrc`, no cookie
+jar, no client certificate, no proxy.
+
+What it carries of curl: `-s`, `-S`, `-i`, `-I`, `-L` with `--max-redirs`,
+`-f`, `-X`, `-H`, `-A`, `-u`, `-d` with `--data-raw`, `--data-binary`,
+`--data-ascii` and `--json` — `@file` reading the virtual tree and `@-` the
+pipe — `-o`, `-O`, `-m`, `--compressed`, which the runtime does anyway, and
+`-h`, which lists what this curl carries rather than what curl has.
+Several URLs run one after another, `-o` and `-O` pair with them in the order
+both were written, and the status is the last transfer that failed, in curl's
+own numbers: 3 for a URL, 6 for a name that did not resolve, 7 for a
+connection that did not open, 22 for `-f` over a failing status, 23 for an
+output it could not write, 28 for `--max-time`, 47 for the end of a redirect
+chain, 56 for an answer that stopped early, and 60 for a certificate. What
+comes back is bytes, as it is for every other command here that writes what no
+string need spell, so `curl url > /tmp/f.png` and `curl url | sha256sum` read
+the answer itself and `-o` writes it into the overlay — which, being the only
+writable place here, is where an output file must be. A transfer is one
+request and its answer: there is no connection to reuse, no cookie jar, no
+resume, and no progress meter, since there is no terminal to draw one on. The
+options that would ask for those — `-k`, `-v`, `-x`, `-b`, `-c`, `-w`, `-T`,
+`-F`, `-G`, `-r`, `-E`, `--retry`, `--connect-timeout` and the rest — report
+an unsupported diagnostic naming what would have to exist for them to work,
+rather than being accepted and quietly dropped. Two things read differently
+from the real tool, and the run says the first of them on the note channel:
+`-i` prints a header block rendered from what `fetch` hands back — names
+lowercased and sorted, under a status line that reads `HTTP/1.1` whichever
+version the connection spoke — and a header the runtime reserves for itself is
+the runtime's to set, so `-H` can add to a request but not take away from it.
 
 `realpath` supports GNU canonicalization modes (`-e`, `-m`, and the default),
 relative output (`--relative-to`, `--relative-base`), quiet errors (`-q`) and

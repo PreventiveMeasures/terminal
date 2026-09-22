@@ -1,4 +1,4 @@
-import { RUNTIME_COMMANDS } from './runtime.js'
+import { NETWORK_NAMES, RUNTIME_COMMANDS, networkState } from './runtime.js'
 import { parseArgs } from '../args.js'
 import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, joinLines, lineRecords, ok, okWith, readInputs, splitLines, usage } from '../util.js'
 import { unsupported } from '../unsupported.js'
@@ -351,3 +351,6 @@ export const EXTRA_COMMANDS = { rg, cut, tac, tr, seq, nl, which: whichCmd, hexd
 // — is there only where the runtime can do it, and nothing at all where it
 // cannot.
 export const HIDDEN_EXTRAS = { whoami, date, od, xxd, base32, ...RUNTIME_COMMANDS }
+// What a network adds, for the registry to ask for: the one thing here that
+// is not in a table, since a terminal has it only where it asked for it.
+export { NETWORK_NAMES, networkState }

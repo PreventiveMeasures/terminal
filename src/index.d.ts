@@ -200,6 +200,25 @@ export interface CreateTerminalOptions {
    */
   locale?: string
   /**
+   * Whether this terminal may reach the network, which is what puts `curl` in
+   * it. `false` by default, and everything else here is over a tree that
+   * exists only in memory, so a terminal created without this has no command
+   * that can make a request — the name is not found, and what it says is that
+   * the network was never asked for rather than that `curl` was never
+   * written. `true` needs a `fetch` in the runtime to make the request with;
+   * a runtime without one leaves the command out for the same reason a
+   * runtime whose streams do not know a compression format leaves `brotli`
+   * out, and says which of the two it was.
+   *
+   * There is nothing narrower to ask for: `true` is whatever the runtime's
+   * own `fetch` can reach, over http and https alone. A caller who needs an
+   * allow-list, a proxy or credentials of their own leaves this off and wires
+   * a `curl` of their own through {@link CreateTerminalOptions.commands},
+   * which the name is free for while the network is off.
+   * @throws if it is anything but a boolean.
+   */
+  network?: boolean
+  /**
    * Commands to add to the built-in set — the wiring point for anything this
    * package will not implement itself, such as a `sha256sum` whose hashing
    * comes from the host. Wired commands are dispatchable, pipeable, and
@@ -211,8 +230,8 @@ export interface CreateTerminalOptions {
 
 /**
  * Options for {@link Terminal.fork}. What the terminal is *over* — the source
- * tree, the mount, the `/tmp/` overlay, the wired commands — belongs to the
- * parent and cannot be given another value here; an option this leaves out is
+ * tree, the mount, the `/tmp/` overlay, the network, the wired commands —
+ * belongs to the parent and cannot be given another value here; an option this leaves out is
  * rejected rather than ignored, since `fork({ writable: false })` would
  * otherwise read as an isolation a fork does not provide.
  */

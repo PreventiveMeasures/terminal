@@ -3,8 +3,8 @@ import { localeOption } from './locale.js'
 import { writableFs } from './writable.js'
 
 // Session settings a fork sets anew. Everything else it is over — the sources,
-// the mount, the /tmp/ overlay, the wired commands — belongs to the terminal it
-// forked from and cannot be given another value here.
+// the mount, the /tmp/ overlay, the network, the wired commands — belongs to
+// the terminal it forked from and cannot be given another value here.
 const FORK_OPTIONS = ['cwd', 'home', 'user', 'inherit']
 
 export function mountSources(sources, opts) {
@@ -38,7 +38,7 @@ export function forkSettings(ctx, opts) {
   }
   for (const name of Object.keys(opts)) {
     if (!FORK_OPTIONS.includes(name)) {
-      throw new Error(`fork: unknown option \`${name}\` (known: ${FORK_OPTIONS.join(', ')}; the sources, the mount, the /tmp/ overlay and the commands come from the parent)`)
+      throw new Error(`fork: unknown option \`${name}\` (known: ${FORK_OPTIONS.join(', ')}; the sources, the mount, the /tmp/ overlay, the network and the commands come from the parent)`)
     }
   }
   // Only the two states a shell can be handed: the parent's, or none. A value

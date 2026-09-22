@@ -1,4 +1,6 @@
-// In-memory shell over a { path: content } source tree; no host I/O.
+// In-memory shell over a { path: content } source tree; no host I/O, and no
+// network unless the caller asked for one — `network: true`, which is what
+// puts `curl` in the registry (net.js) and is not the default.
 // cwd and variables persist across run() calls. Unsupported constructs also
 // reach a diagnostic feed that redirects and pipelines cannot suppress.
 // Informational notes share that scope without changing the command's streams.
@@ -6,7 +8,8 @@
 
 import { forkSettings, mountSources } from './mount.js'
 import { parseUnits } from './shell/parse.js'
-import { DEFAULT_REGISTRY, createRegistry, unknownCommand } from './registry.js'
+import { createRegistry, defaultRegistry, unknownCommand } from './registry.js'
+import { networkOption } from './net.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
 import { discardedNotes, err, missingPathNote, reason } from './util.js'
 import { complete } from './complete.js'
@@ -16,7 +19,11 @@ import { commandWriteError, createIoGuard, routeExternalOutput, runSteps } from 
 
 export function createTerminal(sources, opts = {}) {
   const { fs, cwd, home, mount, writable, locale } = mountSources(sources, opts)
-  const registry = opts.commands === undefined ? DEFAULT_REGISTRY : createRegistry(opts.commands)
+  // What a terminal can run is settled here: the commands wired into it, and
+  // whether it has a network at all. Both belong to the terminal rather than
+  // to a line it runs, and a fork is over the same registry for that reason.
+  const network = networkOption(opts)
+  const registry = opts.commands === undefined ? defaultRegistry(network) : createRegistry(opts.commands, network)
   // The I/O guard watches one filesystem's reads and writes, and the writable
   // overlay it observes holds a single observer, so the guard belongs to the
   // filesystem rather than to a terminal: a fork over the same tree shares it.
