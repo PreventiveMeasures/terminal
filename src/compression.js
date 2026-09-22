@@ -46,10 +46,14 @@ async function through(stream, bytes) {
     }
   } catch (e) { error = e?.cause?.message ?? e?.message ?? 'corrupt input' }
   await written
+  return { bytes: join(chunks), error }
+}
+
+function join(chunks) {
   const out = new Uint8Array(chunks.reduce((n, chunk) => n + chunk.length, 0))
   let at = 0
   for (const chunk of chunks) { out.set(chunk, at); at += chunk.length }
-  return { bytes: out, error }
+  return out
 }
 
 export const decompressBytes = (bytes, format) => through(new DecompressionStream(format), bytes)
@@ -58,62 +62,90 @@ export const decompressBytes = (bytes, format) => through(new DecompressionStrea
 // them is gzip's business rather than the runtime's: the stream reads those
 // bytes as another member's header, fails on them, and hands back neither
 // them nor what it had already read. gzip keeps what the members held and
-// says what it made of the rest, so the members are found here by asking
-// which of the input's ends decompresses whole.
+// says what it made of the rest, so the members are taken apart here.
 //
-// The asking is cheap because the format says where a member may end: the
-// four bytes before its end count what that member held, which is no more
-// than deflate could have packed into everything ahead of it. Ends whose
-// count says otherwise are not tried at all, and little else survives — the
-// count is four bytes of whatever the garbage is, and the bound is tight for
-// all but a very long input. Each end that does survive is decompressed whole
-// before it is believed, so nothing answered here was guessed at; the looking
-// stops once it has read a few times the input over, an input that buries its
-// members deeper than that being one this leaves as the stream left it.
-const LEAST = 18 // a ten-byte header, a byte of deflate, an eight-byte trailer
-const RATIO = 1032 // the most a byte of deflate can hold
-const ZEROS = 16 // the zero bytes a member can end with, trailer and all
-const BUDGET = 1 << 20
+// Where a member ends is not something a runtime's stream will say, but the
+// member says it itself. Its header is ten bytes and whatever its flags call
+// for after them; its data is a raw deflate stream, which `deflate-raw` reads
+// to its own end and hands over whole, minding nothing that follows it; and
+// the four bytes before a member's end count what that member held. So the
+// data is inflated on its own to learn that count, and the end is where the
+// input spells it — one place in four thousand million, whatever the rest of
+// the input is and however much of it there is. Each end so found is
+// decompressed as the member it claims to be before a byte of it is answered
+// with, so nothing here was guessed at.
+const HEADER = 10 // a member's header before its flags add to it
+const TRAILER = 8 // the check and the count that close one
+const DEFLATE = 8 // the method every member is written with
+const FCOMMENT = 0x10, FEXTRA = 0x04, FHCRC = 0x02, FNAME = 0x08
+const GZIP = 'gzip', RAW = 'deflate-raw'
 const heldAt = (bytes, at) => bytes[at] + bytes[at + 1] * 0x100 + bytes[at + 2] * 0x10000 + bytes[at + 3] * 0x1000000
 
-async function wholeAt(bytes, format, end) {
-  const read = await through(new DecompressionStream(format), bytes.subarray(0, end))
-  return read.error === null ? { bytes: read.bytes, rest: bytes.subarray(end) } : null
+// How far a member's header reaches. One that runs past the end of what there
+// is, or that names a method no member is written with, is not one to read.
+function headerLength(bytes, at) {
+  if (bytes[at] !== 0x1f || bytes[at + 1] !== 0x8b || bytes[at + 2] !== DEFLATE) return -1
+  const flags = bytes[at + 3]
+  let cursor = at + HEADER
+  if ((flags & FEXTRA) !== 0) {
+    if (cursor + 2 > bytes.length) return -1
+    cursor += 2 + bytes[cursor] + bytes[cursor + 1] * 0x100
+  }
+  // The name and the comment are each closed by a zero, in that order.
+  for (const flag of [FNAME, FCOMMENT]) {
+    if ((flags & flag) === 0) continue
+    while (cursor < bytes.length && bytes[cursor] !== 0) cursor++
+    cursor++
+  }
+  if ((flags & FHCRC) !== 0) cursor += 2
+  return cursor <= bytes.length ? cursor - at : -1
 }
 
-async function lastWholeMember(bytes, format) {
-  // gzip passes over a tail of zero bytes without a word, that being a block
-  // device's padding rather than anything it was meant to read. A member ends
-  // in zeros of its own — the high bytes of its length, and the last of the
-  // block before them — so where there is such a tail the member ends a byte
-  // or two into it, and those ends are tried from the near side first.
-  let pad = bytes.length
-  while (pad > 0 && bytes[pad - 1] === 0) pad--
-  const state = { budget: Math.max(BUDGET, bytes.length * 8) }
-  const near = await scan(bytes, format, state, Math.max(pad, LEAST), Math.min(bytes.length - 1, pad + ZEROS), 1)
-  return near ?? await scan(bytes, format, state, Math.min(bytes.length - 1, pad - 1), LEAST, -1)
-}
-
-async function scan(bytes, format, state, from, to, step) {
-  for (let end = from; step * (to - end) >= 0 && end <= state.budget; end += step) {
-    if (heldAt(bytes, end - 4) > RATIO * end) continue
-    state.budget -= end
-    // oxlint-disable-next-line no-await-in-loop -- one end after another, and the first that comes back whole is the answer.
-    const found = await wholeAt(bytes, format, end)
-    if (found) return found
+// The member beginning at `at`, and where it ends, or nothing where the bytes
+// there are no whole member. An end ahead of the real one has to spell the
+// same count in four bytes to be tried at all, which no run of data does; a
+// run of zeros spells nought, so a member whose data held nothing — or was
+// never data — is given up on after a few rather than followed to the end of
+// the input, there being no end of its own to find either way.
+const TRIES = 64
+async function memberAt(bytes, at) {
+  const head = headerLength(bytes, at)
+  if (head < 0) return null
+  const raw = await through(new DecompressionStream(RAW), bytes.subarray(at + head))
+  // Whatever stopped the raw stream stopped it past what this member held —
+  // that is the trailer and what follows, which are no part of the data — so
+  // the count stands or no end will match it.
+  const held = raw.bytes.length % 0x100000000
+  let tries = TRIES
+  for (let end = at + head + TRAILER; end <= bytes.length && tries > 0; end++) {
+    if (heldAt(bytes, end - 4) !== held) continue
+    tries--
+    // oxlint-disable-next-line no-await-in-loop -- all but one end in four thousand million is ruled out before this.
+    const member = await through(new DecompressionStream(GZIP), bytes.subarray(at, end))
+    if (member.error === null) return { bytes: member.bytes, end }
   }
   return null
 }
 
 // What came out whole, what stopped the stream, and what was left over after
 // the members it did read. An input the stream read to the end left nothing
-// over and nothing stopped it; one with no whole member in it is answered as
-// it was before, with the bytes the stream managed and what it ran into.
-export async function decompressMembers(bytes, format) {
-  const read = await through(new DecompressionStream(format), bytes)
-  if (read.error === null) return { ...read, rest: null }
-  const whole = await lastWholeMember(bytes, format)
-  return whole === null ? { ...read, rest: null } : { ...whole, error: read.error }
+// over and nothing stopped it; one whose members do not account for it short
+// of the end is answered as it was before, with the bytes the stream managed
+// and what it ran into.
+export async function decompressMembers(bytes) {
+  const read = await through(new DecompressionStream(GZIP), bytes)
+  if (read.error === null || !decompressionAvailable(RAW)) return { ...read, rest: null }
+  const parts = []
+  let at = 0
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one member after the last, as a stream carries them.
+    const member = await memberAt(bytes, at)
+    if (member === null) break
+    parts.push(member.bytes)
+    at = member.end
+  }
+  if (at === 0 || at === bytes.length) return { ...read, rest: null }
+  return { bytes: join(parts), error: read.error, rest: bytes.subarray(at) }
 }
 
 // Nothing is wrong with bytes to compress, whatever they are, so compressing

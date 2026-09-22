@@ -356,6 +356,19 @@ describe('gzip keeps the members it read, whatever followed them', () => {
     assert.deepEqual(await t.run('cat /tmp/x && ls /tmp'), result('alpha\nbeta\nx\n'))
   })
 
+  it('finds the member however much followed it', async () => {
+    // What follows is not searched through one end at a time: a member says
+    // how much it held, and the input spells that in one place. A hundred
+    // thousand bytes of it here, and gzip 1.12 says the same of them.
+    const tail = new Uint8Array(100000)
+    for (let at = 0; at < tail.length; at++) tail[at] = (at * 7 + 13) % 256
+    const t = terminal({ 'long.gz': joined(GOOD, tail) })
+    assert.deepEqual(await t.run('zcat long.gz'), result('alpha\nbeta\n', ignored('long.gz')))
+    // And a hundred thousand zero bytes are still the padding they were.
+    const padded = terminal({ 'long.gz': joined(GOOD, new Uint8Array(100000)) })
+    assert.deepEqual(await padded.run('zcat long.gz'), result('alpha\nbeta\n'))
+  })
+
   it('passes over a tail of zero bytes without a word', async () => {
     const t = terminal(TAILS)
     assert.deepEqual(await t.run('zcat pad.gz'), result('alpha\nbeta\n'))

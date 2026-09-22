@@ -175,7 +175,7 @@ async function decompress(name, bytes, opts, state, path = null) {
   const { ctx } = state
   if (!looksCompressed(bytes)) return dataError(state, `${name}: ${tooShort(bytes, path, ctx) ? 'unexpected end of file' : 'not in gzip format'}`)
 
-  const inflated = await decompressMembers(bytes, FORMAT)
+  const inflated = await decompressMembers(bytes)
   const suffix = suffixOf(name)
   const written = opts.stdout ? toStdout(inflated.bytes, state)
     : suffix === undefined ? fail(state, `${name}: unknown suffix -- ignored`, 2)
