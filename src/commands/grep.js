@@ -4,7 +4,7 @@ import { basename, lookup, relativeTo, resolve, walkTree } from '../fs.js'
 import { lookupWithNote, omissionNote } from '../notes.js'
 import { parseArgs } from '../args.js'
 import { consumeStdin, decodeUtf8Maybe, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, readTextOrBytes, usage } from '../util.js'
-import { UnsupportedError, unsupported, unsupportedFrom } from '../unsupported.js'
+import { UnsupportedError, markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { AwkError } from '../awk/common.js'
 import { cannotHoldMatch, compilePatterns, inputGap } from './grep-pattern.js'
 import { compileGlob } from '../glob.js'
@@ -69,8 +69,15 @@ function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
   let inputs = r.inputs
   if (filters.name.length > 0) inputs = inputs.filter((inp) => includedInput(inp, filters))
   if (counts.max !== 0) inputs = inputs.map((inp) => textInput(inp, filters, re.res, flags.has('v')))
+  // A file this cannot search is that file's trouble and not the search's.
+  // GNU keeps what the other files matched and says which one it could not
+  // read, so one such file in a tree does not take the rest of the answers
+  // with it; only a search with nothing left to read is the gap itself.
   const gap = counts.max === 0 ? null : inputGap(inputs, re.res, flags.has('v'), filters.forceText, ctx.locale)
-  if (gap) return gap
+  if (gap) {
+    inputs = inputs.filter((inp) => !inputGap([inp], re.res, flags.has('v'), filters.forceText, ctx.locale))
+    if (inputs.length === 0) return gap
+  }
   const showName = pickShowName(flags, rest.length)
   const invert = flags.has('v')
   const opts = { showName, invert, showLine: flags.has('n'), only: flags.has('o'), ...counts }
@@ -83,6 +90,11 @@ function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
     return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2)
   }
   // Read errors preserve successful output but override the match status with exit 2.
+  if (gap) {
+    const note = unsupportedNote(gap)
+    const left = { stdout: result.stdout, stderr: r.stderr + result.stderr + gap.stderr, exitCode: 2 }
+    return markUnsupported(left, note.kind, note.command, note.detail, note.message)
+  }
   if (r.failed) return { stdout: result.stdout, stderr: r.stderr + result.stderr, exitCode: 2 }
   return result
 }
