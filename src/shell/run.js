@@ -4,7 +4,7 @@ import { refusedWrite } from './parse.js'
 import { BindingMap } from './bindings.js'
 import { gateBlame, gateTracker, lookupWithNote, missingPathNote } from '../notes.js'
 import { UnsupportedError, unsupported, unsupportedNote } from '../unsupported.js'
-import { decodeUtf8Maybe, encodeUtf8, err, joinBytes, reason } from '../util.js'
+import { decodeUtf8Maybe, encodeUtf8, err, joinBytes, readTextOrBytes, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
 import { runBlock } from './blocks.js'
@@ -226,8 +226,7 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
   // the list shares, and what it takes it takes out of both halves of it.
   let piped = ctx.stdinBytes
   let parentBytes = piped
-  let replaced = false
-  const done = (error) => ({ error, fds, stdin: input, stdinBytes: replaced ? null : piped, stdinFile: file, stdinPiped: redirected || ctx.stdinPiped, stdinOrigin: file ? origin : null, stdinHandle: file ? handle : null, inherited, parentLeft, parentBytes })
+  const done = (error) => ({ error, fds, stdin: input, stdinBytes: piped, stdinFile: file, stdinPiped: redirected || ctx.stdinPiped, stdinOrigin: file ? origin : null, stdinHandle: file ? handle : null, inherited, parentLeft, parentBytes })
   const expand = async (fn) => {
     const value = await withState(ctx, { expansionFds: fds }, () => withStreams({ fds, stdin: input, stdinBytes: piped, stdinFile: file, stdinOrigin: origin, stdinHandle: handle }, ctx, fn))
     input = ctx.stdinLeft; piped = ctx.stdinBytes
@@ -255,15 +254,16 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
         if (dest === 'closed') return done(err(`error: ${t.value}: No such file or directory`))
         fds[r.fd] = dest
         if (r.both) fds[2] = dest
-      } else if (r.op === 'text') { input = r.expand ? await expand(() => expandScalar(heredocWord(r.body), ctx)) : r.body; file = false; inherited = false; replaced = true }
+      } else if (r.op === 'text') { input = r.expand ? await expand(() => expandScalar(heredocWord(r.body), ctx)) : r.body; file = false; inherited = false; piped = null }
       // A here-string is expanded but neither split nor globbed (bash).
-      else if (r.op === 'herestring') { input = await expand(() => expandScalar(r.word, ctx)) + '\n'; file = false; inherited = false; replaced = true }
+      else if (r.op === 'herestring') { input = await expand(() => expandScalar(r.word, ctx)) + '\n'; file = false; inherited = false; piped = null }
       else {
         const t = await expand(() => expandRedirect(r.word, ctx))
         const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, file ? origin : input)
         if (read.error) return done(read.error)
         input = read.content
-        replaced = t.value !== '/dev/stdin'
+        // `/dev/stdin` is the stream already there, and keeps what it carried.
+        if (t.value !== '/dev/stdin') piped = read.bytes ?? null
         // A pipe's /dev/stdin shares the current stream. A regular file
         // is reopened from its original start with an independent offset.
         if (t.value !== '/dev/stdin' || file) inherited = false
@@ -345,8 +345,14 @@ function readInput(path, ctx, stdin) {
   const { path: abs, error } = lookupWithNote(ctx, 'shell', path)
   if (error) return { error: err(`error: ${path}: ${error}`) }
   if (ctx.fs.isFile(abs)) {
-    const content = ctx.fs.readFile(abs)
-    return { content, handle: ctx.writable && abs.startsWith('/tmp/') ? { path: abs, content, identity: ctx.fs.fileIdentity(abs) } : null }
+    // A file of bytes is those bytes on the way in, as it is on the way out:
+    // reading it as text here would refuse `wc -c < img.png` for spelling no
+    // text, where nothing was going to read it as text in the first place.
+    // Bytes that spell text are that text, exactly as they are through a
+    // pipe, so only a file no text spells travels as the bytes it is.
+    const { text, bytes } = readTextOrBytes(ctx.fs, abs)
+    const content = text ?? '', held = text === undefined ? bytes : undefined
+    return { content, bytes: held, handle: ctx.writable && abs.startsWith('/tmp/') ? { path: abs, content, identity: ctx.fs.fileIdentity(abs) } : null }
   }
   return { error: err(`error: ${path}: Is a directory`) }
 }
