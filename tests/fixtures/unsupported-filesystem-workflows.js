@@ -47,7 +47,7 @@ export const FILESYSTEM_WORKFLOWS = [
   unavailable('Parse the manifest using Python', `python3 -c "import json; print(json.load(open('package.json'))['name'])"`, 'python3'),
   gap('Compare two source files side by side', 'diff -y src/index.js src/util.js', 'diff', '-y'),
   unavailable('Compare sorted name lists', 'comm -23 data/declared-names.txt data/used-names.txt', 'comm'),
-  unavailable('Save a listing while passing it down a pipeline', 'find src -type f | tee data/paths.txt', 'tee'),
+  unavailable('Line up two name lists side by side', 'paste data/declared-names.txt data/used-names.txt', 'paste'),
   unavailable('Identify a source file format', 'file src/index.js', 'file'),
   unavailable('Hash an entry point with a digest no runtime here does', 'md5sum src/index.js', 'md5sum'),
 ]

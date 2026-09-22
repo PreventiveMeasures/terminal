@@ -28,7 +28,7 @@ const isBuiltin = (name) => Boolean(BUILTIN_COMMANDS[name])
 // and splitting a path, making a link or writing a file is not what they were
 // reaching for. What the list keeps is what someone looking around a tree
 // reaches for.
-const UNANNOUNCED_NAMES = new Set(['basename', 'cp', 'dirname', 'ln', 'mkdir', 'patch', 'rm', 'touch'])
+const UNANNOUNCED_NAMES = new Set(['basename', 'cp', 'dirname', 'ln', 'mkdir', 'patch', 'rm', 'tee', 'touch'])
 const ANNOUNCED = Object.fromEntries(Object.entries(VISIBLE_COMMANDS).filter(([name]) => !UNANNOUNCED_NAMES.has(name)))
 
 // Priority for completion/help; unlisted builtins follow in sorted order.
@@ -47,7 +47,7 @@ const COMMAND_ORDER = [
 // are the shell's syntax rather than something a terminal hands out.
 const UNANNOUNCED = Object.keys(BUILTIN_COMMANDS).filter((name) => !SHELL_ONLY.has(name) && !Object.hasOwn(ANNOUNCED, name)).sort()
 // The unannounced readers, which belong after a pipe as the announced ones do.
-const UNANNOUNCED_PIPE = new Set(['base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'xxd', 'zcat'])
+const UNANNOUNCED_PIPE = new Set(['base32', 'brotli', 'egrep', 'fgrep', 'gunzip', 'gzcat', 'gzip', 'od', 'sed', 'sha1sum', 'sha256sum', 'sha384sum', 'sha512sum', 'shasum', 'tee', 'xxd', 'zcat'])
 const BUILTIN_NAMES = orderedCommandNames()
 
 // Only commands that consume stdin are offered after a pipe.

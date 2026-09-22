@@ -117,6 +117,7 @@
     "src/commands/sort.js",
     "src/commands/stat-format.js",
     "src/commands/stat.js",
+    "src/commands/tee.js",
     "src/commands/test.js",
     "src/commands/text.js",
     "src/commands/touch.js",
