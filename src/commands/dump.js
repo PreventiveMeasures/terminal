@@ -1,6 +1,7 @@
 // Byte dumps share row grouping, repeat folding, and offset tracking. Stored
 // strings are encoded as UTF-8; only printable ASCII appears in the gutter.
 
+import { toHex } from '@exodus/bytes/hex.js'
 import { unsupported } from '../unsupported.js'
 import { dumpInput } from './dump-input.js'
 import { parseArgs } from '../args.js'
@@ -46,15 +47,22 @@ export function xxd(stdin, tokens, ctx) {
 // Only identical full rows fold to *. Trailer policy differs for empty input:
 // od always prints one, hexdump requires a nonzero end offset, and xxd omits it.
 function dump(bytes, start, verbose, spec) {
+  // Every byte of a dump is two hex digits, and the runtime turns the whole
+  // input into them in one go — far faster than asking each byte for its own
+  // two, which is what this did. A row written byte by byte takes its share
+  // of that string; one written in little-endian words, or in octal, still
+  // works them out for itself, there being no such conversion to borrow.
+  const digits = spec.hex ? toHex(bytes) : ''
   const out = []
   let prev = null
   let starred = false
   for (let off = 0; off < bytes.length; off += BYTES_PER_LINE) {
     const row = bytes.subarray(off, off + BYTES_PER_LINE)
+    const rowHex = spec.hex ? digits.slice(off * 2, (off + BYTES_PER_LINE) * 2) : ''
     if (spec.compress && !verbose && prev !== null && row.length === BYTES_PER_LINE && sameBytes(row, prev)) {
       if (!starred) { out.push('*'); starred = true }
     } else {
-      out.push(spec.row(start + off, row))
+      out.push(spec.row(start + off, row, rowHex))
       starred = false
     }
     prev = row
@@ -75,6 +83,7 @@ const HEXDUMP_C = {
   compress: true,
   trailer: 'nonzero',
   addr: hexAddr8,
+  hex: true,
   row: canonicalRow,
 }
 
@@ -88,7 +97,8 @@ const OD = {
 const XXD = {
   compress: false,
   trailer: 'never',
-  row: (off, b) => `${hexAddr8(off)}: ${xxdGroups(b).join(' ').padEnd(XXD_HEX_WIDTH)}  ${gutter(b)}`,
+  hex: true,
+  row: (off, b, hex) => `${hexAddr8(off)}: ${xxdGroups(b, hex).join(' ').padEnd(XXD_HEX_WIDTH)}  ${gutter(b)}`,
 }
 
 function hexAddr7(n) { return n.toString(16).padStart(7, '0') }
@@ -98,9 +108,9 @@ function octAddr7(n) { return n.toString(8).padStart(7, '0') }
 // Canonical (`hexdump -C`) row: 8-digit offset, two padded groups of
 // eight 2-digit bytes, then a `|`-delimited ASCII gutter. Missing
 // trailing bytes pad to blanks so the `|` column stays aligned.
-function canonicalRow(off, row) {
+function canonicalRow(off, row, hex) {
   const cells = []
-  for (let i = 0; i < BYTES_PER_LINE; i++) cells.push(i < row.length ? hex2(row[i]) : '  ')
+  for (let i = 0; i < BYTES_PER_LINE; i++) cells.push(i < row.length ? hex.slice(i * 2, i * 2 + 2) : '  ')
   const left = cells.slice(0, 8).join(' ')
   const right = cells.slice(8).join(' ')
   return `${hexAddr8(off)}  ${left}  ${right}  |${gutter(row)}|`
@@ -117,13 +127,12 @@ function leWords(row) {
   return words
 }
 
-// xxd grouping: raw byte pairs, NOT byte-swapped (`he` → `6865`); a
-// lone trailing byte renders as a single 2-digit group.
-function xxdGroups(row) {
+// xxd grouping: raw byte pairs, NOT byte-swapped (`he` → `6865`), which is
+// the order the digits are already in; a lone trailing byte renders as a
+// single 2-digit group, which is all the slice has left to give.
+function xxdGroups(row, hex) {
   const groups = []
-  for (let i = 0; i < row.length; i += 2) {
-    groups.push(hex2(row[i]) + (i + 1 < row.length ? hex2(row[i + 1]) : ''))
-  }
+  for (let i = 0; i < row.length; i += 2) groups.push(hex.slice(i * 2, i * 2 + 4))
   return groups
 }
 
@@ -137,6 +146,5 @@ function sameBytes(a, b) {
   return a.length === b.length && a.every((byte, i) => byte === b[i])
 }
 
-const hex2 = (b) => b.toString(16).padStart(2, '0')
 const hex4 = (w) => w.toString(16).padStart(4, '0')
 const oct6 = (w) => w.toString(8).padStart(6, '0')
