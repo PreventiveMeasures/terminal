@@ -82,7 +82,7 @@ function parseBinary(p, opts, minimum = 0) {
     }
     const right = parseBinary(p, opts, precedence + 1)
     if ((op === '/' || op === '%') && constValue(right) === 0 && constValue(left) !== null) {
-      p.fail(op === '/' ? 'division by zero attempted' : 'division by zero attempted in `%`')
+      p.fail(op === '/' ? 'division by zero attempted' : 'division by zero attempted in `%`', null, 'error')
     }
     if (type === 'compare' && isRelOp(p, opts)) {
       p.fail(`comparison operators do not chain (\`a ${op} b ${p.tok.value} c\`); parenthesize the first comparison`)

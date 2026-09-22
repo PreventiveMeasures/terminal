@@ -46,7 +46,7 @@ export class Parser {
   }
   skipNewlines() { while (this.tok.type === 'newline') this.i++ }
   skipTerminators() { while (this.tok.type === 'newline' || this.is(';')) this.i++ }
-  fail(msg, gap = null) { throw new AwkError(msg, this.tok.line, gap) }
+  fail(msg, gap = null, kind = 'syntax error') { throw new AwkError(msg, this.tok.line, gap, kind) }
   warn(msg) { this.warnings.push(msg) }
   unexpected() { this.fail(`unexpected ${describe(this.tok)}`) }
 }

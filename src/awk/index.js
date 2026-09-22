@@ -41,7 +41,7 @@ export function awk(stdin, tokens, ctx) {
     if (e instanceof RangeError) return unsupported('feature', 'awk', 'parser depth limit', `awk: program too deeply nested (${e.message})`)
     if (unsupportedNote(e)) return unsupportedFrom(e, 'awk', `awk: ${e.message}`)
     if (!(e instanceof AwkError)) throw e
-    const message = e.line === null ? `awk: ${e.message}` : `awk: syntax error at line ${e.line}: ${e.message}`
+    const message = e.line === null ? `awk: ${e.message}` : `awk: ${e.kind} at line ${e.line}: ${e.message}`
     // Unsupported constructs also reach diagnostics when stderr is redirected.
     return e.gap === null ? err(message) : unsupported('feature', 'awk', e.gap, message)
   }
