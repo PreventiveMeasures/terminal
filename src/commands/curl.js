@@ -6,9 +6,10 @@ import { fail, gap, readCommandLine } from './curl-options.js'
 // curl, over the runtime's `fetch` (../net.js). It is here only where the
 // caller asked for a terminal with a network — `createTerminal(sources, {
 // network: true })` — and where the runtime has a `fetch` to make the request
-// with; without either, the name is not a command, which is what it was
-// before this one was written, and what is then not found says which of the
-// two it was rather than leaving someone to guess.
+// with; without either, the name is not a command at all, and says no more
+// than that. How a terminal was built is the caller's business and nothing a
+// line running inside it can do anything about, so a missing `curl` reads
+// exactly as it did before this command was written.
 //
 // What it is: the request the command line describes, made once, and the
 // answer written out. What it is not is libcurl. A transfer here is one
@@ -208,7 +209,7 @@ function toFile(name, headers, body, state) {
 // an HTTP/1.1 one. The run says as much on the note channel, beside the
 // answer, since it is a difference from the real tool rather than a failure.
 function headerBlock(response, ctx) {
-  ctx.notes?.add('curl: the response header block is rendered from the headers as the runtime hands them back: names lowercased and sorted, under a status line reading HTTP/1.1 whichever version the connection spoke')
+  ctx.notes?.add('curl: response header names are lowercased and sorted, and the status line reads HTTP/1.1 whatever the connection spoke.')
   const lines = [`HTTP/1.1 ${response.status}${response.statusText === '' ? '' : ` ${response.statusText}`}`]
   // Cookies are the one header a response may carry several of, and the one
   // the iteration below cannot answer for: a runtime hands them back joined into

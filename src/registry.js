@@ -1,7 +1,7 @@
 // Builtins are shared; custom commands and completion order are per terminal.
 
 import { defineCommands } from './custom.js'
-import { EXTRA_COMMANDS, HIDDEN_EXTRAS, NETWORK_NAMES, networkState } from './commands/extra.js'
+import { EXTRA_COMMANDS, HIDDEN_EXTRAS, NETWORK_NAMES, networkCommands } from './commands/extra.js'
 import { NAV_COMMANDS } from './commands/nav.js'
 import { cat } from './commands/cat.js'
 import { sed } from './commands/sed.js'
@@ -99,18 +99,15 @@ function chainRole(argv, has) {
 // `fetch`, the commands that would use one stay out, as the compressors stay
 // out of a runtime whose streams do not know their format.
 export function createRegistry(commands, network = false) {
-  const net = networkState(network)
-  const networked = net.commands === null ? [] : NETWORK_NAMES
+  const networkedCommands = networkCommands(network)
+  const networked = networkedCommands === null ? [] : NETWORK_NAMES
   const custom = defineCommands(commands, (name) => isBuiltin(name) || networked.includes(name))
-  const handlers = Object.freeze({ __proto__: null, ...BUILTIN_COMMANDS, ...net.commands, ...custom.handlers })
+  const handlers = Object.freeze({ __proto__: null, ...BUILTIN_COMMANDS, ...networkedCommands, ...custom.handlers })
   const has = (name) => Boolean(handlers[name])
   const names = Object.freeze([...BUILTIN_NAMES, ...networked, ...UNANNOUNCED, ...custom.names])
   return Object.freeze({
     commands: handlers,
     names,
-    // Whether a network was asked for, and whether the runtime has one to
-    // give: what a name that is missing because of it says it is missing for.
-    network: Object.freeze({ asked: net.asked, usable: net.usable }),
     // `curl` reads stdin with `-d @-`, so it belongs after a pipe as readily
     // as it does in front of one.
     pipeNames: Object.freeze([...PIPE_NAMES, ...networked, ...UNANNOUNCED.filter((name) => UNANNOUNCED_PIPE.has(name)), ...custom.pipeNames]),
@@ -140,19 +137,12 @@ export const defaultRegistry = (network) => {
 }
 
 // Render unavailable command names using the same registry used for dispatch.
+// A name a terminal was built without is a name it does not have, and that is
+// the whole of what it says: how the terminal was built is the caller's
+// business and nothing a line running inside it can act on, so a command that
+// is not there reads exactly as it did before it was written.
 export function unknownCommand(name, reg) {
   const gap = SHELL_GAPS.get(name)
   if (gap !== undefined) return unsupported('feature', name, name, `${name}: ${gap}`, 127)
-  // A name that is missing for one reason and one reason only says that
-  // reason, rather than sending someone to look for a spelling of it in a
-  // list it was never going to be in. A bin-prefixed spelling of it is the
-  // same name: nothing resolves one that is not registered, so it is read
-  // here rather than left to the generic miss.
-  const networked = NETWORK_NAMES.find((known) => name === known || BIN_PREFIXES.some((prefix) => name === prefix + known))
-  if (networked !== undefined) return unsupported('feature', name, 'network', `${name}: ${networkGap(networked, reg)}`, 127)
   return unsupported('command', name, name, `${name}: command not found. Available: ${reg.known}`, 127)
 }
-
-const networkGap = (name, reg) => reg.network?.asked
-  ? `this runtime has no \`fetch\`, so \`network: true\` has nothing to make a request with, and \`${name}\` is not here`
-  : `this terminal has no network. \`createTerminal\` takes \`network: true\`, which is what puts \`${name}\` here`

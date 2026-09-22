@@ -64,8 +64,9 @@ line without running it is a separate entry point,
 
 Nothing here reaches outside unless you say so. `network: true` adds `curl`,
 which makes its request with the runtime's own `fetch`; without it there is no
-`curl` at all, and the name says the network was never asked for rather than
-that the command was never written.
+`curl` at all — the name is not a command, exactly as it was before the command
+was written. How you built the terminal is not something a line running inside
+it is told, or could act on.
 
 ```js
 const online = createTerminal(sources, { mount: '/repo', writable: '/tmp/', network: true })
@@ -73,7 +74,7 @@ const online = createTerminal(sources, { mount: '/repo', writable: '/tmp/', netw
 (await online.run('curl -sS https://example.com/status.json | head -c 40')).stdout
 (await online.run('curl -fsSL -o /tmp/page.html https://example.com/')).exitCode
 (await createTerminal(sources).run('curl https://example.com/')).unsupported
-// [{ kind: 'feature', command: 'curl', detail: 'network', message: 'curl: this terminal has no network. …' }]
+// [{ kind: 'command', command: 'curl', detail: 'curl', message: 'curl: command not found. Available: …' }]
 ```
 
 `true` is whatever that `fetch` can reach, over http and https alone — there is

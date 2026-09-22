@@ -239,8 +239,9 @@ scripts and git binary patches are refused the same way.
 
 `curl` is the one command that reaches outside, and the one no terminal has
 unless it was asked for: `createTerminal` takes `network: true`, and without
-it the name is not a command — what says so says the network was never asked
-for rather than that `curl` was never written. It makes its request with the
+it the name is not a command, which is what it was before `curl` was written —
+a line that reaches for it is told that and no more, since how the terminal
+was built is the caller's business rather than the line's. It makes its request with the
 runtime's own `fetch`, over http and https alone; every other scheme, on the
 URL or on a redirect it was told to follow, is refused as the protocol this
 terminal does not speak, `file:` included. A request carries what the command

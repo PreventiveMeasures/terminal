@@ -20,7 +20,7 @@ const offline = (sources = SOURCES, opts = {}) => createTerminal(sources, { moun
 const result = (stdout = '', { stderr = '', exitCode = 0, notes = [], unsupported = [] } = {}) =>
   ({ stdout, stderr, exitCode, cwd: '/repo', notes, unsupported })
 
-const HEADER_NOTE = 'curl: the response header block is rendered from the headers as the runtime hands them back: names lowercased and sorted, under a status line reading HTTP/1.1 whichever version the connection spoke'
+const HEADER_NOTE = 'curl: response header names are lowercased and sorted, and the status line reads HTTP/1.1 whatever the connection spoke.'
 
 // Every request the line made, in order, with what it carried: a test asks
 // what went out as readily as what came back, since half of what curl does is
@@ -48,19 +48,26 @@ const moved = (to, status = 302) => () => new Response('', { status, headers: { 
 const refused = (code, message) => () => { throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(message), { code }) }) }
 
 describe('a terminal has no network unless it asked for one', () => {
-  it('does not have the command, and says which of the two reasons it is', async () => {
+  it('does not have the command, and says no more than that', async () => {
     const t = offline()
     const r = await t.run('curl https://example.test/')
     assert.equal(r.exitCode, 127)
-    assert.match(r.stderr, /^curl: this terminal has no network\. `createTerminal` takes `network: true`/u)
-    assert.deepEqual(r.unsupported.map(({ kind, command, detail }) => ({ kind, command, detail })), [{ kind: 'feature', command: 'curl', detail: 'network' }])
+    assert.deepEqual(r.unsupported.map(({ kind, command, detail }) => ({ kind, command, detail })), [{ kind: 'command', command: 'curl', detail: 'curl' }])
+    // Word for word the miss any other name gets, with `curl` not among the
+    // names it offers — the compressors and the digests read the same way
+    // where the runtime cannot do their work, and for the same reason: how a
+    // terminal was built is nothing a line running inside it can act on, so
+    // nothing tells it.
+    const other = await t.run('frobnicate https://example.test/')
+    assert.match(r.stderr, /^curl: command not found\. Available: /u)
+    assert.equal(r.stderr.replace('curl', 'frobnicate'), other.stderr)
+    assert.doesNotMatch(r.stderr, /network|createTerminal|fetch/u)
     // It is not in the list of names either, so nothing offers what is not there.
     assert.deepEqual(t.complete('cur'), [])
-    assert.doesNotMatch(r.stderr, /Available:/u)
-    // A bin-prefixed spelling is the same name, and gets the same answer.
+    // A bin-prefixed spelling is a name like any other, and misses like one.
     const bin = await t.run('/usr/bin/curl https://example.test/')
     assert.equal(bin.exitCode, 127)
-    assert.match(bin.stderr, /^\/usr\/bin\/curl: this terminal has no network/u)
+    assert.match(bin.stderr, /^\/usr\/bin\/curl: command not found\. Available: /u)
   })
 
   it('offers the name, and the list of names, once it has one', async () => {

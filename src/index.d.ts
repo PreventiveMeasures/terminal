@@ -203,12 +203,12 @@ export interface CreateTerminalOptions {
    * Whether this terminal may reach the network, which is what puts `curl` in
    * it. `false` by default, and everything else here is over a tree that
    * exists only in memory, so a terminal created without this has no command
-   * that can make a request — the name is not found, and what it says is that
-   * the network was never asked for rather than that `curl` was never
-   * written. `true` needs a `fetch` in the runtime to make the request with;
-   * a runtime without one leaves the command out for the same reason a
-   * runtime whose streams do not know a compression format leaves `brotli`
-   * out, and says which of the two it was.
+   * that can make a request: the name is not found, exactly as it was before
+   * the command was written. A line running in the terminal is told nothing
+   * more than that, since how the terminal was built is yours rather than
+   * its. `true` needs a `fetch` in the runtime to make the request with; a
+   * runtime without one leaves the command out for the same reason a runtime
+   * whose streams do not know a compression format leaves `brotli` out.
    *
    * There is nothing narrower to ask for: `true` is whatever the runtime's
    * own `fetch` can reach, over http and https alone. A caller who needs an

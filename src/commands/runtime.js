@@ -19,11 +19,8 @@ export const RUNTIME_COMMANDS = { ...GZIP, ...BROTLI, ...SHA }
 const NETWORK_COMMANDS = Object.freeze({ __proto__: null, curl })
 export const NETWORK_NAMES = Object.freeze(Object.keys(NETWORK_COMMANDS))
 
-// What a network adds to a registry, and the two reasons it may add nothing:
-// the caller did not ask for one, or the runtime has no `fetch` to make a
-// request with. A name that is missing says which of the two it was.
-export const networkState = (asked) => Object.freeze({
-  asked: asked === true,
-  usable: networkUsable(),
-  commands: asked === true && networkUsable() ? NETWORK_COMMANDS : null,
-})
+// What a network adds to a registry, and nothing at all for either of the two
+// reasons it may add nothing: the caller did not ask for one, or the runtime
+// has no `fetch` to make a request with. Neither reason is the registry's to
+// tell apart — a terminal without the command is a terminal without it.
+export const networkCommands = (asked) => (asked === true && networkUsable() ? NETWORK_COMMANDS : null)

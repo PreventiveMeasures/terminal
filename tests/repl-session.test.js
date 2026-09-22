@@ -104,12 +104,12 @@ describe('the development REPL reaches the network only with --network', () => {
       writeFileSync(join(dir, 'a.txt'), 'alpha\n')
       await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve) })
       const url = `http://127.0.0.1:${server.address().port}/hello`
-      // Without the flag the name is not a command, and what says so says
-      // that the session was started without a network rather than that the
-      // command was never written.
+      // Without the flag the name is not a command, and that is all it says:
+      // how the session was started is not the session's to report.
       const off = await running(`curl ${url}\n`, [], dir)
       assert.equal(off.stdout, '')
-      assert.match(off.stderr, /curl: this terminal has no network/u)
+      assert.match(off.stderr, /curl: command not found\. Available: /u)
+      assert.doesNotMatch(off.stderr, /network|--network/u)
       // With it, the request leaves this process and the answer comes back
       // through the same terminal every other command writes to.
       const on = await running(`curl -sS ${url} | tr a-z A-Z\n`, ['--network'], dir)

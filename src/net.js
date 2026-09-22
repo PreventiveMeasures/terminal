@@ -10,7 +10,8 @@
 // did not hand over. A request does leave, so it is asked for rather than
 // assumed — `createTerminal(sources, { network: true })` — and without that
 // the command that would make one is not in the registry at all: the name is
-// not found, which is what it was before the command was written.
+// not found, which is what it was before the command was written, and is the
+// whole of what a line inside such a terminal is told about it.
 //
 // Two rules hold whatever is asked for. What it will speak is http and https
 // and nothing else: `file:` would be the host filesystem this package does
