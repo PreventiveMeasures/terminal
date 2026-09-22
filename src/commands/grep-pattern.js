@@ -250,6 +250,21 @@ function hasBackreference(pattern) {
   return false
 }
 
+// A wildcard, or a set spelt by what it excludes, over the normalised source:
+// either can match what is not ASCII, and what that is — one character or the
+// bytes of one — is the locale's to say.
+function readsAnyCharacter(source) {
+  let inClass = false
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]
+    if (c === '\\') { i++; continue }
+    if (inClass) { if (c === ']') inClass = false; continue }
+    if (c === '.') return true
+    if (c === '[') { inClass = true; if (source[i + 1] === '^') return true }
+  }
+  return false
+}
+
 export function compilePatterns(patterns, flags, locale = LOCALE) {
   // Compile -e patterns separately: combining them would shift backreference
   // numbers across patterns. A line matches if any pattern selects it.
@@ -295,6 +310,11 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       re.folded = folded
       re.extendedC = folded && EXTENDED_C.test(pattern)
       re.unicodePattern = /[\u0080-\u{10FFFF}]/u.test(pattern)
+      // Whether the pattern reads a character at a time rather than a byte: a
+      // wildcard and a set spelt by what it excludes both reach past ASCII,
+      // and a locale's own classes name ASCII alone outside C.UTF-8 — so a set
+      // spelt by what it holds reads the same either way, and a literal does.
+      re.anyCharacter = readsAnyCharacter(canonical)
       const literal = flags.has('F') || !METACHARACTER.test(pattern)
       re.binaryLiteral = !whole && !word && literal
       // Whether the bytes alone can say that a file this terminal cannot read
@@ -395,9 +415,12 @@ export function inputGap(inputs, res, invert, forceText = false, locale = LOCALE
   if (!forceText && inputs.some((inp) => inp.content.includes('\0') && (invert || res.some((re) => !re.binaryLiteral || re.test(inp.content))))) return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
   // The matcher reads a character at a time, which is C.UTF-8's reading and
   // no other locale's: anywhere else, a pattern the locale could change is
-  // refused over non-ASCII text before any of it is read.
+  // refused over non-ASCII text before any of it is read. A wildcard is one
+  // such pattern — where a byte is a character it matches one byte of what is
+  // spelt in more than one — so it is refused with the rest rather than
+  // answered a character at a time.
   const nonAscii = /[\u0080-\u{10FFFF}]/u
-  if (locale !== LOCALE && res.some((re) => re.localeSensitive || re.folded) && (res.some((re) => re.unicodePattern) || inputs.some((inp) => nonAscii.test(inp.content)))) {
+  if (locale !== LOCALE && res.some((re) => re.localeSensitive || re.folded || re.anyCharacter) && (res.some((re) => re.unicodePattern) || inputs.some((inp) => nonAscii.test(inp.content)))) {
     return unsupported('feature', 'grep', 'locale', `grep: matching non-ASCII text in the ${locale} locale is not supported`, 2)
   }
   // GNU's two matchers fold the Cyrillic Extended-C letters differently

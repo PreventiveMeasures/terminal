@@ -5,6 +5,8 @@
 import { trimParameter } from './parameter-pattern.js'
 import { transformParameter } from './parameter-transform.js'
 import { parameterError } from './parameter-parse.js'
+import { byteLocale } from '../locale.js'
+import { encodeUtf8Loose } from '../util.js'
 
 const VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/u
 
@@ -13,7 +15,7 @@ export async function evaluateParameter(ref, ctx, options) {
   const { name, operator, word = '' } = ref
   const found = lookup(name, { quiet: operator !== '' })
   if (!operator) return found
-  if (operator === 'length') return parameterLength(name, found.value)
+  if (operator === 'length') return parameterLength(name, found.value, ctx)
   if (operator === ':' || operator.startsWith('/')) return transformParameter(ref, found, ctx, options)
   if (operator[0] === '#' || operator[0] === '%') {
     // Bash does not expand a removal pattern when there is no value to trim.
@@ -39,8 +41,12 @@ export async function evaluateParameter(ref, ctx, options) {
   return { value: ctx.vars.get(name) }
 }
 
-function parameterLength(name, value) {
+function parameterLength(name, value, ctx) {
   if (name === '*' || name === '@') return { value: '0' }
+  // How long a value is, is how many of whatever the locale counts in are in
+  // it: bytes where a byte is a character, and characters where one is spelt
+  // in more than one byte — which is a reading only C.UTF-8's tables give.
+  if (byteLocale(ctx)) return { value: String(encodeUtf8Loose(value).length) }
   if (/\P{ASCII}/u.test(value)) {
     throw parameterError('#' + name, 'locale-dependent length of non-ASCII parameters is not supported')
   }

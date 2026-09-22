@@ -1,10 +1,22 @@
-// tree 2.x's plain UTF-8 listing. Counts include the root directory.
+// tree 2.x's listing. Counts include the root directory.
+//
+// The branches are drawn with what the locale's character set has in it: the
+// box drawing of a UTF-8 one, and the ASCII tree falls back to where a byte
+// is a character. The widths are the same either way, so only the characters
+// the lines are made of change.
 import { compareNames, joinPath, lookup } from '../fs.js'
 import { parseArgs } from '../args.js'
 import { err, parseNonNegativeInt } from '../util.js'
 import { unsupported } from '../unsupported.js'
+import { byteLocale } from '../locale.js'
 import { INT32_MAX } from '../numeric.js'
 import { hiddenEntryNotes, lookupWithNote, omissionNote } from '../notes.js'
+
+const BRANCHES = Object.freeze({
+  utf8: { down: '\u251C\u2500\u2500 ', last: '\u2514\u2500\u2500 ', through: '\u2502\u00A0\u00A0 ', past: '    ' },
+  ascii: { down: '|-- ', last: '`-- ', through: '|   ', past: '    ' },
+})
+export const branchesFor = (ctx) => (byteLocale(ctx) ? BRANCHES.ascii : BRANCHES.utf8)
 
 export function tree(_stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, { short: ['a', 'd', 'F'], long: ['noreport'], valueShort: ['L'] })
@@ -26,7 +38,7 @@ export function tree(_stdin, tokens, ctx) {
     const omitted = new Set()
     const hidden = hiddenEntryNotes()
     try {
-      const gap = walk(ctx.fs, root, out, flags, limit.value, count, omitted, hidden)
+      const gap = walk(ctx.fs, root, out, flags, limit.value, count, omitted, hidden, branchesFor(ctx))
       if (gap) return gap
     } finally {
       omissionNote(ctx.notes, { command: 'tree', action: 'depth limit omitted contents of', noun: ['directory', 'directories'], paths: omitted })
@@ -51,7 +63,7 @@ function rootMark(ctx, flags, named, isDir) {
   return isDir && !flags.has('d') ? '/' : ''
 }
 
-function walk(fs, root, out, flags, limit, count, omitted, hidden) {
+function walk(fs, root, out, flags, limit, count, omitted, hidden, branches) {
   const stack = [{ dir: root, prefix: '', items: itemsFor(fs, root, flags, hidden), i: 0, depth: 0 }]
   while (stack.length) {
     const frame = stack.at(-1)
@@ -64,7 +76,7 @@ function walk(fs, root, out, flags, limit, count, omitted, hidden) {
     // `-F` marks what a name leads to, so a link carries the mark on the
     // target it names rather than on itself, as a long listing does.
     const mark = isDir && flags.has('F') && !flags.has('d') ? '/' : ''
-    out.push(frame.prefix + (last ? '└── ' : '├── ') + n + (target === undefined ? mark : ' -> ' + target + mark))
+    out.push(frame.prefix + (last ? branches.last : branches.down) + n + (target === undefined ? mark : ' -> ' + target + mark))
     count[isDir ? 'dirs' : 'files']++
     // A link is counted as what it leads to and crossed no more than the walk
     // below it is: what it holds is listed where that name is, not here.
@@ -77,7 +89,7 @@ function walk(fs, root, out, flags, limit, count, omitted, hidden) {
       continue
     }
     const items = itemsFor(fs, dir, flags, hidden)
-    stack.push({ dir, prefix: frame.prefix + (last ? '    ' : '│   '), items, i: 0, depth: frame.depth + 1 })
+    stack.push({ dir, prefix: frame.prefix + (last ? branches.past : branches.through), items, i: 0, depth: frame.depth + 1 })
   }
 }
 
