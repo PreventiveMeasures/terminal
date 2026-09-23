@@ -96,11 +96,13 @@ export function parseTar(tokens, ctx) {
 }
 
 // One option, as GNU takes it where it stands: a second mode, and a value it
-// cannot read, are refused there, ahead of anything later on the line.
+// cannot read, are refused there, ahead of anything later on the line. `-t`
+// is a verbosity of its own, each time it is given, so `-tt` lists as `-tv`.
 function take(opts, name, value, ctx) {
   if (MODES.has(name)) {
     if (opts.mode !== null && opts.mode !== name) return usage("You may not specify more than one '-Acdtrux', '--delete' or  '--test-label' option")
     opts.mode = name
+    if (name === 'list') opts.verbose++
   } else if (name === 'verbose') opts.verbose++
   else if (name === 'directory') opts.items.push({ dir: value })
   else if (value === undefined) opts.flags.add(name)
@@ -174,6 +176,8 @@ function settle(opts) {
     keepOld: opts.flags.has('keep-old-files'),
     numericOwner: opts.flags.has('numeric-owner'),
     utc: opts.flags.has('utc'),
+    // Wherever it stands: GNU asks once all the names are read.
+    noWildcards: opts.flags.has('no-wildcards'),
     owner: opts.values.get('owner'),
     group: opts.values.get('group'),
     strip: opts.values.get('strip-components') ?? 0,

@@ -65,11 +65,12 @@ export function memberNames(items) {
   }
 }
 
-// GNU's report of the operands nothing matched, once the archive is read.
-export function reportMissing(names, state) {
+// GNU's report of the operands nothing matched, once the archive is read,
+// with its warning of a pattern in one unless --no-wildcards silenced it.
+export function reportMissing(names, state, noWildcards) {
   for (const name of names.names) {
     if (name.found) continue
-    if (hasWildcards(name.operand)) {
+    if (!noWildcards && hasWildcards(name.operand)) {
       state.warn('Pattern matching characters used in file names')
       state.warn('Use --wildcards to enable pattern matching, or --no-wildcards to suppress this warning')
     }

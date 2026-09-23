@@ -41,8 +41,7 @@ async function readMembers(opts, state) {
   const extracting = opts.mode === 'extract'
   // What -O writes goes to stdout, which moves the names to stderr.
   if (extracting && opts.toStdout) state.listTo = 2
-  const verbose = extracting ? opts.verbose : opts.verbose + 1
-  const line = verbose > 1 ? longLines(ctx, opts) : null
+  const line = opts.verbose > 1 ? longLines(ctx, opts) : null
   const places = new Map()
   for (const [i, entry] of read.entries.entries()) {
     // What GNU says of an entry's header it says as it reads it, whatever
@@ -55,7 +54,7 @@ async function readMembers(opts, state) {
     if (dir === null) return
     const name = extracting ? strippedName(shown, opts.strip) : shown
     if (name === null) continue
-    if (verbose > 0) state.list(line ? line(entry) : quoteEscape(shown, ctx))
+    if (opts.verbose > 0) state.list(line ? line(entry) : quoteEscape(shown, ctx))
     if (extracting && opts.toStdout) {
       if (entry.type === 'file' || entry.type === 'contiguous-file') state.bytes(entry.data)
     } else if (extracting && extractEntry(entry, name, landing(dir, name), state, opts.keepOld)) dated(read.mtimes[i], name, began, state)
@@ -64,7 +63,7 @@ async function readMembers(opts, state) {
   // gzip's status is waited for when the archive is closed, which GNU does
   // before it looks for what it did not find.
   if (read.child) return state.fatal(`Child returned status ${read.child}`)
-  reportMissing(names, state)
+  reportMissing(names, state, opts.noWildcards)
 }
 
 // GNU sets the time of each entry it writes, and warns of one before 1970 or

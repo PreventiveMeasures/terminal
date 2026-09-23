@@ -198,6 +198,9 @@ describe('tar lists what an archive holds', () => {
     const t = await terminal()
     assert.deepEqual(await t.run('tar -tf pkg.tar'), result(NAMES))
     assert.deepEqual(await t.run('tar -tvf pkg.tar'), result(lines(...LONG)))
+    // -t is a verbosity of its own each time it is given.
+    assert.deepEqual(await t.run('tar -ttf pkg.tar'), result(lines(...LONG)))
+    assert.deepEqual(await t.run('tar --list --list -f pkg.tar'), result(lines(...LONG)))
     // The old style: the letters of a first word with no dash, their
     // arguments taken from the words after it.
     assert.deepEqual(await t.run('tar tvf pkg.tar pkg/src'), result(lines(...LONG.slice(6))))
@@ -251,6 +254,10 @@ describe('tar lists what an archive holds', () => {
         + 'tar: pkg/*.md: Not found in archive\ntar: Exiting with failure status due to previous errors\n',
       exitCode: 2,
     }))
+    // --no-wildcards silences the warning, wherever it stands.
+    const missing = result('', { stderr: 'tar: pkg/*.md: Not found in archive\ntar: Exiting with failure status due to previous errors\n', exitCode: 2 })
+    assert.deepEqual(await t.run("tar -tf pkg.tar --no-wildcards 'pkg/*.md'"), missing)
+    assert.deepEqual(await t.run("tar -tf pkg.tar 'pkg/*.md' --no-wildcards"), missing)
   })
 
   it('says what GNU says of what is not an archive at all', async () => {
