@@ -260,6 +260,20 @@ describe('tar lists what an archive holds', () => {
     assert.deepEqual(await t.run("tar -tf pkg.tar 'pkg/*.md' --no-wildcards"), missing)
   })
 
+  it('reads no archive from the terminal and writes none to it, as GNU does', async () => {
+    // Nothing can be typed into this terminal, and it shows text: stdin is
+    // the terminal unless something was piped or redirected into it, and
+    // stdout is unless it goes on down a pipe or into a file. GNU asks before
+    // anything but the command line itself.
+    const t = await terminal()
+    const refusing = (way) => result('', { stderr: `tar: Refusing to ${way} archive contents ${way === 'read' ? 'from' : 'to'} terminal (missing -f option?)\ntar: Error is not recoverable: exiting now\n`, exitCode: 2 })
+    for (const line of ['tar -t', 'tar -tf -', 'tar -xz', 'tar -tv pkg/README.md']) assert.deepEqual(await t.run(line), refusing('read'), line)
+    for (const line of ['tar -c pkg', 'tar -czvf - pkg', 'tar -c --format=pax pkg']) assert.deepEqual(await t.run(line), refusing('write'), line)
+    // A pipe and a redirect are no terminal.
+    assert.deepEqual(await t.run('tar -cf - --owner=dev:1000 --group=staff:50 pkg/README.md | tar -t'), result('pkg/README.md\n'))
+    assert.deepEqual(await t.run('tar -t < pkg.tar'), result(NAMES))
+  })
+
   it('says what GNU says of what is not an archive at all', async () => {
     const t = await terminal()
     assert.deepEqual(await t.run('tar -t < /dev/null'), result('', { stderr: 'tar: This does not look like a tar archive\ntar: Exiting with failure status due to previous errors\n', exitCode: 2 }))

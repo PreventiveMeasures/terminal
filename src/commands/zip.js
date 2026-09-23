@@ -17,7 +17,7 @@
 import { compress } from '@preventive/archive/compression.js'
 import { ArchiveError, zip as writeZip } from '@preventive/archive/zip.js'
 import { basename, compareNames, joinPath, lookup, resolve } from '../fs.js'
-import { readBytesOf } from '../util.js'
+import { readBytesOf, stdoutIsTerminal } from '../util.js'
 import { inOverlay } from '../writable.js'
 import { UnsupportedError, markUnsupported } from '../unsupported.js'
 
@@ -44,8 +44,16 @@ function parseZip(tokens) {
 export async function zip(_stdin, tokens, ctx) {
   const opts = parseZip(tokens)
   // Without an archive to write, or with `-` for one, zip is a filter from
-  // stdin to stdout, whose archive has to say its sizes after the data.
-  if (opts.archive === null || opts.archive === '-') throw new UnsupportedError('feature', 'streamed archive', 'writing an archive to stdout is not supported')
+  // stdin to stdout, whose archive has to say its sizes after the data. With
+  // nothing on the line at all it prints its help instead; given anything,
+  // it will not write to a terminal, and says so on stderr, where a filter's
+  // messages go.
+  if (opts.archive === null || opts.archive === '-') {
+    if (tokens.length > 0 && stdoutIsTerminal(ctx)) {
+      return { stdout: '', stderr: '\nzip error: Invalid command arguments (cannot write zip file to terminal)\n', exitCode: 16 }
+    }
+    throw new UnsupportedError('feature', 'streamed archive', 'writing an archive to stdout is not supported')
+  }
   const say = { events: [], status: 0 }
   const out = (text) => say.events.push({ fd: 1, text })
   // Info-ZIP puts `.zip` on a name that has no suffix of its own.

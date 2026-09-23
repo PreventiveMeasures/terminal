@@ -282,7 +282,12 @@ describe('zip writes an archive UnZip reads back', () => {
     const t = await terminal()
     await gap(t, 'zip /tmp/a.zip pkg/README.md && zip /tmp/a.zip pkg/src/index.js', 'existing archive', 'zip: /tmp/a.zip: adding to an archive that is already there is not supported\n')
     await gap(t, 'zip -9 /tmp/l.zip pkg/README.md', '-9', 'zip: unknown option: -9\n')
-    await gap(t, 'zip - pkg/README.md', 'streamed archive', 'zip: writing an archive to stdout is not supported\n')
+    // Info-ZIP writes no archive to a terminal, and says so where a filter's
+    // messages go; into a file or down a pipe it streams one, which is a gap.
+    const terminalOut = result('', { stderr: '\nzip error: Invalid command arguments (cannot write zip file to terminal)\n', exitCode: 16 })
+    assert.deepEqual(await t.run('zip - pkg/README.md'), terminalOut)
+    assert.deepEqual(await t.run('zip -q'), terminalOut)
+    await gap(t, 'zip - pkg/README.md > /tmp/s.zip', 'streamed archive', 'zip: writing an archive to stdout is not supported\n')
     // Info-ZIP stores `../README.md` as it is typed; the package stores no climb.
     await gap(t, 'cd pkg/src && zip /tmp/m.zip ../README.md', 'dot-segment names', "zip: ../README.md: names with `.', `..' or empty segments are not supported\n")
     await gap(t, 'zip /repo/n.zip /repo/pkg/README.md', 'read-only target', 'zip: /repo/n.zip: Read-only file system\n')

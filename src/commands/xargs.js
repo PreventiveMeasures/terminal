@@ -33,7 +33,7 @@ export async function xargs(stdin, tokens, ctx) {
       ? [...baseArgs, ...items.slice(i, i + size)]
       : baseArgs.map((arg) => arg.replaceAll(replace, item))
     // oxlint-disable-next-line no-await-in-loop -- one batch after the last, as xargs runs them.
-    const r = await ctx.dispatch(cmd, args, '')
+    const r = await ctx.dispatch(cmd, args, '', { devNull: true })
     stdout += r.stdout; stderr += r.stderr
     if (r.exitCode === 255) return { stdout, stderr: stderr + 'xargs: ' + cmd + ': exited with status 255; aborting\n', exitCode: 124 }
     if (r.exitCode === 127 && !ctx.hasCommand(ctx.registry.resolveCommand(cmd))) return { stdout, stderr, exitCode: 127 }

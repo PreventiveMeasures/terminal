@@ -23,7 +23,7 @@ import { supports } from '@preventive/archive/compression.js'
 import { ArchiveError, unpack } from '@preventive/archive/tar.js'
 import { decompressMembers } from '../../compression.js'
 import { lookupWithNote } from '../../notes.js'
-import { consumeStdin, encodeUtf8, readBytesOf } from '../../util.js'
+import { consumeStdin, encodeUtf8, readBytesOf, stdinIsTerminal } from '../../util.js'
 import { gzipTrouble, looksCompressed } from '../gzip.js'
 import { tarHeaders } from './headers.js'
 import { quoteColon } from './names.js'
@@ -78,6 +78,9 @@ function openArchive(opts, state) {
   const { ctx } = state
   const name = opts.archive
   if (name === '-') {
+    // GNU reads no archive from a terminal, and a stdin nothing was piped or
+    // redirected into is this one's.
+    if (stdinIsTerminal(ctx)) return state.fatal('Refusing to read archive contents from terminal (missing -f option?)')
     const bytes = ctx.stdinBytes ?? encodeUtf8(ctx.stdinLeft)
     // Taking the pipe is taking it: the next command finds it at its end.
     consumeStdin(ctx, '', true)

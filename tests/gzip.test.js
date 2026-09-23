@@ -175,11 +175,25 @@ describe('gzip compresses with the stream the runtime has', () => {
 
   it('cannot hand back a member, because no string spells one', async () => {
     // The second byte of the header begins no character at all, so `-c` is
-    // the output this terminal cannot carry — and a pipe is the same answer.
+    // the output this terminal cannot carry, where GNU writes it to one.
     const t = terminal()
-    const message = 'gzip: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n'
-    await gap(t, 'gzip -c plain.txt', 'partial UTF-8 byte sequence', message)
-    await gap(t, 'echo hi | gzip', 'partial UTF-8 byte sequence', message)
+    await gap(t, 'gzip -c plain.txt', 'partial UTF-8 byte sequence', 'gzip: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
+  })
+
+  it('neither writes a stream to the terminal nor reads one from it, as GNU will not', async () => {
+    // Nothing can be typed into this terminal: stdin is the terminal unless
+    // something was piped or redirected into it, and stdout is unless it goes
+    // on down a pipe or into a file. GNU asks where it takes the stream, and
+    // stops there, after the operands before it.
+    const t = terminal()
+    const writing = result('', { stderr: 'gzip: compressed data not written to a terminal. Use -f to force compression.\nFor help, type: gzip -h\n', exitCode: 1 })
+    const reading = result('', { stderr: 'gzip: compressed data not read from a terminal. Use -f to force decompression.\nFor help, type: gzip -h\n', exitCode: 1 })
+    for (const line of ['echo hi | gzip', 'gzip < plain.txt', 'gzip']) assert.deepEqual(await t.run(line), writing, line)
+    for (const line of ['gunzip', 'zcat', 'gzip -d', 'gzip -dc -']) assert.deepEqual(await t.run(line), reading, line)
+    assert.deepEqual(await t.run('gzip -dc data.gz - data.gz'), result('alpha\nbeta\n', { stderr: reading.stderr, exitCode: 1 }))
+    // A pipe, a redirect and /dev/null are no terminal.
+    assert.deepEqual(await t.run('gzip < plain.txt | gzip -d'), result('not compressed\n'))
+    assert.deepEqual(await t.run('gunzip < /dev/null'), result('', { stderr: '\ngzip: stdin: unexpected end of file\n', exitCode: 1 }))
   })
 
   it('refuses to write where nothing can be written', async () => {

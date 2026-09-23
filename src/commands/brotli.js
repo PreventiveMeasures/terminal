@@ -1,5 +1,5 @@
 import { parseArgs } from '../args.js'
-import { consumeStdin, encodeUtf8, readBytesOf } from '../util.js'
+import { consumeStdin, encodeUtf8, readBytesOf, stdinIsTerminal, stdoutIsTerminal } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
 import { compress, supports } from '@preventive/archive/compression.js'
@@ -78,6 +78,10 @@ function one(name, stdin, opts, state) {
   // is taking it — what is read here is read, so a second `-` and the next
   // command in the list both find the pipe at its end, as they would a file's.
   if (name === '-') {
+    // Unless forced, brotli reads nothing compressed from a terminal and
+    // writes nothing compressed to one; this terminal's stdin is one unless
+    // something was piped or redirected into it.
+    if (!opts.force && (opts.decompressing ? stdinIsTerminal(ctx) : stdoutIsTerminal(ctx))) return fail(state, `Use -h help. Use -f to force ${opts.decompressing ? 'input from' : 'output to'} a terminal.`)
     const piped = ctx.stdinBytes
     const text = ctx.stdinLeft
     consumeStdin(ctx, '', true)
@@ -100,6 +104,7 @@ function one(name, stdin, opts, state) {
   if (target !== null && !opts.force && lookupWithNote(ctx, 'brotli', target).error === null) {
     return fail(state, `failed to open output file [${target}]: File exists`)
   }
+  if (target === null && !opts.decompressing && !opts.force && stdoutIsTerminal(ctx)) return fail(state, 'Use -h help. Use -f to force output to a terminal.')
   if (ctx.fs.isDir(found.path)) return fail(state, `failed to read input [${name}]: Is a directory`)
   return through(readBytesOf(ctx.fs, found.path), name, target, opts, state)
 }

@@ -22,7 +22,7 @@
 import { compress, supports } from '@preventive/archive/compression.js'
 import { ArchiveError, pack } from '@preventive/archive/tar.js'
 import { compareNames, dirname, joinPath, lookup, resolve } from '../../fs.js'
-import { readBytesOf } from '../../util.js'
+import { readBytesOf, stdoutIsTerminal } from '../../util.js'
 import { inOverlay } from '../../writable.js'
 import { longLines } from './list.js'
 import { enterDirectory, memberOperand, quoteColon, quoteLocale } from './names.js'
@@ -34,6 +34,8 @@ const MODES = { file: 0o600, directory: 0o700, symlink: 0o777 }
 
 export async function createArchive(opts, state) {
   const { ctx } = state
+  // GNU writes no archive to a terminal, and asks before anything else.
+  if (opts.archive === '-' && stdoutIsTerminal(ctx)) return state.fatal('Refusing to write archive contents to terminal (missing -f option?)')
   // GNU's pax headers carry each file's access and change times, which this
   // tree does not have; the package writes them without.
   if (opts.format === 'pax') return state.refuse('option', '--format=pax', 'the pax format records access and change times, which this tree does not have')

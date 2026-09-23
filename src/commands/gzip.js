@@ -1,5 +1,5 @@
 import { parseArgs } from '../args.js'
-import { consumeStdin, encodeUtf8, encodeUtf8Loose, readBytesOf } from '../util.js'
+import { consumeStdin, encodeUtf8, encodeUtf8Loose, readBytesOf, stdinIsTerminal, stdoutIsTerminal } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
 import { compress as compressBytes, supports } from '@preventive/archive/compression.js'
@@ -96,10 +96,15 @@ export async function gzip(stdin, tokens, ctx) {
     stdout: ['c', 'stdout', 'to-stdout'].some((name) => flags.has(name)),
     keep: flags.has('k') || flags.has('keep'),
   }
-  const state = { ctx, events: [], stderr: '', status: 0, gap: null }
+  const state = { ctx, events: [], stderr: '', status: 0, gap: null, stopped: false }
   if (positional.length === 0) await fromStdin(opts, state)
-  // oxlint-disable-next-line no-await-in-loop -- one operand after the last, as gzip takes them.
-  else for (const name of positional) await one(name, opts, state)
+  else {
+    for (const name of positional) {
+      // oxlint-disable-next-line no-await-in-loop -- one operand after the last, as gzip takes them.
+      await one(name, opts, state)
+      if (state.stopped) break
+    }
+  }
   if (state.gap) return state.gap
   // What it wrote, in the order it wrote it: the bytes go to a pipe or a file
   // as they are, and to a terminal as the text they spell.
@@ -113,6 +118,16 @@ export async function gzip(stdin, tokens, ctx) {
 // same thing. Compressing reads that pipe as readily as decompressing does —
 // a member is what `gzip | gzip` is handed, and no text spells one.
 async function fromStdin(opts, state) {
+  // GNU neither writes a member to a terminal nor reads one from it, and
+  // stops there; this terminal's stdin is one unless something was piped or
+  // redirected into it.
+  if (opts.decompressing ? stdinIsTerminal(state.ctx) : stdoutIsTerminal(state.ctx)) {
+    const [way, what] = opts.decompressing ? ['read from', 'decompression'] : ['written to', 'compression']
+    state.stderr += `gzip: compressed data not ${way} a terminal. Use -f to force ${what}.\nFor help, type: gzip -h\n`
+    state.status = 1
+    state.stopped = true
+    return
+  }
   // Read from the context rather than from what the command was handed, so a
   // second `-` finds the stream where the first left it, which is its end.
   const stdin = state.ctx.stdinLeft

@@ -79,6 +79,18 @@ one as it passes over any other binary file, and an `rg` walk passes over
 what ripgrep itself calls binary: a file holding a NUL, which it never reads
 past.
 
+The terminal's own stdin and stdout are a terminal's: nothing can be typed
+into it, and it shows text. A command reads the terminal where nothing was
+piped or redirected into it — a file, `/dev/null` and a here-document are no
+terminal — and writes to it where its output goes neither down a pipe nor into
+a file. Where a tool will not read an archive or a compressed stream from a
+terminal, or write one to it, it refuses here as it does there: `tar -t` with
+no `-f` says "Refusing to read archive contents from terminal", `gzip` and
+`gunzip` that compressed data is not written to or read from a terminal,
+`brotli` to use `-f`, and `zip -` that it cannot write a zip file to terminal.
+What `xargs` runs reads `/dev/null`, as it does under GNU's xargs, so a `tar`
+run there finds no archive rather than a terminal.
+
 `cp -r` copies a tree into the overlay, making each directory before what goes
 inside it; `-R` and `--recursive` spell the same flag, and `-v` announces a
 directory once, where it is made. A destination inside the source, a
