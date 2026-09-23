@@ -5,12 +5,14 @@
 // otherwise — on stdin, where this terminal has nothing to answer with, so
 // the first question meets its end, and UnZip reads that as "None" for the
 // rest. A link is made last, once everything else is written, as UnZip
-// defers them.
+// defers them: until then its name holds a placeholder, a file of its
+// target, which is what a later entry of that name meets.
 //
 // The overlay is the one place a file can be written; a name anywhere else
 // is the read-only filesystem, and a gap.
 
 import { basename, dirname, lookup, resolve } from '../../fs.js'
+import { encodeUtf8, readBytesOf } from '../../util.js'
 import { inOverlay } from '../../writable.js'
 
 // How UnZip names the file it is writing: under the `-d` directory as it was
@@ -18,10 +20,16 @@ import { inOverlay } from '../../writable.js'
 const shownUnder = (exdir, name) => (exdir === null ? name : `${exdir.endsWith('/') ? exdir.slice(0, -1) : exdir}/${name}`)
 
 export function extractMembers(entries, opts, run) {
-  const { ctx } = run
   const base = extractionDirectory(opts.exdir, run)
   if (base === null) return false
   const links = []
+  const done = extractEntries(entries, base, links, opts, run)
+  for (const link of links) finishLink(link, run)
+  return done
+}
+
+function extractEntries(entries, base, links, opts, run) {
+  const { ctx } = run
   for (const entry of entries) {
     const directory = entry.type === 'directory'
     if (opts.junk && directory) continue
@@ -49,16 +57,29 @@ export function extractMembers(entries, opts, run) {
     const decision = conflict(path, shown, opts, run)
     if (decision === null) return false
     if (decision === 'skip') continue
-    if (entry.type === 'symlink') {
-      links.push({ path, target: entry.linkname })
-      continue
-    }
     const handle = ctx.fs.openWritable('/', path)
     if (!handle) return readOnly(shown, run)
-    handle.writeBytes(entry.data)
+    const link = entry.type === 'symlink'
+    handle.writeBytes(link ? encodeUtf8(entry.linkname) : entry.data)
+    if (link) links.push({ path, shown, target: entry.linkname })
   }
-  for (const { path, target } of links) ctx.fs.makeWritableLink('/', path, target)
   return true
+}
+
+// set_deferred_symlink: the placeholder, read through whatever stands at
+// the name, has to hold the target and nothing else; otherwise UnZip warns,
+// leaves what is there, and goes on.
+function finishLink({ path, shown, target }, run) {
+  const { fs } = run.ctx
+  const found = lookup('/', path, fs)
+  const held = found.path !== null && fs.isFile(found.path) ? readBytesOf(fs, found.path) : null
+  const wanted = encodeUtf8(target)
+  if (held === null || held.length !== wanted.length || held.some((byte, i) => byte !== wanted[i])) {
+    run.say(2, `warning:  deferred symlink (${shown}) failed:\n          invalid placeholder file\n`)
+    return
+  }
+  fs.removeWritable('/', path)
+  fs.makeWritableLink('/', path, target)
 }
 
 const writable = (path, ctx) => ctx.writable && inOverlay(path)

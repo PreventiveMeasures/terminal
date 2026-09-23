@@ -54,6 +54,11 @@ UEsDBAoAAAAAAAU5plgcae8UBgAAAAYAAAANAAAAcGtnL1JFQURNRS5tZCMgcGtnClBLAwQKAAAAAAAF
 EAAAAHBrZy9zcmMvaW5kZXguanNleHBvcnQgY29uc3QgeCA9IDEKUEsBAh4DCgAAAAAABTmmWBxp7xQGAAAABgAAAA0AAAAAAAAA
 AQAAAKSBAAAAAHBrZy9SRUFETUUubWRQSwECHgMKAAAAAAAFOaZYTkU8KxMAAAATAAAAEAAAAAAAAAABAAAApIExAAAAcGtnL3Ny
 Yy9pbmRleC5qc1BLBQYAAAAAAgACAHkAAAByAAAAAAA=`)
+// Python's zipfile, which stores links as asked: a link `a/x` to `t` and a
+// file `b/x`, and two links, `a/x` to `t1` and `b/x` to `t2` — one name
+// each under -j.
+const LINK_FILE_ZIP = bytesOf('UEsDBBQAAAAAAAQ5plioWmqFAQAAAAEAAAADAAAAYS94dFBLAwQUAAAAAAAEOaZYgsXB5gUAAAAFAAAAAwAAAGIveGRhdGEKUEsBAhQDFAAAAAAABDmmWKhaaoUBAAAAAQAAAAMAAAAAAAAAAAAAAP+hAAAAAGEveFBLAQIUAxQAAAAAAAQ5pliCxcHmBQAAAAUAAAADAAAAAAAAAAAAAACkgSIAAABiL3hQSwUGAAAAAAIAAgBiAAAASAAAAAAA')
+const LINK_LINK_ZIP = bytesOf('UEsDBBQAAAAAAAQ5plg3rlRbAgAAAAIAAAADAAAAYS94dDFQSwMEFAAAAAAABDmmWI3/XcICAAAAAgAAAAMAAABiL3h0MlBLAQIUAxQAAAAAAAQ5plg3rlRbAgAAAAIAAAADAAAAAAAAAAAAAAD/oQAAAABhL3hQSwECFAMUAAAAAAAEOaZYjf9dwgIAAAACAAAAAwAAAAAAAAAAAAAA/6EjAAAAYi94UEsFBgAAAAACAAIAYgAAAEYAAAAAAA==')
 // Python's zipfile, which stores `./a` as it is given one.
 const DOT_ZIP = bytesOf('UEsDBBQAAAAAAAU5plgHoerdAgAAAAIAAAADAAAALi9hYQpQSwECFAMUAAAAAAAFOaZYB6Hq3QIAAAACAAAAAwAAAAAAAAAAAAAApIEAAAAALi9hUEsFBgAAAAABAAEAMQAAACMAAAAAAA==')
 const NUMBERS = Array.from({ length: 400 }, (_, i) => `${i + 1}\n`).join('')
@@ -61,6 +66,8 @@ const SOURCES = {
   'pkg.zip': PKG_ZIP,
   'nout.zip': NOUT_ZIP,
   'dot.zip': DOT_ZIP,
+  'linkfile.zip': LINK_FILE_ZIP,
+  'linklink.zip': LINK_LINK_ZIP,
   'empty.zip': Uint8Array.of(0x50, 0x4b, 0x05, 0x06, ...new Uint8Array(18)),
   'notes.txt': 'plain text\n',
   'pkg/README.md': '# pkg\n',
@@ -205,6 +212,19 @@ describe('unzip extracts into the writable overlay', () => {
       stderr: 'caution:  both -n and -o specified; ignoring -o\n', cwd: '/tmp',
     }))
     assert.deepEqual(await t.run('unzip -qq /repo/pkg.zip pkg/README.md -d out'), result('', { stderr: replace('out/pkg/README.md'), exitCode: 1, cwd: '/tmp' }))
+  })
+
+  it('holds the name of a link it makes last, as UnZip does', async () => {
+    const t = await terminal()
+    // The file meets the placeholder the link keeps its name with, and is
+    // asked about; with -o it replaces it, and the link is not made.
+    assert.deepEqual(await t.run('cd /tmp && unzip -qj /repo/linkfile.zip -d j'), result('', { stderr: replace('j/x'), exitCode: 1, cwd: '/tmp' }))
+    assert.match((await t.run('ls -l j/x')).stdout, / j\/x -> t\n$/u)
+    const invalid = (name) => `warning:  deferred symlink (${name}) failed:\n          invalid placeholder file\n`
+    assert.deepEqual(await t.run('unzip -qjo /repo/linkfile.zip -d o && cat o/x'), result('data\n', { stderr: invalid('o/x'), cwd: '/tmp' }))
+    // A second link replaces the first one's placeholder with its own.
+    assert.deepEqual(await t.run('unzip -qjo /repo/linklink.zip -d l'), result('', { stderr: invalid('l/x'), cwd: '/tmp' }))
+    assert.match((await t.run('ls -l l/x')).stdout, / l\/x -> t2\n$/u)
   })
 
   it('junks paths, excludes, and reports what it did not find', async () => {

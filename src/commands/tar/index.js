@@ -62,7 +62,7 @@ async function readMembers(opts, state) {
     if (name === null) continue
     if (opts.verbose > 0) state.list(line ? line(entry) : quoteEscape(shown, ctx))
     if (extracting && opts.toStdout) {
-      if (entry.type === 'file' || entry.type === 'contiguous-file') state.bytes(entry.data)
+      if (entry.type === 'file' || entry.type === 'contiguous-file') toStdout(entry.data, name, state)
     } else if (extracting && extractEntry(entry, name, landing(dir, name), state, opts.keepOld, (count) => creating(name, count, line, state))) dated(read.mtimes[i], name, began, state)
     if (state.stopped) return
   }
@@ -72,12 +72,19 @@ async function readMembers(opts, state) {
   reportMissing(names, state, opts.noWildcards)
 }
 
+// -O writes each member straight to stdout; where that is closed, GNU
+// reports each write it could not make, none for an empty file, and goes on.
+function toStdout(data, name, state) {
+  if (!state.closedOut) state.bytes(data)
+  else if (data.length > 0) state.error(`${quoteColon(name, state.ctx)}: Cannot write: Bad file descriptor`)
+}
+
 // The directories GNU made for an entry, the last `count` of those above its
 // name, which -vv lists outermost first after the entry's own line.
 function creating(name, count, line, state) {
   if (!line) return
   const parents = name.split('/').slice(0, -1)
-  for (let i = parents.length - count; i < parents.length; i++) state.list(line.mkdir(parents.slice(0, i + 1).join('/')))
+  for (let i = parents.length - count; i < parents.length; i++) state.list(line.mkdir(parents.slice(0, i + 1).join('/')), false)
 }
 
 // GNU sets the time of each entry it writes, and warns of one before 1970 or

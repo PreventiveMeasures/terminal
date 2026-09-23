@@ -263,8 +263,11 @@ second time under another name — `src` and then `-C src a.txt` — is stored a
 a hard link to the first, as GNU stores it; met under the same name, it would
 be a hard link to itself, which the package will not write, so that is
 refused. GNU holds a whole record in memory, and a `-b` past 32768 blocks,
-16 MiB, is refused. The archive is read and written by
-[`@preventive/archive`](https://www.npmjs.com/package/@preventive/archive),
+16 MiB, is refused. A closed stdout is `/dev/null` opened for reading to GNU:
+a listing it would take is lost, and said to be once the run is over, a
+member `-O` writes there is an error of its own, and an archive for it is
+written nowhere — but through gzip, which is refused. The archive is read and
+written by [`@preventive/archive`](https://www.npmjs.com/package/@preventive/archive),
 whose writer puts down byte for byte what GNU tar writes for the same entries —
 but for a name too long for its header, which goes in a header of GNU's own
 ahead of it, where GNU records the host's names for user and group 0, `root`
@@ -312,9 +315,11 @@ file operand `-`, which Info-ZIP reads from stdin, a compression level and the
 rest are refused. `unzip` answers as Debian's UnZip 6.00 does: `-l`, dated
 year first, `-t`, `-p`, and extraction with `-q`, `-o`, `-n` — which wins over
 `-o`, with UnZip's caution, where both are given — `-j`, `-d` and `-x`, the
-overwrite question included — UnZip asks
-it on stdin, and a stdin with nothing on it answers with its end, which UnZip
-takes as "None". A name stored with a `.` segment, which Info-ZIP never writes
+overwrite question included — UnZip asks it on stdin, and a stdin with
+nothing on it answers with its end, which UnZip takes as "None". A link is
+made last, its name held until then by a placeholder of its target, as UnZip
+holds it, so a later entry of that name, which `-j` can make, meets it as it
+would there. A name stored with a `.` segment, which Info-ZIP never writes
 and other tools do, is refused as tar's is, since UnZip lists it as stored. The
 package does not say how an entry was stored, nor whether its time is an exact
 one or a DOS time, so an extraction that is not quiet — which names each file

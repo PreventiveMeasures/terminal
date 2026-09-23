@@ -47,6 +47,9 @@ export async function createArchive(opts, state) {
   if (gzip && !supports('gzip')) return state.refuse('option', '-z', 'this runtime has no gzip stream')
   const target = openTarget(opts.archive, state)
   if (!target) return
+  // gzip writes to a closed stdout and fails, and where tar is by then
+  // depends on how much gzip had to write.
+  if (gzip && target.kind === 'stdout' && state.closedOut) return state.refuse('feature', 'closed stdout', 'writing a compressed archive to a closed stdout is not supported')
   if (target.kind === 'stdout' || opts.toStdout) state.listTo = 2
   const walk = {
     state, owners, target, entries: [], verbose: opts.verbose, many: opts.items.filter((item) => item.name !== undefined).length > 1,
@@ -197,6 +200,7 @@ async function finish(walk, opts, gzip, fatal) {
     archive = archive.subarray(0, Math.floor((archive.length - 2 * BLOCK) / record) * record)
   }
   if (gzip) archive = await compress(archive, 'gzip')
-  if (target.kind === 'stdout') state.bytes(archive)
+  // A closed stdout is /dev/null to GNU, which writes no archive there at all.
+  if (target.kind === 'stdout' && !state.closedOut) state.bytes(archive)
   else if (target.kind === 'file') target.handle.writeBytes(archive)
 }

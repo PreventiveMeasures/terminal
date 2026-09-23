@@ -266,6 +266,25 @@ describe('tar lists what an archive holds', () => {
     assert.deepEqual(await t.run("tar -tf pkg.tar 'pkg/*.md' --no-wildcards"), missing)
   })
 
+  it('answers a closed stdout as GNU does', async () => {
+    // GNU finds /dev/null there, open for reading: a listing it writes is
+    // lost, and said to be at the end, where the run gets that far.
+    const t = await terminal()
+    const failing = (stderr, cwd = '/repo') => result('', { stderr, exitCode: 2, cwd })
+    const exiting = 'tar: Exiting with failure status due to previous errors\n'
+    assert.deepEqual(await t.run('tar -tvf pkg.tar >&-'), failing('tar: stdout: write error\n'))
+    assert.deepEqual(await t.run('tar -tf pkg.tar pkg/README.md pkg/nothere >&-'), failing(`tar: pkg/nothere: Not found in archive\n${exiting}tar: stdout: write error\n`))
+    assert.deepEqual(await t.run('tar -tf pkg.tar pkg/nothere >&-'), failing(`tar: pkg/nothere: Not found in archive\n${exiting}`))
+    // An archive for stdout is written nowhere; through gzip, it depends.
+    assert.deepEqual(await t.run('tar -cvf - --owner=0 --group=0 --numeric-owner notes.txt >&-'), result('', { stderr: 'notes.txt\n' }))
+    await gap(t, 'tar -czf - --owner=0 --group=0 --numeric-owner notes.txt >&-', 'closed stdout', 'tar: writing a compressed archive to a closed stdout is not supported\n')
+    // -O writes each member itself, and each write that fails is an error.
+    assert.deepEqual(await t.run('tar -xvOf pkg.tar pkg/README.md >&-'), failing(`pkg/README.md\ntar: pkg/README.md: Cannot write: Bad file descriptor\n${exiting}`))
+    // The line of a directory it made waits to be written, and at the end
+    // says why it could not be.
+    assert.deepEqual(await t.run('cd /tmp && tar -xf /repo/pkg.tar --utc pkg/README.md >&-'), failing('tar: stdout: write error: Bad file descriptor\n', '/tmp'))
+  })
+
   it('reads no archive from the terminal and writes none to it, as GNU does', async () => {
     // Nothing can be typed into this terminal, and it shows text: stdin is
     // the terminal unless something was piped or redirected into it, and
