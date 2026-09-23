@@ -8,13 +8,14 @@
 // a network (../net.js). So it is handed out by a call rather than standing
 // in a table, since what a terminal can run is settled when it is created.
 
+import { ARCHIVE_COMMANDS } from './archives.js'
 import { BROTLI } from './brotli.js'
 import { GZIP } from './gzip.js'
 import { SHA } from './sha.js'
 import { curl } from './curl.js'
 import { networkUsable } from '../net.js'
 
-export const RUNTIME_COMMANDS = { ...GZIP, ...BROTLI, ...SHA }
+export const RUNTIME_COMMANDS = { ...GZIP, ...BROTLI, ...SHA, ...ARCHIVE_COMMANDS }
 
 const NETWORK_COMMANDS = Object.freeze({ __proto__: null, curl })
 export const NETWORK_NAMES = Object.freeze(Object.keys(NETWORK_COMMANDS))

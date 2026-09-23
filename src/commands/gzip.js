@@ -34,7 +34,7 @@ export const GZIP = supports(FORMAT) ? { gzip, gunzip, zcat, gzcat: zcat } : {}
 
 // A gzip member starts with these two, whatever follows.
 const MAGIC = Object.freeze([0x1f, 0x8b])
-const looksCompressed = (bytes) => bytes !== undefined && bytes.length >= 2 && bytes[0] === MAGIC[0] && bytes[1] === MAGIC[1]
+export const looksCompressed = (bytes) => bytes !== undefined && bytes.length >= 2 && bytes[0] === MAGIC[0] && bytes[1] === MAGIC[1]
 
 // What zlib calls what it would not read, and what gzip says of it. Anything
 // else is data that is not the deflate stream the header promised.
@@ -53,13 +53,26 @@ const DEFLATE = 8
 // it ran out of. Bytes that do begin a member are a member it could not read,
 // and it names a method it does not know where the header gives one;
 // anything else is what the stream ran into.
-function trouble(state, name, inflated) {
+//
+// What it says is also what `tar -z` passes on of it, so it is handed back as
+// the text and the status, and whether what gzip wrote before it was every
+// member whole — which is all `tar` then has to read.
+export function gzipTrouble(name, inflated) {
   const rest = inflated.rest
-  if (rest === null) return dataError(state, `${name}: ${reportOf(inflated.error)}`)
-  if (rest.every((byte) => byte === 0)) return false
-  if (rest.length >= 2 && !looksCompressed(rest)) return fail(state, `${name}: decompression OK, trailing garbage ignored`, 2, '\n')
-  if (rest.length > 2 && rest[2] !== DEFLATE) return fail(state, `${name}: unknown method ${rest[2]} -- not supported`, 1)
-  return dataError(state, `${name}: ${reportOf(inflated.error)}`)
+  const data = (message) => ({ text: `\ngzip: ${name}: ${message}\n`, status: 1, whole: false })
+  if (rest === null) return data(reportOf(inflated.error))
+  if (rest.every((byte) => byte === 0)) return null
+  if (rest.length >= 2 && !looksCompressed(rest)) return { text: `\ngzip: ${name}: decompression OK, trailing garbage ignored\n`, status: 2, whole: true }
+  if (rest.length > 2 && rest[2] !== DEFLATE) return { text: `gzip: ${name}: unknown method ${rest[2]} -- not supported\n`, status: 1, whole: true }
+  return data(reportOf(inflated.error))
+}
+
+function trouble(state, name, inflated) {
+  const found = gzipTrouble(name, inflated)
+  if (found === null) return false
+  state.stderr += found.text
+  state.status = state.status === 1 ? 1 : found.status
+  return false
 }
 
 // The suffixes GNU knows. Decompressing takes one off to name the file it
