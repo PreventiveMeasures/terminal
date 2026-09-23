@@ -185,7 +185,8 @@
     "test:slow": "AWK_SLOW_TESTS=1 node --test --test-isolation=none ./tests/*.test.js"
   },
   "dependencies": {
-    "@exodus/bytes": "^1.15.1",
+    "@exodus/bytes": "^1.16.0",
+    "@preventive/archive": "^1.0.0-beta.0",
     "@preventive/diff": "^1.0.0"
   },
   "devDependencies": {

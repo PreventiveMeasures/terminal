@@ -2,7 +2,8 @@ import { parseArgs } from '../args.js'
 import { consumeStdin, encodeUtf8, encodeUtf8Loose, readBytesOf } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
-import { compressBytes, decompressMembers, formatUsable } from '../compression.js'
+import { compress as compressBytes, supports } from '@preventive/archive/compression.js'
+import { decompressMembers } from '../compression.js'
 
 // gzip, both ways round. The work itself is the runtime's stream rather than
 // this code's (../compression.js), and it answers asynchronously — so the
@@ -29,7 +30,7 @@ const zcat = (stdin, tokens, ctx) => gzip(stdin, ['-d', '-c', ...tokens], ctx)
 // Only where the runtime's streams know the format: a terminal whose streams
 // do not is a terminal without the command, which is what it was before this
 // one was written.
-export const GZIP = formatUsable(FORMAT) ? { gzip, gunzip, zcat, gzcat: zcat } : {}
+export const GZIP = supports(FORMAT) ? { gzip, gunzip, zcat, gzcat: zcat } : {}
 
 // A gzip member starts with these two, whatever follows.
 const MAGIC = Object.freeze([0x1f, 0x8b])
