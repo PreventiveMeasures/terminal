@@ -63,7 +63,7 @@ export function longLines(ctx, { numericOwner = false, utc = false } = {}) {
   let ugswidth = 19
   let datewidth = 16
   const zone = utc || ctx.vars.has('TZ')
-  return (entry) => {
+  const line = (entry) => {
     const user = !numericOwner && entry.uname !== '' ? entry.uname : String(entry.uid)
     const group = !numericOwner && entry.gname !== '' ? entry.gname : String(entry.gid)
     const size = DEVICES.has(entry.type) ? `${entry.devmajor},${entry.devminor}` : String(entry.data.length)
@@ -74,6 +74,10 @@ export function longLines(ctx, { numericOwner = false, utc = false } = {}) {
     const head = `${modeString(entry.type, entry.mode)} ${user}/${group} ${' '.repeat(ugswidth - pad)}${size} ${stamp.padEnd(datewidth)} `
     return head + quoteEscape(storedName(entry), ctx) + linkSuffix(entry, ctx)
   }
+  // print_for_mkdir: a directory made for an entry, in this tree's mode, its
+  // words where the owners and the time stand in the lines around it.
+  line.mkdir = (name) => `${modeString('directory', 0o700)} ${'Creating directory:'.padStart(ugswidth + 1 + datewidth)} ${quoteEscape(name, ctx)}`
+  return line
 }
 
 function linkSuffix(entry, ctx) {

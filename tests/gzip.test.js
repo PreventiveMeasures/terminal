@@ -180,6 +180,11 @@ describe('gzip compresses with the stream the runtime has', () => {
     await gap(t, 'gzip -c plain.txt', 'partial UTF-8 byte sequence', 'gzip: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
   })
 
+  it('hands the bytes it wrote on down a pipe when xargs runs it', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('echo img.gz | xargs gzip -dc | base64'), result('iVBOR/8K\n'))
+  })
+
   it('neither writes a stream to the terminal nor reads one from it, as GNU will not', async () => {
     // Nothing can be typed into this terminal: stdin is the terminal unless
     // something was piped or redirected into it, and stdout is unless it goes

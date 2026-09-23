@@ -206,6 +206,12 @@ describe('tar lists what an archive holds', () => {
     assert.deepEqual(await t.run('tar tvf pkg.tar pkg/src'), result(lines(...LONG.slice(6))))
     assert.deepEqual(await t.run('tar -tvf pkg.tar --numeric-owner pkg/README.md'), result('-rw-r--r-- 1000/50           6 2024-05-06 07:08 pkg/README.md\n'))
     assert.deepEqual(await t.run('tar -tvf pkg.tar --utc pkg/empty'), result(lines(LONG[4])))
+    // A time in UTC is a time in the long listing, which --utc asks for
+    // whatever -v says.
+    assert.deepEqual(await t.run('tar -tf pkg.tar --utc pkg/README.md'), result(lines(LONG[1])))
+    // -O lists on stderr, though nothing is extracted to stdout.
+    assert.deepEqual(await t.run('tar -tOf pkg.tar pkg/README.md'), result('', { stderr: 'pkg/README.md\n' }))
+    assert.deepEqual(await t.run('tar -tvOf pkg.tar pkg/README.md'), result('', { stderr: lines(LONG[1]) }))
   })
 
   it('describes what is not a file the way GNU does', async () => {
@@ -372,6 +378,7 @@ describe('tar reads its command line as GNU does', () => {
     assert.deepEqual(await t.run('tar -tf pkg.tar --strip-components=abc'), usage('abc: Invalid number of elements'))
     assert.deepEqual(await t.run('tar -tf pkg.tar -f pkg.tar'), usage("Multiple archive files require '-M' option"))
     assert.deepEqual(await t.run('tar -cf x -b 0 pkg'), usage('0: Invalid blocking factor'))
+    assert.deepEqual(await t.run('tar -tf pkg.tar -b 2147483648'), usage('2147483648: Invalid blocking factor'))
     assert.deepEqual(await t.run('tar -cf x --format=foo pkg'), usage('foo: Invalid archive format'))
     // argmatch quotes in the locale's own marks.
     assert.deepEqual(await t.run('tar -cf x --sort=n pkg'), result('', {
@@ -384,6 +391,11 @@ describe('tar reads its command line as GNU does', () => {
     const t = await terminal()
     await gap(t, 'tar -cjf x.tbz pkg', '-j', 'tar: unknown option: -j\n')
     await gap(t, 'tar -tf pkg.tar --wildcards', '--wildcards', 'tar: unknown option: --wildcards\n')
+    // GNU holds a whole record in memory, which past 16 MiB this does not.
+    assert.deepEqual(await t.run('tar -tf pkg.tar -b 32768 pkg/README.md'), result('pkg/README.md\n'))
+    for (const blocks of ['32769', '2147483647']) {
+      await gap(t, `tar -tf pkg.tar -b ${blocks}`, '--blocking-factor', `tar: ${blocks}: a record of that many blocks is more than this terminal holds\n`)
+    }
     // A compressor other than gzip, known by its name or its first bytes.
     await gap(t, 'tar -tf fake.xz', '-J', 'tar: -J: archives compressed other than with gzip are not supported\n')
     // A tar is a tar whatever its name says.
@@ -410,6 +422,19 @@ describe('tar extracts into the writable overlay', () => {
       'pkg/bin/run.sh\npkg/src/index.js\npkg/src/lib/\npkg/src/lib/numbers.txt\npkg/src/lib/util.js\ns\ns/index.js\ns/lib\ns/lib/numbers.txt\ns/lib/util.js\ns/run.sh\n',
       { cwd: '/tmp' },
     ))
+  })
+
+  it('names at -vv each directory it made on the way to an entry', async () => {
+    const t = await terminal()
+    const made = (name) => `drwx------                  Creating directory: ${name}\n`
+    assert.deepEqual(await t.run('cd /tmp && mkdir v && tar -xvvf /repo/pkg.tar -C v pkg/src/lib/util.js pkg/bin'), result(
+      lines(LONG[2]) + made('pkg') + lines(LONG[3], LONG[10]) + made('pkg/src') + made('pkg/src/lib'),
+      { cwd: '/tmp' },
+    ))
+    assert.deepEqual(await t.run('tar -xvvf /repo/pkg.tar -C v pkg/src/lib/util.js'), result(lines(LONG[10]), { cwd: '/tmp' }))
+    // Under the name it is extracted as; --utc asks for the long listing.
+    assert.deepEqual(await t.run('mkdir s && tar -xvvf /repo/pkg.tar -C s --strip-components=1 pkg/src/lib/util.js'), result(lines(LONG[10]) + made('src') + made('src/lib'), { cwd: '/tmp' }))
+    assert.deepEqual(await t.run('mkdir u && tar -xf /repo/pkg.tar --utc -C u pkg/README.md'), result(lines(LONG[1]) + made('pkg'), { cwd: '/tmp' }))
   })
 
   it('unlinks what stands in the way, and keeps a directory that is not empty', async () => {
@@ -485,6 +510,37 @@ describe('tar writes the archive GNU writes', () => {
     assert.deepEqual(await t.run('tar -czf /tmp/x.tgz --owner=0 --group=0 --numeric-owner src && gzip -dc /tmp/x.tgz | sha256sum'), result(`${cases[0][1]}  -\n`))
   })
 
+  it('stores a file it meets again as a hard link, given several operands', async () => {
+    const t = await stopped(() => createTerminal(TREE, { mount: '/repo', writable: '/tmp/' }))
+    await t.run('export TZ=UTC')
+    const own = '--owner=0 --group=0 --numeric-owner'
+    // `tar --sort=name OPTIONS -cf x.tar OPERANDS | sha256sum`, over that tree
+    // in a directory named repo. --utc asks for the long listing.
+    assert.deepEqual(await t.run(`tar -cf /tmp/x.tar --utc ${own} src -C src a.txt && sha256sum /tmp/x.tar`), result(lines(
+      'drwx------ 0/0               0 2026-09-18 05:52 src/',
+      '-rw------- 0/0               6 2026-09-18 05:52 src/a.txt',
+      '-rw------- 0/0            8893 2026-09-18 05:52 src/big.txt',
+      'lrwxrwxrwx 0/0               0 2026-09-18 05:52 src/link -> a.txt',
+      'drwx------ 0/0               0 2026-09-18 05:52 src/sub/',
+      '-rw------- 0/0               2 2026-09-18 05:52 src/sub/b.txt',
+      'hrw------- 0/0               0 2026-09-18 05:52 a.txt link to src/a.txt',
+      '14fa4adcf23a4fc950ab6374a6ce2bd7e80491750858991de8c10f53616fcc0f  /tmp/x.tar',
+    )))
+    // A link as a link; a directory it walks again, and not as a link.
+    assert.deepEqual(await t.run(`tar -cvvf /tmp/x.tar ${own} src/link ../repo/src/link && sha256sum /tmp/x.tar`), result(lines(
+      'lrwxrwxrwx 0/0               0 2026-09-18 05:52 src/link -> a.txt',
+      'hrwxrwxrwx 0/0               0 2026-09-18 05:52 ../repo/src/link link to src/link',
+      '3d24ad0f1353b7c7f78cac9bb487b925a67bab230991680e9daa04a0aba30d21  /tmp/x.tar',
+    ), { stderr: "tar: Removing leading `../' from member names\n" }))
+    assert.deepEqual(await t.run(`tar -cvf /tmp/x.tar ${own} src/sub/b.txt ../repo/src/sub && sha256sum /tmp/x.tar`), result(
+      'src/sub/b.txt\n../repo/src/sub/\n../repo/src/sub/b.txt\n83188c1e262e5054047c45826525fb6998330df703e31625ff0e69d5f17edc03  /tmp/x.tar\n',
+      { stderr: "tar: Removing leading `../' from member names\n" },
+    ))
+    // A name given twice is a hard link to itself, which the package will
+    // not write.
+    await gap(t, `tar -cf /tmp/y.tar ${own} src/a.txt src/a.txt`, 'repeated name', 'tar: src/a.txt: storing a name again, as a hard link to itself, is not supported\n')
+  })
+
   it('refuses to make up the numbers an archive records', async () => {
     const t = await terminal(TREE)
     const message = 'tar: the files here have no numeric owner or group to record; give them with --owner=NAME:UID and --group=NAME:GID, or as ids with --numeric-owner\n'
@@ -539,6 +595,8 @@ describe('tar names what it stores as GNU does', () => {
   it('writes to stdout, and lists on stderr when it does', async () => {
     const t = await terminal(TREE)
     assert.deepEqual(await t.run(`tar -cvf - ${own} src/sub | tar -t`), result('src/sub/\nsrc/sub/b.txt\n', { stderr: 'src/sub/\nsrc/sub/b.txt\n' }))
+    // So does -O, which writes nothing there.
+    assert.deepEqual(await t.run(`tar -cvOf /tmp/o.tar ${own} src/sub`), result('', { stderr: 'src/sub/\nsrc/sub/b.txt\n' }))
     // -a picks gzip by the name.
     assert.deepEqual(await t.run(`tar -caf /tmp/a.tgz ${own} src/a.txt && tar -tzf /tmp/a.tgz`), result('src/a.txt\n'))
   })

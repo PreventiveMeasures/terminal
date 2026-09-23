@@ -153,6 +153,7 @@ describe('unzip lists and tests what an archive holds', () => {
       `Archive:  pkg.zip\n${[names[0], ...names.slice(6)].map(test).join('')}caution: excluded filename not matched:  nothere\nNo errors detected in pkg.zip for the 6 files tested.\n`,
     ))
     assert.deepEqual(await t.run('unzip -tq pkg.zip pkg/link'), result('No errors detected in pkg.zip for the 1 file tested.\n'))
+    assert.deepEqual(await t.run('unzip -tqno pkg.zip'), result('caution:  both -n and -o specified; ignoring -o\nNo errors detected in compressed data of pkg.zip.\n'))
   })
 
   it('pipes the members out as they are stored', async () => {
@@ -199,6 +200,10 @@ describe('unzip extracts into the writable overlay', () => {
     assert.deepEqual(await t.run('unzip -q /repo/pkg.zip -d out'), result('', { stderr: replace('out/pkg/src/index.js'), exitCode: 1, cwd: '/tmp' }))
     assert.deepEqual(await t.run('unzip -qo /repo/pkg.zip -d out'), result('', { cwd: '/tmp' }))
     assert.deepEqual(await t.run('unzip -qn /repo/pkg.zip -d out'), result('', { cwd: '/tmp' }))
+    // Given both, UnZip takes -n, and says so however quiet it is.
+    assert.deepEqual(await t.run('echo changed > out/pkg/README.md && unzip -qqno /repo/pkg.zip -d out && cat out/pkg/README.md'), result('changed\n', {
+      stderr: 'caution:  both -n and -o specified; ignoring -o\n', cwd: '/tmp',
+    }))
     assert.deepEqual(await t.run('unzip -qq /repo/pkg.zip pkg/README.md -d out'), result('', { stderr: replace('out/pkg/README.md'), exitCode: 1, cwd: '/tmp' }))
   })
 
@@ -234,6 +239,20 @@ describe('unzip extracts into the writable overlay', () => {
   })
 })
 
+// Each entry of an archive in the overlay and the method it is stored by,
+// from its local headers: 0 stored, 8 deflated.
+async function methods(t, path) {
+  const bytes = bytesOf((await t.run(`base64 ${path}`)).stdout)
+  const view = new DataView(bytes.buffer)
+  const found = []
+  for (let at = 0; view.getUint32(at, true) === 0x04034b50;) {
+    const name = view.getUint16(at + 26, true)
+    found.push([Buffer.from(bytes.subarray(at + 30, at + 30 + name)).toString(), view.getUint16(at + 8, true)])
+    at += 30 + name + view.getUint16(at + 28, true) + view.getUint32(at + 18, true)
+  }
+  return found
+}
+
 // What the runtime's deflate saves on a file, rounded as Info-ZIP rounds it.
 function deflated(text) {
   const n = Buffer.byteLength(text)
@@ -265,6 +284,23 @@ describe('zip writes an archive UnZip reads back', () => {
     assert.deepEqual(await t.run('zip /tmp/j.zip pkg'), result('  adding: pkg/ (stored 0%)\n'))
   })
 
+  it('stores a file named as compressed already, as Info-ZIP does', async () => {
+    const t = await terminal()
+    // Deflate would make pkg.zip smaller; Info-ZIP stores it all the same.
+    assert.deepEqual(await t.run('zip /tmp/y.zip pkg.zip'), result('  adding: pkg.zip (stored 0%)\n'))
+    assert.deepEqual(await methods(t, '/tmp/y.zip'), [['pkg.zip', 0]])
+    // Beside a file deflate makes no smaller, and so stores either way.
+    assert.deepEqual(await t.run('zip /tmp/v.zip pkg.zip notes.txt'), result('  adding: pkg.zip (stored 0%)\n  adding: notes.txt (stored 0%)\n'))
+    assert.deepEqual(await methods(t, '/tmp/v.zip'), [['pkg.zip', 0], ['notes.txt', 0]])
+    // A file by such a suffix that deflate makes no smaller, beside one it
+    // deflates, and the suffixes spelled as they are: `.ZIP` is none of them.
+    const numbers = `deflated ${deflated(NUMBERS)}`
+    assert.deepEqual(await t.run('printf ab > /tmp/t.Z && cp pkg/src/lib/numbers.txt /tmp/n.ZIP && zip /tmp/w.zip /tmp/t.Z /tmp/n.ZIP'), result(`  adding: tmp/t.Z (stored 0%)\n  adding: tmp/n.ZIP (${numbers}%)\n`))
+    assert.deepEqual(await methods(t, '/tmp/w.zip'), [['tmp/t.Z', 0], ['tmp/n.ZIP', 8]])
+    // One the package would deflate, beside another it deflates, is a gap.
+    await gap(t, 'zip /tmp/x.zip pkg/src/lib/numbers.txt pkg.zip', 'stored suffix', 'zip: pkg.zip: storing a file as Info-ZIP stores one by its suffix, beside files it deflates, is not supported\n')
+  })
+
   it('takes one file named twice once, and refuses two names for one entry', async () => {
     const t = await terminal()
     assert.deepEqual(await t.run('zip /tmp/r.zip pkg/README.md pkg/README.md'), result('  adding: pkg/README.md (stored 0%)\n'))
@@ -288,6 +324,8 @@ describe('zip writes an archive UnZip reads back', () => {
     assert.deepEqual(await t.run('zip - pkg/README.md'), terminalOut)
     assert.deepEqual(await t.run('zip -q'), terminalOut)
     await gap(t, 'zip - pkg/README.md > /tmp/s.zip', 'streamed archive', 'zip: writing an archive to stdout is not supported\n')
+    // An operand `-` is a file whose bytes are what stdin holds.
+    await gap(t, 'echo hi | zip /tmp/t.zip pkg/README.md -', 'stdin input', 'zip: adding what stdin holds, as the entry `-`, is not supported\n')
     // Info-ZIP stores `../README.md` as it is typed; the package stores no climb.
     await gap(t, 'cd pkg/src && zip /tmp/m.zip ../README.md', 'dot-segment names', "zip: ../README.md: names with `.', `..' or empty segments are not supported\n")
     await gap(t, 'zip /repo/n.zip /repo/pkg/README.md', 'read-only target', 'zip: /repo/n.zip: Read-only file system\n')

@@ -45,10 +45,10 @@ export async function createArchive(opts, state) {
   if (gzip && !supports('gzip')) return state.refuse('option', '-z', 'this runtime has no gzip stream')
   const target = openTarget(opts.archive, state)
   if (!target) return
-  if (target.kind === 'stdout') state.listTo = 2
+  if (target.kind === 'stdout' || opts.toStdout) state.listTo = 2
   const walk = {
     state, owners, target, entries: [], verbose: opts.verbose, many: opts.items.filter((item) => item.name !== undefined).length > 1,
-    mtime: Math.floor(ctx.createdAt / 1000), members: new Set(), links: new Set(), line: opts.verbose > 1 ? longLines(ctx, opts) : null,
+    mtime: Math.floor(ctx.createdAt / 1000), members: new Set(), links: new Set(), line: opts.verbose > 1 ? longLines(ctx, opts) : null, archived: new Map(),
   }
   let dir = ctx.cwd
   let pending = []
@@ -152,15 +152,22 @@ function addPath(path, orig, safe, walk) {
     return state.refuse('feature', 'dot-segment names', `${quoteColon(orig, state.ctx)}: member names with \`.' or empty segments are not supported`)
   }
   const type = dir ? 'directory' : link ? 'symlink' : 'file'
-  const entry = {
-    name: safe.name, type, mode: MODES[type], mtime: walk.mtime, ...walk.owners,
-    linkname: link ? fs.readLink(path) : '', data: type === 'file' ? readBytesOf(fs, path) : undefined,
-  }
+  // Where there are several operands, GNU keeps everything but a directory
+  // by its inode, and stores the same one met again as a hard link to the
+  // name it was first stored under: reached twice, or given twice — which
+  // is a hard link to its own name, an entry the package will not write.
+  const first = walk.many && !dir ? walk.archived.get(path) : undefined
+  if (first === safe.name) return state.refuse('feature', 'repeated name', `${quoteColon(orig, state.ctx)}: storing a name again, as a hard link to itself, is not supported`)
+  if (walk.many && !dir && first === undefined) walk.archived.set(path, safe.name)
+  const entry = first === undefined
+    ? { name: safe.name, type, mode: MODES[type], mtime: walk.mtime, ...walk.owners, linkname: link ? fs.readLink(path) : '', data: type === 'file' ? readBytesOf(fs, path) : undefined }
+    : { name: safe.name, type: 'link', mode: MODES[type], mtime: walk.mtime, ...walk.owners, linkname: first }
   walk.entries.push(entry)
   if (walk.verbose) state.list(walk.line ? walk.line({ ...entry, name: orig, data: entry.data ?? new Uint8Array() }) : dir ? `${orig}/` : orig)
   // Where there are several operands, GNU counts the links of everything
-  // but a directory, and warns of the same prefix for hard link targets.
-  if (walk.many && !dir && safe.prefix !== '' && !walk.links.has(safe.prefix)) {
+  // but a directory it did not store as a link, and warns of the same prefix
+  // for hard link targets.
+  if (walk.many && !dir && first === undefined && safe.prefix !== '' && !walk.links.has(safe.prefix)) {
     walk.links.add(safe.prefix)
     state.warn(`Removing leading \`${safe.prefix}' from hard link targets`)
   }

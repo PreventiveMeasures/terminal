@@ -20,11 +20,16 @@ import { parseTar } from './options.js'
 import { readArchive } from './read.js'
 import { tarResult, tarState } from './state.js'
 
+// GNU holds a whole record in memory, reading or writing, and a record past
+// 16 MiB is more than this terminal holds.
+const MAX_BLOCKING = 32768
+
 export async function tar(_stdin, tokens, ctx) {
   const opts = parseTar(tokens, ctx)
   if (opts.usage) return { stdout: '', stderr: opts.usage.text, exitCode: opts.usage.status }
   const state = tarState(ctx)
-  if (opts.mode === 'create') await createArchive(opts, state)
+  if (opts.blocking > MAX_BLOCKING) state.refuse('option', '--blocking-factor', `${opts.blocking}: a record of that many blocks is more than this terminal holds`)
+  else if (opts.mode === 'create') await createArchive(opts, state)
   else await readMembers(opts, state)
   return tarResult(state)
 }
@@ -39,8 +44,9 @@ async function readMembers(opts, state) {
   if (!read) return
   const names = memberNames(opts.items)
   const extracting = opts.mode === 'extract'
-  // What -O writes goes to stdout, which moves the names to stderr.
-  if (extracting && opts.toStdout) state.listTo = 2
+  // Where -O is given, even to a mode that writes nothing out, GNU lists on
+  // stderr.
+  if (opts.toStdout) state.listTo = 2
   const line = opts.verbose > 1 ? longLines(ctx, opts) : null
   const places = new Map()
   for (const [i, entry] of read.entries.entries()) {
@@ -57,13 +63,21 @@ async function readMembers(opts, state) {
     if (opts.verbose > 0) state.list(line ? line(entry) : quoteEscape(shown, ctx))
     if (extracting && opts.toStdout) {
       if (entry.type === 'file' || entry.type === 'contiguous-file') state.bytes(entry.data)
-    } else if (extracting && extractEntry(entry, name, landing(dir, name), state, opts.keepOld)) dated(read.mtimes[i], name, began, state)
+    } else if (extracting && extractEntry(entry, name, landing(dir, name), state, opts.keepOld, (count) => creating(name, count, line, state))) dated(read.mtimes[i], name, began, state)
     if (state.stopped) return
   }
   // gzip's status is waited for when the archive is closed, which GNU does
   // before it looks for what it did not find.
   if (read.child) return state.fatal(`Child returned status ${read.child}`)
   reportMissing(names, state, opts.noWildcards)
+}
+
+// The directories GNU made for an entry, the last `count` of those above its
+// name, which -vv lists outermost first after the entry's own line.
+function creating(name, count, line, state) {
+  if (!line) return
+  const parents = name.split('/').slice(0, -1)
+  for (let i = parents.length - count; i < parents.length; i++) state.list(line.mkdir(parents.slice(0, i + 1).join('/')))
 }
 
 // GNU sets the time of each entry it writes, and warns of one before 1970 or

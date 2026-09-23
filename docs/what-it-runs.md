@@ -65,7 +65,8 @@ there reports. A `{ }`, a `( )`, an `if` or a loop standing in a pipeline
 reads what a command standing there would, and the commands inside it share
 that one input as the commands of any list do: `cat f.tgz | { gzip -d; }`
 reads the member, and what one command in the braces takes is not there for
-the next to take again. What reads such bytes as text names the input and reports an
+the next to take again. What `xargs` runs hands its bytes on the same way, so
+`echo f.gz | xargs gzip -dc | base64` reads the member too. What reads such bytes as text names the input and reports an
 unsupported diagnostic rather than mangling it — `head`, `sed`, `awk` and the
 rest, whether the bytes came from a file, a redirection or a pipe, and
 `diff -a`. A search
@@ -255,7 +256,14 @@ scripts and git binary patches are refused the same way.
 spelling and getopt's, `-f`, `-v` and `-vv`, `-z` and `-a`, the positional
 `-C`, `-O`, `-k`, `--strip-components`, `--numeric-owner`, `--utc`, `-b`,
 `--format` of `gnu` or `ustar`, and `--sort=name`, which is the order this
-tree is walked in anyway. The archive is read and written by
+tree is walked in anyway. `-O` moves every listing to stderr, `--utc` asks for
+the long listing whatever `-v` says, and at `-vv` an extraction names each
+directory it made on the way to an entry. With several operands, a file met a
+second time under another name — `src` and then `-C src a.txt` — is stored as
+a hard link to the first, as GNU stores it; met under the same name, it would
+be a hard link to itself, which the package will not write, so that is
+refused. GNU holds a whole record in memory, and a `-b` past 32768 blocks,
+16 MiB, is refused. The archive is read and written by
 [`@preventive/archive`](https://www.npmjs.com/package/@preventive/archive),
 whose writer puts down byte for byte what GNU tar writes for the same entries,
 and whose reader is strict: an archive it will not read whole — damaged,
@@ -290,12 +298,19 @@ the run began, which GNU warns of once it has written it, is refused as well.
 `zip` makes a new archive as Info-ZIP Zip 3.0 does — `-r`, `-j`, `-D`, `-0`,
 `-y` and `-q`, its `adding:` lines, warnings, refusal of one name for two
 files, and statuses — each file deflated through the runtime's stream wherever
-that makes it smaller. That deflate is the runtime's rather than Info-ZIP's,
-so the share a file reports saved is this archive's, and can be a point away
-from what Info-ZIP's would be. Adding to an archive already there, a
-compression level and the rest are refused. `unzip` answers as Debian's
-UnZip 6.00 does: `-l`, dated year first, `-t`, `-p`, and extraction with `-q`,
-`-o`, `-n`, `-j`, `-d` and `-x`, the overwrite question included — UnZip asks
+that makes it smaller, and one whose name says it is compressed already —
+`.zip`, `.Z`, `.zoo`, `.arc`, `.lzh` or `.arj` — stored as it is. The package
+stores a whole archive or deflates what deflate makes smaller, so a file by
+one of those names that deflate would make smaller, beside another file it
+makes smaller, is refused. That deflate is the runtime's rather than
+Info-ZIP's, so the share a file reports saved is this archive's, and can be a
+few points away from what Info-ZIP's would be: 56% for the numbers 1 to 400,
+a line each, where Info-ZIP saves 53%. Adding to an archive already there, a
+file operand `-`, which Info-ZIP reads from stdin, a compression level and the
+rest are refused. `unzip` answers as Debian's UnZip 6.00 does: `-l`, dated
+year first, `-t`, `-p`, and extraction with `-q`, `-o`, `-n` — which wins over
+`-o`, with UnZip's caution, where both are given — `-j`, `-d` and `-x`, the
+overwrite question included — UnZip asks
 it on stdin, and a stdin with nothing on it answers with its end, which UnZip
 takes as "None". A name stored with a `.` segment, which Info-ZIP never writes
 and other tools do, is refused as tar's is, since UnZip lists it as stored. The

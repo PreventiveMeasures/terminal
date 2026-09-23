@@ -1,11 +1,12 @@
 // zip, as Info-ZIP Zip 3.0 answers it, writing the archive with
 // @preventive/archive's zip writer: each file deflated through the runtime's
 // stream and kept deflated only where that made it smaller, as Info-ZIP
-// keeps it. What it says of each entry — "stored 0%", "deflated 53%" — is
-// what this archive holds, worked out with Info-ZIP's own rounding from the
-// deflated size the same stream gives; the bytes are the runtime's deflate
-// rather than Info-ZIP's, so a file can come out a few bytes apart from
-// what Info-ZIP would have made of it.
+// keeps it, and one named as compressed already stored as it is (see
+// STORED_SUFFIXES). What it says of each entry — "stored 0%", "deflated
+// 53%" — is what this archive holds, worked out with Info-ZIP's own rounding
+// from the deflated size the same stream gives; the bytes are the runtime's
+// deflate rather than Info-ZIP's, so a file can come out a few bytes apart
+// from what Info-ZIP would have made of it, and its share a few points.
 //
 // The entries are this tree as `ls -l` describes it: files `-rw-------`,
 // directories `drwx------`, links `lrwxrwxrwx`, all dated to the moment the
@@ -62,6 +63,8 @@ export async function zip(_stdin, tokens, ctx) {
   if (target.path !== null) return refuse(say, 'feature', 'existing archive', `${name}: adding to an archive that is already there is not supported`)
   const walk = { ctx, opts, entries: [], seen: new Set(), out, gap: null }
   for (const given of opts.names) {
+    // Info-ZIP reads `-` as a file whose bytes are stdin's.
+    if (given === '-') return refuse(say, 'feature', 'stdin input', 'adding what stdin holds, as the entry `-`, is not supported')
     addOperand(given, walk)
     if (walk.gap) return refuse(say, ...walk.gap)
   }
@@ -74,9 +77,18 @@ export async function zip(_stdin, tokens, ctx) {
     out(repeated)
     return finish(say, 16)
   }
-  const lines = await Promise.all(walk.entries.map((entry) => addingLine(entry, opts)))
+  // Info-ZIP stores a file by one of these suffixes as it is. The package
+  // stores everything, or keeps each file deflated where deflate makes it
+  // smaller: a file by such a suffix that deflate makes smaller, beside
+  // another file that it makes smaller, is one it cannot write as Info-ZIP
+  // does.
+  const packed = opts.store ? new Map() : await deflated(walk.entries.filter((entry) => entry.type === 'file'))
+  const kept = [...packed.keys()].filter(storedBySuffix)
+  if (kept.length > 0 && kept.length < packed.size) return refuse(say, 'feature', 'stored suffix', `${kept[0].name}: storing a file as Info-ZIP stores one by its suffix, beside files it deflates, is not supported`)
+  for (const entry of kept) packed.delete(entry)
+  const lines = walk.entries.map((entry) => addingLine(entry, packed.get(entry)))
   let archive
-  try { archive = await writeZip(walk.entries, { method: opts.store ? 'store' : 'deflate' }) } catch (error) {
+  try { archive = await writeZip(walk.entries, { method: packed.size > 0 ? 'deflate' : 'store' }) } catch (error) {
     if (!(error instanceof ArchiveError)) throw error
     return refuse(say, 'feature', 'archive', `this archive cannot be written here: ${error.message}`)
   }
@@ -98,14 +110,24 @@ function openArchive(ctx, name) {
   }
 }
 
+// Info-ZIP's default -n: the suffixes of what is compressed already, which
+// it matches as they are spelled on Unix.
+const STORED_SUFFIXES = ['.Z', '.zip', '.zoo', '.arc', '.lzh', '.arj']
+const storedBySuffix = (entry) => STORED_SUFFIXES.some((suffix) => entry.name.endsWith(suffix))
+
+// The size deflate gives each file it makes smaller, which the archive keeps
+// deflated, as the same stream the package deflates with gives it.
+async function deflated(files) {
+  const sizes = await Promise.all(files.map(async (entry) => (entry.data.length === 0 ? 0 : (await compress(entry.data, 'deflate-raw')).length)))
+  return new Map(files.flatMap((entry, i) => (sizes[i] < entry.data.length ? [[entry, sizes[i]]] : [])))
+}
+
 // What Info-ZIP says of an entry as it adds it: stored, or deflated by the
 // share it saved, rounded as Info-ZIP's percent() rounds it.
-async function addingLine(entry, opts) {
+function addingLine(entry, packed) {
   const shown = entry.type === 'directory' ? `${entry.name}/` : entry.name
-  if (opts.store || entry.type !== 'file' || entry.data.length === 0) return `  adding: ${shown} (stored 0%)\n`
-  const packed = await compress(entry.data, 'deflate-raw')
-  if (packed.length >= entry.data.length) return `  adding: ${shown} (stored 0%)\n`
-  return `  adding: ${shown} (deflated ${percent(entry.data.length, packed.length)}%)\n`
+  if (packed === undefined) return `  adding: ${shown} (stored 0%)\n`
+  return `  adding: ${shown} (deflated ${percent(entry.data.length, packed)}%)\n`
 }
 
 function percent(n, m) {

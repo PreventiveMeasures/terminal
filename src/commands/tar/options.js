@@ -123,10 +123,10 @@ const VALUES = {
     const n = wholeNumber(text)
     return n === null || n < 0 ? usage(`${text}: Invalid number of elements`) : { value: n }
   },
-  // GNU's bound: a record of that many blocks has to fit an int.
+  // GNU's bound: the factor has to fit an int.
   'blocking-factor': (text) => {
     const n = wholeNumber(text)
-    return n === null || n < 1 || n > 4194303 ? usage(`${text}: Invalid blocking factor`) : { value: n }
+    return n === null || n < 1 || n > 2147483647 ? usage(`${text}: Invalid blocking factor`) : { value: n }
   },
   format: (text) => {
     const chosen = FORMATS[text]
@@ -168,7 +168,9 @@ function settle(opts) {
   return {
     mode: opts.mode,
     items: opts.items,
-    verbose: opts.verbose,
+    // GNU prints times only in the long listing, so asking for them in UTC
+    // asks for that listing, whatever -v said.
+    verbose: opts.flags.has('utc') ? Math.max(opts.verbose, 2) : opts.verbose,
     archive: opts.values.get('file') ?? '-',
     gzip: opts.flags.has('gzip'),
     auto: opts.flags.has('auto-compress'),

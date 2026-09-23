@@ -32,8 +32,9 @@ export const landing = (dir, name) => resolve(dir, name)
 // `name` is what GNU calls the entry in what it says of it: the name it is
 // extracted under, stripped and with no slash after it; `path` is where it
 // goes. True where the entry was written; ends the run on a gap, and
-// reports a name it cannot take as GNU does, going on to the next.
-export function extractEntry(entry, name, path, state, keepOld) {
+// reports a name it cannot take as GNU does, going on to the next. `made` is
+// told how many directories above the name were made for it.
+export function extractEntry(entry, name, path, state, keepOld, made = () => {}) {
   const { ctx } = state
   const named = quoteColon(name, ctx)
   if (!WRITTEN.has(entry.type)) {
@@ -45,7 +46,8 @@ export function extractEntry(entry, name, path, state, keepOld) {
   if (!ctx.writable || !inOverlay(path)) return readOnly()
   const parents = makeParents(dirname(path), state)
   if (parents === 'read-only') return readOnly()
-  if (parents !== null) return state.error(`${named}: Cannot ${verb}: ${parents}`)
+  if (typeof parents === 'string') return state.error(`${named}: Cannot ${verb}: ${parents}`)
+  if (parents > 0) made(parents)
   if (entry.type === 'directory') return makeDirectory(path, named, state)
   const refusal = entry.type === 'symlink' ? `Cannot create symlink to ${quoteLocale(entry.linkname, ctx)}` : 'Cannot open'
   const taken = lookup('/', path, ctx.fs, { follow: false }).path !== null
@@ -57,9 +59,9 @@ export function extractEntry(entry, name, path, state, keepOld) {
   return true
 }
 
-// Every directory above the name, made where it is missing. What stops it
-// is said as the reason the entry cannot be opened; a directory the overlay
-// cannot hold is the read-only filesystem.
+// Every directory above the name, made where it is missing, and how many
+// were. What stops it is said as the reason the entry cannot be opened; a
+// directory the overlay cannot hold is the read-only filesystem.
 function makeParents(path, state) {
   const { fs } = state.ctx
   const missing = []
@@ -76,7 +78,7 @@ function makeParents(path, state) {
   for (const dir of missing.toReversed()) {
     if (!inOverlay(dir) || !fs.makeWritableDir('/', dir)) return 'read-only'
   }
-  return null
+  return missing.length
 }
 
 function makeDirectory(path, named, state) {

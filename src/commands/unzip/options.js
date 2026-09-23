@@ -16,7 +16,7 @@ const MODES = { __proto__: null, l: 'list', t: 'test', p: 'pipe', c: 'crt', v: '
 const NO_EXDIR = { usage: { text: 'error:  must specify directory to which to extract with -d option\n', status: 10 } }
 
 export function parseUnzip(tokens) {
-  const opts = { modes: new Set(), quiet: 0, overwrite: null, junk: false, exdir: null, archive: null, members: [], excludes: [] }
+  const opts = { modes: new Set(), quiet: 0, overwriteAll: false, overwriteNone: false, junk: false, exdir: null, archive: null, members: [], excludes: [] }
   let i = 0
   for (; i < tokens.length && tokens[i].startsWith('-') && tokens[i].length > 1; i++) {
     const word = tokens[i]
@@ -29,8 +29,8 @@ export function parseUnzip(tokens) {
       }
       if (MODES[letter]) opts.modes.add(MODES[letter])
       else if (letter === 'q') opts.quiet++
-      else if (letter === 'o') opts.overwrite = 'all'
-      else if (letter === 'n') opts.overwrite = 'none'
+      else if (letter === 'o') opts.overwriteAll = true
+      else if (letter === 'n') opts.overwriteNone = true
       else if (letter === 'j') opts.junk = true
       else throw new UnsupportedError('option', `-${letter}`, `unknown option: -${letter}`)
     }
@@ -48,7 +48,9 @@ export function parseUnzip(tokens) {
     } else (excluding ? opts.excludes : opts.members).push(word)
   }
   const [mode = 'extract'] = opts.modes
-  return { ...opts, mode }
+  // Given both, UnZip takes -n, and says so (see index.js).
+  const overwrite = opts.overwriteNone ? 'none' : opts.overwriteAll ? 'all' : null
+  return { ...opts, mode, overwrite, bothOverwrites: opts.overwriteAll && opts.overwriteNone }
 }
 
 // Info-ZIP's recmatch, over the bytes of the name as the archive stores them:

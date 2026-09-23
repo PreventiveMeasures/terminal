@@ -38,6 +38,7 @@ export async function unzip(_stdin, tokens, ctx) {
   // members, and is as quiet as -q.
   const run = unzipRun(ctx, opts)
   // A place to extract to means nothing to a run that extracts nothing.
+  if (opts.bothOverwrites) run.say(2, 'caution:  both -n and -o specified; ignoring -o\n')
   if (opts.exdir !== null && opts.mode !== 'extract') run.say(2, 'caution:  not extracting; -d ignored\n')
   if (opts.mode === 'crt' || opts.mode === 'verbose') {
     return run.refuse('option', opts.mode === 'crt' ? '-c' : '-v', 'how each entry is stored is not known here, which this listing prints')
