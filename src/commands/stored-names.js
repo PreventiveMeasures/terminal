@@ -7,7 +7,7 @@
 // the cleaning changed is refused, and so is one with an entry for its own
 // root, which an extraction here does not handle as GNU's does. The stored
 // names are read back out of the archive: a zip's from its central
-// directory, here, and a tar's from its headers (see tar-headers.js).
+// directory, here, and a tar's from its headers (see tar/headers.js).
 
 import { decodeUtf8, encodeUtf8 } from '../util.js'
 

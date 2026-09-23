@@ -7,7 +7,7 @@
 // patterns exclude, and `-d`. Anything else that looks like an option there
 // is a name like any other, and is reported as one when nothing matches it.
 
-import { UnsupportedError } from '../unsupported.js'
+import { UnsupportedError } from '../../unsupported.js'
 
 // What each letter does; a mode letter picks what is done with the members.
 const MODES = { __proto__: null, l: 'list', t: 'test', p: 'pipe', c: 'crt', v: 'verbose' }

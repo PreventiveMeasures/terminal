@@ -21,12 +21,12 @@
 
 import { compress, supports } from '@preventive/archive/compression.js'
 import { ArchiveError, pack } from '@preventive/archive/tar.js'
-import { compareNames, dirname, joinPath, lookup, resolve } from '../fs.js'
-import { readBytesOf } from '../util.js'
-import { inOverlay } from '../writable.js'
-import { longLines } from './tar-list.js'
-import { enterDirectory, memberOperand, quoteColon, quoteLocale } from './tar-names.js'
-import { refuseCompression, remoteArchive, suffixCompression } from './tar-read.js'
+import { compareNames, dirname, joinPath, lookup, resolve } from '../../fs.js'
+import { readBytesOf } from '../../util.js'
+import { inOverlay } from '../../writable.js'
+import { longLines } from './list.js'
+import { enterDirectory, memberOperand, quoteColon, quoteLocale } from './names.js'
+import { refuseCompression, remoteArchive, suffixCompression } from './read.js'
 
 const BLOCK = 512
 // The one model of this tree's metadata, which `ls -l` prints (ls-long.js).

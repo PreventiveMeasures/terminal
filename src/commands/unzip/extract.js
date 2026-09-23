@@ -10,8 +10,8 @@
 // The overlay is the one place a file can be written; a name anywhere else
 // is the read-only filesystem, and a gap.
 
-import { basename, dirname, lookup, resolve } from '../fs.js'
-import { inOverlay } from '../writable.js'
+import { basename, dirname, lookup, resolve } from '../../fs.js'
+import { inOverlay } from '../../writable.js'
 
 // How UnZip names the file it is writing: under the `-d` directory as it was
 // typed, one trailing slash dropped, or as the archive names it.

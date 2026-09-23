@@ -16,13 +16,13 @@
 // gaps.
 
 import { ArchiveError, unzip as readZip } from '@preventive/archive/zip.js'
-import { lookupWithNote } from '../notes.js'
-import { encodeUtf8, readBytesOf } from '../util.js'
-import { markUnsupported } from '../unsupported.js'
-import { formatDate } from './extra.js'
-import { refusalOf, storedName, zipRewritten } from './stored-names.js'
-import { extractMembers } from './unzip-extract.js'
-import { matches, parseUnzip } from './unzip-options.js'
+import { lookupWithNote } from '../../notes.js'
+import { encodeUtf8, readBytesOf } from '../../util.js'
+import { markUnsupported } from '../../unsupported.js'
+import { formatDate } from '../extra.js'
+import { refusalOf, storedName, zipRewritten } from '../stored-names.js'
+import { extractMembers } from './extract.js'
+import { matches, parseUnzip } from './options.js'
 
 const NO_DIRECTORY = [
   '  End-of-central-directory signature not found.  Either this file is not',
@@ -58,7 +58,7 @@ export async function unzip(_stdin, tokens, ctx) {
     return run.end(9)
   }
   // Where the package hands a name out otherwise than the archive stores it,
-  // the name is not one to print or match (see stored-names.js).
+  // the name is not one to print or match (see ../stored-names.js).
   const stored = zipRewritten(bytes, entries)
   if (stored !== null) {
     const [detail, message] = refusalOf(stored)

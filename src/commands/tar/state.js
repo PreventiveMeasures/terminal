@@ -8,7 +8,7 @@
 // A gap is where this terminal cannot go on as GNU would: the run ends
 // there, with what it had already done kept and the gap reported over it.
 
-import { markUnsupported } from '../unsupported.js'
+import { markUnsupported } from '../../unsupported.js'
 
 export function tarState(ctx) {
   const state = {

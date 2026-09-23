@@ -9,9 +9,9 @@
 // it may have been meant as a pattern. An empty operand names nothing and is
 // never missed.
 
-import { lookup } from '../fs.js'
-import { byteLocale } from '../util.js'
-import { quoteEscape } from './tar-list.js'
+import { lookup } from '../../fs.js'
+import { byteLocale } from '../../util.js'
+import { quoteEscape } from './list.js'
 
 // quotearg_colon: the escape style, with the colon escaped too, since the
 // name stands before one in the message.

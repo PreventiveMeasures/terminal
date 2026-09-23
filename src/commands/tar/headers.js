@@ -1,6 +1,6 @@
 // What a tar archive's headers say that @preventive/archive's entries do not,
 // read back out of them: each entry's name and link target as stored (see
-// stored-names.js), and the pax records GNU tar 1.35 reads.
+// ../stored-names.js), and the pax records GNU tar 1.35 reads.
 //
 // GNU reads the records of an entry's extended header as it comes to the
 // entry, before it does anything with it, and warns of each keyword it does
@@ -19,8 +19,8 @@
 // header, else a pax `path`, else the header's own name, joined to its
 // prefix under the ustar magic; a link's target the same way.
 
-import { decodeUtf8, joinBytes } from '../util.js'
-import { refusalOf, rewritten } from './stored-names.js'
+import { decodeUtf8, joinBytes } from '../../util.js'
+import { refusalOf, rewritten } from '../stored-names.js'
 
 const BLOCK = 512
 const blocks = (size) => Math.ceil(size / BLOCK) * BLOCK

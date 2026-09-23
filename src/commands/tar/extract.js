@@ -13,9 +13,9 @@
 // one is a gap. So is a name outside /tmp, which is the read-only filesystem
 // every other write here meets.
 
-import { dirname, lookup, resolve } from '../fs.js'
-import { inOverlay } from '../writable.js'
-import { quoteColon, quoteLocale } from './tar-names.js'
+import { dirname, lookup, resolve } from '../../fs.js'
+import { inOverlay } from '../../writable.js'
+import { quoteColon, quoteLocale } from './names.js'
 
 const WRITTEN = new Set(['file', 'contiguous-file', 'directory', 'symlink'])
 

@@ -4,8 +4,8 @@
 // where the runtime's streams know raw deflate, and not at all where they
 // do not, as the compressors are.
 import { supports } from '@preventive/archive/compression.js'
-import { tar } from './tar.js'
-import { unzip } from './unzip.js'
+import { tar } from './tar/index.js'
+import { unzip } from './unzip/index.js'
 import { zip } from './zip.js'
 
 export const ARCHIVE_COMMANDS = { tar, ...(supports('deflate-raw') ? { zip, unzip } : {}) }

@@ -1,10 +1,10 @@
 // How GNU tar 1.35 prints an entry: its name as stored, which is the one the
-// package hands out where the archive is read at all (see stored-names.js),
-// and with -v the long line
-// `-tv` shows. Names are quoted in tar's own style, `escape`: printed as they
-// are where the locale can print them, a backslash doubled, and everything
-// else — a control character, a character the locale cannot print — as C
-// escapes, a byte at a time.
+// package hands out wherever the archive is read at all (see
+// ../stored-names.js), and with -v the long line `-tv` shows. Names are
+// quoted in tar's own style, `escape`: printed as they are where the locale
+// can print them, a backslash doubled, and everything else — a control
+// character, a character the locale cannot print — as C escapes, a byte at
+// a time.
 //
 // The long line is GNU's print_header: mode, owner/group, size, the time to
 // the minute, the name, and where the entry is a link, what it links to.
@@ -12,10 +12,10 @@
 // run, as the time's does, so the lines of one listing line up the way
 // GNU's do and a later, wider entry shifts only the lines after it.
 
-import { UnsupportedError } from '../unsupported.js'
-import { byteLocale, classTables, encodeUtf8 } from '../util.js'
-import { formatDate } from './extra.js'
-import { storedName } from './stored-names.js'
+import { UnsupportedError } from '../../unsupported.js'
+import { byteLocale, classTables, encodeUtf8 } from '../../util.js'
+import { formatDate } from '../extra.js'
+import { storedName } from '../stored-names.js'
 
 const C_ESCAPES = new Map([[7, 'a'], [8, 'b'], [12, 'f'], [10, 'n'], [13, 'r'], [9, 't'], [11, 'v']])
 const octal = (byte) => '\\' + byte.toString(8).padStart(3, '0')

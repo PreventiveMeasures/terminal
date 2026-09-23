@@ -21,12 +21,12 @@
 
 import { supports } from '@preventive/archive/compression.js'
 import { ArchiveError, unpack } from '@preventive/archive/tar.js'
-import { decompressMembers } from '../compression.js'
-import { lookupWithNote } from '../notes.js'
-import { consumeStdin, encodeUtf8, readBytesOf } from '../util.js'
-import { gzipTrouble, looksCompressed } from './gzip.js'
-import { tarHeaders } from './tar-headers.js'
-import { quoteColon } from './tar-names.js'
+import { decompressMembers } from '../../compression.js'
+import { lookupWithNote } from '../../notes.js'
+import { consumeStdin, encodeUtf8, readBytesOf } from '../../util.js'
+import { gzipTrouble, looksCompressed } from '../gzip.js'
+import { tarHeaders } from './headers.js'
+import { quoteColon } from './names.js'
 
 const BLOCK = 512
 const GZIP_HEADER = 10
@@ -159,7 +159,7 @@ function refused(error, state) {
 }
 
 // The entries read, the status gzip left, and what the headers say of each
-// entry that the package does not (see tar-headers.js); null where they say
+// entry that the package does not (see headers.js); null where they say
 // what this terminal cannot answer for, which ends the run.
 function named(entries, data, state, child) {
   const read = tarHeaders(data, entries, (text) => quoteColon(text, state.ctx))

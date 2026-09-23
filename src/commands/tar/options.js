@@ -12,8 +12,8 @@
 // An option GNU has and this terminal does not is a gap, named as it was
 // written, rather than GNU's own complaint about an option it does not know.
 
-import { UnsupportedError } from '../unsupported.js'
-import { quoteColon, quoteLocale } from './tar-names.js'
+import { UnsupportedError } from '../../unsupported.js'
+import { quoteColon, quoteLocale } from './names.js'
 
 const MODES = new Set(['create', 'list', 'extract'])
 

@@ -9,16 +9,16 @@
 // filesystem, which is a gap. So is whatever the package will not read or
 // write, and every option this terminal does not carry. What an archive's
 // headers hold that the package does not hand out — each name as stored,
-// the pax records GNU reads — is read back out of them (tar-headers.js).
+// the pax records GNU reads — is read back out of them (headers.js).
 
-import { storedName } from './stored-names.js'
-import { createArchive } from './tar-create.js'
-import { extractEntry, landing, strippedName } from './tar-extract.js'
-import { longLines, quoteEscape } from './tar-list.js'
-import { enterDirectory, memberNames, quoteColon, reportMissing } from './tar-names.js'
-import { parseTar } from './tar-options.js'
-import { readArchive } from './tar-read.js'
-import { tarResult, tarState } from './tar-state.js'
+import { storedName } from '../stored-names.js'
+import { createArchive } from './create.js'
+import { extractEntry, landing, strippedName } from './extract.js'
+import { longLines, quoteEscape } from './list.js'
+import { enterDirectory, memberNames, quoteColon, reportMissing } from './names.js'
+import { parseTar } from './options.js'
+import { readArchive } from './read.js'
+import { tarResult, tarState } from './state.js'
 
 export async function tar(_stdin, tokens, ctx) {
   const opts = parseTar(tokens, ctx)
