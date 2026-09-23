@@ -7,9 +7,9 @@
 // What it writes goes to the writable overlay or to stdout, the archive's
 // bytes as they are; everything else a write would touch is the read-only
 // filesystem, which is a gap. So is whatever the package will not read or
-// write, and every option this terminal does not carry. What an archive's
-// headers hold that the package does not hand out — each name as stored,
-// the pax records GNU reads — is read back out of them (headers.js).
+// write, and every option this terminal does not carry, and an archive
+// whose stored names or pax records say what this cannot answer for as GNU
+// does (pax.js).
 
 import { storedName } from '../stored-names.js'
 import { createArchive } from './create.js'

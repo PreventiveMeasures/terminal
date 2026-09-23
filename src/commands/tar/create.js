@@ -1,6 +1,8 @@
 // An archive made the way GNU tar 1.35 makes one, written by
 // @preventive/archive's tar writer, which puts down byte for byte what GNU
-// does for the same entries.
+// does for the same entries — but in the header GNU writes ahead of a name
+// too long for its own, where GNU records the host's names for user and
+// group 0 unless under --numeric-owner, and the package no names at all.
 //
 // The entries are this tree as `ls -l` describes it: every file `-rw-------`,
 // every directory `drwx------`, every link `lrwxrwxrwx`, all of them dated to

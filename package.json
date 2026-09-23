@@ -121,11 +121,11 @@
     "src/commands/stored-names.js",
     "src/commands/tar/create.js",
     "src/commands/tar/extract.js",
-    "src/commands/tar/headers.js",
     "src/commands/tar/index.js",
     "src/commands/tar/list.js",
     "src/commands/tar/names.js",
     "src/commands/tar/options.js",
+    "src/commands/tar/pax.js",
     "src/commands/tar/read.js",
     "src/commands/tar/state.js",
     "src/commands/tee.js",
@@ -201,7 +201,7 @@
   },
   "dependencies": {
     "@exodus/bytes": "^1.16.0",
-    "@preventive/archive": "^1.0.0-beta.1",
+    "@preventive/archive": "^1.0.0-beta.2",
     "@preventive/diff": "^1.0.0"
   },
   "devDependencies": {

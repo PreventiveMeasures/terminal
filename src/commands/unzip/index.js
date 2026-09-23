@@ -20,7 +20,7 @@ import { lookupWithNote } from '../../notes.js'
 import { encodeUtf8, readBytesOf } from '../../util.js'
 import { markUnsupported } from '../../unsupported.js'
 import { formatDate } from '../extra.js'
-import { refusalOf, storedName, zipRewritten } from '../stored-names.js'
+import { refusalOf, rewritten, storedName } from '../stored-names.js'
 import { extractMembers } from './extract.js'
 import { matches, parseUnzip } from './options.js'
 
@@ -60,8 +60,8 @@ export async function unzip(_stdin, tokens, ctx) {
   }
   // Where the package hands a name out otherwise than the archive stores it,
   // the name is not one to print or match (see ../stored-names.js).
-  const stored = zipRewritten(bytes, entries)
-  if (stored !== null) {
+  const stored = entries.map(rewritten).find((name) => name !== null)
+  if (stored !== undefined) {
     const [detail, message] = refusalOf(stored)
     return run.refuse('feature', detail, `${stored}: ${message}`)
   }

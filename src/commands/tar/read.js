@@ -25,8 +25,8 @@ import { decompressMembers } from '../../compression.js'
 import { lookupWithNote } from '../../notes.js'
 import { consumeStdin, encodeUtf8, readBytesOf, stdinIsTerminal } from '../../util.js'
 import { gzipTrouble, looksCompressed } from '../gzip.js'
-import { tarHeaders } from './headers.js'
 import { quoteColon } from './names.js'
+import { tarNotes } from './pax.js'
 
 const BLOCK = 512
 const GZIP_HEADER = 10
@@ -108,7 +108,7 @@ export function readArchive(opts, state) {
   if (opts.gzip) return gunzipped(data, state)
   // A block's worth the reader takes is an archive, whatever its name says.
   const read = data.length >= BLOCK ? unpacked(data) : null
-  if (read?.entries !== undefined) return named(read.entries, data, state, 0)
+  if (read?.entries !== undefined) return named(read.entries, state, 0)
   const magic = magicOf(data)
   if (magic !== undefined) {
     if (source.stdin) return state.fatal(`Archive is compressed. Use ${magic.option} option`)
@@ -144,7 +144,7 @@ async function gunzipped(data, state) {
   const child = trouble?.status ?? 0
   if (inflated.bytes.length < BLOCK) return noEntries(child)
   const read = unpacked(inflated.bytes)
-  return read.entries === undefined ? refused(read.error, state) : named(read.entries, inflated.bytes, state, child)
+  return read.entries === undefined ? refused(read.error, state) : named(read.entries, state, child)
 }
 
 // The whole archive through the package's reader: its entries, or why it
@@ -161,11 +161,11 @@ function refused(error, state) {
   return null
 }
 
-// The entries read, the status gzip left, and what the headers say of each
-// entry that the package does not (see headers.js); null where they say
-// what this terminal cannot answer for, which ends the run.
-function named(entries, data, state, child) {
-  const read = tarHeaders(data, entries, (text) => quoteColon(text, state.ctx))
+// The entries read, the status gzip left, and what their records and stored
+// names say (see pax.js); null where that is what this terminal cannot
+// answer for, which ends the run.
+function named(entries, state, child) {
+  const read = tarNotes(entries, (text) => quoteColon(text, state.ctx))
   if (read.gap === undefined) return { entries, child, ...read }
   state.refuse('feature', ...read.gap)
   return null

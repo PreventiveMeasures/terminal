@@ -265,8 +265,11 @@ be a hard link to itself, which the package will not write, so that is
 refused. GNU holds a whole record in memory, and a `-b` past 32768 blocks,
 16 MiB, is refused. The archive is read and written by
 [`@preventive/archive`](https://www.npmjs.com/package/@preventive/archive),
-whose writer puts down byte for byte what GNU tar writes for the same entries,
-and whose reader is strict: an archive it will not read whole — damaged,
+whose writer puts down byte for byte what GNU tar writes for the same entries —
+but for a name too long for its header, which goes in a header of GNU's own
+ahead of it, where GNU records the host's names for user and group 0, `root`
+on most systems, unless under `--numeric-owner`, and the package records
+none; no reader lists or uses them — and whose reader is strict: an archive it will not read whole — damaged,
 truncated, or holding a name that climbs out of it — is refused with an
 unsupported diagnostic, where GNU would list or extract what it could and
 complain of the rest. A gzip archive goes through the runtime's stream, found
@@ -282,11 +285,10 @@ and change times, is refused for the same reason. The package keeps no `.`
 segment in a name, so a name GNU would store with one — anything under a `.`
 operand — is refused rather than stored differently. It reads names the same
 way, handing `./a` out as `a` and a directory as its name without a slash
-however it was stored, where GNU prints every name as it is stored; so the
-names are read back out of the archive's own headers, and one holding a name
-the package hands out otherwise — `./a`, `d/./b`, a directory stored without
-its slash, a hard link to `./f` — is refused, as is one with an entry for its
-own root. `tar` warns of a pax keyword GNU does not know as GNU does, as it
+however it was stored, beside the name as stored; GNU prints and matches
+every name as it is stored, so an archive holding a name the package cleans —
+`./a`, `d/./b`, a directory stored without its slash, a hard link to `./f` —
+is refused, as is one with an entry for its own root. `tar` warns of a pax keyword GNU does not know as GNU does, as it
 comes to the entry: macOS's `LIBARCHIVE.xattr.` records are warned of, while
 `SCHILY.xattr.` records pass without a word. An access or change time GNU
 would complain of, and the records of multi-volume and incremental archives,
