@@ -318,9 +318,9 @@ takes as "None". A name stored with a `.` segment, which Info-ZIP never writes
 and other tools do, is refused as tar's is, since UnZip lists it as stored. The
 package does not say how an entry was stored, nor whether its time is an exact
 one or a DOS time, so an extraction that is not quiet — which names each file
-`extracting` or `inflating` by how it was stored — `-c` and `-v` are refused,
-and `-l` answers where the two readings of every time agree, which they always
-do under `TZ=UTC`.
+`extracting` or `inflating` by how it was stored — `-c`, and `-v` or the
+second `-l` that UnZip reads as one, are refused, and `-l` answers where the
+two readings of every time agree, which they always do under `TZ=UTC`.
 
 `curl` is the one command that reaches outside, and the one no terminal has
 unless it was asked for: `createTerminal` takes `network: true`, and without

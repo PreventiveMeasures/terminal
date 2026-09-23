@@ -16,7 +16,7 @@ const MODES = { __proto__: null, l: 'list', t: 'test', p: 'pipe', c: 'crt', v: '
 const NO_EXDIR = { usage: { text: 'error:  must specify directory to which to extract with -d option\n', status: 10 } }
 
 export function parseUnzip(tokens) {
-  const opts = { modes: new Set(), quiet: 0, overwriteAll: false, overwriteNone: false, junk: false, exdir: null, archive: null, members: [], excludes: [] }
+  const opts = { modes: new Set(), lists: 0, quiet: 0, overwriteAll: false, overwriteNone: false, junk: false, exdir: null, archive: null, members: [], excludes: [] }
   let i = 0
   for (; i < tokens.length && tokens[i].startsWith('-') && tokens[i].length > 1; i++) {
     const word = tokens[i]
@@ -27,6 +27,7 @@ export function parseUnzip(tokens) {
         if (opts.exdir === undefined) return NO_EXDIR
         break
       }
+      if (letter === 'l') opts.lists++
       if (MODES[letter]) opts.modes.add(MODES[letter])
       else if (letter === 'q') opts.quiet++
       else if (letter === 'o') opts.overwriteAll = true
@@ -47,7 +48,9 @@ export function parseUnzip(tokens) {
       if (opts.exdir === undefined) return NO_EXDIR
     } else (excluding ? opts.excludes : opts.members).push(word)
   }
-  const [mode = 'extract'] = opts.modes
+  // UnZip counts -l, and a second asks for its verbose listing, as -v does.
+  const [first = 'extract'] = opts.modes
+  const mode = first === 'list' && opts.lists > 1 ? 'verbose' : first
   // Given both, UnZip takes -n, and says so (see index.js).
   const overwrite = opts.overwriteNone ? 'none' : opts.overwriteAll ? 'all' : null
   return { ...opts, mode, overwrite, bothOverwrites: opts.overwriteAll && opts.overwriteNone }

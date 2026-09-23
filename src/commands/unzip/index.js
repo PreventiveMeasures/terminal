@@ -41,7 +41,8 @@ export async function unzip(_stdin, tokens, ctx) {
   if (opts.bothOverwrites) run.say(2, 'caution:  both -n and -o specified; ignoring -o\n')
   if (opts.exdir !== null && opts.mode !== 'extract') run.say(2, 'caution:  not extracting; -d ignored\n')
   if (opts.mode === 'crt' || opts.mode === 'verbose') {
-    return run.refuse('option', opts.mode === 'crt' ? '-c' : '-v', 'how each entry is stored is not known here, which this listing prints')
+    const option = opts.mode === 'crt' ? '-c' : opts.lists > 1 ? '-ll' : '-v'
+    return run.refuse('option', option, 'how each entry is stored is not known here, which this listing prints')
   }
   const found = findArchive(opts.archive, ctx)
   if (!found) {

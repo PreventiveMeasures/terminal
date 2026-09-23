@@ -235,6 +235,10 @@ describe('unzip extracts into the writable overlay', () => {
     const r = await gap(t, 'cd /tmp && unzip /repo/pkg.zip -d out', 'extraction listing', listing)
     assert.equal(r.stdout, 'Archive:  /repo/pkg.zip\n   creating: out/pkg/\n   creating: out/pkg/src/\n')
     await gap(t, 'unzip -v /repo/pkg.zip', '-v', 'unzip: how each entry is stored is not known here, which this listing prints\n')
+    // UnZip counts -l, and lists as -v does from the second on.
+    for (const line of ['unzip -ll /repo/pkg.zip', 'unzip -l -ql /repo/pkg.zip']) {
+      await gap(t, line, '-ll', 'unzip: how each entry is stored is not known here, which this listing prints\n')
+    }
     await gap(t, 'cd /repo && unzip -q pkg.zip', 'read-only target', 'unzip: pkg/: Read-only file system\n')
   })
 })
