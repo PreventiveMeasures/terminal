@@ -14,6 +14,11 @@ const GOOD = Uint8Array.of(0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
 const BINARY = Uint8Array.of(0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0xeb, 0x0c, 0xf0, 0x73, 0xff, 0xcf, 0x05, 0x00, 0x5f, 0x8b, 0x81, 0xcd, 0x06, 0x00, 0x00, 0x00)
 const TRUNCATED = GOOD.slice(0, GOOD.length - 5)
 const CORRUPT = Uint8Array.from(GOOD, (byte, at) => (at === GOOD.length - 5 ? byte ^ 0xff : byte))
+// A member with bytes after it that begin none, and the first bytes of what
+// GNU reads as a zip and as compress's output.
+const TAIL = Uint8Array.of(...GOOD, ...Buffer.from('garbage\n'))
+const ZIPPED = Uint8Array.of(0x50, 0x4b, 0x03, 0x04, ...Buffer.from('rest of it'))
+const LZW = Uint8Array.of(0x1f, 0x9d, ...Buffer.from('rest of it'))
 const SOURCES = {
   'data.gz': GOOD,
   'named.dat': GOOD,
@@ -22,6 +27,9 @@ const SOURCES = {
   'trunc.gz': TRUNCATED,
   'crc.gz': CORRUPT,
   'empty.gz': new Uint8Array(),
+  'tail.gz': TAIL,
+  'zip.bin': ZIPPED,
+  'lzw.bin': LZW,
   'plain.txt': 'not compressed\n',
   'dir/inner.txt': 'inner\n',
 }
@@ -105,7 +113,45 @@ describe('gzip decompresses what a runtime inflated for it', () => {
     // one off, and a name with no suffix to take off is left alone.
     assert.deepEqual(await t.run('cp arch.tgz /tmp/a.tgz && gzip -d /tmp/a.tgz && cat /tmp/a.tar'), result('alpha\nbeta\n'))
     assert.deepEqual(await t.run('cp named.dat /tmp/n.dat && gzip -d /tmp/n.dat'), result('', { stderr: 'gzip: /tmp/n.dat: unknown suffix -- ignored\n', exitCode: 2 }))
-    assert.deepEqual(await t.run('cp data.gz /tmp/x.gz && gzip -d /tmp/x.gz'), result('', { stderr: 'gzip: /tmp/x already exists;\tnot overwritten\n', exitCode: 2 }))
+    // A name already taken is asked about where stdin is the terminal, which
+    // answers with its end; elsewhere GNU does not ask.
+    assert.deepEqual(await t.run('cp data.gz /tmp/x.gz && gzip -d /tmp/x.gz'), result('', { stderr: 'gzip: /tmp/x already exists; do you wish to overwrite (y or n)? \tnot overwritten\n', exitCode: 2 }))
+    assert.deepEqual(await t.run('gzip -d /tmp/x.gz < /dev/null'), result('', { stderr: 'gzip: /tmp/x already exists;\tnot overwritten\n', exitCode: 2 }))
+  })
+
+  it('takes -f as GNU does', async () => {
+    const t = terminal()
+    // Decompressing to stdout, what is not a member goes on as it is: a
+    // whole file, or what follows the last member, which is then no garbage.
+    assert.deepEqual(await t.run('gzip -dcf plain.txt'), result('not compressed\n'))
+    assert.deepEqual(await t.run('zcat -f data.gz plain.txt'), result('alpha\nbeta\nnot compressed\n'))
+    assert.deepEqual(await t.run('cat plain.txt | gzip -df'), result('not compressed\n'))
+    assert.deepEqual(await t.run('gzip -dcf tail.gz'), result('alpha\nbeta\ngarbage\n'))
+    assert.deepEqual(await t.run('gzip -dc tail.gz'), result('alpha\nbeta\n', { stderr: '\ngzip: tail.gz: decompression OK, trailing garbage ignored\n', exitCode: 2 }))
+    // Not to stdout, a file that is not a member is still not one.
+    assert.deepEqual(await t.run('cp plain.txt /tmp/p.gz && gzip -df /tmp/p.gz'), result('', { stderr: '\ngzip: /tmp/p.gz: not in gzip format\n', exitCode: 1 }))
+    // A name that carries a suffix is compressed all the same, and a name
+    // already taken is taken over, unless it is a directory.
+    assert.deepEqual(await t.run('cp data.gz /tmp/d.gz && gzip -f /tmp/d.gz && ls /tmp && gzip -dc /tmp/d.gz.gz | gzip -dc'), result('d.gz.gz\np.gz\nalpha\nbeta\n'))
+    assert.deepEqual(await t.run('cp data.gz /tmp/x.gz && echo old > /tmp/x && gzip -df /tmp/x.gz && cat /tmp/x'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('cp plain.txt /tmp/y && mkdir /tmp/y.gz && gzip -f /tmp/y'), result('', { stderr: 'gzip: /tmp/y.gz: Is a directory\n', exitCode: 1 }))
+  })
+
+  it('opens the name it is given, and a link only where told to', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('ln -s /repo/plain.txt /tmp/l && gzip /tmp/l'), result('', { stderr: 'gzip: /tmp/l: Too many levels of symbolic links\n', exitCode: 1 }))
+    assert.deepEqual(await t.run('gzip -c /tmp/l | gzip -d'), result('not compressed\n'))
+    assert.deepEqual(await t.run('gzip -f /tmp/l && ls /tmp && gzip -dc /tmp/l.gz'), result('l.gz\nnot compressed\n'))
+  })
+
+  it('refuses what another compressor made, which GNU also reads', async () => {
+    const t = terminal()
+    await gap(t, 'gzip -dc zip.bin', 'other formats', 'gzip: zip.bin: data compressed other than by gzip is not supported\n')
+    await gap(t, 'gzip -dcf lzw.bin', 'other formats', 'gzip: lzw.bin: data compressed other than by gzip is not supported\n')
+    await gap(t, 'cat data.gz lzw.bin | gzip -d', 'other formats', 'gzip: stdin: data compressed other than by gzip is not supported\n')
+    // Before anything is written, or what was read is taken away.
+    await gap(t, 'cat data.gz lzw.bin > /tmp/f.gz && gzip -d /tmp/f.gz', 'other formats', 'gzip: /tmp/f.gz: data compressed other than by gzip is not supported\n')
+    assert.deepEqual(await t.run('ls /tmp'), result('f.gz\n'))
   })
 
   it('refuses to write where nothing can be written', async () => {
@@ -175,11 +221,39 @@ describe('gzip compresses with the stream the runtime has', () => {
 
   it('cannot hand back a member, because no string spells one', async () => {
     // The second byte of the header begins no character at all, so `-c` is
-    // the output this terminal cannot carry — and a pipe is the same answer.
+    // the output this terminal cannot carry, where GNU writes it to one.
     const t = terminal()
-    const message = 'gzip: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n'
-    await gap(t, 'gzip -c plain.txt', 'partial UTF-8 byte sequence', message)
-    await gap(t, 'echo hi | gzip', 'partial UTF-8 byte sequence', message)
+    await gap(t, 'gzip -c plain.txt', 'partial UTF-8 byte sequence', 'gzip: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
+  })
+
+  it('hands the bytes it wrote on down a pipe when xargs runs it', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('echo img.gz | xargs gzip -dc | base64'), result('iVBOR/8K\n'))
+  })
+
+  it('neither writes a stream to the terminal nor reads one from it, as GNU will not', async () => {
+    // Nothing can be typed into this terminal: stdin is the terminal unless
+    // something was piped or redirected into it, and stdout is unless it goes
+    // on down a pipe or into a file. GNU asks where it takes the stream, and
+    // stops there, after the operands before it.
+    const t = terminal()
+    const writing = result('', { stderr: 'gzip: compressed data not written to a terminal. Use -f to force compression.\nFor help, type: gzip -h\n', exitCode: 1 })
+    const reading = result('', { stderr: 'gzip: compressed data not read from a terminal. Use -f to force decompression.\nFor help, type: gzip -h\n', exitCode: 1 })
+    for (const line of ['echo hi | gzip', 'gzip < plain.txt', 'gzip']) assert.deepEqual(await t.run(line), writing, line)
+    for (const line of ['gunzip', 'zcat', 'gzip -d', 'gzip -dc -']) assert.deepEqual(await t.run(line), reading, line)
+    // -f takes the terminal as it comes: nothing is typed there, so there is
+    // nothing to decompress, and compressing it makes the empty member GNU
+    // makes, which as bytes the terminal cannot show.
+    for (const line of ['gzip -df', 'zcat -f', 'gunzip --force']) assert.deepEqual(await t.run(line), result(''), line)
+    assert.deepEqual(await t.run('gzip -f > /tmp/e.gz && base64 /tmp/e.gz'), result('H4sIAAAAAAAAAwMAAAAAAAAAAAA=\n'))
+    await gap(t, 'gzip -f', 'partial UTF-8 byte sequence', 'gzip: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
+    assert.deepEqual(await t.run('gzip -dc data.gz - data.gz'), result('alpha\nbeta\n', { stderr: reading.stderr, exitCode: 1 }))
+    // A pipe, a redirect and /dev/null are no terminal.
+    assert.deepEqual(await t.run('gzip < plain.txt | gzip -d'), result('not compressed\n'))
+    assert.deepEqual(await t.run('gunzip < /dev/null'), result('', { stderr: '\ngzip: stdin: unexpected end of file\n', exitCode: 1 }))
+    // One byte is as short of a header as none, unless it is a zero.
+    assert.deepEqual(await t.run('printf x | gunzip'), result('', { stderr: '\ngzip: stdin: unexpected end of file\n', exitCode: 1 }))
+    assert.deepEqual(await t.run("printf '\\0' | gunzip"), result('', { stderr: '\ngzip: stdin: not in gzip format\n', exitCode: 1 }))
   })
 
   it('refuses to write where nothing can be written', async () => {
@@ -197,7 +271,7 @@ describe('gzip compresses with the stream the runtime has', () => {
     // With `-c` there is no name to write, so there is nothing to object to.
     await gap(t, 'gzip -c data.gz', 'partial UTF-8 byte sequence',
       'gzip: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
-    assert.deepEqual(await t.run('cp plain.txt /tmp/t && cp plain.txt /tmp/t.gz && gzip /tmp/t'),
+    assert.deepEqual(await t.run('cp plain.txt /tmp/t && cp plain.txt /tmp/t.gz && gzip /tmp/t < /dev/null'),
       result('', { stderr: 'gzip: /tmp/t.gz already exists;\tnot overwritten\n', exitCode: 2 }))
   })
 })

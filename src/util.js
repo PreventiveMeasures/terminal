@@ -37,6 +37,18 @@ export function lineRecords(text, delimiter = '\n') {
   return records
 }
 
+// Whether a command's stdin is the terminal itself: nothing piped or
+// redirected into it — a file, /dev/null, a here-document — and not the
+// /dev/null xargs gives what it runs. Nothing can be typed into this
+// terminal, so its stdin holds nothing to read, and a tool that will not read
+// from a terminal does not read from this one.
+export const stdinIsTerminal = (ctx) => ctx.stdinTerminal === true
+
+// Whether a command's stdout is the terminal itself: not a pipe, a file,
+// /dev/null or what a command substitution captures. The terminal shows text,
+// and a tool that will not write to a terminal does not write to this one.
+export const stdoutIsTerminal = (ctx) => (ctx.outputFds?.[1] === 'out' || ctx.outputFds?.[1] === 'err') && !ctx.substitutionDepth
+
 // Readers record unconsumed stdin so later commands in a group share its offset.
 // Taking stdin is taking what it holds. Where a pipe carried bytes that spell
 // no text, a command reading it as text is told which input it is, the way it

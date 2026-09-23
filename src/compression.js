@@ -5,58 +5,30 @@
 // `run` is for — nothing is worked out ahead of a line to spare it the wait,
 // because a line that can wait has no need of that.
 //
-// Which formats those streams know is the runtime's business too, and it
-// differs between them: gzip is everywhere they are, brotli only where it was
-// added. So a format is asked for rather than assumed, and a command that
-// cannot have one says so rather than guessing at the bytes.
+// Reaching those streams is @preventive/archive's work, the same code its
+// zip half deflates through: its compression.js puts bytes through one whole,
+// says whether a runtime's streams know a format both ways, and keeps what
+// came out before a failure on the error it throws. Which formats they know
+// is the runtime's business, and it differs between them: gzip is everywhere
+// they are, brotli only where it was added. So a format is asked for rather
+// than assumed, and a command that cannot have one says so rather than
+// guessing at the bytes. What is left here is what a command makes of a
+// failure, and the members of a gzip stream, which no stream tells apart.
 
-// Nothing here reaches for a stream it has not first been told is there.
-function decompressionAvailable(format) {
-  try { return typeof DecompressionStream === 'function' && Boolean(new DecompressionStream(format)) } catch { return false }
-}
-function compressionAvailable(format) {
-  try { return typeof CompressionStream === 'function' && Boolean(new CompressionStream(format)) } catch { return false }
-}
+import { CompressionError, decompress, supports } from '@preventive/archive/compression.js'
+import { joinBytes } from './bytes.js'
 
-// Whether a command for this format belongs in the registry at all. A tool
-// that could neither compress nor decompress is no tool, so a terminal whose
-// streams do not know the format does not carry it: the name is not found,
-// which is what it was before the command was written. Asked once, when the
-// registry is built — a runtime does not learn a format later.
-export const formatUsable = (format) => decompressionAvailable(format) && compressionAvailable(format)
-
-// The bytes the stream gives back, and what stopped it where it stopped: what
+// The bytes the stream gave back, and what stopped it where it stopped: what
 // a tool makes of that — the words it uses, and whether it keeps what came
-// before it — is the tool's own business, so both travel together.
-async function through(stream, bytes) {
-  const { readable, writable } = stream
-  const writer = writable.getWriter()
-  // The write is not waited for until the read is done, or a stream of more
-  // than one chunk would wait on itself; what it fails at, the reader reports.
-  const written = (async () => { try { await writer.write(bytes); await writer.close() } catch { /* the reader has it */ } })()
-  const reader = readable.getReader()
-  const chunks = []
-  let error = null
-  try {
-    for (;;) {
-      // oxlint-disable-next-line no-await-in-loop -- a stream hands over one chunk after the last.
-      const { done, value } = await reader.read()
-      if (done) break
-      chunks.push(value)
-    }
-  } catch (e) { error = e?.cause?.message ?? e?.message ?? 'corrupt input' }
-  await written
-  return { bytes: join(chunks), error }
+// before it — is the tool's own business, so both travel together. The word
+// is the platform's: Node's stream error carries zlib's under it, and names
+// a raw stream's trailing bytes itself.
+export async function decompressBytes(bytes, format) {
+  try { return { bytes: await decompress(bytes, format), error: null } } catch (error) {
+    if (!(error instanceof CompressionError)) throw error
+    return { bytes: error.bytes, error: error.cause?.cause?.message ?? error.cause?.message ?? 'corrupt input' }
+  }
 }
-
-function join(chunks) {
-  const out = new Uint8Array(chunks.reduce((n, chunk) => n + chunk.length, 0))
-  let at = 0
-  for (const chunk of chunks) { out.set(chunk, at); at += chunk.length }
-  return out
-}
-
-export const decompressBytes = (bytes, format) => through(new DecompressionStream(format), bytes)
 
 // A gzip stream is members one after another, and what follows the last of
 // them is gzip's business rather than the runtime's: the stream reads those
@@ -111,7 +83,7 @@ const TRIES = 64
 async function memberAt(bytes, at) {
   const head = headerLength(bytes, at)
   if (head < 0) return null
-  const raw = await through(new DecompressionStream(RAW), bytes.subarray(at + head))
+  const raw = await decompressBytes(bytes.subarray(at + head), RAW)
   // Whatever stopped the raw stream stopped it past what this member held —
   // that is the trailer and what follows, which are no part of the data — so
   // the count stands or no end will match it.
@@ -121,7 +93,7 @@ async function memberAt(bytes, at) {
     if (heldAt(bytes, end - 4) !== held) continue
     tries--
     // oxlint-disable-next-line no-await-in-loop -- all but one end in four thousand million is ruled out before this.
-    const member = await through(new DecompressionStream(GZIP), bytes.subarray(at, end))
+    const member = await decompressBytes(bytes.subarray(at, end), GZIP)
     if (member.error === null) return { bytes: member.bytes, end }
   }
   return null
@@ -133,8 +105,8 @@ async function memberAt(bytes, at) {
 // of the end is answered as it was before, with the bytes the stream managed
 // and what it ran into.
 export async function decompressMembers(bytes) {
-  const read = await through(new DecompressionStream(GZIP), bytes)
-  if (read.error === null || !decompressionAvailable(RAW)) return { ...read, rest: null }
+  const read = await decompressBytes(bytes, GZIP)
+  if (read.error === null || !supports(RAW)) return { ...read, rest: null }
   const parts = []
   let at = 0
   for (;;) {
@@ -145,9 +117,5 @@ export async function decompressMembers(bytes) {
     at = member.end
   }
   if (at === 0 || at === bytes.length) return { ...read, rest: null }
-  return { bytes: join(parts), error: read.error, rest: bytes.subarray(at) }
+  return { bytes: joinBytes(parts), error: read.error, rest: bytes.subarray(at) }
 }
-
-// Nothing is wrong with bytes to compress, whatever they are, so compressing
-// answers with the stream alone.
-export const compressBytes = async (bytes, format) => (await through(new CompressionStream(format), bytes)).bytes

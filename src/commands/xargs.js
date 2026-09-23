@@ -1,6 +1,7 @@
 // xargs parses its input using its own quoting rules, not shell expansion.
 import { parseArgs } from '../args.js'
 import { consumeStdin, err, ok, parseNonNegativeInt, splitLines } from '../util.js'
+import { appendOutput, emptyOutput } from '../shell/output.js'
 import { unsupported } from '../unsupported.js'
 
 export async function xargs(stdin, tokens, ctx) {
@@ -26,20 +27,26 @@ export async function xargs(stdin, tokens, ctx) {
   if (items.length === 0 && (flags.has('r') || replace !== undefined)) return ok()
   // Build each batch only when it is reached; unavailable commands stop immediately.
   const size = replace === undefined ? n.value ?? Math.max(1, items.length) : 1
-  let exitCode = 0, stderr = '', stdout = ''
+  // What every batch wrote, in the order it wrote it, the bytes a command
+  // wrote as bytes among it: a pipe after xargs takes those as they are.
+  const out = emptyOutput()
+  let exitCode = 0
   for (let i = 0; i < Math.max(1, items.length); i += size) {
     const item = items[i]
     const args = replace === undefined
       ? [...baseArgs, ...items.slice(i, i + size)]
       : baseArgs.map((arg) => arg.replaceAll(replace, item))
     // oxlint-disable-next-line no-await-in-loop -- one batch after the last, as xargs runs them.
-    const r = await ctx.dispatch(cmd, args, '')
-    stdout += r.stdout; stderr += r.stderr
-    if (r.exitCode === 255) return { stdout, stderr: stderr + 'xargs: ' + cmd + ': exited with status 255; aborting\n', exitCode: 124 }
-    if (r.exitCode === 127 && !ctx.hasCommand(ctx.registry.resolveCommand(cmd))) return { stdout, stderr, exitCode: 127 }
+    const r = await ctx.dispatch(cmd, args, '', { devNull: true })
+    appendOutput(out, r)
+    if (r.exitCode === 255) {
+      appendOutput(out, { ...emptyOutput(`xargs: ${cmd}: exited with status 255; aborting\n`), exitCode: 124 })
+      return out
+    }
+    if (r.exitCode === 127 && !ctx.hasCommand(ctx.registry.resolveCommand(cmd))) return { ...out, exitCode: 127 }
     if (r.exitCode !== 0) exitCode = 123
   }
-  return { stdout, stderr, exitCode }
+  return { ...out, exitCode, ignored: false }
 }
 
 // Dispatch names the command, so the message says only what went wrong —

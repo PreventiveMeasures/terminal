@@ -23,10 +23,11 @@ not.
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
 `printf` `test` `cp` `rm` `mkdir` `touch` `ln` `diff` `patch` `du` `stat` `realpath`
 `pwd` `seq` `which` `basename` `dirname` — plus your own, via `opts.commands`.
-It has more besides: `gzip`, `gunzip`, `zcat` and `gzcat`, `brotli`, `base32`,
-`od`, `xxd`, `sha1sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shasum`,
-`whoami`, `date`, `true` and `false`, and — where the caller asked for a
-network — `curl`. The compressors, the digests and `curl` are
+It has more besides: `gzip`, `gunzip`, `zcat` and `gzcat`, `brotli`, `tar`,
+`zip` and `unzip`, `base32`, `od`, `xxd`, `sha1sum`, `sha256sum`, `sha384sum`,
+`sha512sum`, `shasum`, `whoami`, `date`, `true` and `false`, and — where the
+caller asked for a network — `curl`. The compressors, `zip` and `unzip`, the
+digests and `curl` are
 there only where the runtime can do the work — a format its streams do not
 know, a crypto it does not have, or no `fetch` at all is a command this
 terminal does not have either.
@@ -35,7 +36,7 @@ Every one of them completes. The shorter list is the one a `command not found`
 prints after `Available:`, which is for someone who has just been told a name
 is not a command and is looking for the one that is — so it is the everyday
 commands for reading a tree, and leaves out what that person was not reaching
-for: the compressors, the digests and the dumps above, and `basename`,
+for: the compressors, the archivers, the digests and the dumps above, and `basename`,
 `dirname`, `ln`, `cp`, `rm`, `mkdir`, `touch` and `patch`, all of which the
 terminal runs and completes as readily as the rest.
 
@@ -64,7 +65,8 @@ there reports. A `{ }`, a `( )`, an `if` or a loop standing in a pipeline
 reads what a command standing there would, and the commands inside it share
 that one input as the commands of any list do: `cat f.tgz | { gzip -d; }`
 reads the member, and what one command in the braces takes is not there for
-the next to take again. What reads such bytes as text names the input and reports an
+the next to take again. What `xargs` runs hands its bytes on the same way, so
+`echo f.gz | xargs gzip -dc | base64` reads the member too. What reads such bytes as text names the input and reports an
 unsupported diagnostic rather than mangling it — `head`, `sed`, `awk` and the
 rest, whether the bytes came from a file, a redirection or a pipe, and
 `diff -a`. A search
@@ -77,6 +79,20 @@ calls binary, `rg` by naming the file it cannot search. `grep -I` passes over
 one as it passes over any other binary file, and an `rg` walk passes over
 what ripgrep itself calls binary: a file holding a NUL, which it never reads
 past.
+
+The terminal's own stdin and stdout are a terminal's: nothing can be typed
+into it, and it shows text. A command reads the terminal where nothing was
+piped or redirected into it — a file, `/dev/null` and a here-document are no
+terminal — and writes to it where its output goes neither down a pipe nor into
+a file. Where a tool will not read an archive or a compressed stream from a
+terminal, or write one to it, it refuses here as it does there: `tar -t` with
+no `-f` says "Refusing to read archive contents from terminal", `gzip` and
+`gunzip` that compressed data is not written to or read from a terminal,
+`brotli` to use `-f`, and `zip -` that it cannot write a zip file to terminal.
+Given `-f`, `gzip` takes the terminal as GNU's does: nothing is typed there,
+so it decompresses nothing from it, and compresses it to an empty member.
+What `xargs` runs reads `/dev/null`, as it does under GNU's xargs, so a `tar`
+run there finds no archive rather than a terminal.
 
 `cp -r` copies a tree into the overlay, making each directory before what goes
 inside it; `-R` and `--recursive` spell the same flag, and `-v` announces a
@@ -237,6 +253,92 @@ inside a writable `/tmp/` overlay; a target anywhere else is refused with an
 unsupported diagnostic, while `--dry-run` and `-o -` work everywhere. Ed
 scripts and git binary patches are refused the same way.
 
+`gzip`, `gunzip`, `zcat` and `gzcat` compress and decompress through the
+runtime's stream as GNU gzip 1.12 does, with `-c`, `-d`, `-k` and `-f`, which
+takes a terminal, a link, and a name already taken or already named as
+compressed, and decompressing to stdout hands on unchanged what is not gzip
+data, as `zcat -f` of a plain file. Without it a link is refused, as GNU
+refuses one, and a name already taken is asked about where stdin is the
+terminal, which answers with its end. What another compressor made —
+compress, pack, a zip — GNU gzip also reads, and it is refused here, as is a
+compression level.
+
+`tar` lists (`-t`), extracts (`-x`) and creates (`-c`) archives as GNU tar
+1.35 does, with its listings, messages and statuses: the old-style `tar czf`
+spelling and getopt's, `-f`, `-v` and `-vv`, `-z` and `-a`, the positional
+`-C`, `-O`, `-k`, `--strip-components`, `--numeric-owner`, `--utc`, `-b`,
+`--format` of `gnu` or `ustar`, and `--sort=name`, which is the order this
+tree is walked in anyway. `-O` moves every listing to stderr, `--utc` asks for
+the long listing whatever `-v` says, and at `-vv` an extraction names each
+directory it made on the way to an entry. With several operands, a file met a
+second time under another name — `src` and then `-C src a.txt` — is stored as
+a hard link to the first, as GNU stores it; met under the same name, it would
+be a hard link to itself, which the package will not write, so that is
+refused. GNU holds a whole record in memory, and a `-b` past 32768 blocks,
+16 MiB, is refused. A closed stdout is `/dev/null` opened for reading to GNU:
+a listing it would take is lost, and said to be once the run is over, a
+member `-O` writes there is an error of its own, and an archive for it is
+written nowhere — but through gzip, which is refused. The archive is read and
+written by [`@preventive/archive`](https://www.npmjs.com/package/@preventive/archive),
+whose writer puts down byte for byte what GNU tar writes for the same entries —
+but for a name too long for its header, which goes in a header of GNU's own
+ahead of it, where GNU records the host's names for user and group 0, `root`
+on most systems, unless under `--numeric-owner`, and the package records
+none; no reader lists or uses them — and whose reader is strict: an archive it will not read whole — damaged,
+truncated, or holding a name that climbs out of it — is refused with an
+unsupported diagnostic, where GNU would list or extract what it could and
+complain of the rest. A gzip archive goes through the runtime's stream, found
+by `-z`, by its first bytes or by its name as GNU finds one, and what gzip
+would say of a damaged one is said; another compressor is refused. An archive
+made here records this tree as `ls -l` describes it — files `-rw-------`,
+directories `drwx------`, everything dated to the moment the terminal was made
+— and an owner and group, which a header records as numbers this terminal does
+not have, as it has no `$UID`: `tar -c` asks for them with
+`--owner=NAME:UID --group=NAME:GID`, or as ids under `--numeric-owner`, and
+refuses rather than making them up. `--format=pax`, whose headers carry access
+and change times, is refused for the same reason. The package keeps no `.`
+segment in a name, so a name GNU would store with one — anything under a `.`
+operand — is refused rather than stored differently. It reads names the same
+way, handing `./a` out as `a` and a directory as its name without a slash
+however it was stored, beside the name as stored; GNU prints and matches
+every name as it is stored, so an archive holding a name the package cleans —
+`./a`, `d/./b`, a directory stored without its slash, a hard link to `./f` —
+is refused, as is one with an entry for its own root. `tar` warns of a pax keyword GNU does not know as GNU does, as it
+comes to the entry: macOS's `LIBARCHIVE.xattr.` records are warned of, while
+`SCHILY.xattr.` records pass without a word. An access or change time GNU
+would complain of, and the records of multi-volume and incremental archives,
+are refused. Extraction writes into the writable `/tmp/` overlay alone, which
+holds no hard link and no device, so an entry that would make one is refused
+too. The overlay keeps no times either, so an entry dated before 1970 or after
+the run began, which GNU warns of once it has written it, is refused as well.
+
+`zip` makes a new archive as Info-ZIP Zip 3.0 does — `-r`, `-j`, `-D`, `-0`,
+`-y` and `-q`, its `adding:` lines, warnings, refusal of one name for two
+files, and statuses — each file deflated through the runtime's stream wherever
+that makes it smaller, and one whose name says it is compressed already —
+`.zip`, `.Z`, `.zoo`, `.arc`, `.lzh` or `.arj` — stored as it is. The package
+stores a whole archive or deflates what deflate makes smaller, so a file by
+one of those names that deflate would make smaller, beside another file it
+makes smaller, is refused. That deflate is the runtime's rather than
+Info-ZIP's, so the share a file reports saved is this archive's, and can be a
+few points away from what Info-ZIP's would be: 56% for the numbers 1 to 400,
+a line each, where Info-ZIP saves 53%. Adding to an archive already there, a
+file operand `-`, which Info-ZIP reads from stdin, a compression level and the
+rest are refused. `unzip` answers as Debian's UnZip 6.00 does: `-l`, dated
+year first, `-t`, `-p`, and extraction with `-q`, `-o`, `-n` — which wins over
+`-o`, with UnZip's caution, where both are given — `-j`, `-d` and `-x`, the
+overwrite question included — UnZip asks it on stdin, and a stdin with
+nothing on it answers with its end, which UnZip takes as "None". A link is
+made last, its name held until then by a placeholder of its target, as UnZip
+holds it, so a later entry of that name, which `-j` can make, meets it as it
+would there. A name stored with a `.` segment, which Info-ZIP never writes
+and other tools do, is refused as tar's is, since UnZip lists it as stored. The
+package does not say how an entry was stored, nor whether its time is an exact
+one or a DOS time, so an extraction that is not quiet — which names each file
+`extracting` or `inflating` by how it was stored — `-c`, and `-v` or the
+second `-l` that UnZip reads as one, are refused, and `-l` answers where the
+two readings of every time agree, which they always do under `TZ=UTC`.
+
 `curl` is the one command that reaches outside, and the one no terminal has
 unless it was asked for: `createTerminal` takes `network: true`, and without
 it the name is not a command, which is what it was before `curl` was written —
@@ -291,4 +393,5 @@ all, asking the filesystem only whether what the name leads to is there.
 
 Behaviour is checked against the real tools: bash 5.2, GNU grep 3.11, GNU sed
 4.9, gawk 5.2, ripgrep 14.1, GNU diff 3.10 and GNU patch 2.7.6 in the C
-locale, alongside the BusyBox, GNU/Spencer regex and Oils spec corpora.
+locale, GNU tar 1.35 and Info-ZIP Zip 3.0 and UnZip 6.00 in C.UTF-8,
+alongside the BusyBox, GNU/Spencer regex and Oils spec corpora.

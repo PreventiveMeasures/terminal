@@ -1,8 +1,9 @@
 import { parseArgs } from '../args.js'
-import { consumeStdin, encodeUtf8, readBytesOf } from '../util.js'
+import { consumeStdin, encodeUtf8, readBytesOf, stdinIsTerminal, stdoutIsTerminal } from '../util.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported } from '../unsupported.js'
-import { compressBytes, decompressBytes, formatUsable } from '../compression.js'
+import { compress, supports } from '@preventive/archive/compression.js'
+import { decompressBytes } from '../compression.js'
 
 // brotli, where the runtime's streams know the format. Everything gzip's
 // command says about waiting holds here (../compression.js), and two things
@@ -19,7 +20,7 @@ const SUFFIX = '.br'
 // Only where the runtime's streams know the format. gzip is everywhere they
 // are; brotli is where it was added, and a terminal whose streams do not know
 // it does not carry the command — the name is not found, as it was before.
-export const BROTLI = formatUsable(FORMAT) ? { brotli } : {}
+export const BROTLI = supports(FORMAT) ? { brotli } : {}
 // The name brotli gives the input it did not open, which is the console's on
 // the system it was first written for.
 const STDIN = 'con'
@@ -77,6 +78,10 @@ function one(name, stdin, opts, state) {
   // is taking it — what is read here is read, so a second `-` and the next
   // command in the list both find the pipe at its end, as they would a file's.
   if (name === '-') {
+    // Unless forced, brotli reads nothing compressed from a terminal and
+    // writes nothing compressed to one; this terminal's stdin is one unless
+    // something was piped or redirected into it.
+    if (!opts.force && (opts.decompressing ? stdinIsTerminal(ctx) : stdoutIsTerminal(ctx))) return fail(state, `Use -h help. Use -f to force ${opts.decompressing ? 'input from' : 'output to'} a terminal.`)
     const piped = ctx.stdinBytes
     const text = ctx.stdinLeft
     consumeStdin(ctx, '', true)
@@ -99,6 +104,7 @@ function one(name, stdin, opts, state) {
   if (target !== null && !opts.force && lookupWithNote(ctx, 'brotli', target).error === null) {
     return fail(state, `failed to open output file [${target}]: File exists`)
   }
+  if (target === null && !opts.decompressing && !opts.force && stdoutIsTerminal(ctx)) return fail(state, 'Use -h help. Use -f to force output to a terminal.')
   if (ctx.fs.isDir(found.path)) return fail(state, `failed to read input [${name}]: Is a directory`)
   return through(readBytesOf(ctx.fs, found.path), name, target, opts, state)
 }
@@ -106,7 +112,7 @@ function one(name, stdin, opts, state) {
 // One file's worth of the work the runtime does, and what becomes of it.
 async function through(bytes, name, target, opts, state) {
   const { ctx } = state
-  const done = opts.decompressing ? await decompressBytes(bytes, FORMAT) : { bytes: await compressBytes(bytes, FORMAT), error: null }
+  const done = opts.decompressing ? await decompressBytes(bytes, FORMAT) : { bytes: await compress(bytes, FORMAT), error: null }
   // Brotli hands over nothing it could not read to the end: a stream that
   // failed leaves the file it was writing unwritten, and says only that.
   if (done.error) return fail(state, `corrupt input [${name}]`)

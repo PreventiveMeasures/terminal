@@ -124,13 +124,26 @@ describe('brotli compresses with the stream the runtime has', () => {
   })
 
   it('cannot hand back a member whose bytes spell no text', async () => {
+    // Forced out to the terminal, a stream is what this terminal carries only
+    // where its bytes spell text. The runtime's encoder writes nothing as one
+    // byte that does, where the brotli tool picks a smaller window and another.
     const t = terminal()
-    const message = 'brotli: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n'
-    await gap(t, 'brotli -c plain.txt', 'partial UTF-8 byte sequence', message)
-    await gap(t, 'echo hi | brotli', 'partial UTF-8 byte sequence', message)
-    // The bytes of a member of nothing at all do spell text, and that is what
-    // a terminal carrying its output as a string can hand back.
-    assert.deepEqual(await t.run('printf "" | brotli'), result(';'))
+    await gap(t, 'brotli -fc plain.txt', 'partial UTF-8 byte sequence', 'brotli: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
+    assert.deepEqual(await t.run('printf "" | brotli -f'), result(';'))
+  })
+
+  it('neither writes a stream to the terminal nor reads one from it, unless forced', async () => {
+    // Nothing can be typed into this terminal: stdin is the terminal unless
+    // something was piped or redirected into it, and stdout is unless it goes
+    // on down a pipe or into a file. What it decompresses it writes anywhere.
+    const t = terminal()
+    const writing = result('', { stderr: 'Use -h help. Use -f to force output to a terminal.\n', exitCode: 1 })
+    const reading = result('', { stderr: 'Use -h help. Use -f to force input from a terminal.\n', exitCode: 1 })
+    for (const line of ['brotli -c plain.txt', 'echo hi | brotli', 'printf "" | brotli', 'brotli < plain.txt']) assert.deepEqual(await t.run(line), writing, line)
+    for (const line of ['brotli -d', 'brotli -dc', 'brotli -d -']) assert.deepEqual(await t.run(line), reading, line)
+    assert.deepEqual(await t.run('brotli -dc data.br'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('brotli -dc < data.br'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('brotli -c plain.txt | brotli -d'), result('not compressed\n'))
   })
 
   it('refuses what it does not do at all', async () => {
