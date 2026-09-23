@@ -89,6 +89,8 @@ terminal, or write one to it, it refuses here as it does there: `tar -t` with
 no `-f` says "Refusing to read archive contents from terminal", `gzip` and
 `gunzip` that compressed data is not written to or read from a terminal,
 `brotli` to use `-f`, and `zip -` that it cannot write a zip file to terminal.
+Given `-f`, `gzip` takes the terminal as GNU's does: nothing is typed there,
+so it decompresses nothing from it, and compresses it to an empty member.
 What `xargs` runs reads `/dev/null`, as it does under GNU's xargs, so a `tar`
 run there finds no archive rather than a terminal.
 
@@ -250,6 +252,16 @@ with fuzz, exactly as GNU patch does, with the same messages, reject files,
 inside a writable `/tmp/` overlay; a target anywhere else is refused with an
 unsupported diagnostic, while `--dry-run` and `-o -` work everywhere. Ed
 scripts and git binary patches are refused the same way.
+
+`gzip`, `gunzip`, `zcat` and `gzcat` compress and decompress through the
+runtime's stream as GNU gzip 1.12 does, with `-c`, `-d`, `-k` and `-f`, which
+takes a terminal, a link, and a name already taken or already named as
+compressed, and decompressing to stdout hands on unchanged what is not gzip
+data, as `zcat -f` of a plain file. Without it a link is refused, as GNU
+refuses one, and a name already taken is asked about where stdin is the
+terminal, which answers with its end. What another compressor made —
+compress, pack, a zip — GNU gzip also reads, and it is refused here, as is a
+compression level.
 
 `tar` lists (`-t`), extracts (`-x`) and creates (`-c`) archives as GNU tar
 1.35 does, with its listings, messages and statuses: the old-style `tar czf`
