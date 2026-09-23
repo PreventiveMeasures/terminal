@@ -20,6 +20,7 @@ import { lookupWithNote } from '../notes.js'
 import { encodeUtf8, readBytesOf } from '../util.js'
 import { markUnsupported } from '../unsupported.js'
 import { formatDate } from './extra.js'
+import { refusalOf, storedName, zipRewritten } from './stored-names.js'
 import { extractMembers } from './unzip-extract.js'
 import { matches, parseUnzip } from './unzip-options.js'
 
@@ -56,9 +57,13 @@ export async function unzip(_stdin, tokens, ctx) {
     if (opts.mode !== 'pipe') run.say(2, `unzip:  cannot find zipfile directory in one of ${opts.archive} or\n        ${opts.archive}.zip, and cannot find ${opts.archive}.ZIP, period.\n`)
     return run.end(9)
   }
-  // The package gives names back without the `./` they were stored with;
-  // an entry for the archive's own root is the one sign of it.
-  if (entries.some((entry) => entry.name === '.')) return run.refuse('feature', 'dot-segment names', 'names stored with `./` in front are not supported')
+  // Where the package hands a name out otherwise than the archive stores it,
+  // the name is not one to print or match (see stored-names.js).
+  const stored = zipRewritten(bytes, entries)
+  if (stored !== null) {
+    const [detail, message] = refusalOf(stored)
+    return run.refuse('feature', detail, `${stored}: ${message}`)
+  }
   if (entries.length === 0) {
     run.heading(found.name, false)
     run.say(2, `warning [${found.name}]:  zipfile is empty\n`)
@@ -94,8 +99,6 @@ function hasEndRecord(bytes) {
   return false
 }
 
-// The name as the archive stores it, a directory's with its slash.
-const storedName = (entry) => (entry.type === 'directory' ? `${entry.name}/` : entry.name)
 const bytesOf = (text) => encodeUtf8(text)
 
 // The members the patterns name, less those `-x` names: every one of them

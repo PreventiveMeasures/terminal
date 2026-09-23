@@ -1,4 +1,6 @@
-// How GNU tar 1.35 prints an entry: its name, and with -v the long line
+// How GNU tar 1.35 prints an entry: its name as stored, which is the one the
+// package hands out where the archive is read at all (see stored-names.js),
+// and with -v the long line
 // `-tv` shows. Names are quoted in tar's own style, `escape`: printed as they
 // are where the locale can print them, a backslash doubled, and everything
 // else — a control character, a character the locale cannot print — as C
@@ -13,6 +15,7 @@
 import { UnsupportedError } from '../unsupported.js'
 import { byteLocale, classTables, encodeUtf8 } from '../util.js'
 import { formatDate } from './extra.js'
+import { storedName } from './stored-names.js'
 
 const C_ESCAPES = new Map([[7, 'a'], [8, 'b'], [12, 'f'], [10, 'n'], [13, 'r'], [9, 't'], [11, 'v']])
 const octal = (byte) => '\\' + byte.toString(8).padStart(3, '0')
@@ -30,14 +33,6 @@ export function quoteEscape(text, ctx) {
   }
   return out
 }
-
-// The name as the archive holds it, which is what GNU prints: a directory's
-// with the slash it is stored with. The archive package gives names back
-// with that slash dropped, and with the `.` segments of a name stored as
-// `./a` dropped too; an archive whose root is an entry of its own was made
-// from `.`, and every name in it carries one, so it is refused before
-// anything reaches this (see tar-read.js).
-export const storedName = (entry) => (entry.type === 'directory' ? `${entry.name}/` : entry.name)
 
 const TYPES = {
   __proto__: null,

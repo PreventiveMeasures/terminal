@@ -7,12 +7,15 @@
 // What it writes goes to the writable overlay or to stdout, the archive's
 // bytes as they are; everything else a write would touch is the read-only
 // filesystem, which is a gap. So is whatever the package will not read or
-// write, and every option this terminal does not carry.
+// write, and every option this terminal does not carry. What an archive's
+// headers hold that the package does not hand out — each name as stored,
+// the pax records GNU reads — is read back out of them (tar-headers.js).
 
+import { storedName } from './stored-names.js'
 import { createArchive } from './tar-create.js'
 import { extractEntry, landing, strippedName } from './tar-extract.js'
-import { longLines, quoteEscape, storedName } from './tar-list.js'
-import { enterDirectory, memberNames, reportMissing } from './tar-names.js'
+import { longLines, quoteEscape } from './tar-list.js'
+import { enterDirectory, memberNames, quoteColon, reportMissing } from './tar-names.js'
 import { parseTar } from './tar-options.js'
 import { readArchive } from './tar-read.js'
 import { tarResult, tarState } from './tar-state.js'
@@ -30,6 +33,8 @@ export async function tar(_stdin, tokens, ctx) {
 // operands name, each from where the `-C` before its operand leads.
 async function readMembers(opts, state) {
   const { ctx } = state
+  // GNU's clock starts before it opens the archive.
+  const began = Date.now()
   const read = await readArchive(opts, state)
   if (!read) return
   const names = memberNames(opts.items)
@@ -39,7 +44,10 @@ async function readMembers(opts, state) {
   const verbose = extracting ? opts.verbose : opts.verbose + 1
   const line = verbose > 1 ? longLines(ctx, opts) : null
   const places = new Map()
-  for (const entry of read.entries) {
+  for (const [i, entry] of read.entries.entries()) {
+    // What GNU says of an entry's header it says as it reads it, whatever
+    // becomes of the entry.
+    for (const warning of read.warnings[i]) state.warn(warning)
     const shown = storedName(entry)
     const hit = names.match(shown)
     if (hit === null) continue
@@ -50,13 +58,21 @@ async function readMembers(opts, state) {
     if (verbose > 0) state.list(line ? line(entry) : quoteEscape(shown, ctx))
     if (extracting && opts.toStdout) {
       if (entry.type === 'file' || entry.type === 'contiguous-file') state.bytes(entry.data)
-    } else if (extracting) extractEntry(entry, name, landing(dir, name), state, opts.keepOld)
+    } else if (extracting && extractEntry(entry, name, landing(dir, name), state, opts.keepOld)) dated(read.mtimes[i], name, began, state)
     if (state.stopped) return
   }
   // gzip's status is waited for when the archive is closed, which GNU does
   // before it looks for what it did not find.
   if (read.child) return state.fatal(`Child returned status ${read.child}`)
   reportMissing(names, state)
+}
+
+// GNU sets the time of each entry it writes, and warns of one before 1970 or
+// after the run began, the latter counted to the nanosecond from when it
+// began. The overlay keeps no times, so an entry dated either way is a gap.
+function dated(mtime, name, began, state) {
+  if (mtime >= 0 && mtime * 1000 <= began) return
+  state.refuse('feature', 'archive times', `${quoteColon(name, state.ctx)}: extracting an entry dated before 1970 or in the future is not supported`)
 }
 
 // Where the `-C` directories before an operand lead, entered the first time

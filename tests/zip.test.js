@@ -54,10 +54,13 @@ UEsDBAoAAAAAAAU5plgcae8UBgAAAAYAAAANAAAAcGtnL1JFQURNRS5tZCMgcGtnClBLAwQKAAAAAAAF
 EAAAAHBrZy9zcmMvaW5kZXguanNleHBvcnQgY29uc3QgeCA9IDEKUEsBAh4DCgAAAAAABTmmWBxp7xQGAAAABgAAAA0AAAAAAAAA
 AQAAAKSBAAAAAHBrZy9SRUFETUUubWRQSwECHgMKAAAAAAAFOaZYTkU8KxMAAAATAAAAEAAAAAAAAAABAAAApIExAAAAcGtnL3Ny
 Yy9pbmRleC5qc1BLBQYAAAAAAgACAHkAAAByAAAAAAA=`)
+// Python's zipfile, which stores `./a` as it is given one.
+const DOT_ZIP = bytesOf('UEsDBBQAAAAAAAU5plgHoerdAgAAAAIAAAADAAAALi9hYQpQSwECFAMUAAAAAAAFOaZYB6Hq3QIAAAACAAAAAwAAAAAAAAAAAAAApIEAAAAALi9hUEsFBgAAAAABAAEAMQAAACMAAAAAAA==')
 const NUMBERS = Array.from({ length: 400 }, (_, i) => `${i + 1}\n`).join('')
 const SOURCES = {
   'pkg.zip': PKG_ZIP,
   'nout.zip': NOUT_ZIP,
+  'dot.zip': DOT_ZIP,
   'empty.zip': Uint8Array.of(0x50, 0x4b, 0x05, 0x06, ...new Uint8Array(18)),
   'notes.txt': 'plain text\n',
   'pkg/README.md': '# pkg\n',
@@ -170,6 +173,17 @@ describe('unzip lists and tests what an archive holds', () => {
     assert.deepEqual(await t.run('unzip -t notes.txt'), result('Archive:  notes.txt\n' + NO_DIRECTORY + period, { exitCode: 9 }))
     assert.deepEqual(await t.run('unzip empty.zip'), result('Archive:  empty.zip\n', { stderr: 'warning [empty.zip]:  zipfile is empty\n', exitCode: 1 }))
     assert.deepEqual(await t.run('unzip -p empty.zip'), result('', { stderr: 'warning [empty.zip]:  zipfile is empty\n', exitCode: 1 }))
+  })
+
+  it('refuses an archive whose names it cannot give back as stored', async () => {
+    // UnZip lists and matches `./a` as it is stored; the package hands it out
+    // as `a`. Nothing is extracted, and no -d directory made.
+    const t = await terminal()
+    const dot = "unzip: ./a: names stored with `.' segments are not supported\n"
+    await gap(t, 'unzip -l dot.zip', 'dot-segment names', dot)
+    await gap(t, 'unzip -p dot.zip ./a', 'dot-segment names', dot)
+    await gap(t, 'unzip -q dot.zip -d /tmp/out', 'dot-segment names', dot)
+    assert.equal((await t.run('ls -A /tmp')).stdout, '')
   })
 })
 

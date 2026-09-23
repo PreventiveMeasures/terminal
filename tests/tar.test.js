@@ -52,11 +52,103 @@ H4sIAAAAAAACA+3VQQ6CMBCF4Vl7it6A1rbDeRqR6EoC6Pmt6IqFcUMD8n+baZpumpeZGbpKlmazOsap
 JkoB92FMvTGyU0NXnZrzY/H8NYTf83c2qIrxW8r//Q/3qX5D+bcl+v97/nHe/9FbMZb+X1yTxnQQ7Hj+t9f2tq75b+vjsRaj9H+J
 /C+pb9a2/18rwbgSy2nn+QMAAAAAAAAAAAD4H09P7romACgAAA==`)))
 
+// Names longer than a header's field, as GNU 1.35 stores them in each format
+// — in `L` and `K` blocks under --format=gnu, in pax `path` and `linkpath`
+// records, split across the prefix under --format=ustar — and `git archive`'s,
+// which opens with a global header. The name is a directory of 105 bytes.
+const tarOf = (base64) => new Uint8Array(gunzipSync(bytesOf(base64)))
+const LONG_TARS = {
+  'gnu-long.tar': tarOf(`
+H4sIAAAAAAACA+2Y3Y6CMBCFe71P0RcQOi2d3u798hImykokkiAaH39HY0z8WV0v2rBwvpsSmIQmwzk9TJZn+WfZbr7LerNWcTAC
+F8VpFW5XQ95drk/3idhYpUuVgN22n3daq65t+2d1r57/Uxpp/eyQgFyBifb/KOrg/VHjFPxZ92yvNE8FE5PUOVLGMbNR2qfU/2K5
+f1onZVU1vv5nQ/B/fuD/Dv4/Lv+v6maZ9YcenjtF/z/r/xf/d3f+L5FQG/h/dFb1B0QwYQZ7/sv/3xfOf5z/YPz69+Fe/4z8Py79
+r+bdAnpD/v/D/IdZMoHSlGJzmP8g/8H/kf+Q/5D/oP+I+m/ifWBg8PkvhPBW/rOif4v8F51tgne8zv/2uv8mcDCY/yfpP8b/AAAw
+SX4Ajx/gvwAqAAA=`),
+  'pax-long.tar': tarOf(`
+H4sIAAAAAAACA+2Zz06DQBCH9+xT7AsIM/tnFg69e/QVNgJCxGoADY/vEhtjIbUxKVsj8116WBJoJr/vN6VJeu/Hu9IXZden7cv+
+8Xa8OBAgYwR8Mv8ERSDQEBICOI0CtDGIQo4iAm/94LvwKGKbIJJ89UO9W2n2S9IbDdIPzXO5Q5cDGm0zm1hrlTI5ZNPpw/IUD6eC
+uSgxxj5l3Fk75R2dPeSe1Ff+Jxcc55+cAiFtzPwX5fuP14XLqornv4r/3Xz+VhH7P47/lYnt/6ppy2QYhxM9kDkDOTjugf+Y/xP+
+1wv/oxYS2P+rUzccJc7/dfvfkFn2P3H/x+n/TLbN/ulaOwAqiL1/1L4rePf4U/0/2/+JwIb8Y4yH499/7H/2/5b8P31d9n/s93/O
+/cr/U/4V+391ku////Tr3OOc/8HN/I+hEhT7PwbswW3TR7jH+f1fHec/tIUGfv8XZf6cYoZhmE3yAfzZwtwAJgAA`),
+  'ustar-long.tar': tarOf(`
+H4sIAAAAAAACA0vLzEnVK6koYaAhMAACMxMTEG1obmoA5huYGUFoMDBmMDQxMzQzNDAwNzZkMDAxNDUyZFAwYKADKC0uSSwCOiUl
+tQyvOqCytDQSzM3Jz0vXraADoMz7GZlcDKNg5IJiOthBOP8boeZ/A3NzY4Mhnv+HSvyPZv9RMApGwSgYkQAAbNykDwAMAAA=`),
+  'git.tar': tarOf(`
+H4sIAAAAAAACA+3UQW7CMBCFYa85RW+Ax7Fn0kXPgpxg6AIalKZSj1+XZSrKBiKB/m8zlseSZT2NT/l7sz8MXT5s3kveltHdnq9U
+9Vyrea3N6CSqqHhvjdR9iUnE7d0Cvj6nPNYrx2GY/jt3rT9/3INI4aUfjsfyMb1Z10ZT7Xfmt9m6po19sZ1Kra855VCCb0KxduXw
+NE7r+9/xOw9m6fL81/Vs/qWR6BLzv0D+eZH8tf7xl/MPf/KP0Zwn/7vL/OYAAAAAAAAAAAAAADy8H3Je9WMAKAAA`),
+}
+
+// Names stored otherwise than the package gives them back: GNU's `./a` and
+// `d/./b`, and a `./` in front of a long name in each format; and made with
+// Python's tarfile, a directory stored as `d` without its slash, and hard
+// links to `./f` and to a long name with `./` in front.
+const STORED_TARS = {
+  'lead.tar': tarOf(`
+H4sIAAAAAAACA+3Kuw2AMBCDYddMkQnAR8JlnkiQAXjNTwg9HRRwX/PLktsu4WksNISzEgfWTe2vVj0kqKiQ0QtYSg9HvGBb1jQ7
+h3Hab3/lljM+JzUwxhjzQwdlxlMrAAgAAA==`),
+  'mid.tar': tarOf(`
+H4sIAAAAAAACA+3Kuw2AMAyE4auZIhMQ2wRnHiLIALzmJ4SeDgrw1/w66Ubf+oRnUaEhnOXYU92kcrUScFBWJoodg5hEIhzhBduy
+DrNzGKf99lduOeNzUgNjjDE/dABbgy4tAAgAAA==`),
+  'gnu-dot-long.tar': tarOf(`
+H4sIAAAAAAACA+3TQQ7CIBAF0Fl7Ci4gzAhMtx6AS5hYlNiUpFbT40saYxoXuJLEytsMgVnx86WSau9if3Khv8B3YMLGzDN5n0hs
+X+f5nojRgnBQwO06HgYhYIhxzO19ev9RUnUp/O1UgPKha+U4rfEba/4Zi/5TY5+9592i8xrIMDEhNpoANRuNILBk/4/tPbuX1rxf
+X/7nsKklqKqq+kMPyFav6wAMAAA=`),
+  'pax-dot-long.tar': tarOf(`
+H4sIAAAAAAACA+3TTQ6CMBCG4a45BRewftNOW1hwGKIgJPgTrYbjWyNxgYkr7UL6bLqYWTRpX7kejofdavwlBJZZ4Gl+QjkliC1Z
+ApwmAW3AEPkoIrhefH0OVxHLRMrmp9p3lYzwESbrth8a6UefaeS17/dNRa4EsTaFkcYUjlHCPaab9ykpxSWKTCRfIOP2T85M3Vv1
+6h/Qs/4tu9A/Yva/bW4f98Ja2/7f+3d9CilJkmSJ7kiPXs0ADAAA`),
+  'ustar-dot-long.tar': tarOf(`
+H4sIAAAAAAACA+3PUQpAQBAG4Hl2ChewZljjPMouaqNYcnyLdyXxYr6Xv6m/acZ2zii/engRBqz1nlQWeMzI2ZmHHEgzMSGWOQFq
+4oIhRvjAPPlqDKfUZrnshZq1N/aq1A19k6wfePJ+20UghBDifzZNuzPiAAgAAA==`),
+  'nodir.tar': tarOf(`
+H4sIAAAAAAACA+3RMQ6DMBBE0a05hW8QL3jX54lkfACScH4MVGnoQAL914y8msLSFDlfbLLZmpotbu/o/Z470eTq2nqDtnt2yxLs
+gr/J7/N9TyFIGefDXqvVKo9TXvWS/T2lg/37//3XdAmR/U9XOwEAAAAAAAAAAAAAAABwUwsZ5SvBACgAAA==`),
+  'hardlink.tar': tarOf(`
+H4sIAAAAAAACA+3TMQ7CMAyFYc+cIido7TZxzoNELWYKPT+hTAywgaryf8uTLQ9eXsj3aeM5P9Jq0XVWH565GsSym5tqHa3tq5dR
+kv7gN7nN1+MlJTlNy8e7dhYhuxMHwR87b6L/+tp/UytVknV90H8AAAAAAAAAAAAAAADgvTtZ7erAACgAAA==`),
+  'longlink.tar': tarOf(`
+H4sIAAAAAAACA+3WSwrCMBSF4Tt2FdmAbdI2ydS53YSgVVEq+MLlG62IKOrIIM3/TVJCoIObw0mWZ/mo3rTzetmu5Dd0592qja3u
+392+99aKqiWCw24/2SoliVqH0Q9PEeSNIM35X0LtqmvGjbe33LviIfOFmMoZZ0LySyO6dM4WonTM/E9nx4/nwrGmh1e4GZCBlGV/
+0f/utf+dqDH9H2H+vABStojwj+/9r5/73/qQfxPjcibe/wAAAAAAAAAAAOiXM7mvugYAKAAA`),
+}
+
+// Pax records, by Python's tarfile: keywords GNU does not know on two of
+// three entries, with a global one it takes without a word (`warn.tar`); a
+// volume label; an access time GNU finds malformed, in an entry's header and
+// in a global one; and entries dated before 1970, now and in 2100.
+const PAX_TARS = {
+  'warn.tar': tarOf(`
+H4sIAAAAAAACA+3Wy0rEMBQG4Kz7FHmCTE4mTWYT8IIwA7MQBcFloBeEcbRX2z69LSreUBcypUP/b5OSE+ii/c+JWIjFyaVv1rGP
+4pwdhHzx0yolmffnYZ8kWWI8ZSOoitLn/evZPJHmWZa54m4X78uAwcyIKeRfya/5VzJkvEH+D27Fu65zdbDibdu6J3SAmUlG+PGH
+UButh5Vs+Jp1oz5kXvVzyJAhKe2S+n2rtWFcjpn/KK5/PfdX/Vi/PxI/7/zTRPNvkX/kH+Zw/ydF3+//Fvf/MSwV327OTq/O15ub
+C9H4ssxFVcS58C5KnQtUyK/72vb2c60OlH4rJMnOp4XbP0TV/SPayZH1fzXN+d8fw/zH/AcAAAAAAAAAgH96Brk5IEIAKAAA`),
+  'label.tar': tarOf(`
+H4sIAAAAAAACA+3TsQrCMBDG8Zt9ij5BmqQxnQQ3HURcfIBI41QRalv6+LYo6KJOFkr/v+XCJZDh7lOpSteH0G1jKGIlf6EfPlWt
+rX+dh77R1mSSdDKC5laHqv9e5snaZLM/qvZaNpeoynCK5Wq3EMzEeYTFH0LtnRuqyZfP3Hv7lnkrxnnjjdZ5Zvp+7pyXRI+Z/yK2
+X9/9up/q/Mk6AAAAAAAAAAAAAADApN0B9uNtZQAoAAA=`),
+  'badatime.tar': tarOf(`
+H4sIAAAAAAACA+3TMQrCMBSA4Td7ip6gfS+m6SQ4OnqFQCM4uNQqPb6tCrqok4HS/1sSkkCG5C+rstru47BLsU2d/IU+fBpVzb/m
+07qpM5VikAwu5z524/WyTOaK2B9PaVMPK8HiHDJ8/Cnq4O+NW1M/uw/urXkn5oMFU23WNq433gcpNGf/bbp+Pfdrf67vT/UAAAAA
+AAAAAAAAAACzdgMiCyIsACgAAA==`),
+  'globatime.tar': tarOf(`
+H4sIAAAAAAACA+3TsQ6CMBDG8Zt9Cp4A7qC0k4mjo69QQzUOLojGxweiiS7qJAnh/1uuuTbpcPflRV5sdvG+TbFJrfyFPnyqqla/
+zmPf1IJKdpQJXC9dbIfvZZmsymJ3Oqf1PjYrwdIcJlj8MdTeubFaqJ+59+Vb5ksx582baqhs6AfnvGQ6Zf6bdPv67tf9XOdP6AEA
+AAAAAAAAAAAAAGatB1/LJUsAKAAA`),
+  'times.tar': tarOf(`
+H4sIAAAAAAACA+3VPQ7CMAyGYc+cIkewGzc5D1LLhKhUGjg8A4QysAFL+RHvs1iOvVmfMmw7WZpWyf1aLbc695qaW501cr47qXmb
+TILKG5T9tB5DkK4/PNx7Nv9Rm5Xgj+2G41fk3zxZMtUcrb7nrE7+yT8Wv3+Zyth/Pv+xLtRvP7rWualbJv/kHwAAAAAAAAAAAADw
+qgsTGIu7ACgAAA==`),
+}
+
 const SOURCES = {
   'pkg.tar': PKG_TAR,
   'pkg.tgz': PKG_TGZ,
   'dot.tar': DOT_TAR,
   'sp.tar': SP_TAR,
+  ...LONG_TARS,
+  ...STORED_TARS,
+  ...PAX_TARS,
   'notes.txt': 'plain text\n',
   'empty.zip': Uint8Array.of(0x50, 0x4b, 0x05, 0x06, ...new Uint8Array(18)),
   'pkg/README.md': '# pkg\n',
@@ -176,10 +268,71 @@ describe('tar lists what an archive holds', () => {
     }))
   })
 
-  it('refuses an archive whose names it cannot give back as stored', async () => {
-    // The package reads `./a` as `a`; GNU lists it as it was stored.
+  it('reads a long name from wherever GNU stores one', async () => {
     const t = await terminal()
-    await gap(t, 'tar -tf dot.tar', 'dot-segment names', 'tar: names stored with `./` in front are not supported\n')
+    const dir = `long-${'x'.repeat(100)}`
+    const all = lines(
+      `drwxr-xr-x dev/staff         0 2024-05-06 07:08 ${dir}/`,
+      `-rw-r--r-- dev/staff         3 2024-05-06 07:08 ${dir}/file.txt`,
+      `hrw-r--r-- dev/staff         0 2024-05-06 07:08 ${dir}/hard link to ${dir}/file.txt`,
+      `lrwxrwxrwx dev/staff         0 2024-05-06 07:08 ${dir}/link -> ${dir}/file.txt`,
+      '-rw-r--r-- dev/staff         2 2024-05-06 07:08 s',
+    )
+    assert.deepEqual(await t.run('tar -tvf gnu-long.tar'), result(all))
+    assert.deepEqual(await t.run('tar -tvf pax-long.tar'), result(all))
+    assert.deepEqual(await t.run('tar -tvf ustar-long.tar'), result(lines(
+      `-rw-r--r-- dev/staff         3 2024-05-06 07:08 ${dir}/file.txt`,
+      '-rw-r--r-- dev/staff         2 2024-05-06 07:08 s',
+    )))
+    assert.deepEqual(await t.run('tar -tvf git.tar'), result(lines(
+      'drwxrwxr-x root/root         0 2024-05-06 07:08 p/',
+      '-rw-rw-r-- root/root         2 2024-05-06 07:08 p/a',
+    )))
+  })
+
+  it('warns of a pax keyword GNU does not know as it comes to its entry', async () => {
+    const t = await terminal()
+    const warn = (keyword) => `tar: Ignoring unknown extended header keyword '${keyword}'`
+    const row = (name) => `-rw-r--r-- dev/dev           2 2024-05-06 07:08 ${name}`
+    assert.deepEqual(await t.run('tar -tvf warn.tar 2>&1'), result(lines(warn('zzz'), warn('yyy'), row('f0'), row('f1'), warn('LIBARCHIVE.xattr.user.a'), warn('SCHILY.fflags'), row('f2'))))
+    // Of every entry it reads, whether asked for or not.
+    assert.deepEqual(await t.run('tar -xvf warn.tar -C /tmp f1 2>&1'), result(lines(warn('zzz'), warn('yyy'), 'f1', warn('LIBARCHIVE.xattr.user.a'), warn('SCHILY.fflags'))))
+  })
+
+  it('refuses a pax record it cannot answer for as GNU does', async () => {
+    // GNU lists a volume label as an entry of its own, and complains of a
+    // time it cannot read and goes on; the package does neither.
+    const t = await terminal()
+    await gap(t, 'tar -tf label.tar', 'extended header', 'tar: GNU.volume.label: records of multi-volume and incremental archives are not supported\n')
+    await gap(t, 'tar -tf badatime.tar', 'extended header', 'tar: atime=5x: extended header times GNU would reject are not supported\n')
+    await gap(t, 'tar -tf globatime.tar', 'extended header', 'tar: atime=bad: extended header times GNU would reject are not supported\n')
+  })
+
+  it('refuses an archive whose names it cannot give back as stored', async () => {
+    // The package hands `./a` out as `a`, `d/./b` as `d/b` and a directory
+    // as its name without a slash, however it was stored; GNU prints each
+    // name as stored, so an archive holding one the package changed is
+    // refused, wherever in the archive the name sits. An entry for the
+    // archive's own root is refused as well.
+    const t = await terminal()
+    const dot = (name) => `tar: ${name}: names stored with \`.' segments are not supported\n`
+    const dir = `long-${'x'.repeat(100)}`
+    await gap(t, 'tar -tf dot.tar', 'dot-segment names', dot('./'))
+    await gap(t, 'tar -tf lead.tar', 'dot-segment names', dot('./a'))
+    await gap(t, 'tar -tf mid.tar', 'dot-segment names', dot('d/./b'))
+    for (const format of ['gnu', 'pax', 'ustar']) await gap(t, `tar -tf ${format}-dot-long.tar`, 'dot-segment names', dot(`./${dir}/file.txt`))
+    await gap(t, 'tar -tf nodir.tar', 'directory names', 'tar: d: directories stored without a trailing slash are not supported\n')
+    await gap(t, 'tar -tvf hardlink.tar', 'dot-segment names', dot('./f'))
+    await gap(t, 'tar -tvf longlink.tar', 'dot-segment names', dot(`./${dir}/f`))
+    // However the archive arrives: through gzip, down a pipe, under a name
+    // that says it is compressed when its first block says it is not.
+    await gap(t, 'gzip -c lead.tar | tar -tzf -', 'dot-segment names', dot('./a'))
+    await gap(t, 'cat lead.tar | tar -tf -', 'dot-segment names', dot('./a'))
+    await t.run('cp lead.tar /tmp/lead.tar.xz')
+    await gap(t, 'tar -tf /tmp/lead.tar.xz', 'dot-segment names', dot('./a'))
+    // And before anything is extracted.
+    await gap(t, 'tar -xf mid.tar -C /tmp', 'dot-segment names', dot('d/./b'))
+    assert.equal((await t.run('ls -A /tmp')).stdout, 'lead.tar.xz\n')
   })
 })
 
@@ -254,6 +407,19 @@ describe('tar extracts into the writable overlay', () => {
     assert.deepEqual(await t.run('tar -tf /repo/pkg.tar -C nodir'), result('', { stderr: fatal, exitCode: 2, cwd: '/tmp' }))
     assert.deepEqual(await t.run('tar -xvf /repo/pkg.tar -C . pkg/README.md -C nodir pkg/link'), result('pkg/README.md\n', { stderr: fatal, exitCode: 2, cwd: '/tmp' }))
     assert.equal((await t.run('cat pkg/README.md')).stdout, '# pkg\n')
+  })
+
+  it('reports a time it cannot keep as a gap, where GNU would warn of it', async () => {
+    // GNU warns of a time before 1970, or after it began, once it has written
+    // the entry; the overlay keeps no times, and how far in the future one is
+    // GNU counts to the nanosecond.
+    const t = await terminal()
+    const r = await gap(t, 'tar -xvf times.tar -C /tmp', 'archive times', 'tar: old: extracting an entry dated before 1970 or in the future is not supported\n')
+    assert.equal(r.stdout, 'old\n')
+    await gap(t, 'tar -xf times.tar -C /tmp future', 'archive times', 'tar: future: extracting an entry dated before 1970 or in the future is not supported\n')
+    // What is not written sets no time.
+    assert.deepEqual(await t.run('tar -xOf times.tar'), result('f\nf\nf\n'))
+    assert.deepEqual(await t.run('tar -xf times.tar -C /tmp now'), result(''))
   })
 
   it('reports a write it cannot make here as a gap', async () => {

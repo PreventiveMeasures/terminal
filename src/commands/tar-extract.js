@@ -31,8 +31,8 @@ export const landing = (dir, name) => resolve(dir, name)
 
 // `name` is what GNU calls the entry in what it says of it: the name it is
 // extracted under, stripped and with no slash after it; `path` is where it
-// goes. Ends the run on a gap, and reports a name it cannot take as GNU
-// does, going on to the next.
+// goes. True where the entry was written; ends the run on a gap, and
+// reports a name it cannot take as GNU does, going on to the next.
 export function extractEntry(entry, name, path, state, keepOld) {
   const { ctx } = state
   const named = quoteColon(name, ctx)
@@ -50,14 +50,11 @@ export function extractEntry(entry, name, path, state, keepOld) {
   const refusal = entry.type === 'symlink' ? `Cannot create symlink to ${quoteLocale(entry.linkname, ctx)}` : 'Cannot open'
   const taken = lookup('/', path, ctx.fs, { follow: false }).path !== null
   if (taken && (keepOld || !clear(path, ctx.fs))) return state.error(`${named}: ${refusal}: File exists`)
-  if (entry.type === 'symlink') {
-    if (!ctx.fs.makeWritableLink('/', path, entry.linkname)) return readOnly()
-    return null
-  }
+  if (entry.type === 'symlink') return ctx.fs.makeWritableLink('/', path, entry.linkname) || readOnly()
   const handle = ctx.fs.openWritable('/', path)
   if (!handle) return readOnly()
   handle.writeBytes(entry.data)
-  return null
+  return true
 }
 
 // Every directory above the name, made where it is missing. What stops it
@@ -85,10 +82,10 @@ function makeParents(path, state) {
 function makeDirectory(path, named, state) {
   const { fs } = state.ctx
   const found = lookup('/', path, fs, { follow: false })
-  if (found.path !== null && fs.isDir(found.path) && !fs.isLink?.(found.path)) return null
+  if (found.path !== null && fs.isDir(found.path) && !fs.isLink?.(found.path)) return true
   if (found.path !== null && !clear(path, fs)) return state.error(`${named}: Cannot mkdir: File exists`)
   fs.makeWritableDir('/', path)
-  return null
+  return true
 }
 
 // Takes away what stands at the name: a file or a link unlinked, an empty

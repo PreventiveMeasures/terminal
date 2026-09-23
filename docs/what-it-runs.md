@@ -260,11 +260,20 @@ not have, as it has no `$UID`: `tar -c` asks for them with
 refuses rather than making them up. `--format=pax`, whose headers carry access
 and change times, is refused for the same reason. The package keeps no `.`
 segment in a name, so a name GNU would store with one — anything under a `.`
-operand — is refused rather than stored differently, and so, on reading, is an
-archive with an entry for its own root, which is the one sign it gives that
-the names were stored under `./`. Extraction writes into the writable `/tmp/`
-overlay alone, which holds no hard link and no device, so an entry that would
-make one is refused too.
+operand — is refused rather than stored differently. It reads names the same
+way, handing `./a` out as `a` and a directory as its name without a slash
+however it was stored, where GNU prints every name as it is stored; so the
+names are read back out of the archive's own headers, and one holding a name
+the package hands out otherwise — `./a`, `d/./b`, a directory stored without
+its slash, a hard link to `./f` — is refused, as is one with an entry for its
+own root. `tar` warns of a pax keyword GNU does not know as GNU does, as it
+comes to the entry: macOS's `LIBARCHIVE.xattr.` records are warned of, while
+`SCHILY.xattr.` records pass without a word. An access or change time GNU
+would complain of, and the records of multi-volume and incremental archives,
+are refused. Extraction writes into the writable `/tmp/` overlay alone, which
+holds no hard link and no device, so an entry that would make one is refused
+too. The overlay keeps no times either, so an entry dated before 1970 or after
+the run began, which GNU warns of once it has written it, is refused as well.
 
 `zip` makes a new archive as Info-ZIP Zip 3.0 does — `-r`, `-j`, `-D`, `-0`,
 `-y` and `-q`, its `adding:` lines, warnings, refusal of one name for two
@@ -276,11 +285,13 @@ compression level and the rest are refused. `unzip` answers as Debian's
 UnZip 6.00 does: `-l`, dated year first, `-t`, `-p`, and extraction with `-q`,
 `-o`, `-n`, `-j`, `-d` and `-x`, the overwrite question included — UnZip asks
 it on stdin, and a stdin with nothing on it answers with its end, which UnZip
-takes as "None". The package does not say how an entry was stored, nor whether
-its time is an exact one or a DOS time, so an extraction that is not quiet —
-which names each file `extracting` or `inflating` by how it was stored — `-c`
-and `-v` are refused, and `-l` answers where the two readings of every time
-agree, which they always do under `TZ=UTC`.
+takes as "None". A name stored with a `.` segment, which Info-ZIP never writes
+and other tools do, is refused as tar's is, since UnZip lists it as stored. The
+package does not say how an entry was stored, nor whether its time is an exact
+one or a DOS time, so an extraction that is not quiet — which names each file
+`extracting` or `inflating` by how it was stored — `-c` and `-v` are refused,
+and `-l` answers where the two readings of every time agree, which they always
+do under `TZ=UTC`.
 
 `curl` is the one command that reaches outside, and the one no terminal has
 unless it was asked for: `createTerminal` takes `network: true`, and without

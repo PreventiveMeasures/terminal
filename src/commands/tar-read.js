@@ -25,10 +25,13 @@ import { decompressMembers } from '../compression.js'
 import { lookupWithNote } from '../notes.js'
 import { consumeStdin, encodeUtf8, readBytesOf } from '../util.js'
 import { gzipTrouble, looksCompressed } from './gzip.js'
+import { tarHeaders } from './tar-headers.js'
 import { quoteColon } from './tar-names.js'
 
 const BLOCK = 512
 const GZIP_HEADER = 10
+// No entries at all, and the status gzip left.
+const noEntries = (child) => ({ entries: [], child, warnings: [], mtimes: [] })
 
 // The compressors GNU knows by their first bytes, and the option that asks
 // for each (check_compressed_archive).
@@ -100,10 +103,9 @@ export function readArchive(opts, state) {
   if (!source) return null
   const data = source.bytes
   if (opts.gzip) return gunzipped(data, state)
-  if (data.length >= BLOCK) {
-    const read = unpacked(data, state, false)
-    if (read !== null) return { entries: read, child: 0 }
-  }
+  // A block's worth the reader takes is an archive, whatever its name says.
+  const read = data.length >= BLOCK ? unpacked(data) : null
+  if (read?.entries !== undefined) return named(read.entries, data, state, 0)
   const magic = magicOf(data)
   if (magic !== undefined) {
     if (source.stdin) return state.fatal(`Archive is compressed. Use ${magic.option} option`)
@@ -113,11 +115,10 @@ export function readArchive(opts, state) {
   if (short) state.error('This does not look like a tar archive')
   const suffix = source.stdin ? undefined : suffixCompression(source.name)
   if (suffix !== undefined && suffix !== '-z') return refuseCompression(state, suffix)
-  if (short) return suffix === undefined ? { entries: [], child: 0 } : gunzipped(data, state)
+  if (short) return suffix === undefined ? noEntries(0) : gunzipped(data, state)
   // A block's worth that the reader refused may still open with a header
   // GNU would have taken, and then it never runs gzip over it at all.
-  const entries = unpacked(data, state, true)
-  return entries === null ? null : { entries, child: 0 }
+  return refused(read.error, state)
 }
 
 // What gzip hands tar, and what it says of it.
@@ -126,7 +127,7 @@ async function gunzipped(data, state) {
   if (!looksCompressed(data)) {
     // gzip reads the two magic bytes before anything else.
     state.say(2, `\ngzip: stdin: ${data.length < 2 ? 'unexpected end of file' : 'not in gzip format'}\n`)
-    return { entries: [], child: 1 }
+    return noEntries(1)
   }
   const inflated = await decompressMembers(data)
   const trouble = inflated.error === null ? null : gzipTrouble('stdin', inflated)
@@ -137,25 +138,32 @@ async function gunzipped(data, state) {
   if (trouble !== null) state.say(2, trouble.text)
   // Less than a block is the end of the archive to GNU when it arrives
   // through a pipe: nothing to read, and nothing wrong with that.
-  const entries = inflated.bytes.length < BLOCK ? [] : unpacked(inflated.bytes, state, true)
-  return entries === null ? null : { entries, child: trouble?.status ?? 0 }
+  const child = trouble?.status ?? 0
+  if (inflated.bytes.length < BLOCK) return noEntries(child)
+  const read = unpacked(inflated.bytes)
+  return read.entries === undefined ? refused(read.error, state) : named(read.entries, inflated.bytes, state, child)
 }
 
-// The whole archive through the package's reader, or null where it will not
-// read it — which is a gap where `refuse` says the run is to end on it.
-function unpacked(data, state, refuse) {
-  let entries
-  try { entries = unpack(data) } catch (error) {
+// The whole archive through the package's reader: its entries, or why it
+// will not read them.
+function unpacked(data) {
+  try { return { entries: unpack(data) } } catch (error) {
     if (!(error instanceof ArchiveError)) throw error
-    if (refuse) state.refuse('feature', 'archive', `this archive is not one this terminal reads: ${error.message}`)
-    return null
+    return { error }
   }
-  // An archive with an entry for its own root was made from `.`, and GNU
-  // lists every name in it as it was stored, `./` and all; the package gives
-  // them back without it, so they are not the names to print or match.
-  if (entries.some((entry) => entry.name === '.')) {
-    if (refuse) state.refuse('feature', 'dot-segment names', 'names stored with `./` in front are not supported')
-    return null
-  }
-  return entries
+}
+
+function refused(error, state) {
+  state.refuse('feature', 'archive', `this archive is not one this terminal reads: ${error.message}`)
+  return null
+}
+
+// The entries read, the status gzip left, and what the headers say of each
+// entry that the package does not (see tar-headers.js); null where they say
+// what this terminal cannot answer for, which ends the run.
+function named(entries, data, state, child) {
+  const read = tarHeaders(data, entries, (text) => quoteColon(text, state.ctx))
+  if (read.gap === undefined) return { entries, child, ...read }
+  state.refuse('feature', ...read.gap)
+  return null
 }
