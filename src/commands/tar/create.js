@@ -166,7 +166,7 @@ function addPath(path, orig, safe, walk) {
   if (walk.many && !dir && first === undefined) walk.archived.set(path, safe.name)
   const entry = first === undefined
     ? { name: safe.name, type, mode: MODES[type], mtime: walk.mtime, ...walk.owners, linkname: link ? fs.readLink(path) : '', data: type === 'file' ? readBytesOf(fs, path) : undefined }
-    : { name: safe.name, type: 'link', mode: MODES[type], mtime: walk.mtime, ...walk.owners, linkname: first }
+    : { name: safe.name, type: 'hardlink', mode: MODES[type], mtime: walk.mtime, ...walk.owners, linkname: first }
   walk.entries.push(entry)
   if (walk.verbose) state.list(walk.line ? walk.line({ ...entry, name: orig, data: entry.data ?? new Uint8Array() }) : dir ? `${orig}/` : orig)
   // Where there are several operands, GNU counts the links of everything

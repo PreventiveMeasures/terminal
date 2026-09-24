@@ -201,7 +201,7 @@
   },
   "dependencies": {
     "@exodus/bytes": "^1.16.0",
-    "@preventive/archive": "^1.0.0-beta.2",
+    "@preventive/archive": "^1.0.0-beta.3",
     "@preventive/diff": "^1.0.0"
   },
   "devDependencies": {
