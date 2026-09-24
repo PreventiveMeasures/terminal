@@ -100,19 +100,19 @@ describe('loose encoding and strict file bytes retain their distinct contracts',
   }
 
   it('preserves existing loose byte-reader behavior while strict encoders diagnose it', async () => {
-    const t = createTerminal({ input: '\uD800x' })
-    assert.deepEqual(await t.run('head -c3 input'), result('\uFFFD', 0, '', [], ['head: selected 3 of 4 bytes from "/input".']))
-    assert.deepEqual(await t.run('wc -c input'), result('4 input\n'))
-    const failed = await t.run('base64 input')
+    const t = createTerminal({})
+    assert.deepEqual(await t.run("echo -n '\uD800x' | head -c3"), result('\uFFFD', 0, '', [], ['head: selected 3 of 4 bytes from standard input.']))
+    assert.deepEqual(await t.run("echo -n '\uD800x' | wc -c"), result('4\n'))
+    const failed = await t.run("echo -n '\uD800x' | base64")
     assert.equal(failed.stdout, '')
     assert.equal(failed.exitCode, 1)
     assert.deepEqual(failed.unsupported.map(({ detail }) => detail), ['unpaired surrogate'])
   })
 
   it('does not corrupt a writable file when strict encoding rejects an append', async () => {
-    const t = createTerminal({ valid: '\uFEFFé😀', bad: '\uD800' }, { mount: '/repo', writable: '/tmp/' })
+    const t = createTerminal({ valid: '\uFEFFé😀' }, { mount: '/repo', writable: '/tmp/' })
     assert.deepEqual(await t.run('cat /repo/valid >/tmp/file'), mounted())
-    const failed = await t.run('cat /repo/bad >>/tmp/file 2>/dev/null | cat')
+    const failed = await t.run("echo -n '\uD800' >>/tmp/file 2>/dev/null | cat")
     assert.equal(failed.stdout, '')
     assert.equal(failed.stderr, '')
     assert.equal(failed.exitCode, 0)

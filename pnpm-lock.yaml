@@ -17,6 +17,9 @@ importers:
       '@preventive/diff':
         specifier: ^1.0.0
         version: 1.0.0
+      '@preventive/vfs':
+        specifier: 1.0.0-beta.1
+        version: 1.0.0-beta.1
     devDependencies:
       oxlint:
         specifier: ^1.63.0
@@ -163,6 +166,10 @@ packages:
     resolution: {integrity: sha512-voZPhZLUkbM1R8N4TxZ1LjHYmAoy8/4cohXYq5gL5DXYag3MQ/XehTSGa+871V6ffsNptixV9iURVtqqMHLOHg==}
     engines: {node: '>=24.14.0'}
 
+  '@preventive/vfs@1.0.0-beta.1':
+    resolution: {integrity: sha512-MDqqjjAw+Sy5ZRGx3qY4NsgcCU962IxhtpwclBxIxQ7LjR2WcdkIjR4j7YzV00NdKjv5z0iwCYS4RzZ9haqcDg==}
+    engines: {node: '>=24.14.0'}
+
   oxlint@1.64.0:
     resolution: {integrity: sha512-Star3SNpWPeWFPw7kRXIhXUSn6fdiAl25q15CQzH/9WaOtG6e9CWTc25vNZOCr4PE1yEP1GtKJKIKglhj3OmEQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -241,6 +248,8 @@ snapshots:
       - '@noble/hashes'
 
   '@preventive/diff@1.0.0': {}
+
+  '@preventive/vfs@1.0.0-beta.1': {}
 
   oxlint@1.64.0:
     optionalDependencies:

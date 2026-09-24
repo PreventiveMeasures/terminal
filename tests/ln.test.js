@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 // operand means under -T and -n, what -f replaces and refuses, and what
 // symlink(2) says of a name that is taken, that has no parent, or that lies
 // under something that is not a directory.
-const SOURCES = { file: 'plain\n', 'dir/leaf': 'leaf\n', srclink: { type: 'link', target: 'file' } }
+const SOURCES = { file: 'plain\n', 'dir/leaf': 'leaf\n', srclink: { type: 'symlink', target: 'file' } }
 const terminal = (options = {}) => createTerminal(SOURCES, { mount: '/repo', cwd: '/tmp', writable: '/tmp/', ...options })
 
 async function check(t, command, stdout = '', stderr = '', exitCode = 0, cwd = '/tmp') {

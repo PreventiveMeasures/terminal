@@ -1,27 +1,39 @@
 /**
- * What a source entry is where a string cannot say it. A symbolic link,
- * `{ type: 'link', target }`, holds the path the link carries, resolved from
- * the directory the link itself is in, exactly as the kernel resolves one.
- * The target need not exist — a link leading nowhere is a link, and
- * `find -type l` and `ls -l` say so — and an absolute target names a path in
- * the terminal's own filesystem rather than one inside the mount. Bytes spelt
- * in base64, `{ format: 'base64', data }`, are the file a `Uint8Array` of the
- * same bytes would be, for a tree that arrives serialized as text: it is
- * decoded (RFC 4648, padded or not) the first time the file is read, so a
- * tree of many such files costs nothing until one is opened. That reading is
- * where a spelling that does not decode is reported, as reading a binary
- * file as text is: the command names the file, and the diagnostic feed
- * carries it under the detail `base64 source`.
+ * What a source entry is where a string or a `Uint8Array` cannot say it, in
+ * the shapes `@preventive/vfs` declares an entry with. `{ type: 'file', data }`
+ * is a file, `data` its text or its bytes, and nothing for an empty file;
+ * `{ type: 'directory' }` a directory, which need hold nothing; and
+ * `{ type: 'symlink', target }` a symbolic link, holding the path it carries,
+ * resolved from the directory the link itself is in, exactly as the kernel
+ * resolves one. The target need not exist — a link leading nowhere is a link,
+ * and `find -type l` and `ls -l` say so — and an absolute target names a path
+ * in the terminal's own filesystem rather than one inside the mount. Bytes
+ * spelt in base64, `{ format: 'base64', data }` (RFC 4648, padded or not), are
+ * the file a `Uint8Array` of the same bytes would be, for a tree that arrives
+ * serialized as text, decoded when the terminal is made. A hard link, and a
+ * `mode` or an `mtime`, are what a Vfs holds and this terminal does not keep
+ * yet: declaring one is refused, as is any field an entry's type does not
+ * have.
  */
-export type SourceEntry = { type: 'link'; target: string } | { format: 'base64'; data: string }
+export type SourceEntry =
+  | { type: 'file'; data?: string | Uint8Array }
+  | { type: 'directory' }
+  | { type: 'symlink'; target: string }
+  | { format: 'base64'; data: string }
 
 /**
- * Virtual source tree: file paths within the configured mount (leading `/`
- * optional) to file contents, as either a plain object or a `Map`. A file is
+ * Virtual source tree: paths within the configured mount (leading `/`
+ * optional) to what is there, as either a plain object or a `Map`. A file is
  * the text it holds, or — for one no string can spell, such as an image or a
  * compiled object — the bytes themselves, as a `Uint8Array` that is copied
- * when the terminal is created, or those bytes spelt in base64 (see
- * {@link SourceEntry}).
+ * when the terminal is made; anything else is a {@link SourceEntry}. Parent
+ * directories are implied. The tree follows `@preventive/vfs`'s rules for a
+ * map: two spellings of one path (`a/f`, `./a/f`) are one name, declared again
+ * only as the same entry; nothing is declared under a file or through a link;
+ * a name is at most 255 bytes of UTF-8; and text must have a UTF-8 encoding,
+ * which text holding a lone surrogate has not. A source that breaks a rule,
+ * or declares nothing — `null`, a number, an object without a type — makes
+ * `createTerminal` throw a `TypeError` naming it.
  */
 export type Sources = Record<string, string | Uint8Array | SourceEntry> | Map<string, string | Uint8Array | SourceEntry>
 
@@ -31,13 +43,13 @@ export interface CommandFs {
   resolve(path: string): string
   /** Whether `path` names a file in the source tree. */
   isFile(path: string): boolean
-  /** Whether `path` names a directory (directories are derived from the file paths). */
+  /** Whether `path` names a directory, declared as one or implied by the paths below it. */
   isDir(path: string): boolean
   /** Whether `path` itself names a symbolic link — the name is not followed, as `lstat` does not follow one. Every other method here resolves links on the way, and `path` reaching through one is resolved for this check too. */
   isLink(path: string): boolean
   /** The path a symbolic link holds, unresolved, or `undefined` if `path` is not one. */
   readLink(path: string): string | undefined
-  /** Whether `path` holds bytes rather than text — a file declared as a `Uint8Array`, or one written under `/tmp`. Its bytes may still spell text, which {@link CommandFs.readFile} then reads. */
+  /** Whether `path` names a file, every one of which holds bytes: a file declared as text holds what the text encodes to as UTF-8. Its bytes may spell text, which {@link CommandFs.readFile} then reads, or may not, which {@link CommandFs.readBytes} reads. */
   isBytes(path: string): boolean
   /** Contents of `path`, or `undefined` if it is not a file. Throws where the file holds bytes that spell no text, as this string-based terminal cannot carry them out; {@link CommandFs.readBytes} reads those. */
   readFile(path: string): string | undefined

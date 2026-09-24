@@ -1,20 +1,21 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { createFs, lookup, walkTree } from '../src/fs.js'
+import { createFs } from '../src/filesystem.js'
+import { lookup, walkTree } from '../src/fs.js'
 
 // A source value that is not a string declares what the entry is, where a
-// path-to-content map cannot spell it: today `{ type: 'link', target }`, the
+// path-to-content map cannot spell it: today `{ type: 'symlink', target }`, the
 // symbolic link `find -type l` asks about and `node_modules/.bin` is full of.
 // Checked against GNU coreutils 9.4, findutils 4.9, tree 2.1 and bash 5.2 over
 // the same tree made on disk.
 const SOURCES = {
   'node_modules/pkg/bin/cli.js': 'run\n',
   'node_modules/pkg/index.js': 'module\n',
-  'node_modules/.bin/cli': { type: 'link', target: '../pkg/bin/cli.js' },
-  'node_modules/.bin/stale': { type: 'link', target: '../gone/cli.js' },
+  'node_modules/.bin/cli': { type: 'symlink', target: '../pkg/bin/cli.js' },
+  'node_modules/.bin/stale': { type: 'symlink', target: '../gone/cli.js' },
   'src/app.js': 'app\n',
-  pkg: { type: 'link', target: 'node_modules/pkg' },
+  pkg: { type: 'symlink', target: 'node_modules/pkg' },
 }
 
 const terminal = (sources = SOURCES, options = {}) => createTerminal(sources, options)
@@ -35,7 +36,7 @@ async function gap(t, command, detail, stderr) {
 
 describe('a source entry can declare a symbolic link', () => {
   it('lists links apart from the files and the directories a map implies', () => {
-    const fs = createFs({ 'a/file': 'x\n', 'a/link': { type: 'link', target: 'file' }, dir: { type: 'link', target: 'a' } })
+    const fs = createFs({ 'a/file': 'x\n', 'a/link': { type: 'symlink', target: 'file' }, dir: { type: 'symlink', target: 'a' } })
     assert.deepEqual(fs.listDir('/'), { dirs: ['a'], files: [], links: ['dir'] })
     assert.deepEqual(fs.listDir('/a'), { dirs: [], files: ['file'], links: ['link'] })
     assert.deepEqual([fs.isLink('/a/link'), fs.isFile('/a/link'), fs.isDir('/dir')], [true, false, false])
@@ -46,7 +47,7 @@ describe('a source entry can declare a symbolic link', () => {
   })
 
   it('walks a link as an entry of its own, and never through it', () => {
-    const fs = createFs({ 'a/file': 'x\n', 'a/link': { type: 'link', target: 'file' }, up: { type: 'link', target: '.' } })
+    const fs = createFs({ 'a/file': 'x\n', 'a/link': { type: 'symlink', target: 'file' }, up: { type: 'symlink', target: '.' } })
     assert.deepEqual([...walkTree(fs, '/')].map((e) => [e.path, e.kind]), [
       ['/', 'dir'], ['/a', 'dir'], ['/a/file', 'file'], ['/a/link', 'link'], ['/up', 'link'],
     ])
@@ -54,25 +55,60 @@ describe('a source entry can declare a symbolic link', () => {
     assert.deepEqual([...fs.walkFiles('/')], ['/a/file'])
   })
 
-  it('replaces an earlier declaration of the same name, whichever kind each was', () => {
-    const fs = createFs(new Map([['x', 'file\n'], ['./x', { type: 'link', target: 'y' }], ['y', { type: 'link', target: 'x' }], ['/y', 'later\n']]))
-    assert.deepEqual(fs.listDir('/'), { dirs: [], files: ['y'], links: ['x'] })
-    assert.equal(fs.readFile('/y'), 'later\n')
-    assert.equal(fs.readLink('/x'), 'y')
+  it('takes a name declared again only as the entry it already is', () => {
+    const fs = createFs(new Map([
+      ['x', { type: 'symlink', target: 'y' }], ['./x', { type: 'symlink', target: 'y' }],
+      ['y', 'file\n'], ['/y', Uint8Array.of(0x66, 0x69, 0x6c, 0x65, 0x0a)], ['d', { type: 'directory' }], ['d/', { type: 'directory' }],
+    ]))
+    assert.deepEqual(fs.listDir('/'), { dirs: ['d'], files: ['y'], links: ['x'] })
+    for (const sources of [
+      [['x', 'file\n'], ['./x', { type: 'symlink', target: 'y' }]],
+      [['x', { type: 'symlink', target: 'y' }], ['/x', { type: 'symlink', target: 'z' }]],
+      [['x', 'one\n'], ['x/.', 'two\n']],
+      [['d', { type: 'directory' }], ['/d', '']],
+    ]) {
+      assert.throws(() => createFs(new Map(sources)), /names the same path as an earlier source, which declared something else there/u, JSON.stringify(sources))
+    }
   })
 
-  it('refuses a declaration it cannot read, and still ignores a value declaring nothing', () => {
+  it('declares nothing under a file, or through a link', () => {
+    assert.throws(() => createFs({ a: 'x', 'a/b': 'y' }), /source "a\/b": \/a: Not a directory/u)
+    assert.throws(() => createFs({ 'a/b': 'y', a: 'x' }), /source "a": \/a: Is a directory/u)
+    assert.throws(() => createFs({ 'a/b': 'y', a: { type: 'symlink', target: 'b' } }), /source "a": \/a: File exists/u)
+    assert.throws(() => createFs({ d: { type: 'directory' }, l: { type: 'symlink', target: 'd' }, 'l/f': 'x' }), /source "l\/f" is declared through a symbolic link/u)
+    assert.throws(() => createFs({ l: { type: 'symlink', target: 'missing' }, 'l/f': 'x' }), /source "l\/f" is declared through a symbolic link/u)
+    assert.throws(() => createFs({ l: { type: 'symlink', target: '.' }, l2: { type: 'directory' }, 'l/l2/f': 'x' }), /declared through a symbolic link/u)
+  })
+
+  it('refuses a declaration it cannot read, and a value declaring nothing', () => {
     for (const [sources, message] of [
       [{ x: { type: 'lnik', target: 'y' } }, /declares type "lnik"/u],
-      [{ x: { target: 'y' } }, /declares type null/u],
-      [{ x: { type: 'link' } }, /non-empty target/u],
-      [{ x: { type: 'link', target: '' } }, /non-empty target/u],
-      [{ x: { type: 'link', target: 'a\0b' } }, /NUL/u],
+      [{ x: { target: 'y' } }, /declares no type/u],
+      [{ x: { type: 'link', target: 'y' } }, /declares type "link"; a symbolic link is declared as \{ type: 'symlink', target \}/u],
+      [{ x: { type: 'hardlink', target: 'y' } }, /declares a hard link, which is not supported/u],
+      [{ x: { type: 'symlink' } }, /non-empty target/u],
+      [{ x: { type: 'symlink', target: '' } }, /non-empty target/u],
+      [{ x: { type: 'symlink', target: 'a\0b' } }, /NUL/u],
+      [{ x: { type: 'symlink', target: '\uD800' } }, /source "x": \/x: Invalid or incomplete multibyte or wide character/u],
+      [{ x: { type: 'symlink', target: 'y', data: 'z' } }, /declares `data`, which a symlink does not have/u],
+      [{ x: { type: 'directory', target: 'y' } }, /declares `target`, which a directory does not have/u],
+      [{ x: { type: 'file', data: 'y', mode: 0o755 } }, /declares `mode`, which this terminal does not keep yet/u],
+      [{ x: { type: 'directory', mtime: 0 } }, /declares `mtime`, which this terminal does not keep yet/u],
+      [{ x: { type: 'file', data: 1 } }, /declares `data` that is neither text nor a Uint8Array/u],
+      [{ x: '\uD800' }, /source "x" holds a lone surrogate/u],
+      [{ '\uD800': 'x' }, /Invalid or incomplete multibyte or wide character/u],
+      [{ ['a'.repeat(256)]: 'x' }, /File name too long/u],
+      [{ nothing: null }, /source "nothing" is null/u],
+      [{ list: ['a'] }, /source "list" is an array/u],
+      [{ nested: { file: '' } }, /source "nested" declares no type/u],
+      [{ n: 1 }, /source "n" is a number/u],
+      [{ u: undefined }, /source "u" is undefined/u],
     ]) {
-      assert.throws(() => createTerminal(sources), message)
+      assert.throws(() => createTerminal(sources), message, JSON.stringify(sources))
     }
-    const fs = createFs({ nothing: null, list: ['a'], nested: { file: '' }, kept: 'x\n' })
-    assert.deepEqual(fs.listDir('/'), { dirs: [], files: ['kept'], links: [] })
+    const fs = createFs({ f: { type: 'file', data: 'x\n' }, e: { type: 'file' }, b: { type: 'file', data: Uint8Array.of(1) }, d: { type: 'directory' } })
+    assert.deepEqual(fs.listDir('/'), { dirs: ['d'], files: ['b', 'e', 'f'], links: [] })
+    assert.deepEqual([fs.readFile('/f'), fs.readFile('/e'), fs.fileSize('/b')], ['x\n', '', 1])
   })
 })
 
@@ -85,9 +121,9 @@ describe('a link is resolved the way the kernel resolves one', () => {
   })
 
   it('follows a link to a link, and a link named by a target of its own', async () => {
-    const t = terminal({ file: 'x\n', one: { type: 'link', target: 'two' }, two: { type: 'link', target: 'file' } })
+    const t = terminal({ file: 'x\n', one: { type: 'symlink', target: 'two' }, two: { type: 'symlink', target: 'file' } })
     await check(t, 'cat one two', 'x\nx\n')
-    assert.deepEqual(lookup('/', 'one', createFs({ file: 'x\n', one: { type: 'link', target: 'two' }, two: { type: 'link', target: 'file' } })), { path: '/file', error: null })
+    assert.deepEqual(lookup('/', 'one', createFs({ file: 'x\n', one: { type: 'symlink', target: 'two' }, two: { type: 'symlink', target: 'file' } })), { path: '/file', error: null })
   })
 
   it('reports a link that leads nowhere as the missing path it is', async () => {
@@ -97,20 +133,20 @@ describe('a link is resolved the way the kernel resolves one', () => {
   })
 
   it('stops a resolution that never ends, as ELOOP does', async () => {
-    const t = terminal({ self: { type: 'link', target: 'self' }, ping: { type: 'link', target: 'pong' }, pong: { type: 'link', target: 'ping' } })
+    const t = terminal({ self: { type: 'symlink', target: 'self' }, ping: { type: 'symlink', target: 'pong' }, pong: { type: 'symlink', target: 'ping' } })
     await check(t, 'cat self', '', { stderr: 'cat: self: Too many levels of symbolic links\n', exitCode: 1 })
     await check(t, 'cat ping', '', { stderr: 'cat: ping: Too many levels of symbolic links\n', exitCode: 1 })
   })
 
   it('takes an absolute target as a path in this filesystem, not one inside the mount', async () => {
-    const sources = { file: 'mounted\n', inside: { type: 'link', target: '/repo/file' }, outside: { type: 'link', target: '/file' } }
+    const sources = { file: 'mounted\n', inside: { type: 'symlink', target: '/repo/file' }, outside: { type: 'symlink', target: '/file' } }
     const t = createTerminal(sources, { mount: '/repo' })
     await check(t, 'cat inside', 'mounted\n', { cwd: '/repo' })
     await check(t, 'cat outside', '', { stderr: 'cat: outside: No such file or directory\n', exitCode: 1, cwd: '/repo' })
   })
 
   it('holds a target written with a trailing slash to the directory it names', async () => {
-    const t = terminal({ 'one/a.txt': 'one\n', 'two/b.txt': 'two\n', toDir: { type: 'link', target: 'two/' }, toFile: { type: 'link', target: 'one/a.txt/' } })
+    const t = terminal({ 'one/a.txt': 'one\n', 'two/b.txt': 'two\n', toDir: { type: 'symlink', target: 'two/' }, toFile: { type: 'symlink', target: 'one/a.txt/' } })
     await check(t, 'cat toDir/b.txt', 'two\n')
     await check(t, 'cat toFile', '', { stderr: 'cat: toFile: Not a directory\n', exitCode: 1 })
     await check(t, 'realpath toFile', '', { stderr: 'realpath: toFile: Not a directory\n', exitCode: 1 })
@@ -118,7 +154,7 @@ describe('a link is resolved the way the kernel resolves one', () => {
   })
 
   it('resolves `..` after a link against what the link leads to', async () => {
-    const t = terminal({ 'one/a.txt': 'one\n', 'two/b.txt': 'two\n', 'one/over': { type: 'link', target: '../two' } })
+    const t = terminal({ 'one/a.txt': 'one\n', 'two/b.txt': 'two\n', 'one/over': { type: 'symlink', target: '../two' } })
     await check(t, 'cat one/over/b.txt', 'two\n')
     await check(t, 'cat one/over/../a.txt', '', { stderr: 'cat: one/over/../a.txt: No such file or directory\n', exitCode: 1 })
     await check(t, 'cat one/over/../two/b.txt', 'two\n')
@@ -151,7 +187,7 @@ describe('find names a link, and passes over what it points at', () => {
   })
 
   it('counts a link neither empty nor a directory', async () => {
-    const t = terminal({ 'holder/link': { type: 'link', target: 'gone' }, 'file.txt': '' })
+    const t = terminal({ 'holder/link': { type: 'symlink', target: 'gone' }, 'file.txt': '' })
     await check(t, 'find . -empty', './file.txt\n')
   })
 
@@ -184,7 +220,7 @@ describe('ls shows a link as the entry it is', () => {
   })
 
   it('names what a link points at in a long listing, with the length of that path as its size', async () => {
-    const t = await dated({ 'dir/file': 'x\n', 'dir/link': { type: 'link', target: 'file' }, far: { type: 'link', target: 'a'.repeat(60) } })
+    const t = await dated({ 'dir/file': 'x\n', 'dir/link': { type: 'symlink', target: 'file' }, far: { type: 'symlink', target: 'a'.repeat(60) } })
     assert.deepEqual((await at(() => t.run('ls -l dir'))).stdout, [
       'total 4',
       '-rw------- 1 user user 2 Sep 18 05:52 file',
@@ -200,7 +236,7 @@ describe('ls shows a link as the entry it is', () => {
   })
 
   it('marks what a link points at in a long listing, which is where GNU puts the indicator', async () => {
-    const t = await dated({ 'two/b.txt': 'two\n', 'one/a.txt': 'one\n', dir: { type: 'link', target: 'two/' }, file: { type: 'link', target: 'one/a.txt' } })
+    const t = await dated({ 'two/b.txt': 'two\n', 'one/a.txt': 'one\n', dir: { type: 'symlink', target: 'two/' }, file: { type: 'symlink', target: 'one/a.txt' } })
     // The row names both, so the mark goes on the target, on the target as it
     // was written: a target already ending in a slash takes another.
     assert.deepEqual((await at(() => t.run('ls -lF dir file'))).stdout, [
@@ -226,7 +262,7 @@ describe('ls shows a link as the entry it is', () => {
   })
 
   it('does not descend into a link under -R', async () => {
-    const t = terminal({ 'a/file': 'x\n', 'a/up': { type: 'link', target: '.' } })
+    const t = terminal({ 'a/file': 'x\n', 'a/up': { type: 'symlink', target: '.' } })
     await check(t, 'ls -R a', 'a:\nfile\nup\n')
   })
 })
@@ -235,9 +271,9 @@ describe('the rest of the tree tools answer for a link without crossing it', () 
   it('tree names the target beside the link, and counts it as what it leads to', async () => {
     const t = terminal({
       'a/file': 'x\n', 'a/dir/deep': 'y\n',
-      'a/link': { type: 'link', target: 'file' },
-      'a/up': { type: 'link', target: 'dir' },
-      'a/gone': { type: 'link', target: 'nowhere' },
+      'a/link': { type: 'symlink', target: 'file' },
+      'a/up': { type: 'symlink', target: 'dir' },
+      'a/gone': { type: 'symlink', target: 'nowhere' },
     })
     // A link is named beside what it points at and crossed no further, while
     // the counts follow where it leads: `up` is one of the directories.
@@ -367,7 +403,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
   })
 
   it('cp answers for the destination before it looks at the tree for links', async () => {
-    const sources = { 'a/file': 'x\n', 'a/link': { type: 'link', target: 'file' }, afile: 'f\n' }
+    const sources = { 'a/file': 'x\n', 'a/link': { type: 'symlink', target: 'file' }, afile: 'f\n' }
     const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     // A copy the destination turns away never reaches the tree, so what it
     // holds is not what the refusal is about.
@@ -384,7 +420,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
   })
 
   it('cp reads a destination link for where it leads, loop and all', async () => {
-    const sources = { 'a/file': 'x\n', into: { type: 'link', target: '/tmp/src' } }
+    const sources = { 'a/file': 'x\n', into: { type: 'symlink', target: '/tmp/src' } }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     const at = { cwd: '/repo' }
     const seed = 'mkdir /tmp/src; printf a > /tmp/src/f; '
@@ -406,7 +442,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
   })
 
   it('cp refuses a link a recursive copy meets, before that copy writes anything', async () => {
-    const sources = { 'a/file': 'x\n', 'a/link': { type: 'link', target: 'file' }, 'a/sub/deep': 'y\n', 'plain/f': 'z\n' }
+    const sources = { 'a/file': 'x\n', 'a/link': { type: 'symlink', target: 'file' }, 'a/sub/deep': 'y\n', 'plain/f': 'z\n' }
     const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     // `-r` keeps every link it meets as the link it is, and only `-L` reads
     // through one. Nothing here can make a link, so writing the file it points
@@ -421,7 +457,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
   })
 
   it('diff names a link that is only on one side, and refuses only a walk that would cross one', async () => {
-    const t = terminal({ 'a/file': 'one\n', 'a/over': { type: 'link', target: '../b' }, 'b/file': 'two\n', 'b/over/x': 'x\n' })
+    const t = terminal({ 'a/file': 'one\n', 'a/over': { type: 'symlink', target: '../b' }, 'b/file': 'two\n', 'b/over/x': 'x\n' })
     await check(t, 'diff a b', [
       'diff a/file b/file', '1c1', '< one', '---', '> two',
       'Common subdirectories: a/over and b/over', '',
@@ -430,7 +466,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
   })
 
   it('diff names the side a one-sided link is on, where -N stands in for the other', async () => {
-    const t = terminal({ 'a/file': 'one\n', 'b/file': 'one\n', 'b/only': { type: 'link', target: '../d' }, 'd/x': 'x\n' })
+    const t = terminal({ 'a/file': 'one\n', 'b/file': 'one\n', 'b/only': { type: 'symlink', target: '../d' }, 'd/x': 'x\n' })
     // `-N` stands a name one side lacks in as an empty directory, so the walk
     // still meets the link — which is on the side whose listing held it,
     // whichever side that is.
@@ -444,8 +480,8 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
   it('diff reads a name a directory cannot answer for rather than typing it', async () => {
     const t = terminal({
       'a/keep': 'same\n', 'b/keep': 'same\n',
-      'a/gone': { type: 'link', target: 'nowhere' }, 'b/gone/inner': 'in\n',
-      'a/loop': { type: 'link', target: 'ring' }, 'a/ring': { type: 'link', target: 'loop' },
+      'a/gone': { type: 'symlink', target: 'nowhere' }, 'b/gone/inner': 'in\n',
+      'a/loop': { type: 'symlink', target: 'ring' }, 'a/ring': { type: 'symlink', target: 'loop' },
       'b/loop': 'file\n', 'b/ring': 'file\n',
     })
     // A link leading nowhere, across from a directory, is not a file of some
@@ -473,8 +509,8 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
   it('diff answers for a link leading nowhere rather than standing in for it under -N', async () => {
     const sources = {
       'a/keep': 'same\n', 'b/keep': 'same\n', 'b/only': 'real\n', 'b/pair': 'realfile\n',
-      'a/both': { type: 'link', target: 'nowhere' }, 'b/both': { type: 'link', target: 'nowhere' },
-      'a/pair': { type: 'link', target: 'nowhere' }, 'a/alone': { type: 'link', target: 'nowhere' },
+      'a/both': { type: 'symlink', target: 'nowhere' }, 'b/both': { type: 'symlink', target: 'nowhere' },
+      'a/pair': { type: 'symlink', target: 'nowhere' }, 'a/alone': { type: 'symlink', target: 'nowhere' },
     }
     const t = terminal(sources)
     // `-N` stands in for a name the directory does not have; a name it has and
@@ -498,7 +534,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
   })
 
   it('diff compares what two links point at', async () => {
-    const t = terminal({ 'a/file': 'one\n', 'a/link': { type: 'link', target: 'file' }, 'b/file': 'two\n', 'b/link': { type: 'link', target: 'file' } })
+    const t = terminal({ 'a/file': 'one\n', 'a/link': { type: 'symlink', target: 'file' }, 'b/file': 'two\n', 'b/link': { type: 'symlink', target: 'file' } })
     await check(t, 'diff a/link b/link', '1c1\n< one\n---\n> two\n', { exitCode: 1 })
     await check(t, 'diff -r a b', [
       'diff -r a/file b/file', '1c1', '< one', '---', '> two',
@@ -511,10 +547,10 @@ describe('what a link cannot change', () => {
   it('writes where a link leads, which is the file the overlay answers for', async () => {
     const sources = {
       file: 'src\n',
-      out: { type: 'link', target: '/tmp/out' },
-      fresh: { type: 'link', target: '/tmp/new' },
-      dirlink: { type: 'link', target: '/tmp/d' },
-      outside: { type: 'link', target: '/repo/file' },
+      out: { type: 'symlink', target: '/tmp/out' },
+      fresh: { type: 'symlink', target: '/tmp/new' },
+      dirlink: { type: 'symlink', target: '/tmp/d' },
+      outside: { type: 'symlink', target: '/repo/file' },
     }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     const at = { cwd: '/repo' }
@@ -530,7 +566,7 @@ describe('what a link cannot change', () => {
   })
 
   it('refuses a write to a link naming a file under a directory that is not there', async () => {
-    const sources = { file: 'x\n', orphan: { type: 'link', target: '/tmp/gone/file' } }
+    const sources = { file: 'x\n', orphan: { type: 'symlink', target: '/tmp/gone/file' } }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     // The name a link leads to answers for its own parent: where that is not
     // there, the write fails as the kernel fails it rather than leaving bytes
@@ -549,9 +585,9 @@ describe('what a link cannot change', () => {
   it('writes through no link that leads nowhere, where GNU writes through neither half', async () => {
     const sources = {
       file: 'src\n', 'd/inner': 'in\n',
-      out: { type: 'link', target: '/tmp/out' },
-      fresh: { type: 'link', target: '/tmp/new' },
-      outside: { type: 'link', target: '/repo/newname' },
+      out: { type: 'symlink', target: '/tmp/out' },
+      fresh: { type: 'symlink', target: '/tmp/new' },
+      outside: { type: 'symlink', target: '/repo/newname' },
     }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     const at = { cwd: '/repo' }
@@ -579,7 +615,7 @@ describe('what a link cannot change', () => {
   })
 
   it('copies into the directory a link names, and over no link that is not one', async () => {
-    const sources = { file: 'src\n', 'd/inner': 'in\n', dirlink: { type: 'link', target: '/tmp/d' } }
+    const sources = { file: 'src\n', 'd/inner': 'in\n', dirlink: { type: 'symlink', target: '/tmp/d' } }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     const at = { cwd: '/repo' }
     // A copy lands where the name leads, so what the overlay may hold is asked
@@ -598,9 +634,9 @@ describe('what a link cannot change', () => {
   it('makes no directory over a name a link holds, however far the link leads', async () => {
     const sources = {
       file: 'x\n',
-      dirlink: { type: 'link', target: '/tmp/d' },
-      fresh: { type: 'link', target: '/tmp/new' },
-      through: { type: 'link', target: '/repo/file/sub' },
+      dirlink: { type: 'symlink', target: '/tmp/d' },
+      fresh: { type: 'symlink', target: '/tmp/new' },
+      through: { type: 'symlink', target: '/repo/file/sub' },
     }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     const at = { cwd: '/repo' }
@@ -625,9 +661,9 @@ describe('what a link cannot change', () => {
   it('answers for the parent of the name a link leads to before the boundary answers', async () => {
     const sources = {
       file: 'x\n',
-      orphan: { type: 'link', target: '/repo/missing/file' },
-      spelled: { type: 'link', target: '/repo/newname' },
-      through: { type: 'link', target: '/repo/file/sub' },
+      orphan: { type: 'symlink', target: '/repo/missing/file' },
+      spelled: { type: 'symlink', target: '/repo/newname' },
+      through: { type: 'symlink', target: '/repo/file/sub' },
     }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     const at = { cwd: '/repo' }
@@ -643,7 +679,7 @@ describe('what a link cannot change', () => {
   })
 
   it('refuses no link a copy can never reach', async () => {
-    const sources = { 'g/f': 'g\n', 'g/sub/h': 'h\n', 'g/sub/gl': { type: 'link', target: 'h' } }
+    const sources = { 'g/f': 'g\n', 'g/sub/h': 'h\n', 'g/sub/gl': { type: 'symlink', target: 'h' } }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     const at = { cwd: '/repo' }
     const blocked = 'mkdir -p /tmp/dest/g; printf BLOCK > /tmp/dest/g/sub; '
@@ -662,9 +698,9 @@ describe('what a link cannot change', () => {
   it('leaves a link alone where -n has left its destination alone', async () => {
     const sources = {
       file: 'x\n', 'e/f': 'e\n',
-      'e/el': { type: 'link', target: 'f' },
-      out: { type: 'link', target: '/tmp/out' },
-      gone: { type: 'link', target: '/tmp/never' },
+      'e/el': { type: 'symlink', target: 'f' },
+      out: { type: 'symlink', target: '/tmp/out' },
+      gone: { type: 'symlink', target: '/tmp/never' },
     }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     const at = { cwd: '/repo' }
@@ -688,7 +724,7 @@ describe('what a link cannot change', () => {
   })
 
   it('patches through a link on the way, and patches no link itself', async () => {
-    const sources = { file: 'a\n', into: { type: 'link', target: '/tmp' }, out: { type: 'link', target: '/tmp/out' } }
+    const sources = { file: 'a\n', into: { type: 'symlink', target: '/tmp' }, out: { type: 'symlink', target: '/tmp/out' } }
     const made = async () => {
       const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
       await t.run("printf 'a\\n' > /tmp/out; printf -- '--- out\\n+++ out\\n@@ -1 +1 @@\\n-a\\n+b\\n' > /tmp/d.patch")
@@ -707,7 +743,7 @@ describe('what a link cannot change', () => {
   })
 
   it('sed guards the file it reads, which a link naming that file is', async () => {
-    const sources = { file: 'a\n', out: { type: 'link', target: '/tmp/out' } }
+    const sources = { file: 'a\n', out: { type: 'symlink', target: '/tmp/out' } }
     const refusal = 'sed: writing to an actively read input file is not supported\n'
     // The guard is about the file rather than the name it was opened by, so
     // both spellings of one file answer alike.
@@ -720,7 +756,7 @@ describe('what a link cannot change', () => {
   })
 
   it('empties what a slashed link names and still cannot unlink the name', async () => {
-    const t = createTerminal({ dirlink: { type: 'link', target: '/tmp/d' } }, { mount: '/repo', writable: '/tmp/' })
+    const t = createTerminal({ dirlink: { type: 'symlink', target: '/tmp/d' } }, { mount: '/repo', writable: '/tmp/' })
     await check(t, 'mkdir /tmp/d; printf x > /tmp/d/f', '', { cwd: '/repo' })
     // GNU walks into the directory the slash asked for, empties it, and then
     // fails the name itself, which is a link and not the directory it led to.
@@ -729,7 +765,7 @@ describe('what a link cannot change', () => {
   })
 
   it('watches the file a copy will write, where a link names the one it reports on', async () => {
-    const sources = { file: 'src\n', out: { type: 'link', target: '/tmp/out' } }
+    const sources = { file: 'src\n', out: { type: 'symlink', target: '/tmp/out' } }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     // GNU buffers its verbose line, so a copy whose report shares the file it
     // writes is refused — by the name the copy lands on, link or not.
@@ -742,8 +778,8 @@ describe('what a link cannot change', () => {
   it('unlinks and replaces the name it was given, which a link in the sources is not', async () => {
     const sources = {
       file: 'x\n',
-      out: { type: 'link', target: '/tmp/out' },
-      dirlink: { type: 'link', target: '/tmp/d' },
+      out: { type: 'symlink', target: '/tmp/out' },
+      dirlink: { type: 'symlink', target: '/tmp/d' },
     }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     const at = { cwd: '/repo' }
@@ -774,7 +810,7 @@ describe('what a link cannot change', () => {
   })
 
   it('realpath takes `..` from the name as written under -L, and from what a link leads to under -P', async () => {
-    const t = terminal({ 'd/f': 'f\n', 'x/y/z': 'z\n', 'sub/l': { type: 'link', target: '../x/y' }, l: { type: 'link', target: 'd' } })
+    const t = terminal({ 'd/f': 'f\n', 'x/y/z': 'z\n', 'sub/l': { type: 'symlink', target: '../x/y' }, l: { type: 'symlink', target: 'd' } })
     // `-P`, the default, expands the link and takes `..` from where it leads.
     check(t, 'realpath sub/l/../z', '/x/z\n')
     await check(t, 'realpath -P sub/l/../z', '/x/z\n')
@@ -791,7 +827,7 @@ describe('what a link cannot change', () => {
   })
 
   it('realpath expands no link under -s, in the existence mode as well as the default', async () => {
-    const t = terminal({ 'd/f': 'f\n', l: { type: 'link', target: 'd' } })
+    const t = terminal({ 'd/f': 'f\n', l: { type: 'symlink', target: 'd' } })
     await check(t, 'realpath -s l/f', '/l/f\n')
     await check(t, 'realpath -s -e l/f', '/l/f\n')
     await check(t, 'realpath -s -m l/nope', '/l/nope\n')
@@ -801,7 +837,7 @@ describe('what a link cannot change', () => {
   })
 
   it('realpath -s -e asks about the name it reduced to, not the spelling it came from', async () => {
-    const t = terminal({ 'x/z': 'z\n', 'x/y/f': 'y\n', l: { type: 'link', target: 'x/y' } })
+    const t = terminal({ 'x/z': 'z\n', 'x/y/f': 'y\n', l: { type: 'symlink', target: 'x/y' } })
     // `l/../z` is `z` where no link is expanded, and `z` is what has to be
     // there; the walk `-e` makes without `-s` asks about `x/z` instead.
     check(t, 'realpath -s l/../z', '/z\n')
@@ -811,7 +847,7 @@ describe('what a link cannot change', () => {
   })
 
   it('stat measures the link a redirect points through, and refuses only what -L would measure', () => {
-    const sources = { file: 'content\n', link: { type: 'link', target: '/tmp/out' } }
+    const sources = { file: 'content\n', link: { type: 'symlink', target: '/tmp/out' } }
     const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     // The size is the link's own — the path it holds — so the file the output
     // is going to is nothing this measured, and GNU answers it too.
@@ -821,7 +857,7 @@ describe('what a link cannot change', () => {
   })
 
   it('realpath keeps a path it cannot resolve where -m asked for one that need not be there', async () => {
-    const t = terminal({ self: { type: 'link', target: 'self' }, 'a.txt': 'x\n' })
+    const t = terminal({ self: { type: 'symlink', target: 'self' }, 'a.txt': 'x\n' })
     await check(t, 'realpath self', '', { stderr: 'realpath: self: Too many levels of symbolic links\n', exitCode: 1 })
     await check(t, 'realpath -m self/deeper', '/self/deeper\n')
     await check(t, 'realpath -m a.txt/under', '/a.txt/under\n')

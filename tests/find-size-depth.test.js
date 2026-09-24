@@ -17,8 +17,8 @@ const TREE = {
   'over.txt': 'x'.repeat(513),
   'kilo.txt': 'x'.repeat(1024),
   'dir/sub/d.txt': 'deep\n',
-  link: { type: 'link', target: 'one.txt' },
-  away: { type: 'link', target: 'dir/sub' },
+  link: { type: 'symlink', target: 'one.txt' },
+  away: { type: 'symlink', target: 'dir/sub' },
 }
 const out = async (command) => (await createTerminal(TREE).run(command)).stdout
 const fails = async (command, stderr) => {

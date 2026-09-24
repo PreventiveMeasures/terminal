@@ -5,7 +5,7 @@ import { createTerminal } from '@preventive/terminal'
 // Independently expressed cases from GNU Bash5.2.37 parse.y cond_term,
 // execute_cmd.c execute_cond_node and test.c arithcomp. The upstream cond.tests
 // fixture also covers predicate ambiguity, quoting, and arithmetic precedence.
-const terminal = () => createTerminal({ data: 'input\n', dir: { file: '' } })
+const terminal = () => createTerminal({ data: 'input\n', 'dir/file': '' })
 const expected = (exitCode = 0, stdout = '', stderr = '', notes = []) => ({ stdout, stderr, exitCode, cwd: '/', notes, unsupported: [] })
 
 describe('conditional quoting survives continuations and concatenated words', () => {

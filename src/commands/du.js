@@ -56,7 +56,6 @@ function measure(path, name, state) {
       continue
     }
     const isDir = ctx.fs.isDir(item.path)
-    if (isDir && ctx.fs.isFile(item.path)) throw new UnsupportedError('feature', 'ambiguous file type', `path is both a file and a directory: ${item.name}`)
     // A walk measures the links it finds, which is what du does without `-L`.
     // What `-L` would measure instead — the tree each one leads to, and the
     // cycle a link above itself makes of that walk — is not modelled.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { createFs } from '../src/fs.js'
+import { createFs } from '../src/filesystem.js'
 import { encodeUtf8 } from '../src/util.js'
 import { toBase64 } from '@exodus/bytes/base64.js'
 
@@ -30,7 +30,7 @@ const SOURCES = {
 const TREE = {
   'img.png': PNG,
   'text.txt': 'text here\n',
-  'link.png': { type: 'link', target: 'img.png' },
+  'link.png': { type: 'symlink', target: 'img.png' },
   'dir/inner.png': Uint8Array.of(0, 1, 2),
   empty: new Uint8Array(),
 }
@@ -80,10 +80,12 @@ describe('a source entry can be the bytes of a file', () => {
     assert.equal(fs.isFile('/repo/a/img.png'), true)
     assert.equal(fs.fileSize('/repo/a/img.png'), PNG.length)
     assert.deepEqual(fs.readBytes('/repo/a/img.png'), PNG)
+    // Every file is bytes, a file declared as text holding what its text
+    // encodes to, and a reader that works in bytes gets them without going
+    // through text at all.
     assert.equal(fs.isBytes('/repo/a/img.png'), true)
-    assert.equal(fs.isBytes('/repo/a/text.txt'), false)
-    // Bytes the sources declare are the file's own, and a reader that works
-    // in them gets them without going through text at all.
+    assert.equal(fs.isBytes('/repo/a/text.txt'), true)
+    assert.equal(fs.isBytes('/repo/a'), false)
     assert.deepEqual(fs.readBytes('/repo/a/text.txt'), Uint8Array.of(0x78, 0x0a))
   })
 
@@ -153,7 +155,7 @@ describe('a source entry can be the bytes of a file spelt in base64', () => {
     assert.equal(createFs({ b: encoded(PNG) }).sameFileContents('/b', '/b'), true)
   })
 
-  it('is sized by its spelling, padded or not, before it is ever decoded', () => {
+  it('is the bytes its spelling decodes to, padded or not', () => {
     const fs = createFs({ one: { format: 'base64', data: 'AQ==' }, bare: { format: 'base64', data: 'AQI' }, three: { format: 'base64', data: 'AQID' }, none: { format: 'base64', data: '' } })
     assert.deepEqual(['/one', '/bare', '/three', '/none'].map((p) => fs.fileSize(p)), [1, 2, 3, 0])
     assert.deepEqual(['/one', '/none'].map((p) => fs.isEmptyFile(p)), [false, true])
@@ -163,43 +165,24 @@ describe('a source entry can be the bytes of a file spelt in base64', () => {
   })
 
   it('takes a Map of sources, and reads through a link', async () => {
-    const t = createTerminal(new Map([['img.png', encoded(PNG)], ['link.png', { type: 'link', target: 'img.png' }]]), { mount: '/repo' })
+    const t = createTerminal(new Map([['img.png', encoded(PNG)], ['link.png', { type: 'symlink', target: 'img.png' }]]), { mount: '/repo' })
     await check(t, 'wc -c link.png; base64 link.png', '19 link.png\niVBORw0KGgoAAAANSUhEUv/+Cg==\n')
   })
 
-  it('reports a spelling that does not decode to the first reader, not when the terminal is made', async () => {
-    // Checking a spelling costs more than decoding it, so nothing is checked
-    // until a reader needs the bytes; what needs none — the listing, the size
-    // from the spelling's length — is answered as ever, and a reader is told
-    // which file it is, on stderr and on the feed, as for a binary file.
+  it('refuses a spelling that does not decode when the terminal is made', () => {
+    // The bytes are decoded as the tree is built, so a spelling that does
+    // not decode is refused there, with every other declaration that cannot
+    // be what it says, rather than left for the first reader to meet.
     for (const data of ['AQ ID', 'AQID\n', 'AQ=D', 'AR==', 'AQI=x', '!!!!', 'AQID====', 'A']) {
-      const t = terminal({ f: { format: 'base64', data }, 'ok.txt': 'fine\n' }, { writable: '/tmp/' })
-      await check(t, 'ls; cat ok.txt', 'f\nok.txt\nfine\n')
-      const message = '"/repo/f" declares base64 that does not decode, so its bytes cannot be read'
-      await gap(t, 'cat f', 'base64 source', `cat: ${message}\n`)
-      for (const command of ['base64 f', 'wc -c f', 'cp f /tmp/copy', 'diff f ok.txt', 'grep -c x f']) {
-        const result = await t.run(command)
-        assert.deepEqual(result.unsupported.map((u) => u.detail), ['base64 source'], `${command} for ${JSON.stringify(data)}`)
-        assert.match(result.stderr, /declares base64 that does not decode/u, command)
-        assert.notEqual(result.exitCode, 0, command)
-      }
-      await check(t, 'ls /tmp')
+      assert.throws(() => terminal({ f: { format: 'base64', data } }), /source "f" declares base64 that does not decode/u, JSON.stringify(data))
     }
     assert.throws(() => terminal({ f: { format: 'hex', data: '01' } }), /source "f" declares format "hex"; the only format is \{ format: 'base64', data \}/u)
-    // A comparison never throws: where a hint weighs two paths a missing name
-    // could have meant, a spelling that does not decode is a file no other is
-    // the same as, and the command's own error is the one reported.
-    const weighed = { file: { format: 'base64', data: '!!!!' }, 'home/file': 'x\n', 'sub/keep': '' }
-    const note = 'cat: relative path "file" was not found from cwd "/repo/sub". Both of "/repo/file" and "/repo/home/file" exist, and they differ in contents.'
-    for (const writable of [undefined, '/tmp/']) {
-      const t = createTerminal(weighed, { mount: '/repo', home: '/repo/home', cwd: '/repo/sub', writable })
-      await check(t, 'cat file', '', { stderr: 'cat: file: No such file or directory\n', exitCode: 1, cwd: '/repo/sub', notes: [note] })
-    }
-    // `data` alone is a declaration with its format left off, not a value to
-    // pass over: the file would otherwise simply not be there.
-    assert.throws(() => terminal({ f: { data: 'AQ==' } }), /source "f" declares format null; the only format is \{ format: 'base64', data \}/u)
+    // `data` alone is a declaration with its type or its format left off,
+    // not a value to pass over: the file would otherwise simply not be there.
+    assert.throws(() => terminal({ f: { data: 'AQ==' } }), /source "f" declares no type/u)
     assert.throws(() => terminal({ f: { format: 'base64', data: PNG } }), /source "f" must declare its base64 as a string in `data`/u)
     assert.throws(() => terminal({ f: { format: 'base64' } }), /source "f" must declare its base64 as a string in `data`/u)
+    assert.throws(() => terminal({ f: { format: 'base64', data: 'AQ==', type: 'file' } }), /source "f" declares `type`, which base64 contents do not have/u)
   })
 })
 
@@ -381,7 +364,7 @@ describe('what a file of bytes cannot be read as', () => {
       show: (io) => io.fs.readFile(io.args[0]),
     }
     const t = terminal(SOURCES, { commands })
-    await check(t, 'probe img.png text.txt missing', 'img.png true 19\ntext.txt false 20\nmissing false undefined\n')
+    await check(t, 'probe img.png text.txt missing', 'img.png true 19\ntext.txt true 20\nmissing false undefined\n')
     await gap(t, 'show img.png', 'binary file', `show: ${unreadable('img.png')}`)
     // The bytes are the handler's own copy: this view is read-only, so what
     // it does with them cannot reach the tree behind it.

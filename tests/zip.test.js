@@ -75,7 +75,7 @@ const SOURCES = {
   'pkg/src/lib/util.js': 'export const twice = (n) => n * 2\n',
   'pkg/src/lib/numbers.txt': NUMBERS,
   'pkg/bin/run.sh': '#!/bin/sh\necho run\n',
-  'pkg/link': { type: 'link', target: 'README.md' },
+  'pkg/link': { type: 'symlink', target: 'README.md' },
 }
 
 // A listing prints a time, which is local time unless TZ says UTC.

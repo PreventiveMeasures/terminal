@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { createFs } from '../src/fs.js'
+import { createFs } from '../src/filesystem.js'
 import { writableFs } from '../src/writable.js'
 import { stat } from '../src/commands/stat.js'
 
@@ -133,10 +133,6 @@ describe('stat reports unavailable metadata and unsupported syntax', () => {
     assert.equal(actual.stdout, 'xyz')
     assert.equal(actual.unsupported[0].detail, 'standard input metadata')
   })
-  it('diagnoses ambiguous source paths', async () => {
-    const actual = await createTerminal({ a: 'x', 'a/b': 'y' }).run('stat -c%F a')
-    assert.equal(actual.unsupported[0].detail, 'ambiguous file type')
-  })
 })
 
 describe('stat errors, mounts, and writable metadata', () => {
@@ -182,12 +178,6 @@ describe('stat errors, mounts, and writable metadata', () => {
     assert.throws(() => fs.readFile('/tmp/file'), /spell no text/u)
     const ctx = { fs, cwd: '/', vars: new Map(), notes: new Set(), outputFds: {}, unsupported: { add() {} } }
     assert.equal(stat('', ['-c', '%s %F', '/tmp/file'], ctx).stdout, '2 regular file\n')
-  })
-  it('diagnoses unpaired source surrogates instead of measuring replacement bytes', async () => {
-    const actual = await createTerminal({ file: '\uD800' }).run('stat -c%s file')
-    assert.equal(actual.exitCode, 1)
-    assert.equal(actual.stdout, '')
-    assert.equal(actual.unsupported.length, 1)
   })
   it('diagnoses buffered output that shares a measured file', async () => {
     const terminal = createTerminal({}, { mount: '/src', writable: '/tmp/' })
