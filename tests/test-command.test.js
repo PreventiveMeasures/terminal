@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
-const FILES = { 'a.txt': 'hello\n', empty: '', 'src/main.js': '', 'src/name with spaces.js': '', 'src/[x].js': '', link: { type: 'link', target: 'a.txt' }, dead: { type: 'link', target: 'gone' } }
+const FILES = { 'a.txt': 'hello\n', empty: '', 'src/main.js': '', 'src/name with spaces.js': '', 'src/[x].js': '', link: { type: 'symlink', target: 'a.txt' }, dead: { type: 'symlink', target: 'gone' } }
 const run = (command) => createTerminal(FILES).run(command)
 
 async function check(command, code) {

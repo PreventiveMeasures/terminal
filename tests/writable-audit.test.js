@@ -5,7 +5,7 @@ import { createTerminal } from '@preventive/terminal'
 const INPUT = 'x\nx\ny\n'
 const options = { mount: '/repo', writable: '/tmp/' }
 async function terminal() {
-  const t = createTerminal({ input: INPUT, bad: '\uD800', replacement: '\uFFFD' }, options)
+  const t = createTerminal({ input: INPUT, replacement: '\uFFFD' }, options)
   assert.equal((await t.run('cat /repo/input >/tmp/file')).exitCode, 0)
   return t
 }
@@ -94,7 +94,7 @@ describe('byte-backed writes reject unrepresentable text and preserve surroundin
   for (const redirect of ['>/tmp/file', '>>/tmp/file']) {
     it(redirect, async () => {
       const t = await terminal()
-      const result = await t.run(`echo before; cat /repo/bad 2>/dev/null ${redirect}; echo after`)
+      const result = await t.run(`echo before; echo -n '\uD800' 2>/dev/null ${redirect}; echo after`)
       assert.equal(result.stdout, 'before\nafter\n')
       assert.equal(result.stderr, '')
       assert.equal(result.exitCode, 0)

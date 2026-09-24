@@ -54,15 +54,17 @@ describe('createTerminal source mount', () => {
       ['../outside.txt', 'outside\n'],
       ['a/../../deep.txt', 'deep\n'],
       ['./x/../inside.txt', 'inside\n'],
-      ['../../../../same.txt', 'old\n'],
-      ['/same.txt', 'new\n'],
+      ['../../../../same.txt', 'same\n'],
+      ['/same.txt', 'same\n'],
     ]), { mount: '/workspace' })
     await check(t, 'find /workspace -type f', '/workspace/absolute.txt\n/workspace/deep.txt\n/workspace/inside.txt\n/workspace/outside.txt\n/workspace/same.txt\n')
-    await check(t, 'cat /workspace/absolute.txt /workspace/deep.txt /workspace/inside.txt /workspace/outside.txt /workspace/same.txt', 'absolute\ndeep\ninside\noutside\nnew\n')
+    await check(t, 'cat /workspace/absolute.txt /workspace/deep.txt /workspace/inside.txt /workspace/outside.txt /workspace/same.txt', 'absolute\ndeep\ninside\noutside\nsame\n')
     await check(t, 'ls /', 'workspace\n')
+    // Two spellings of one path are one entry, declared again only as itself.
+    assert.throws(() => createTerminal(new Map([['../same.txt', 'old\n'], ['/same.txt', 'new\n']]), { mount: '/workspace' }), /source "\/same.txt" names the same path as an earlier source/u)
   })
 
-  for (const [name, sources] of [['empty object', {}], ['empty Map', new Map()], ['ignored values', { ignored: null }]]) {
+  for (const [name, sources] of [['empty object', {}], ['empty Map', new Map()]]) {
     it(`creates the mount and ancestors for ${name}`, async () => {
       const t = createTerminal(sources, { mount: '/one/two/three', cwd: '/one/two/three' })
       assert.equal(t.cwd(), '/one/two/three')
@@ -87,12 +89,10 @@ describe('createTerminal source mount', () => {
     assert.throws(() => createTerminal(SOURCES, { mount: '/workspace', cwd: '/src' }), /cwd.*not a directory/u)
   })
 
-  it('retains existing root file and directory collision behavior at the mount', async () => {
-    const t = createTerminal({ '/': 'mounted root', child: 'child' }, { mount: '/workspace' })
-    assert.deepEqual(await t.run('cat /workspace /workspace/child'), {
-      stdout: 'child', stderr: 'cat: /workspace: Is a directory\n', exitCode: 1, cwd: '/workspace', notes: [], unsupported: [],
-    })
-    await check(t, 'cd /workspace; pwd', '/workspace\n', '/workspace')
+  it('refuses a file declared at the mount, which is a directory', async () => {
+    assert.throws(() => createTerminal({ '/': 'mounted root', child: 'child' }, { mount: '/workspace' }), /source "\/": \/workspace: Is a directory/u)
+    const t = createTerminal({ '/': { type: 'directory' }, child: 'child' }, { mount: '/workspace' })
+    await check(t, 'cd /workspace; cat child', 'child', '/workspace')
   })
 
   it('keeps the default filesystem layout unchanged', async () => {

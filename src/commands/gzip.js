@@ -221,13 +221,9 @@ function decompressFile(name, path, opts, state) {
   // GNU names what it will write before it reads a byte, and a name it
   // cannot take a suffix off is one it leaves alone.
   if (!opts.stdout && suffixOf(name) === undefined) return fail(state, `${name}: unknown suffix -- ignored`, 2)
-  // Only a file held as bytes can be a member: no text spells one, since the
-  // second byte of the header begins no character. Asking costs nothing,
-  // where reading a file to look at its first two bytes would — but a text
-  // may still open another format, and with -f to stdout is handed on.
-  const bytes = ctx.fs.isBytes?.(path) === true || opts.force && opts.stdout ? readBytesOf(ctx.fs, path) : undefined
-  if (bytes === undefined && foreign(encodeUtf8(ctx.fs.readFile(path).slice(0, 4)), true)) return refuseForeign(name, state)
-  return decompress(name, bytes, opts, state, path)
+  // A file is bytes, which say what it is: a member, another format, or
+  // neither, which with -f to stdout is handed on.
+  return decompress(name, readBytesOf(ctx.fs, path), opts, state, path)
 }
 
 async function decompress(name, bytes, opts, state, path = null) {

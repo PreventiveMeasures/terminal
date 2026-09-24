@@ -148,9 +148,9 @@ function truncationNote(cmd, content, body, unit, input) {
 function wc(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c', 'm'] })
   const which = pickWcFlags(flags)
-  // Counted in what each file is: the text of one held as text, and the bytes
-  // of one held as bytes, which this terminal may not be able to spell — and
-  // need not spell to be counted.
+  // Counted in what each input is: the text a pipe carried, and the bytes of
+  // a file, which this terminal may not be able to spell — and need not spell
+  // to be counted.
   const r = readInputs('wc', positional, stdin, ctx, { read: 'as-held' })
   const needsWidth = positional.length > 1 || Object.values(which).filter(Boolean).length > 1
   // GNU aligns multi-column or multi-operand output using file sizes,
@@ -187,10 +187,10 @@ function pickWcFlags(flags) {
   return { l: flags.has('l'), w: flags.has('w'), m: flags.has('m'), c: flags.has('c') }
 }
 
-// `input` is the file as it is held: the text of one declared as text, or the
-// bytes of one declared as bytes. Lines and words are counted in either, so a
-// file this terminal cannot spell as text is counted like any other, and text
-// is never encoded to be counted. Bytes are the size, which text has to be
+// `input` is the input as it is held: the text a pipe carried, or the bytes of
+// a file. Lines and words are counted in either, so a file this terminal
+// cannot spell as text is counted like any other, and text is never encoded
+// to be counted. Bytes are the size, which text has to be
 // encoded to know; characters are the spelling itself, which bytes that spell
 // no text do not have — the C locale counts them as the bytes they are, and a
 // UTF-8 one says so rather than counting a guess.

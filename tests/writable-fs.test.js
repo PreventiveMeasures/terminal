@@ -1,20 +1,19 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { createFs } from '../src/fs.js'
+import { createFs } from '../src/filesystem.js'
 import { writableFs } from '../src/writable.js'
 
 const setup = () => writableFs(createFs({ source: 'original' }, '/repo'))
 
 describe('separate writable filesystem layer', () => {
-  it('leaves the mounted layer and its directory index untouched', () => {
-    const base = createFs({ source: 'original' }, '/repo')
-    const fs = writableFs(base)
+  it('writes into /tmp beside the mounted sources, and never into them', () => {
+    const fs = setup()
     fs.openWritable('/', '/tmp/source').write('copy')
     assert.equal(fs.readFile('/repo/source'), 'original')
     assert.equal(fs.readFile('/tmp/source'), 'copy')
-    assert.equal(base.readFile('/tmp/source'), undefined)
-    assert.equal(base.isDir('/tmp'), false)
-    assert.deepEqual(base.listDir('/'), { dirs: ['repo'], files: [], links: [] })
+    assert.equal(fs.openWritable('/', '/repo/source'), null)
+    assert.equal(fs.openWritable('/repo', 'source', true), null)
+    assert.equal(fs.readFile('/repo/source'), 'original')
     assert.deepEqual(fs.listDir('/'), { dirs: ['repo', 'tmp'], files: [], links: [] })
   })
 

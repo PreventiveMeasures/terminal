@@ -505,7 +505,7 @@ const TREE = {
   'src/a.txt': 'hello\n',
   'src/sub/b.txt': 'b\n',
   'src/big.txt': Array.from({ length: 2000 }, (_, i) => `${i + 1}\n`).join(''),
-  'src/link': { type: 'link', target: 'a.txt' },
+  'src/link': { type: 'symlink', target: 'a.txt' },
 }
 async function stopped(fn) {
   mock.timers.enable({ apis: ['Date'], now: MADE })
