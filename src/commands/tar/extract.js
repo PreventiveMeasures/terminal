@@ -38,7 +38,7 @@ export function extractEntry(entry, name, path, state, keepOld, made = () => {})
   const { ctx } = state
   const named = quoteColon(name, ctx)
   if (!WRITTEN.has(entry.type)) {
-    const what = entry.type === 'link' ? 'hard links' : 'special files'
+    const what = entry.type === 'hardlink' ? 'hard links' : 'special files'
     return state.refuse('feature', entry.type, `${named}: extracting ${what} is not supported`)
   }
   const verb = entry.type === 'directory' ? 'mkdir' : 'open'

@@ -36,7 +36,7 @@ export function quoteEscape(text, ctx) {
 
 const TYPES = {
   __proto__: null,
-  file: '-', 'contiguous-file': 'C', directory: 'd', symlink: 'l', link: 'h',
+  file: '-', 'contiguous-file': 'C', directory: 'd', symlink: 'l', hardlink: 'h',
   fifo: 'p', 'character-device': 'c', 'block-device': 'b',
 }
 
@@ -82,7 +82,7 @@ export function longLines(ctx, { numericOwner = false, utc = false } = {}) {
 
 function linkSuffix(entry, ctx) {
   if (entry.type === 'symlink') return ` -> ${quoteEscape(entry.linkname, ctx)}`
-  if (entry.type === 'link') return ` link to ${quoteEscape(entry.linkname, ctx)}`
+  if (entry.type === 'hardlink') return ` link to ${quoteEscape(entry.linkname, ctx)}`
   return ''
 }
 

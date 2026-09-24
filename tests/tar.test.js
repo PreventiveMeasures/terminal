@@ -492,7 +492,7 @@ describe('tar extracts into the writable overlay', () => {
     // Outside /tmp is the read-only filesystem every other write meets.
     await gap(t, 'tar -xf pkg.tar', 'read-only target', 'tar: pkg: Cannot mkdir: Read-only file system\n')
     // The overlay holds no hard links and no devices.
-    await gap(t, 'tar -xf sp.tar -C /tmp sp/hard', 'link', 'tar: sp/hard: extracting hard links is not supported\n')
+    await gap(t, 'tar -xf sp.tar -C /tmp sp/hard', 'hardlink', 'tar: sp/hard: extracting hard links is not supported\n')
     await gap(t, 'tar -xf sp.tar -C /tmp sp/fifo', 'fifo', 'tar: sp/fifo: extracting special files is not supported\n')
   })
 })
