@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { createFs } from '../src/fs.js'
+import { createFs } from '../src/filesystem.js'
 import { find } from '../src/commands/find.js'
 import { tree } from '../src/commands/tree.js'
 

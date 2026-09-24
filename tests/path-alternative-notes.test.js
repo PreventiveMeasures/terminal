@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { createFs } from '../src/fs.js'
+import { createFs } from '../src/filesystem.js'
 import { writableFs } from '../src/writable.js'
 import { missingPathNote } from '../src/notes.js'
 
@@ -69,7 +69,7 @@ describe('missing-path notes describe alternative file kinds and contents', () =
     assert.deepEqual((await terminal.run('cat file')).notes, ['cat: relative path "file" was not found from cwd "/sub". A file exists at "/file".'])
   })
 
-  for (const [root, mounted, differ] of [['same', 'same', false], ['first', 'other', true], ['\uD800', '\uD800', false]]) {
+  for (const [root, mounted, differ] of [['same', 'same', false], ['first', 'other', true], [Uint8Array.of(0xff), Uint8Array.of(0xff), false]]) {
     it('compares two mounted source files without an overlay', async () => {
       const terminal = createTerminal({ file: root, 'repo/file': mounted, 'sub/keep': '' }, { mount: '/repo', cwd: '/repo/sub' })
       const result = await terminal.run('cat repo/file')
@@ -99,7 +99,7 @@ describe('alternative comparisons are observational', () => {
     const notes = new Set()
     assert.doesNotThrow(() => missingPathNote({ fs, notes, mount: '/repo', cwd: '/repo/sub' }, 'cat', 'tmp/file', 'No such file or directory'))
     assert.deepEqual([...notes], [prefix + both + ', and they differ in contents.'])
-    assert.deepEqual(fs.fileIdentity('/tmp/file').bytes, Uint8Array.of(255))
+    assert.deepEqual(fs.readBytes('/tmp/file'), Uint8Array.of(255))
   })
 
   it('compares only the live bytes of an overlay file', () => {
@@ -107,7 +107,7 @@ describe('alternative comparisons are observational', () => {
     const handle = fs.openWritable('/', '/tmp/file')
     handle.write('sam')
     handle.write('e')
-    assert.ok(handle.identity.bytes.byteLength < handle.identity.bytes.buffer.byteLength)
+    assert.ok(fs.readBytes('/tmp/file').byteLength < fs.readBytes('/tmp/file').buffer.byteLength)
     const notes = new Set()
     missingPathNote({ fs, notes, mount: '/repo', cwd: '/repo/sub' }, 'cat', 'tmp/file', 'No such file or directory')
     assert.deepEqual([...notes], [prefix + both + '.'])
@@ -122,8 +122,8 @@ describe('alternative comparisons are observational', () => {
     assert.deepEqual([...notes], [prefix + both + '.'])
   })
 
-  it('does not confuse an ill-formed source string with replacement-character bytes', () => {
-    const fs = writableFs(createFs({ 'tmp/file': '\uD800', 'sub/keep': '' }, '/repo'))
+  it('does not confuse bytes that spell no text with replacement-character bytes', () => {
+    const fs = writableFs(createFs({ 'tmp/file': Uint8Array.of(0xff), 'sub/keep': '' }, '/repo'))
     fs.openWritable('/', '/tmp/file').write('\uFFFD')
     const notes = new Set()
     assert.doesNotThrow(() => missingPathNote({ fs, notes, mount: '/repo', cwd: '/repo/sub' }, 'cat', 'tmp/file', 'No such file or directory'))

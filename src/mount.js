@@ -1,4 +1,5 @@
-import { createFs, resolve } from './fs.js'
+import { createFs } from './filesystem.js'
+import { resolve } from './fs.js'
 import { localeOption } from './locale.js'
 import { writableFs } from './writable.js'
 

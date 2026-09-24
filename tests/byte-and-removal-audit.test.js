@@ -17,12 +17,14 @@ const writable = (files = {}) => createTerminal(files, { mount: '/src/', writabl
 describe('base64 Unicode cannot silently change input bytes', () => {
   for (const text of ['\uD800', '\uDC00', 'before\uD800after', '😃\uDC00', '\uD800😃', '\uDC00\uD800']) {
     it(`rejects unpaired surrogates: ${JSON.stringify(text)}`, async () => {
-      const t = createTerminal({ input: text })
-      const failure = await t.run('base64 input')
+      // No file holds such text, which has no bytes; the command line can.
+      assert.throws(() => createTerminal({ input: text }), /lone surrogate/u)
+      const t = createTerminal({})
+      const failure = await t.run(`echo -n ${quote(text)} | base64`)
       assert.equal(failure.stdout, '')
       assert.equal(failure.exitCode, 1)
       assert.deepEqual(failure.unsupported.map(({ detail }) => detail), ['unpaired surrogate'])
-      assert.deepEqual(await t.run('cat input | base64 2>/dev/null | cat'), result('', 0, '', failure.unsupported))
+      assert.deepEqual(await t.run(`echo -n ${quote(text)} | base64 2>/dev/null | cat`), result('', 0, '', failure.unsupported))
     })
   }
   it('distinguishes an actual replacement character from an invalid surrogate', async () => {

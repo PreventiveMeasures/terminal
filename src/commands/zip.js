@@ -172,7 +172,6 @@ function addPath(path, name, full, walk) {
   const { fs } = ctx
   const link = opts.symlinks && fs.isLink?.(path) === true
   const dir = !link && fs.isDir(path)
-  if (dir && fs.isFile(path)) return fail(walk, 'ambiguous file type', `${name}: a path that is both a file and a directory cannot be zipped`)
   if (name !== '' && name.split('/').some((part) => part === '.' || part === '..' || part === '')) {
     return fail(walk, 'dot-segment names', `${name}: names with \`.', \`..' or empty segments are not supported`)
   }

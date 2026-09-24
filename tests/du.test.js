@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { createFs } from '../src/fs.js'
+import { createFs } from '../src/filesystem.js'
 import { writableFs } from '../src/writable.js'
 import { du } from '../src/commands/du.js'
 import { duSize } from '../src/commands/du-options.js'
@@ -152,7 +152,7 @@ describe('du allocated sizes follow the ext4 model', () => {
   })
 
   it('gives a link no block while its target fits the inode', async () => {
-    const t = createTerminal({ ...sources, near: { type: 'link', target: 'a' }, far: { type: 'link', target: 'x'.repeat(60) } })
+    const t = createTerminal({ ...sources, near: { type: 'symlink', target: 'a' }, far: { type: 'symlink', target: 'x'.repeat(60) } })
     assert.deepEqual(await t.run('du near far'), result('0\tnear\n4\tfar\n'))
     assert.deepEqual(await t.run('du -b near far'), result('1\tnear\n60\tfar\n'))
     assert.deepEqual(await t.run('du -s .'), result('36\t.\n'))
@@ -200,16 +200,6 @@ describe('du reports failures without inventing metadata', () => {
     assert.deepEqual(await run('du -bsd0 a'), result('3\ta\n', 0, 'du: warning: summarizing is the same as using --max-depth=0\n'))
   })
   it('accepts a signed zero depth', async () => assert.deepEqual(await run('du -b -d-0 dir'), result('12\tdir\n')))
-  it('diagnoses unpaired source surrogates instead of measuring replacement bytes', async () => {
-    const actual = await createTerminal({ file: '\uD800' }).run('du -b file')
-    assert.equal(actual.exitCode, 1)
-    assert.equal(actual.stdout, '')
-    assert.equal(actual.unsupported.length, 1)
-  })
-  it('diagnoses colliding file/directory source keys', async () => {
-    const actual = await createTerminal({ a: 'x', 'a/b': 'y' }).run('du -b a')
-    assert.equal(actual.unsupported[0].detail, 'ambiguous file type')
-  })
   it('measures invalid UTF-8 overlay bytes without decoding them', () => {
     const fs = writableFs(createFs({}, '/src'))
     const first = fs.openWritable('/', '/tmp/file'), second = fs.openWritable('/', '/tmp/file')

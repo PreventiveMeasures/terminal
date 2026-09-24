@@ -71,13 +71,14 @@ export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null) 
 //
 // `read` says what an operand is read as, for the commands that do not work in
 // text alone. `bytes` and `loose-bytes` hand back the bytes themselves — the
-// first as the file exactly has them, the second as a command only measuring
-// or slicing them reads a text file holding a lone surrogate — and the entry
-// then carries `bytes` and no `content`, so a command wanting text cannot
-// quietly read an empty string. `as-held` hands back the file as it is held —
-// `content` for one held as text, `bytes` for one held as bytes — and
-// `maybe-text` adds the text those bytes spell where they spell one, for the
-// command that has something to say about a file whose bytes spell none.
+// first as the input exactly has them, the second as a command only measuring
+// or slicing them reads text holding a lone surrogate, which a pipe can carry
+// and a file cannot — and the entry then carries `bytes` and no `content`, so
+// a command wanting text cannot quietly read an empty string. `as-held` hands
+// back the input as it is held — `content` for text a pipe carried, `bytes`
+// for a file, every one of which is bytes — and `maybe-text` adds the text
+// those bytes spell where they spell one, for the command that has something
+// to say about a file whose bytes spell none.
 // Nothing is converted either way, so a command that can work in either pays
 // for neither.
 export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
@@ -92,7 +93,7 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   const asRead = (text) => bytes ? (read === 'loose-bytes' ? encodeUtf8Loose(text) : encodeUtf8(text)) : text
   const ofFile = (entry, path) => {
     if (bytes) { entry.bytes = readBytesOf(ctx.fs, path, read === 'loose-bytes'); return }
-    // A file held as bytes carries them, and a file held as text its text.
+    // A file carries its bytes, and one a filesystem holds as text its text.
     // Whether those bytes also spell text is a question `maybe-text` asks and
     // `as-held` leaves alone: a command counting or encoding them has no use
     // for the answer, and reading it out of a large file is not free.
@@ -163,8 +164,7 @@ export function readBytesOf(fs, path, loose = false) {
 
 // What a command reads when it answers for a file whose bytes spell no text
 // rather than refusing it: the text where there is one, and the bytes either
-// way. Text a file was declared with is its own, even where it has no
-// encoding at all — a lone surrogate is still the text that file holds.
+// way.
 export function readTextOrBytes(fs, path) {
   if (fs.isBytes?.(path) !== true) return { text: fs.readFile(path), bytes: undefined }
   const bytes = fs.readBytes(path)

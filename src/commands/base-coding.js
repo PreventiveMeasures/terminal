@@ -23,7 +23,7 @@ export function baseCommand(name, { encode, decode }) {
     if (positional.length > 1) return err(`${name}: extra operand: ${positional[1]}`)
     // The file as it is held: this is what bytes look like as text, so a file
     // this terminal cannot spell as text has an encoding all the same, while
-    // one held as text is encoded from the text it is rather than read twice.
+    // text a pipe carried is encoded from the text it is rather than read twice.
     const input = readInputs(name, positional, stdin, ctx, { read: 'as-held' })
     if (input.failed) return err(input.stderr)
     const { content, bytes } = input.inputs[0]

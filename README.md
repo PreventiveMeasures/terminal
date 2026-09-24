@@ -38,6 +38,17 @@ full-line replacements, ready to drop in. Reading a
 line without running it is a separate entry point,
 [`@preventive/terminal/parse.js`](docs/parser.md), which needs no terminal.
 
+A source is a file's text, or its bytes as a `Uint8Array`; an object says what
+else is there — `{ type: 'directory' }`, `{ type: 'symlink', target }`,
+`{ type: 'file', data }`, or `{ format: 'base64', data }` for bytes that arrive
+as text. The tree is an [`@preventive/vfs`](https://www.npmjs.com/package/@preventive/vfs)
+one and takes a map by its rules: a path declared twice is the same entry both
+times, nothing is declared under a file or through a link, and text has a
+UTF-8 encoding, which one holding a lone surrogate has not. A source it cannot
+take — a hard link, a `mode` or an `mtime` it does not keep yet, a value that
+declares nothing — is refused with a `TypeError` when the terminal is made,
+never dropped.
+
 ## Three channels, because a wrong answer is the one failure that matters
 
 - **`stderr`** — what the real tool would have printed in the same situation: a

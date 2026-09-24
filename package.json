@@ -143,6 +143,7 @@
     "src/complete.js",
     "src/compression.js",
     "src/custom.js",
+    "src/filesystem.js",
     "src/fs.js",
     "src/glob.js",
     "src/index.d.ts",
@@ -202,7 +203,8 @@
   "dependencies": {
     "@exodus/bytes": "^1.16.0",
     "@preventive/archive": "^1.0.0-beta.3",
-    "@preventive/diff": "^1.0.0"
+    "@preventive/diff": "^1.0.0",
+    "@preventive/vfs": "1.0.0-beta.1"
   },
   "devDependencies": {
     "oxlint": "^1.63.0"

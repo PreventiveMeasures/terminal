@@ -1,139 +1,119 @@
-import { compareNames, dirname, lookup, sameBytes, textOfFile, walkPath, walkTree, writeTarget } from './fs.js'
-import { decodeUtf8, encodeUtf8, readBytesOf } from './util.js'
+import { VfsError } from '@preventive/vfs'
+import { dirname, lookup, walkPath, writeTarget } from './fs.js'
+import { decodeUtf8, encodeUtf8 } from './util.js'
 
 // The overlay is mounted at /tmp, so what may be written is what falls inside
 // it. Commands ask before acting, where the answer decides more than whether a
 // write would succeed.
 export const inOverlay = (absolute) => absolute === '/tmp' || absolute.startsWith('/tmp/')
 
+const EMPTY = new Uint8Array()
 
-// Only the overlay owns mutable bytes. The mounted source map and its
-// directory index remain separate and are never copied into this map.
+// Writes land in the tree the sources are in, and only under /tmp: every
+// method here answers `false` or `null` for a name outside it, which is the
+// read-only filesystem every other write meets.
 export function writableFs(base) {
-  const files = new Map()
-  // The links `ln -s` made, each the path it holds; the sources own the rest.
-  const links = new Map()
-  // Directories the overlay holds. `/tmp` is there from the start and the rest
-  // are made deliberately, by `cp -r`; a file's parent is always one of them,
-  // since nothing may be written where no directory is.
-  const dirs = new Set(['/tmp'])
-  let observer
-  const root = base.listDir('/')
-  const rootEntries = { dirs: [...root.dirs, 'tmp'].sort(compareNames), files: root.files, links: root.links ?? [] }
-  const listings = overlayListings(dirs, files, links)
-  const reshaped = listings.reshaped
-  // A file put at a name takes the name whole, as a rename over it would:
-  // a link there is gone, not left beside the file.
-  const put = (path, inode) => {
-    if (!path.startsWith('/tmp/')) throw new Error('writable overlay paths must start with /tmp/')
-    if (!files.has(path)) reshaped()
-    links.delete(path)
-    files.set(path, inode)
-  }
+  base.vfs.mkdir('/tmp', { recursive: true })
+  base.writableAt('/tmp')
+  const overlay = overlayOf(base)
+  const observe = (path) => overlay.observer?.read(overlay.identity(path) ?? path)
   const fs = {
-    observeIo: (value) => { observer = value },
-    fileIdentity: (path) => files.get(path),
-    fileSize: (path) => files.get(path)?.bytes.length ?? (links.has(path) ? encodeUtf8(links.get(path)).length : base.fileSize(path)),
-    readIdentity: (inode) => { observer?.read(inode); return decodeUtf8(inode.bytes) },
-    isFile: (path) => files.has(path) || base.isFile(path),
-    isDir: (path) => dirs.has(path) || base.isDir(path),
-    isLink: (path) => links.has(path) || base.isLink?.(path) === true,
-    readLink: (path) => links.get(path) ?? base.readLink?.(path),
-    ...overlayReads(base, files, (identity) => observer?.read(identity)),
-    sameFileContents: (a, b) => sameFileContents(base, files, a, b),
-    listDir: (path) => {
-      if (path === '/') return rootEntries
-      return dirs.has(path) ? listings.of(path) : base.listDir(path)
-    },
-    *walkFiles(path) {
-      for (const entry of walkTree(fs, path)) if (entry.kind === 'file') yield entry.path
-    },
-    openWritable(cwd, path, append = false) {
-      const absolute = writeTarget(fs, cwd, path)
-      if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return null
-      checkTarget(fs, cwd, path)
-      let inode = files.get(absolute)
-      if (!inode) { inode = { bytes: new Uint8Array() }; put(absolute, inode) }
-      else if (!append) { observer?.write(inode); inode.bytes = new Uint8Array() }
-      return writeHandle(absolute, inode, append, () => observer?.write(inode))
-    },
-    makeWritableDir: (cwd, path) => addDirectory(fs, { dirs, files, links, reshaped }, cwd, path),
-    makeWritableLink: (cwd, path, target) => addLink(fs, { links, reshaped }, cwd, path, target),
-    removeWritableDir: (cwd, path) => dropDirectory(fs, { dirs, reshaped }, cwd, path),
-    copyWritable(cwd, source, target) {
-      const absolute = writeTarget(fs, cwd, target)
-      if (!absolute.startsWith('/tmp/')) return false
-      checkTarget(fs, cwd, target)
-      const inode = files.get(source)
-      if (source === absolute || inode && inode === files.get(absolute)) throw new Error('source and destination are the same file')
-      observer?.read(inode ?? source)
-      // A copy carries bytes, which either side may hold without a string
-      // equivalent: the overlay from a write, the sources from a file
-      // declared as bytes. Copy them directly while keeping truncation and
-      // writes observable.
-      const bytes = inode ? inode.bytes : readBytesOf(base, source)
-      fs.openWritable(cwd, target).writeBytes(bytes)
-      return true
-    },
-    replaceWritable: (cwd, path, content, backup) => replaceFile(fs, { files, links, put }, cwd, path, content, backup),
-    removeWritable(cwd, path) {
-      const absolute = writeTarget(fs, cwd, path, false)
-      if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
-      // The name itself is what is unlinked: a link is taken away, not followed.
-      const found = lookup(cwd, path, fs, { follow: false })
-      if (found.error) throw pathError(path, found.error)
-      if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
-      // Open handles retain the unlinked inode until their last writer ends.
-      if (!links.delete(found.path)) files.delete(found.path)
-      reshaped()
-      return true
-    },
+    ...base,
+    observeIo: (value) => { overlay.observer = value },
+    fileIdentity: overlay.identity,
+    readIdentity: (cell) => { overlay.observer?.read(cell); return decodeUtf8(cellBytes(base.vfs, cell)) },
+    readFile: (path) => { observe(path); return base.readFile(path) },
+    readBytes: (path) => { observe(path); return base.readBytes(path) },
+    openWritable: (cwd, path, append = false) => openFile(fs, overlay, cwd, path, append),
+    makeWritableDir: (cwd, path) => addDirectory(fs, overlay, cwd, path),
+    makeWritableLink: (cwd, path, target) => addLink(fs, overlay, cwd, path, target),
+    removeWritableDir: (cwd, path) => dropDirectory(fs, overlay, cwd, path),
+    copyWritable: (cwd, source, target) => copyFile(fs, overlay, cwd, source, target),
+    replaceWritable: (cwd, path, content, backup) => replaceFile(fs, overlay, cwd, path, content, backup),
+    removeWritable: (cwd, path) => removeFile(fs, overlay, cwd, path),
   }
   return fs
 }
 
-// What an overlay file can be read as, taken from the inode where there is
-// one and from the sources where there is not. An overlay file is bytes
-// already — it is written as bytes and read back as the text they spell — so
-// a reader working in bytes is handed them whichever side of the boundary the
-// file is on, and one working in text is told where those bytes spell none.
-function overlayReads(base, files, read) {
+// A descriptor holds a file rather than a name, as the kernel's does, so a
+// file written through one is the file it opened however its name moves or
+// goes. That file is a cell: where its bytes are, `path`, while a name leads
+// to them, and the bytes themselves, `detached`, once none does — an open
+// descriptor keeps an unlinked file until its last writer ends. A cell is
+// also the file's identity, which is what tells a command that its output is
+// one of its inputs. Only a file under /tmp has one: nothing else changes,
+// so its path is identity enough.
+function overlayOf(base) {
+  const { vfs } = base
+  const cells = new Map()
   return {
-    readFile: (path) => {
-      const inode = files.get(path)
-      read(inode ?? path)
-      return inode ? textOfFile(inode.bytes, JSON.stringify(path)) : base.readFile(path)
+    base,
+    vfs,
+    observer: undefined,
+    identity: (path) => {
+      if (!inOverlay(String(path)) || !base.isFile(path)) return
+      const { ino } = vfs.lstat(path)
+      let cell = cells.get(ino)
+      if (cell === undefined) cells.set(ino, cell = { path: vfs.realpath(path), detached: undefined })
+      return cell
     },
-    readBytes: (path, loose = false) => {
-      const inode = files.get(path)
-      read(inode ?? path)
-      return inode ? inode.bytes : readBytesOf(base, path, loose)
+    // A file about to lose its name keeps its bytes in the cell a descriptor
+    // may hold, once `release` says the name has gone.
+    leaving: (path) => {
+      const ino = base.isFile(path) ? vfs.lstat(path).ino : undefined
+      const cell = cells.get(ino)
+      return cell && { cell, ino, bytes: vfs.readFile(path) }
     },
-    // What a comparison and a walk may ask without reading anything: the
-    // bytes a file certainly has, whether it holds nothing at all, and
-    // whether reading it as text may have no answer.
-    exactBytes: (path) => files.get(path)?.bytes ?? base.exactBytes(path),
-    isEmptyFile: (path) => { const inode = files.get(path); return inode ? inode.bytes.length === 0 : base.isEmptyFile(path) },
-    isBytes: (path) => files.has(path) || base.isBytes?.(path) === true,
+    release: (left) => {
+      if (!left) return
+      left.cell.detached = left.bytes
+      cells.delete(left.ino)
+    },
+    // A change to the tree's shape, said as the name that asked for it.
+    change: (path, apply) => {
+      try { return apply() } catch (e) {
+        if (!(e instanceof VfsError)) throw e
+        throw pathError(path, strerror(e.code))
+      } finally { base.reshaped() }
+    },
   }
 }
 
-// `cp -r` is the one thing that makes a directory here, and it makes each one
-// before what goes inside it, so a parent is never missing by the time a child
-// is asked for. `false` says the path is not the overlay's to make, which is
-// the read-only filesystem every other write meets outside /tmp/.
+// What the Vfs says of a code, without the path its messages put in front.
+const strerror = (code) => new VfsError(code, '').message.slice(2)
+
+// The bytes a cell's file holds: the tree's while a name leads to them, and
+// its own once none does.
+const cellBytes = (vfs, cell) => cell.detached ?? vfs.readFile(cell.path)
+
+function openFile(fs, overlay, cwd, path, append) {
+  const absolute = writeTarget(fs, cwd, path)
+  if (!inOverlay(absolute)) return null
+  checkTarget(fs, cwd, path)
+  let cell = overlay.identity(absolute)
+  if (cell === undefined) {
+    overlay.change(path, () => overlay.vfs.writeFile(absolute, EMPTY))
+    cell = overlay.identity(absolute)
+  } else if (!append) {
+    overlay.observer?.write(cell)
+    overlay.vfs.writeFile(absolute, EMPTY)
+  }
+  return writeHandle(overlay.vfs, absolute, cell, append, () => overlay.observer?.write(cell))
+}
+
+// `cp -r` and `mkdir` make a directory here, each before what goes inside it.
+// `false` says the path is not the overlay's to make. `mkdir` never follows a
+// link in the final position: a name already there is `File exists` whatever
+// it leads to, so only the way to it resolves.
 function addDirectory(fs, overlay, cwd, path) {
-  // `mkdir` never follows a link in the final position: a name already there
-  // is `File exists` whatever it leads to, so only the way to it resolves.
   const absolute = writeTarget(fs, cwd, path, false)
-  if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
-  if (overlay.dirs.has(absolute)) return true
+  if (!inOverlay(absolute)) return false
+  if (fs.isDir(absolute)) return true
   checkTarget(fs, cwd, path)
   // checkTarget passes a name already taken by a file or a link, which is not
   // a name a directory can take.
-  if (overlay.files.has(absolute) || overlay.links.has(absolute)) throw new Error(`${path}: File exists`)
-  overlay.dirs.add(absolute)
-  overlay.reshaped()
+  if (fs.isFile(absolute) || fs.isLink(absolute)) throw new Error(`${path}: File exists`)
+  overlay.change(path, () => overlay.vfs.mkdir(absolute))
   return true
 }
 
@@ -143,8 +123,21 @@ function addLink(fs, overlay, cwd, path, target) {
   const absolute = writeTarget(fs, cwd, path, false)
   if (!absolute.startsWith('/tmp/')) return false
   checkNewName(fs, cwd, path)
-  overlay.links.set(absolute, target)
-  overlay.reshaped()
+  overlay.change(path, () => overlay.vfs.symlink(target, absolute))
+  return true
+}
+
+function copyFile(fs, overlay, cwd, source, target) {
+  const absolute = writeTarget(fs, cwd, target)
+  if (!absolute.startsWith('/tmp/')) return false
+  checkTarget(fs, cwd, target)
+  const cell = overlay.identity(source)
+  if (source === absolute || cell !== undefined && cell === overlay.identity(absolute)) throw new Error('source and destination are the same file')
+  overlay.observer?.read(cell ?? source)
+  // A copy carries bytes, which either side may hold without a string
+  // equivalent. Copy them directly while keeping truncation and writes
+  // observable.
+  fs.openWritable(cwd, target).writeBytes(overlay.base.readBytes(source))
   return true
 }
 
@@ -157,19 +150,43 @@ function replaceFile(fs, overlay, cwd, path, content, backupPath) {
   const backup = backupPath === undefined ? null : writeTarget(fs, cwd, backupPath, false)
   if (!absolute.startsWith('/tmp/') || backup !== null && !backup.startsWith('/tmp/')) return false
   checkTarget(fs, cwd, path)
-  const inode = overlay.files.get(absolute)
-  const link = overlay.links.get(absolute)
-  if (!inode && link === undefined) throw pathError(path, 'No such file or directory')
+  if (!fs.isFile(absolute) && !fs.isLink(absolute)) throw pathError(path, 'No such file or directory')
   if (backup !== null) checkTarget(fs, cwd, backupPath)
-  const replacement = { bytes: encodeUtf8(content) }
-  // GNU renames the name aside for the backup and the new file over it, so a
-  // link's backup is the link itself, and the name is a regular file after.
-  if (link === undefined) { if (backup !== null) overlay.put(backup, inode) } else {
-    overlay.links.delete(absolute)
-    if (backup !== null) { overlay.links.set(backup, link); overlay.files.delete(backup) }
-  }
-  // Renaming a replacement keeps already-open descriptors on the old file.
-  overlay.put(absolute, replacement)
+  const bytes = encodeUtf8(content)
+  const { vfs } = overlay
+  overlay.change(path, () => {
+    // GNU renames the name aside for the backup and the new file over it, so
+    // a link's backup is the link itself, and the name is a regular file
+    // after. Renaming a replacement keeps already-open descriptors on the old
+    // file, under whichever name it then has.
+    if (backup !== null && backup !== absolute) {
+      const moved = overlay.leaving(absolute)
+      const replaced = overlay.leaving(backup)
+      vfs.rename(absolute, backup)
+      overlay.release(replaced)
+      if (moved) moved.cell.path = backup
+    } else {
+      const left = overlay.leaving(absolute)
+      vfs.unlink(absolute)
+      overlay.release(left)
+    }
+    vfs.writeFile(absolute, bytes)
+  })
+  return true
+}
+
+function removeFile(fs, overlay, cwd, path) {
+  const absolute = writeTarget(fs, cwd, path, false)
+  if (!inOverlay(absolute)) return false
+  // The name itself is what is unlinked: a link is taken away, not followed.
+  const found = lookup(cwd, path, fs, { follow: false })
+  if (found.error) throw pathError(path, found.error)
+  if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
+  if (!inOverlay(found.path)) return false
+  // Open handles retain the unlinked file until their last writer ends.
+  const left = overlay.leaving(found.path)
+  overlay.change(path, () => overlay.vfs.unlink(found.path))
+  overlay.release(left)
   return true
 }
 
@@ -179,49 +196,15 @@ function replaceFile(fs, overlay, cwd, path, content, backupPath) {
 // the tree below it to remove — which is the busy device Linux reports.
 function dropDirectory(fs, overlay, cwd, path) {
   const absolute = writeTarget(fs, cwd, path, false)
-  if (absolute !== '/tmp' && !absolute.startsWith('/tmp/')) return false
+  if (!inOverlay(absolute)) return false
   const found = lookup(cwd, path, fs)
   if (found.error) throw pathError(path, found.error)
-  if (!overlay.dirs.has(found.path)) throw new Error(`${path}: Not a directory`)
+  if (!inOverlay(found.path) || !fs.isDir(found.path)) throw new Error(`${path}: Not a directory`)
   if (found.path === '/tmp') throw new Error(`${path}: Device or resource busy`)
   const { dirs, files, links } = fs.listDir(found.path)
   if (dirs.length || files.length || links.length) throw new Error(`${path}: Directory not empty`)
-  overlay.dirs.delete(found.path)
-  overlay.reshaped()
+  overlay.change(path, () => overlay.vfs.rmdir(found.path))
   return true
-}
-
-// A directory's listing, built when it is asked for and dropped whole when the
-// overlay changes shape: a scratch tree is cheaper to rebuild than to keep in
-// step entry by entry. Names are sorted as the source tree sorts its own.
-function overlayListings(dirs, files, links) {
-  let cache = new Map()
-  const children = (paths, prefix) => [...paths]
-    .filter((path) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
-    .map((path) => path.slice(prefix.length)).sort(compareNames)
-  return {
-    reshaped: () => { cache = new Map() },
-    of(path) {
-      const cached = cache.get(path)
-      if (cached) return cached
-      const entries = { dirs: children(dirs, path + '/'), files: children(files.keys(), path + '/'), links: children(links.keys(), path + '/') }
-      cache.set(path, entries)
-      return entries
-    },
-  }
-}
-
-// Informational comparisons must not register command input reads or decode
-// overlay bytes: malformed UTF-8 must not turn a missing-path hint into an error.
-function sameFileContents(base, files, a, b) {
-  const first = files.get(a), second = files.get(b)
-  if (!first && !second) return base.sameFileContents(a, b)
-  // A file the sources hold is compared as the bytes it certainly has: those
-  // it was declared with, or what its text encodes to where that text has an
-  // encoding. Neither asks it to be read as text, which a file of bytes is
-  // not and which a hint has no business failing on.
-  const bytes = (path, inode) => inode ? inode.bytes : base.exactBytes(path)
-  return sameBytes(bytes(a, first), bytes(b, second))
 }
 
 // What a name can be written as, asked of the walk rather than of the spelling:
@@ -259,27 +242,26 @@ function pathError(path, fsError) {
   return Object.assign(new Error(`${path}: ${fsError}`), { path, fsError })
 }
 
-function writeHandle(path, inode, append, check) {
+// A descriptor's writes: at its offset, or at the end for one opened to
+// append. A write at the end is an append, which the tree does in amortized
+// linear time, so commands writing one record at a time stay linear; one
+// anywhere else rewrites the file with those bytes in place, since bytes the
+// tree has handed out are never written into. A file past its last name is
+// the cell's to grow the same way.
+function writeHandle(vfs, path, cell, append, check) {
   let offset = 0
   const store = (bytes) => {
-    const current = inode.bytes
+    const current = cellBytes(vfs, cell)
     const start = append ? current.length : offset
-    const length = Math.max(current.length, start + bytes.length)
-    let buffer = current.buffer
-    // Reuse capacity so commands writing one record at a time stay linear.
-    if (buffer.byteLength < length) {
-      buffer = new ArrayBuffer(Math.max(length, buffer.byteLength * 2))
-      new Uint8Array(buffer).set(current)
-    }
-    const next = new Uint8Array(buffer, 0, length)
-    next.set(bytes, start)
-    inode.bytes = next
+    if (cell.detached !== undefined) cell.detached = written(current, start, bytes)
+    else if (start === current.length) vfs.appendFile(cell.path, bytes)
+    else vfs.writeFile(cell.path, written(current, start, bytes))
     offset = start + bytes.length
   }
   return {
     path,
-    identity: inode,
-    get position() { return append ? inode.bytes.length : offset },
+    identity: cell,
+    get position() { return append ? cellBytes(vfs, cell).length : offset },
     write(text) {
       if (text === '') return
       check()
@@ -291,4 +273,16 @@ function writeHandle(path, inode, append, check) {
       store(bytes)
     },
   }
+}
+
+// `bytes` written into `current` at `start`: past its end into room a
+// previous write left, and anywhere else into a copy, so what a reader was
+// handed before is never changed under it. A gap before `start` is zeros.
+function written(current, start, bytes) {
+  const length = Math.max(current.length, start + bytes.length)
+  const room = start === current.length && current.byteOffset + length <= current.buffer.byteLength
+  const next = room ? new Uint8Array(current.buffer, current.byteOffset, length) : new Uint8Array(Math.max(length, current.length * 2)).subarray(0, length)
+  if (!room) next.set(current)
+  next.set(bytes, start)
+  return next
 }

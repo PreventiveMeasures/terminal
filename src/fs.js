@@ -1,10 +1,9 @@
-// Read-only source map with a directory index derived from file paths.
-// All internal lookups use normalized absolute paths.
+// Path resolution over any filesystem shaped like the terminal's own, which
+// filesystem.js builds. All internal lookups use normalized absolute paths.
 
 // The byte codec directly rather than through util.js, which reaches back
 // here for its own lookups.
-import { decodeUtf8Maybe, encodeUtf8, encodeUtf8Loose } from './bytes.js'
-import { fromBase64 } from '@exodus/bytes/base64.js'
+import { decodeUtf8Maybe } from './bytes.js'
 import { UnsupportedError } from './unsupported.js'
 
 export function normalize(path) {
@@ -83,9 +82,7 @@ export function walkPath(cwd, path, fs, { follow = true, lenient = false } = {})
     }
     if (part === '..') { at = dirname(at); continue }
     if (part !== '.') at = joinPath(at, part)
-    // A name that is both a directory and a link stays the directory, as a
-    // name that is both a file and a directory does: the index answers first.
-    if (!isLink(fs, at) || fs.isDir(at) || (rest.length === 0 && !followFinal)) continue
+    if (!isLink(fs, at) || (rest.length === 0 && !followFinal)) continue
     if (budget-- === 0) return { path: at, error: 'Too many levels of symbolic links', rest: [...rest] }
     const target = fs.readLink(at)
     at = target.startsWith('/') ? '/' : dirname(at)
@@ -161,124 +158,6 @@ export function relativeTo(root, abs) {
   return root === '/' ? abs.slice(1) : abs.slice(root.length + 1)
 }
 
-// Ignore non-string contents. Map keys and object keys share normalization;
-// the directory index is built once for repeated listings and traversal.
-export function createFs(sources, mount = '/') {
-  const files = new Map()
-  const links = new Map()
-  for (const [k, v] of sourceEntries(sources)) {
-    const key = String(k)
-    const entry = sourceEntry(v, key)
-    if (entry === null) continue
-    // Normalize inside the source root before mounting; leading / and ..
-    // in a source key cannot place a file outside its mount.
-    if (key.includes('\0')) throw new TypeError('createTerminal: source paths must not contain NUL characters')
-    const path = normalize('/' + key)
-    const at = mount === '/' ? path : path === '/' ? mount : mount + path
-    // One name is one entry: a later declaration replaces an earlier one
-    // whichever of the two each of them was.
-    if (entry.link === undefined) { files.set(at, entry.content); links.delete(at) }
-    else { links.set(at, entry.link); files.delete(at) }
-  }
-  const childMap = new Map([['/', { dirs: [], files: [], links: [] }]])
-  ensureDir(childMap, mount)
-  for (const [list, entries] of [['files', files], ['links', links]]) {
-    for (const f of entries.keys()) {
-      // Keys are already normalized, so split without normalizing again.
-      const split = f.lastIndexOf('/')
-      const parent = f.slice(0, split) || '/'
-      ensureDir(childMap, parent)
-      childMap.get(parent)[list].push(f === '/' ? '/' : f.slice(split + 1))
-    }
-  }
-  for (const entry of childMap.values()) {
-    entry.dirs.sort(compareNames)
-    entry.files.sort(compareNames)
-    entry.links.sort(compareNames)
-  }
-  // A file declared in base64 is decoded the first time its bytes are asked
-  // for, and is those bytes from then on; what can be answered without them
-  // — its size, whether it is empty, whether it is bytes at all — reads the
-  // map as it is. The decoder is strict, and is the one check the spelling
-  // gets: over a hundred mebibytes any check of its own costs more than the
-  // decoding does, so a spelling that does not decode is reported here, to
-  // the reader, as a file of bytes that spell no text is. A comparison asks
-  // for what the file `surely` holds instead, and is answered with nothing
-  // rather than a diagnostic, as it is for text that has no bytes.
-  const held = (p, surely = false) => {
-    const content = files.get(p)
-    if (!(content instanceof Base64Bytes)) return content
-    let bytes
-    try { bytes = content.decode() } catch (e) {
-      if (!(e instanceof SyntaxError)) throw e
-      if (surely) return
-      throw new UnsupportedError('feature', 'base64 source', `${JSON.stringify(p)} declares base64 that does not decode, so its bytes cannot be read`)
-    }
-    files.set(p, bytes)
-    return bytes
-  }
-  const fs = {
-    isFile: (p) => files.has(p),
-    isDir: (p) => childMap.has(p),
-    isLink: (p) => links.has(p),
-    readLink: (p) => links.get(p),
-    // A file declared as bytes is read as the text they spell, which is what
-    // every command here works in; one whose bytes spell none is said to be
-    // what it is, rather than read as something it is not.
-    readFile: (p) => {
-      const content = held(p)
-      return content === undefined || typeof content === 'string' ? content : textOfFile(content, JSON.stringify(p))
-    },
-    // The file as it is stored, for the commands that work in bytes: what a
-    // copy carries, what a dump prints, and what decides that a search has
-    // met something it cannot read. A file declared as text has the bytes its
-    // text encodes to, and a lone surrogate encodes to none: a caller keeping
-    // those bytes is told so, while one only measuring or slicing them reads
-    // the replacement character each stands for, which is the byte count
-    // `wc -c` and `head -c` have always worked in.
-    readBytes: (p, loose = false) => {
-      const content = held(p)
-      if (typeof content !== 'string') return content
-      return loose ? encodeUtf8Loose(content) : encodeUtf8(content)
-    },
-    // A link is as long as the path it holds, which is what the disk stores
-    // of it and what `ls -l`, `du` and `stat` report for one.
-    fileSize: (p) => childMap.has(p) ? undefined
-      : links.has(p) ? encodeUtf8(links.get(p)).length
-        : files.has(p) ? contentSize(files.get(p)) : undefined,
-    sameFileContents: (a, b) => sameContents(held(a, true), held(b, true)),
-    // What a comparison may read of a file without asking it to be text.
-    exactBytes: (p) => exactBytes(held(p, true)),
-    // Whether a file is held as bytes rather than as text, which is what says
-    // that reading it as text may have no answer. Asking costs nothing, so a
-    // command that answers for such a file need not read one to find out.
-    isBytes: (p) => typeof files.get(p) === 'object',
-    // Whether a file holds nothing at all, which `find -empty` asks of every
-    // file it walks: a question about its length, answered without encoding
-    // the text it holds or spelling out the bytes.
-    isEmptyFile: (p) => { const content = files.get(p); return typeof content === 'string' ? content === '' : content?.length === 0 },
-    listDir: (p) => {
-      const entry = childMap.get(p)
-      if (!entry) throw new Error(`not a directory: ${p}`)
-      return entry
-    },
-    walkFiles: (root) => walkFiles(fs, root),
-  }
-  return fs
-}
-
-// A file's length in bytes, which is what it is stored as when it was
-// declared as bytes, what its base64 spells without being decoded, and what
-// its text encodes to when it was declared as one.
-const contentSize = (content) => typeof content === 'string' ? encodeUtf8(content).length : content.length
-
-// The bytes a file certainly has, for comparing one with another without
-// reading either as text: a file declared as bytes has them, and one declared
-// as text has what its text encodes to — unless that text holds a lone
-// surrogate, which encodes to nothing a comparison could be sure of.
-const exactBytes = (content) =>
-  typeof content === 'string' ? (content.isWellFormed() ? encodeUtf8(content) : undefined) : content
-
 // The text a file's bytes spell, where they spell one. A file that holds
 // bytes spelling no text has no reading as text at all: a command that works
 // in bytes asks for those instead, and one that cannot is told which file it
@@ -296,89 +175,6 @@ export function textOfFile(bytes, label, doing = 'reading them as text') {
 export const sameBytes = (left, right) =>
   left !== undefined && right !== undefined && left.length === right.length && left.every((byte, i) => byte === right[i])
 
-// Informational comparisons must not throw, so two files are compared as the
-// bytes they hold rather than as the text they may not spell. Two files of
-// text are still compared as text: one whose text has no bytes is not the
-// same file as one that is bytes, and saying so needs no encoding at all.
-function sameContents(a, b) {
-  if (a === undefined || b === undefined) return false
-  if (typeof a === 'string' && typeof b === 'string') return a === b
-  return sameBytes(exactBytes(a), exactBytes(b))
-}
-
-function sourceEntries(sources) {
-  // A Map from another realm has the same internal storage but fails instanceof.
-  try { return Map.prototype.entries.call(sources) } catch { return Object.entries(sources ?? {}) }
-}
-
-// A source value is the file's contents — text, or the bytes of one a string
-// cannot spell — or an object saying what the entry is where neither can: a
-// symbolic link, `{ type: 'link', target }`, or bytes spelt in base64,
-// `{ format: 'base64', data }`, for a tree that arrives serialized as text.
-// A value that declares neither stays ignored, as every non-string value was
-// before links existed; one that says `type`, `target`, `format` or `data`
-// is a deliberate declaration, so a misspelled one is refused rather than
-// dropped into a tree where the entry would simply not be there.
-function sourceEntry(value, key) {
-  if (typeof value === 'string') return { content: value }
-  // A `Uint8Array` — or any other one-byte view, `Buffer` among them — is the
-  // file's bytes. They are copied, so the tree a terminal was made with is
-  // the tree it keeps however the caller goes on to use the array.
-  if (ArrayBuffer.isView(value)) return { content: byteContent(value, key) }
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
-  if (value instanceof ArrayBuffer) {
-    throw new TypeError(`createTerminal: source ${JSON.stringify(key)} is an ArrayBuffer; declare a file's bytes as a Uint8Array over it`)
-  }
-  if (value.format !== undefined || value.data !== undefined) return { content: encodedContent(value, key) }
-  if (value.type === undefined && value.target === undefined) return null
-  const name = JSON.stringify(key)
-  if (value.type !== 'link') {
-    throw new TypeError(`createTerminal: source ${name} declares type ${JSON.stringify(value.type ?? null)}; the only declaration is { type: 'link', target }`)
-  }
-  const { target } = value
-  if (typeof target !== 'string' || target === '' || target.includes('\0')) {
-    throw new TypeError(`createTerminal: link ${name} must declare a non-empty target without NUL characters`)
-  }
-  return { link: target }
-}
-
-// Bytes spelt in base64: RFC 4648's alphabet, the `=` padding present or
-// left off. What the declaration says is checked here, where every other
-// declaration is; what the string spells is left to the decoder, at the
-// first read, since reading it twice would cost more than the file.
-function encodedContent(value, key) {
-  const name = JSON.stringify(key)
-  if (value.format !== 'base64') {
-    throw new TypeError(`createTerminal: source ${name} declares format ${JSON.stringify(value.format ?? null)}; the only format is { format: 'base64', data }`)
-  }
-  if (typeof value.data !== 'string') throw new TypeError(`createTerminal: source ${name} must declare its base64 as a string in \`data\``)
-  return new Base64Bytes(value.data)
-}
-
-// The base64 of a file, and the length of the bytes it spells — three for
-// every four characters, less what the padding stands for — which is what a
-// listing, a size and `find -empty` ask without the bytes themselves. A
-// spelling that does not decode has no true length, and no reader of it
-// gets past the decoding to care.
-class Base64Bytes {
-  constructor(text) {
-    this.text = text
-    const padding = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0
-    this.length = Math.floor((text.length - padding) * 3 / 4)
-  }
-  decode() { return fromBase64(this.text) }
-}
-
-// Only a view of single bytes says what a file holds: a wider one would be
-// element order, not file order, and which of the two was meant is not this
-// map's to guess.
-function byteContent(value, key) {
-  if (value.BYTES_PER_ELEMENT !== 1) {
-    throw new TypeError(`createTerminal: source ${JSON.stringify(key)} is a ${value[Symbol.toStringTag] ?? 'view'}; declare a file's bytes as a Uint8Array`)
-  }
-  return new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice()
-}
-
 // Iterative depth-first traversal. Yield before consulting shouldDescend so
 // find can prune the directory it just evaluated. Sorting makes the virtual
 // tree deterministic; native readdir order itself is filesystem-dependent.
@@ -393,9 +189,8 @@ export function* walkTree(fs, root, maxDepth = Number.POSITIVE_INFINITY, shouldD
     yield entry
     if (entry.kind !== 'dir' || entry.depth >= maxDepth || !shouldDescend(entry.path)) continue
     const { dirs, files, links = [] } = fs.listDir(entry.path)
-    // Every list is sorted. Push in reverse order, a colliding directory
-    // last of the three, so it and its descendants are visited before the
-    // file or the link that shares its name.
+    // Every list is sorted. Push the three merged, in reverse order, so the
+    // children are visited in name order whatever their kinds.
     let dirIndex = dirs.length - 1
     let fileIndex = files.length - 1
     let linkIndex = links.length - 1
@@ -413,22 +208,6 @@ export function* walkTree(fs, root, maxDepth = Number.POSITIVE_INFINITY, shouldD
 }
 
 // Filter the same depth-first order used by find.
-function* walkFiles(fs, root) {
+export function* walkFiles(fs, root) {
   for (const entry of walkTree(fs, root)) if (entry.kind === 'file') yield entry.path
-}
-
-// Build missing ancestors from the top down without recursive stack growth.
-function ensureDir(map, path) {
-  const toCreate = []
-  let p = path
-  while (p !== '/' && !map.has(p)) {
-    toCreate.push(p)
-    p = p.slice(0, p.lastIndexOf('/')) || '/'
-  }
-  for (let i = toCreate.length - 1; i >= 0; i--) {
-    const child = toCreate[i]
-    map.set(child, { dirs: [], files: [], links: [] })
-    const split = child.lastIndexOf('/')
-    map.get(child.slice(0, split) || '/').dirs.push(child.slice(split + 1))
-  }
 }

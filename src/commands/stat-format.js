@@ -47,7 +47,6 @@ export function statFormat(format, escapes) {
 
 export function formatStat(parts, name, path, fs) {
   const isDir = fs.isDir(path)
-  if (isDir && fs.isFile(path)) throw new UnsupportedError('feature', 'ambiguous file type', `path is both a file and a directory: ${name}`)
   // A link's own size is the length of the path it holds, which is what it
   // takes on disk; `stat` reaches one only where it was not asked to follow.
   const isLink = !isDir && fs.isLink?.(path) === true

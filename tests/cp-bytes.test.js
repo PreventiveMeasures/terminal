@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { createFs } from '../src/fs.js'
+import { createFs } from '../src/filesystem.js'
 import { writableFs } from '../src/writable.js'
 import { createIoGuard } from '../src/shell/io.js'
 import { unsupportedNote } from '../src/unsupported.js'
@@ -14,12 +14,12 @@ describe('cp preserves file bytes without weakening shared write guards', () => 
     const bytes = Uint8Array.of(255, 0, 195, 128, 128, 239, 187, 191)
     fs.openWritable('/', '/tmp/source').writeBytes(bytes)
     assert.equal(fs.copyWritable('/', '/tmp/source', '/tmp/copy'), true)
-    assert.deepEqual(fs.fileIdentity('/tmp/copy').bytes, bytes)
+    assert.deepEqual(fs.readBytes('/tmp/copy'), bytes)
     assert.notEqual(fs.fileIdentity('/tmp/source'), fs.fileIdentity('/tmp/copy'))
-    assert.notEqual(fs.fileIdentity('/tmp/source').bytes.buffer, fs.fileIdentity('/tmp/copy').bytes.buffer)
+    assert.notEqual(fs.readBytes('/tmp/source').buffer, fs.readBytes('/tmp/copy').buffer)
     assert.throws(() => fs.readFile('/tmp/copy'), /spell no text/u)
     fs.openWritable('/', '/tmp/source').write('changed')
-    assert.deepEqual(fs.fileIdentity('/tmp/copy').bytes, bytes)
+    assert.deepEqual(fs.readBytes('/tmp/copy'), bytes)
   })
 
   it('preserves the mounted source and overwrites an existing destination inode', () => {
