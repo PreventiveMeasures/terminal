@@ -5,7 +5,7 @@
   "keywords": [
     "terminal"
   ],
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "author": {
     "name": "Nikita Skovoroda",
     "email": "chalkerx@gmail.com",
@@ -36,6 +36,8 @@
     }
   },
   "files": [
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
     "src/args.js",
     "src/awk/builtins.js",
     "src/awk/common.js",
