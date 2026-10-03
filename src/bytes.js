@@ -65,6 +65,40 @@ export function decodeUtf8Maybe(bytes) {
   return text
 }
 
+// The text the bytes spell, with each byte that spells none read as a marker
+// of its own: the lone surrogate U+DC00 plus that byte, which no decoder ever
+// yields (so strict text holds none) and which says which byte it stands for.
+// A byte spells nothing only from 0x80 up, so markers run U+DC80 to U+DCFF.
+// This is how a search reads a file its locale cannot read as text: every
+// character the bytes do spell is still that character, and each byte that
+// is none is still there to be stepped over — and handed back, byte for
+// byte, by encodeUtf8Marked.
+export function decodeUtf8Marked(bytes) {
+  const text = decodeUtf8Maybe(bytes)
+  if (text !== undefined) return text
+  const parts = []
+  let run = 0
+  for (let at = 0; at < bytes.length;) {
+    const width = SEQUENCE(bytes[at])
+    if (width === 1 || (width > 1 && sequenceCode(bytes, at, width) >= 0)) { at += width; continue }
+    if (run < at) parts.push(utf8toString(bytes.subarray(run, at)))
+    parts.push(String.fromCodePoint(0xdc00 + bytes[at]))
+    run = ++at
+  }
+  if (run < bytes.length) parts.push(utf8toString(bytes.subarray(run)))
+  return parts.join('')
+}
+
+// A byte read as a marker, among the characters around it.
+export const MARKER = /[\uDC80-\uDCFF]/u
+
+// The bytes decodeUtf8Marked read: its markers back as the bytes they stand
+// for, and everything else as UTF-8.
+export function encodeUtf8Marked(text) {
+  if (!MARKER.test(text)) return encodeUtf8(text)
+  return joinBytes(text.split(/([\uDC80-\uDCFF])/u).map((part, i) => (i % 2 ? Uint8Array.of(part.codePointAt(0) - 0xdc00) : encodeUtf8(part))))
+}
+
 // One run of bytes out of several, which is what a pipe carrying both text
 // and bytes ends up holding.
 export function joinBytes(parts) {

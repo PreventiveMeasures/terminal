@@ -205,7 +205,10 @@ function runGrep(stdin, options, operands, targets, ctx) {
   argv.push(...patternArgs(options.patterns, options.literal))
   if (!targets.stdin) argv.push('--', ...(operands.length ? operands : ['.']))
   const before = new Set(ctx.notes)
+  // grep's ordered output is its own wording, which rg rewrites below; the
+  // rewritten streams are what rg writes.
   const result = grep(stdin, argv, ctx)
+  delete result.events
   relabelNotes(ctx.notes, before, targets)
   return relabel(countOnly(result, options), operands, options.patterns)
 }

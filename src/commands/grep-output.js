@@ -1,122 +1,229 @@
-// Line selection and presentation shared by grep's output modes.
-import { joinLines, ok, splitLines } from '../util.js'
+// Line selection and presentation shared by grep's output modes. The loop
+// over a file is GNU grep's own (grep.c: grepbuf, prtext, prpending, prline),
+// down to what it does around a line it will not print: one holding a byte
+// its locale cannot read is held back, the context and group separators go on
+// as if it had never been there, and the file is said to be binary once the
+// search is done with it.
+import { MARKER, encodeUtf8Marked, joinLines, splitLines } from '../util.js'
 import { UnsupportedError } from '../unsupported.js'
 import { stepAt } from '../unicode.js'
+import { markedRegex } from './grep-pattern.js'
+import { glibcReading, markedExtent } from './grep-literal.js'
 
 export const anyMatch = (res, line) => res.some((re) => re.test(line))
 export const noMatch = () => ({ stdout: '', stderr: '', exitCode: 1 })
 
+// What a search reads a file as: lines, which in a file GNU calls binary for
+// a NUL are ended by every NUL too — it turns each into a line end before it
+// looks. A file of bytes that spell no text is matched with the patterns that
+// take no such byte for a character (markedRegex).
+const contentOf = (input) => (input.nul ? input.content.replaceAll('\0', '\n') : input.content)
+const matchersFor = (input, res) => (input.marked ? res.map(markedRegex) : res)
+
 // Stop at the selection limit without splitting the unvisited suffix.
 // A final newline ends its line; it does not create another empty line.
-export function countMatches(content, res, invert, max) {
+export function countMatches(input, res, invert, max) {
+  // `-m0` reads nothing, which `-L` still lists.
+  if (max === 0) return 0
+  const tests = matchersFor(input, res)
+  const content = contentOf(input)
   let count = 0
   if (max === Infinity) {
     // Native splitting is faster for uncapped counts across many small files.
-    for (const line of splitLines(content)) if (anyMatch(res, line) !== invert) count++
+    for (const line of splitLines(content)) if (anyMatch(tests, line) !== invert) count++
     return count
   }
   let start = 0
   while (start < content.length && count < max) {
     let end = content.indexOf('\n', start)
     if (end < 0) end = content.length
-    if (anyMatch(res, content.slice(start, end)) !== invert) count++
+    if (anyMatch(tests, content.slice(start, end)) !== invert) count++
     start = end + 1
   }
   return count
 }
 
+// What a run writes, in the order GNU writes it: each file's lines, what it
+// has to say about that file after them, and a file it could not open where
+// that file came. Lines holding bytes that spell no text go out as the bytes.
+function output() {
+  const events = []
+  const add = (fd, text) => {
+    const last = events.at(-1)
+    if (last?.fd === fd && last.text !== undefined) last.text += text
+    else events.push({ fd, text })
+  }
+  return {
+    events,
+    out(text, marked = false) {
+      if (marked && MARKER.test(text)) events.push({ fd: 1, bytes: encodeUtf8Marked(text) })
+      else if (text) add(1, text)
+    },
+    err(text) { if (text) add(2, text) },
+  }
+}
+
+function written(events, selected) {
+  const text = (fd) => events.filter((event) => event.fd === fd && event.text !== undefined).map((event) => event.text).join('')
+  const bytes = events.some((event) => event.bytes !== undefined)
+  return { stdout: bytes ? '' : text(1), stderr: text(2), exitCode: selected ? 0 : 1, events }
+}
+
 // Default mode: print matching lines, optionally with context.
 // Context-line prefix uses `-` as the field separator (e.g.
 // `file-12-content`); matches use `:`. `--` separates non-adjacent
-// context groups within a single file. -o emits matching substrings;
-// with -v these can occur in context lines instead of selected lines.
-export function grepRun(inputs, res, opts) {
-  const out = []
-  let matched = false
-  for (const { name, content, recursive } of inputs) {
-    const fileOpts = { ...opts, showName: opts.showName ?? recursive, separate: matched && opts.hasContext }
-    if (grepFileBlock(splitLines(content), res, name, fileOpts, out)) matched = true
+// context groups, within a file and across files. -o emits matching
+// substrings; with -v these can occur in context lines instead.
+export function grepRun(items, res, opts) {
+  const run = { used: false, write: output(), selected: false }
+  for (const item of items) {
+    if (item.failure === undefined) grepFile(item, res, opts, run)
+    else run.write.err(item.failure)
   }
-  return matched ? ok(joinLines(out)) : noMatch()
+  return written(run.write.events, run.selected)
 }
 
-// The match cap stops selections, not trailing context. A later match inside
-// that context is printed with - rather than : once the cap is reached.
-function grepFileBlock(lines, res, name, opts, out) {
-  const { invert, after, before, max, hasContext } = opts
-  let lastShown = -1
+// GNU's grepbuf: find each selected line — a block of them under -v — and
+// hand it to prtext. A NUL makes the file binary from where GNU finds it —
+// the top, where its first read held it — and from there nothing is printed
+// and the first selection is the last.
+function grepFile(input, res, opts, run) {
+  const f = {
+    input, opts, run, lines: splitLines(contentOf(input)), res, tests: matchersFor(input, res),
+    out: [], lastout: null, pending: 0, outleft: opts.max ?? Infinity, quiet: false, quietSelected: 0, heldBack: false,
+  }
+  // Where the file turns binary, if it does: the NUL's line or the top.
+  const binaryLine = input.nul ? input.binaryLine : Infinity
   let selected = 0
-  let owedAfter = 0
-  for (let i = 0; i < lines.length; i++) {
-    if (selected === max && owedAfter === 0) break
-    const hit = anyMatch(res, lines[i]) !== invert
-    const capped = max !== undefined && selected >= max
-    if (hit && !capped) {
-      selected++
-      if (selected === 1 && opts.separate) out.push('--')
-      const start = Math.max(0, i - before)
-      if (hasContext && lastShown >= 0 && start > lastShown + 1) out.push('--')
-      // -o shares context grouping even though it emits only matching substrings.
-      for (let j = Math.max(start, lastShown + 1); j < i; j++) {
-        presentLine(lines[j], name, j + 1, res, opts, false, out)
+  for (let p = 0; p < f.lines.length;) {
+    let b = p
+    while (b < f.lines.length && !anyMatch(f.tests, f.lines[b])) b++
+    if (b === f.lines.length && !opts.invert) break
+    if (!opts.invert || p < b) {
+      // A run of -v lines that crosses into the binary part is two: GNU
+      // prints what its first read held before it reads the rest.
+      if (opts.invert && p < binaryLine && b > binaryLine) {
+        selected += prtext(f, p, binaryLine)
+        if (f.outleft === 0) break
+        p = binaryLine
       }
-      presentLine(lines[i], name, i + 1, res, opts, true, out)
-      lastShown = i
-      owedAfter = after
-      continue
+      // Context still owed when the NUL is found was printed as the read
+      // before it ended (lateBinary keeps it within that read).
+      if (!f.quiet && (opts.invert ? p : b) >= binaryLine) {
+        if (f.pending > 0) prpending(f, binaryLine)
+        f.quiet = true
+      }
+      selected += opts.invert ? prtext(f, p, b) : prtext(f, b, b + 1)
+      if (f.outleft === 0 || f.quiet) break
     }
-    if (owedAfter > 0) {
-      presentLine(lines[i], name, i + 1, res, opts, false, out)
-      lastShown = i
-      owedAfter--
-    }
+    p = b + 1
   }
-  return selected > 0
+  if (f.pending > 0) prpending(f, f.lines.length)
+  run.write.out(joinLines(f.out), input.marked)
+  if (selected > 0) run.selected = true
+  // `-I` holds the same lines back and says nothing; `-a` holds none back.
+  if (opts.binaryFiles === 'binary' && (f.heldBack || f.quietSelected > 0)) {
+    run.write.err(`grep: ${input.name ?? '(standard input)'}: binary file matches\n`)
+  }
 }
 
-function presentLine(line, name, lineNum, res, opts, selected, out) {
-  if (!opts.only) { out.push(formatLine(line, name, lineNum, selected, opts)); return }
-  if (selected === opts.invert) return
-  // Across patterns, choose the leftmost-longest nonoverlapping match each time.
-  // Skip zero-length matches while advancing by a full code point.
+// The lines from `beg` up to `lim`, with the leading context GNU reaches back
+// for — never past the last line it printed — and the group separator where
+// what it prints does not follow on from that line. `used` is set by any
+// selection, printed or not, so a binary file's match separates the next one.
+function prtext(f, beg, lim) {
+  const { before, after, hasContext, invert } = f.opts
+  if (!f.quiet && f.pending > 0) prpending(f, beg)
+  let p = beg
+  if (!f.quiet) {
+    const bp = f.lastout ?? 0
+    for (let i = 0; i < before; i++) if (p > bp) p--
+    if (hasContext && f.run.used && p !== f.lastout) f.out.push('--')
+    for (; p < beg; p++) prline(f, p, false)
+  }
+  let n
+  if (invert) {
+    for (n = 0; p < lim && n < f.outleft; n++, p++) if (!f.quiet) prline(f, p, true)
+  } else {
+    if (!f.quiet) prline(f, beg, true)
+    n = 1
+  }
+  f.pending = f.quiet ? 0 : after
+  f.run.used = true
+  f.outleft -= n
+  if (f.quiet) f.quietSelected += n
+  return n
+}
+
+// Trailing context, which goes on through lines that would be selected once
+// the cap is reached. It starts after the last line printed, which is the top
+// of the file when none has been yet, and a line held back is not printed: it
+// is tried again for every line of context still owed.
+function prpending(f, lim) {
+  f.lastout ??= 0
+  for (; f.pending > 0 && f.lastout < lim; f.pending--) prline(f, f.lastout, false)
+}
+
+function prline(f, i, selected) {
+  const line = f.lines[i]
+  if (!f.opts.only) {
+    if (f.input.marked && f.opts.binaryFiles !== 'text' && MARKER.test(line) && glibcReading(line).errors) {
+      f.heldBack = true
+      return false
+    }
+    f.out.push(formatLine(line, f.input.name, i + 1, selected, f))
+  } else if (selected !== f.opts.invert) presentMatches(f, line, i, selected)
+  f.lastout = i + 1
+  return true
+}
+
+// Across patterns, choose the leftmost-longest nonoverlapping match each time.
+// Skip zero-length matches while advancing by a full code point.
+function presentMatches(f, line, i, selected) {
+  const marked = f.input.marked && MARKER.test(line)
   let cursor = 0
   while (cursor < line.length) {
     let best = null
-    for (const re of res) {
-      let match
-      if (re.extent) match = re.extent.search(line, cursor)
-      else {
-        const search = re.scan ??= new RegExp(re.source, re.flags + 'g')
-        search.lastIndex = cursor
-        const m = search.exec(line)
-        if (m && m[0] === '' && re.pcre) throw new UnsupportedError('feature', 'PCRE empty match extent', 'only-matching with empty PCRE matches is not supported')
-        match = m ? { start: m.index, end: m.index + m[0].length } : null
-      }
+    for (const [k, re] of f.res.entries()) {
+      const match = matchFrom(re, f.tests[k], line, cursor, marked)
       if (match && (!best || match.start < best.start || (match.start === best.start && match.end > best.end))) best = match
     }
     if (!best) break
     if (best.end === best.start) { cursor = best.end + stepAt(line, best.end); continue }
-    out.push(formatLine(line.slice(best.start, best.end), name, lineNum, selected, opts))
+    f.out.push(formatLine(line.slice(best.start, best.end), f.input.name, i + 1, selected, f))
     cursor = best.end
   }
 }
 
-function formatLine(text, name, lineNum, isMatch, opts) {
+// Where the pattern next matches: by the POSIX extent matcher where it has
+// one, and by the matcher the line is selected with where it does not.
+function matchFrom(re, test, line, cursor, marked) {
+  if (re.extent) return (marked ? re.markedExtent ??= markedExtent(re.extent) : re.extent).search(line, cursor)
+  const search = test.scan ??= new RegExp(test.source, test.flags + 'g')
+  search.lastIndex = cursor
+  const m = search.exec(line)
+  if (m && m[0] === '' && test.pcre) throw new UnsupportedError('feature', 'PCRE empty match extent', 'only-matching with empty PCRE matches is not supported')
+  return m ? { start: m.index, end: m.index + m[0].length } : null
+}
+
+function formatLine(text, name, lineNum, isMatch, f) {
   const sep = isMatch ? ':' : '-'
-  return (opts.showName ? (name ?? '(standard input)') + sep : '') + (opts.showLine ? lineNum + sep : '') + text
+  const showName = f.opts.showName ?? f.input.recursive
+  return (showName ? (name ?? '(standard input)') + sep : '') + (f.opts.showLine ? lineNum + sep : '') + text
 }
 
 // -L lists files without selections, but status still reports any selected input.
-export function grepSummary(inputs, res, { mode, invert, showName, max = Infinity }) {
-  const out = []
+export function grepSummary(items, res, { mode, invert, showName, max = Infinity }) {
+  const write = output()
   let anySelected = false
   const limit = mode === 'c' ? max : Math.min(1, max)
-  for (const { name, content, recursive } of inputs) {
-    const count = countMatches(content, res, invert, limit)
+  for (const item of items) {
+    if (item.failure !== undefined) { write.err(item.failure); continue }
+    const count = countMatches(item, res, invert, limit)
     if (count > 0) anySelected = true
-    const label = name ?? '(standard input)'
-    if (mode === 'c') out.push((showName ?? recursive) ? label + ':' + count : String(count))
-    else if ((count > 0) === (mode === 'l')) out.push(label)
+    const label = item.name ?? '(standard input)'
+    if (mode === 'c') write.out(((showName ?? item.recursive) ? label + ':' + count : String(count)) + '\n')
+    else if ((count > 0) === (mode === 'l')) write.out(label + '\n')
   }
-  return { stdout: joinLines(out), stderr: '', exitCode: anySelected ? 0 : 1 }
+  return written(write.events, anySelected)
 }

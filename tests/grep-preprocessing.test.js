@@ -32,11 +32,11 @@ describe('grep input preprocessing', () => {
     await diagnoses("grep -i -e TODO -e '\\(é\\)\\1' empty", { empty: '' }, 'non-ASCII regex semantics', localeMessage)
   })
 
-  it('reports binary input before a locale gap in an earlier file', async () => {
-    // The binary gap still wins over the locale one, and the file that could
-    // be read still reports what it matched.
-    await diagnoses("grep -e TODO -e '[[:space:]]' space binary", { space: 'TODO\u2003\n', binary: '\0x\n' },
-      'binary input', 'grep: binary input detection and output are not supported', 2, 'space:TODO\u2003\n')
+  it('says a binary file matches beside what a text file matched', async () => {
+    // Checked against GNU grep 3.11: the NUL ends a record, `x` is one.
+    assert.deepEqual(await createTerminal({ space: 'TODO\u2003\n', binary: '\0x\n' }).run("grep -e x -e '[[:space:]]' space binary"), {
+      stdout: 'space:TODO\u2003\n', stderr: 'grep: binary: binary file matches\n', exitCode: 0, cwd: '/', notes: [], unsupported: [],
+    })
   })
 
   const filteredFiles = { 'late.js': 'x'.repeat(100000) + '\0', 'café.js': 'TODO\n' }
@@ -55,23 +55,29 @@ describe('grep input preprocessing', () => {
 // One file a search cannot read does not take the rest of the tree with it.
 // GNU keeps the matches from the files it could read and names the one it
 // could not; this keeps the matches and says what it could not do, which is
-// the part of that it can say.
+// the part of that it can say. PCRE's reading of bytes that are not UTF-8 is
+// such a file.
 describe('a file it cannot search is that file, not the search', () => {
   const tree = { 'bt/a.txt': 'apple\n', 'bt/c.txt': 'apple pie\n', 'bt/bin.dat': Uint8Array.of(0x61, 0x70, 0x70, 0x6c, 0x65, 0x00, 0xff, 0x0a) }
-  const binaryGap = [{ kind: 'feature', command: 'grep', detail: 'binary input', message: 'grep: binary input detection and output are not supported' }]
+  const pcreGap = [{ kind: 'feature', command: 'grep', detail: 'binary input', message: 'grep: PCRE matching over bytes that spell no text is not supported' }]
 
   it('keeps what the readable files matched', async () => {
-    const r = await createTerminal(tree).run('grep -r apple bt')
+    const r = await createTerminal(tree).run('grep -rP apple bt')
     assert.equal(r.stdout, 'bt/a.txt:apple\nbt/c.txt:apple pie\n')
-    assert.deepEqual(r.unsupported, binaryGap)
+    assert.deepEqual(r.unsupported, pcreGap)
     assert.equal(r.exitCode, 2)
   })
 
   it('is the gap itself when nothing is left to read', async () => {
-    const r = await createTerminal(tree).run('grep apple bt/bin.dat')
+    const r = await createTerminal(tree).run('grep -P apple bt/bin.dat')
     assert.equal(r.stdout, '')
-    assert.deepEqual(r.unsupported, binaryGap)
+    assert.deepEqual(r.unsupported, pcreGap)
     assert.equal(r.exitCode, 2)
+  })
+
+  it('says of a binary file only that it matches, where it comes in the walk', async () => {
+    const r = await createTerminal(tree).run('grep -r apple bt 2>&1')
+    assert.deepEqual([r.stdout, r.exitCode, r.unsupported], ['bt/a.txt:apple\ngrep: bt/bin.dat: binary file matches\nbt/c.txt:apple pie\n', 0, []])
   })
 
   it('says nothing of a binary file no pattern selects', async () => {

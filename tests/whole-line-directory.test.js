@@ -75,11 +75,20 @@ describe('grep -xo emits full matches without changing capture numbering', () =>
   }
 })
 
+describe('grep -x over a binary file', () => {
+  // NUL ends a record there as a newline does, so `a` is a whole one, and the
+  // file is said to match rather than printed. Checked against GNU grep 3.11.
+  for (const line of ['grep -xF a binary', 'grep -x a binary']) {
+    it(line, async () => {
+      const result = await createTerminal({ binary: 'a\0b\n' }).run(line)
+      assert.deepEqual([result.stdout, result.stderr, result.exitCode, result.unsupported], ['', 'grep: binary: binary file matches\n', 0, []])
+    })
+  }
+})
+
 describe('grep -x retains unsupported diagnostics', () => {
   for (const [line, files, detail] of [
     ["grep -xi '\\(é\\)\\1' text", { text: 'é\n' }, 'non-ASCII regex semantics'],
-    ["grep -xF a binary", { binary: 'a\0b\n' }, 'binary input'],
-    ["grep -x a binary", { binary: 'a\0b\n' }, 'binary input'],
     ["grep -xP '(?i)a' lines", FILES, 'PCRE group'],
   ]) {
     it(line, async () => {

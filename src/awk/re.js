@@ -75,11 +75,14 @@ export function compileNfa(ast, tables = classTables(LOCALE)) {
   return { states, start, literal, isWord: (c) => tables.has('word', c), gen: new Int32Array(states.length).fill(-1), stamp: 0 }
 }
 
+// The character ending at `at`: a pair's low half is read with the high half
+// before it, and a low half standing alone is itself.
 function codeBefore(str, at) {
   if (at <= 0) return -1
   const low = str.codePointAt(at - 1)
-  if (low >= 0xDC00 && low <= 0xDFFF && at >= 2) return str.codePointAt(at - 2)
-  return low
+  if (low < 0xDC00 || low > 0xDFFF || at < 2) return low
+  const pair = str.codePointAt(at - 2)
+  return pair > 0xFFFF ? pair : low
 }
 
 function checkAssert(kind, str, at, isWord) {

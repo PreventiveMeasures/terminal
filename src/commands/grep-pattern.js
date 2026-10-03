@@ -6,7 +6,7 @@ import { parseEre } from '../awk/re-parse.js'
 import { breToEs, validateBackreferences } from '../bre.js'
 import { EXTENDED_C, LOCALE, classTables } from '../locale.js'
 import { foldFixed, foldPattern } from '../regex-fold.js'
-import { literalText } from './grep-literal.js'
+import { MARKERS, glibcDiffers, glibcReading, literalText, markedAssertions, markedClass, patternShape } from './grep-literal.js'
 import { pcreSource } from './grep-pcre.js'
 
 export { cannotHoldMatch } from './grep-literal.js'
@@ -65,9 +65,9 @@ export function localeSensitive(source) {
 // The JS matcher gets the locale's word and space sets spelt out, since
 // its own `\\b` and `\\w` know ASCII only; the extent matcher reads the
 // escapes itself, from the same tables.
-export function grepSource(source, extent = false, tables = classTables(LOCALE)) {
+export function grepSource(source, extent = false, tables = classTables(LOCALE), marked = false) {
   const js = tables.assertions()
-  const assertions = extent ? { b: '\\y' } : {
+  const assertions = extent ? { b: '\\y' } : marked ? markedAssertions(tables) : {
     '<': js['<'], '>': js['>'], b: js.boundary, B: js.inside,
     w: js.word, W: js.nonWord, s: js.space, S: js.nonSpace, '`': '^', "'": '$',
   }
@@ -79,13 +79,35 @@ export function grepSource(source, extent = false, tables = classTables(LOCALE))
       const next = source[++i]
       out += !bracket && Object.hasOwn(assertions, next) ? assertions[next] : c + next
       if (!extent && !bracket && /[1-9]/u.test(next) && /\d/u.test(source[i + 1] ?? '')) out += '(?:)'
-    } else {
+    } else if (marked && c === '[') {
+      const end = classEnd(source, i)
+      out += markedClass(source.slice(i, end + 1))
+      i = end
+    } else if (marked && c === '.') out += `[^${MARKERS}]`
+    else {
       if (c === '[') bracket = true
       if (c === ']') bracket = false
       out += c
     }
   }
   return out
+}
+
+function wordEdge(source) {
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] === '[') i = classEnd(source, i)
+    else if (source[i] === '\\' && '<>bB'.includes(source[++i] ?? '')) return true
+  }
+  return false
+}
+
+// The matcher for a line holding markers, built the first time one is met.
+// `-F` and `-P` spell their own sources: a fixed string names no marker, and
+// PCRE's reading of bytes that are not UTF-8 is refused before this is asked.
+export function markedRegex(re) {
+  if (re.markedSource === undefined) return re
+  re.marked ??= new RegExp(grepSource(re.markedSource, false, re.tables, true), re.flags)
+  return re.marked
 }
 
 const ERE_INTERVAL = /^\{(?=\d|,)(\d*)(?:,(\d*))?\}/u
@@ -305,7 +327,12 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       // already reads those the way GNU does, so it takes `source` as is.
       // `-P` selects the ECMAScript reading, where `a+?` really is lazy,
       // so the rewrite is ERE's alone.
-      const re = new RegExp(gnu ? grepSource(posixQuantifiers(source), false, tables) : source, reFlags)
+      const quantified = gnu ? posixQuantifiers(source) : source
+      const re = new RegExp(gnu ? grepSource(quantified, false, tables) : source, reFlags)
+      // What a line holding bytes that spell no character is matched with,
+      // and what the pattern asks of a character, which says whether glibc
+      // reads some such bytes as GNU's own matcher does not (inputGap).
+      if (gnu) Object.assign(re, { markedSource: quantified, tables, shape: patternShape(pattern, backrefs, wordEdge(canonical)) })
       re.pcre = flags.has('P')
       // What still reads text by rules other than the locale's tables:
       // PCRE's own, and the JS case flag a backreference pattern keeps.
@@ -319,7 +346,6 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       // spelt by what it holds reads the same either way, and a literal does.
       re.anyCharacter = readsAnyCharacter(canonical)
       const literal = literalText(pattern, flags)
-      re.binaryLiteral = !whole && !word && literal !== null
       // Whether the bytes alone can say that a file this terminal cannot read
       // as text holds no match — which only a plain literal answers, and only
       // one read as written or folded by the locale's own tables, never by
@@ -359,17 +385,20 @@ function gnuSyntaxGap(source, flags) {
   try { parseEre(grepSource(source, true)); return true } catch (e) { return Boolean(e.gap) }
 }
 
-export function inputGap(inputs, res, invert, forceText = false, locale = LOCALE) {
+export function inputGap(inputs, res, locale = LOCALE, only = false) {
   if (inputs.length === 0) return null
-  // Bytes that spell no text are binary to GNU whatever else they hold, and
-  // searching them is what a terminal working in text cannot do: `-a` asks
-  // for those bytes as the output itself, which it cannot print either.
-  if (inputs.some((inp) => inp.content === undefined)) {
-    return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
+  // PCRE reads bytes that are not UTF-8 by rules of its own, which are not
+  // the ones GNU's matchers go by (markedRegex), and are not modelled.
+  if (res.some((re) => re.pcre) && inputs.some((inp) => inp.marked)) {
+    return unsupported('feature', 'grep', 'binary input', 'grep: PCRE matching over bytes that spell no text is not supported', 2)
   }
-  // A literal absent from a binary file is still safely a non-match.
-  // Regex anchors and classes can see NUL boundaries differently in GNU.
-  if (!forceText && inputs.some((inp) => inp.content.includes('\0') && (invert || res.some((re) => !re.binaryLiteral || re.test(inp.content))))) return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
+  // A surrogate spelt in UTF-8, or a character past U+10FFFF, is one glibc
+  // reads as a character where GNU's own matcher reads its bytes as none, and
+  // which of the two answers is GNU's choice per pattern (glibcDiffers).
+  const readings = inputs.filter((inp) => inp.marked).map((inp) => glibcReading(inp.content))
+  if (res.some((re) => readings.some((reading) => glibcDiffers(re.shape, reading, only)))) {
+    return unsupported('feature', 'grep', 'binary input', 'grep: matching this pattern beside bytes glibc reads as a character is not supported', 2)
+  }
   // The matcher reads a character at a time, which is C.UTF-8's reading and
   // no other locale's: anywhere else, a pattern the locale could change is
   // refused over non-ASCII text before any of it is read. A wildcard is one

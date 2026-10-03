@@ -165,7 +165,7 @@ describe('agent workflows — deduplication and ordering', () => {
 })
 
 describe('agent workflows — silent option and metadata gaps', () => {
-  for (const command of ['grep -2 x g', 'cat -2 g', 'head -n1 -2 g', 'tail -n1 -2 g', "echo -e 'a\\0b' | grep a",
+  for (const command of ['grep -2 x g', 'cat -2 g', 'head -n1 -2 g', 'tail -n1 -2 g',
     `awk 'BEGIN { PROCINFO["sorted_in"]="@ind_num_asc"; a[2]=2; a[1]=1; for (k in a) print k }'`,
     `awk 'BEGIN { print PROCINFO["pid"] }'`, `awk 'BEGIN { print length(PROCINFO) }'`,
     `awk 'BEGIN { for (k in PROCINFO) print k }'`, `awk 'BEGIN { print ENVIRON["HOME"] }'`,
@@ -181,6 +181,10 @@ describe('agent workflows — silent option and metadata gaps', () => {
       assert.deepEqual(hidden.unsupported, r.unsupported)
     })
   }
+  it("echo -e 'a\\0b' | grep a says the binary input matches, as GNU grep does", async () => {
+    const r = await createTerminal(FILES).run("echo -e 'a\\0b' | grep a")
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.unsupported], ['', 'grep: (standard input): binary file matches\n', 0, []])
+  })
   it('-- protects numeric filenames and supported count forms still work', async () => {
     await check('cat -- -2', 'two\n')
     await check('head -2 f', 'x\n\n')

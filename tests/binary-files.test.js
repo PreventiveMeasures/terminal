@@ -419,13 +419,12 @@ describe('searching a tree that holds files of bytes', () => {
     for (const command of commands) await check(t, command, './call.c:foobartest(x) + a.b\n')
   })
 
-  it('refuses where an escape makes an operator of a character', async () => {
+  it('reads an escape that makes an operator of a character as GNU does', async () => {
     const t = terminal()
-    const message = 'grep: binary input detection and output are not supported\n'
-    // `\(` groups in a BRE, and `(` groups in an ERE.
-    await gap(t, 'grep "spel\\(led\\)" img.png', 'binary input', message)
-    await gap(t, 'grep -E "spel(led)" img.png', 'binary input', message)
-    await gap(t, 'grep "\\wspelled" img.png', 'binary input', message)
+    // `\(` groups in a BRE, and `(` groups in an ERE; neither is in the PNG.
+    await check(t, 'grep "spel\\(led\\)" img.png', '', { exitCode: 1 })
+    await check(t, 'grep -E "spel(led)" img.png', '', { exitCode: 1 })
+    await check(t, 'grep "\\wspelled" img.png', '', { exitCode: 1 })
   })
 
   it('answers every output mode for a file a literal cannot be in', async () => {
@@ -442,15 +441,40 @@ describe('searching a tree that holds files of bytes', () => {
     await check(t, "grep -rn --exclude='*.png' --exclude='*.bin' spelled .", './bytes.txt:1:spelled by bytes\n./text.txt:1:spelled by a string\n', { notes: excluded(2, 'img.png', 'latin.bin') })
   })
 
-  it('refuses where the bytes could hold what was asked for', async () => {
+  it('says a file of bytes matches where the bytes hold what was asked for', async () => {
+    // Checked against GNU grep 3.11 over the same bytes on disk. The PNG holds
+    // a NUL, so it is binary from its first line: nothing of it is printed,
+    // and a selection only says that it matches — for a pattern that is not
+    // a plain literal too, and for `-v`, which selects every line there is.
     const t = terminal()
-    const message = 'grep: binary input detection and output are not supported\n'
-    await gap(t, 'grep IHDR img.png', 'binary input', message)
-    await gap(t, 'grep -r IHDR .', 'binary input', message)
-    // A pattern that is not a plain literal has to read the file to know,
-    // and `-v` selects the lines a pattern does not, which is all of them.
-    gap(t, 'grep "IH.R" img.png', 'binary input', message)
-    await gap(t, 'grep -v zzz img.png', 'binary input', message)
+    const matches = (name) => ({ stderr: `grep: ${name}: binary file matches\n` })
+    await check(t, 'grep IHDR img.png', '', matches('img.png'))
+    await check(t, 'grep -r IHDR .', '', matches('./img.png'))
+    await check(t, 'grep "IH.R" img.png', '', matches('img.png'))
+    await check(t, 'grep -v zzz img.png', '', matches('img.png'))
+    // The modes that print no line count and list it as any other file.
+    await check(t, 'grep -c IHDR img.png text.txt', 'img.png:1\ntext.txt:0\n')
+    await check(t, 'grep -l IHDR img.png text.txt', 'img.png\n')
+  })
+
+  it('prints the lines of a file of bytes that are text, and holds back the rest', async () => {
+    // Latin-1 holds no NUL: each line is searched, a line spelling text is
+    // printed, and one holding a byte that spells none is held back — said
+    // of once the file is done with. No pattern takes such a byte for a
+    // character, and `-I` holds the same lines back without saying so.
+    const t = terminal()
+    await check(t, 'grep -n more latin.bin', '2:more\n')
+    await check(t, 'grep latte latin.bin', '', { stderr: 'grep: latin.bin: binary file matches\n' })
+    await check(t, "grep -c 'caf.' latin.bin", '0\n', { exitCode: 1 })
+    await check(t, "grep -o 'l[a-z]*' latin.bin", 'latte\n')
+    await check(t, 'grep -I latte latin.bin')
+    await check(t, 'grep -Ic latte latin.bin text.txt', 'latin.bin:1\ntext.txt:0\n')
+  })
+
+  it('writes the lines of a file of bytes as those bytes under -a', async () => {
+    const t = terminal()
+    await check(t, 'grep -a IHDR img.png | base64', toBase64(PNG.subarray(8)) + '\n')
+    await check(t, 'grep -ac latte latin.bin', '1\n')
   })
 
   it('is passed over by -I, as any other binary file is', async () => {

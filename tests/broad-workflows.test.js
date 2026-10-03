@@ -192,7 +192,8 @@ describe('broad audit — unsupported constructs remain visible to agents', () =
     })
   }
   it('retains the unsupported marker when grep prepends an earlier error', async () => {
-    const r = await createTerminal(FILES).run('grep -q x missing binary 2>/dev/null | cat')
+    // PCRE's reading of bytes that are not UTF-8 is not modelled.
+    const r = await createTerminal({ ...FILES, latin: Uint8Array.of(0x78, 0xe9, 0x0a) }).run('grep -qP x missing latin 2>/dev/null | cat')
     assert.ok(r.unsupported.length > 0)
     assert.equal(r.stderr, '')
   })

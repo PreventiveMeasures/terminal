@@ -45,13 +45,10 @@ describe('grep notes identify actual binary input skips', () => {
     })
   }
 
-  it('keeps unsupported default binary handling in the diagnostic channel', async () => {
+  it('says a binary file matches on stderr, and adds no note of its own', async () => {
     const result = await createTerminal(FILES).run('grep hit binary 2>/dev/null | true')
-    assert.equal(result.stdout, '')
-    assert.equal(result.stderr, '')
-    assert.equal(result.exitCode, 0)
-    assert.deepEqual(result.notes, [])
-    assert.ok(result.unsupported.some(({ detail }) => detail === 'binary input'))
+    assert.deepEqual(result, expected('', []))
+    assert.deepEqual(await createTerminal(FILES).run('grep hit binary'), expected('', [], { stderr: 'grep: binary: binary file matches\n' }))
   })
 
   for (const command of [

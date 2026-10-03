@@ -110,14 +110,12 @@ describe('grep — suppress input read errors', () => {
     }
   })
 
-  it('does not suppress unsupported options, regex features, binary behavior, or locale diagnostics', async () => {
+  it('does not suppress unsupported options, regex features, or locale diagnostics', async () => {
     const gaps = [
       ['grep -s --unknown hit good', 'option', '--unknown'],
       [String.raw`grep -s '\d' good`, 'feature', 'regex escape'],
-      ['grep -s hit binary', 'feature', 'binary input'],
       ["grep -asi '\\(x\\)\\1' unicode", 'feature', 'non-ASCII regex semantics'],
       ["grep --no-messages -aqi '\\(x\\)\\1' unicode", 'feature', 'non-ASCII regex semantics'],
-      ['grep -sq hit missing binary', 'feature', 'binary input'],
     ]
     for (const [command, kind, detail] of gaps) {
       const result = await createTerminal(FILES).run(command)
@@ -126,6 +124,12 @@ describe('grep — suppress input read errors', () => {
       assert.match(result.stderr, /^grep: .+\n$/u, command)
       assert.deepEqual(result.unsupported, [{ kind, command: 'grep', detail, message: result.stderr.trimEnd() }], command)
     }
+  })
+
+  it('does not suppress saying that a binary file matches, which is no read error', async () => {
+    await check('grep -s hit binary', '', 0, 'grep: binary: binary file matches\n')
+    await check('grep -s hit missing binary good', 'good:hit\ngood:hit again\n', 2, 'grep: binary: binary file matches\n')
+    await check('grep -sq hit missing binary', '', 0)
   })
 
   it('keeps unsupported metadata through stderr redirection and a successful following stage', async () => {

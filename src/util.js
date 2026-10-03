@@ -8,7 +8,7 @@ import { lookupWithNote } from './notes.js'
 
 // Commands reach the byte codec and the result shape through here, where the
 // rest of their shared helpers already live.
-export { encodeUtf8, encodeUtf8Loose, decodeUtf8, decodeUtf8Loose, decodeUtf8Maybe, joinBytes, utf8CodePoints } from './bytes.js'
+export { MARKER, encodeUtf8, encodeUtf8Loose, encodeUtf8Marked, decodeUtf8, decodeUtf8Loose, decodeUtf8Marked, decodeUtf8Maybe, joinBytes, utf8CodePoints } from './bytes.js'
 export { textOfFile } from './fs.js'
 export { err, ok, usage } from './result.js'
 export { discardedNotes, missingPathNote } from './notes.js'
@@ -123,7 +123,9 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
       } else ofFile(entry, found.path)
     }
     entries.push(entry)
-    if (error) stderr += readFailure(cmd, name, error, entry.kind === 'dir')
+    // Each failure keeps its own words too, for a command that writes them
+    // where that operand came rather than all together.
+    if (error) stderr += entry.failure = readFailure(cmd, name, error, entry.kind === 'dir')
     if (entry.kind !== 'file' && (options.stopOnError || (entry.kind === 'dir' && options.stopOnDir))) break
   }
   return { inputs: entries.filter((e) => e.kind === 'file'), entries, stderr, failed: stderr !== '' }
