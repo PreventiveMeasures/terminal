@@ -410,6 +410,24 @@ describe('searching a tree that holds files of bytes', () => {
     await check(t, 'grep -x spelled text.txt img.png', '', { exitCode: 1 })
   })
 
+  it('reads a literal by the dialect it is written in', async () => {
+    const t = terminal({ ...SOURCES, 'call.c': 'foobartest(x) + a.b\n', 'nul.o': 'f\0(x)\n' })
+    // A BRE reads `(` and `+` as themselves, and an ERE reads them so
+    // escaped; `\.` is a dot in either.
+    const commands = [String.raw`grep -r 'foobartest(' .`, String.raw`grep -rE 'foobartest\(' .`, String.raw`grep -r 'x) +' .`,
+      String.raw`grep -rE 'x\) \+' .`, String.raw`grep -r 'a\.b' .`, String.raw`grep -rF 'test(x)' .`, String.raw`grep -ri 'FOOBARTEST(' .`]
+    for (const command of commands) await check(t, command, './call.c:foobartest(x) + a.b\n')
+  })
+
+  it('refuses where an escape makes an operator of a character', async () => {
+    const t = terminal()
+    const message = 'grep: binary input detection and output are not supported\n'
+    // `\(` groups in a BRE, and `(` groups in an ERE.
+    await gap(t, 'grep "spel\\(led\\)" img.png', 'binary input', message)
+    await gap(t, 'grep -E "spel(led)" img.png', 'binary input', message)
+    await gap(t, 'grep "\\wspelled" img.png', 'binary input', message)
+  })
+
   it('answers every output mode for a file a literal cannot be in', async () => {
     const t = terminal()
     await check(t, 'grep -q spelled text.txt img.png')
