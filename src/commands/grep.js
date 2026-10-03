@@ -47,8 +47,9 @@ export function grep(stdin, tokens, ctx) {
   if (re.error) return re.error
   const counts = parseCounts(values)
   if (counts.error) return counts.error
-  // -L still lists readable files at -m0; other modes never open input.
-  if (counts.max === 0 && (!flags.has('L') || flags.has('q'))) return noMatch()
+  // -L still lists readable files at -m0; other modes never open input. Nor
+  // do they for a search that can select no line, which GNU does not run.
+  if ((counts.max === 0 || selectsNothing(patterns, flags)) && (!flags.has('L') || flags.has('q'))) return noMatch()
   if (counts.max !== 0 && ctx.stdinFile && (flags.has('q') || flags.has('l') || flags.has('L') || values.has('m')) && (rest.length === 0 || rest.includes('-'))) return unsupported('feature', 'grep', 'partial stdin reads', 'grep: early termination on shared file input is not supported', 2)
   const recursive = flags.has('r') || flags.has('R')
   const filters = compileFilters(parsed, ctx)
@@ -215,6 +216,14 @@ function checkConflicts(flags) {
     return err(`grep: ${dialects.map((f) => `-${f}`).join(' / ')} are mutually exclusive`, 2)
   }
   return null
+}
+
+// No pattern at all matches no line, which GNU reads as `-v ''`; and an
+// empty pattern matches every line, so `-v` with nothing else selects none —
+// unless -x or -w ask more of a line than that it is there.
+function selectsNothing(patterns, flags) {
+  if (patterns.length === 0) return !flags.has('v')
+  return flags.has('v') && !flags.has('x') && !flags.has('w') && patterns.every((pattern) => pattern === '')
 }
 
 function parseCounts(values) {

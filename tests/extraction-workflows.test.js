@@ -163,4 +163,21 @@ describe('grep extraction — combined modes and early exits', () => {
     await check('{ grep -m0 x; cat; } < f', files.f, files)
     await check('{ grep -Lm0 x; cat; } < f', '(standard input)\n' + files.f, files)
   })
+  it('a search that can select no line opens nothing either, as GNU does not run one', async () => {
+    // Checked against GNU grep 3.11. Every line matches an empty pattern, so
+    // `-v` with only empty ones selects none, and no pattern at all is GNU's
+    // `-v ''`: nothing is counted, and a missing file is never opened.
+    const lines = { ...files, t: 'foo\nbar\n\n', none: '', blank: '\n' }
+    for (const command of ["grep -v '' t", "grep -vc '' t", "grep -vcE '' t", "grep -vc -e '' -e '' t", 'grep -vc -f blank t',
+      "grep -vl '' t", "grep -vqL '' t", "grep -v '' missing", "grep -vr '' .", 'grep -c -f none t', 'grep -cx -f none missing']) {
+      await check(command, '', lines, 1)
+    }
+    await check('{ grep -v \'\'; cat; } < t', lines.t, lines)
+    // -L still lists, -x and -w ask more of a line than that it is there,
+    // and another pattern beside the empty one is searched as ever.
+    await check("grep -vL '' t", 't\n', lines, 1)
+    await check("grep -vx '' t", 'foo\nbar\n', lines)
+    await check("grep -vc -e '' -e foo t", '0\n', lines, 1)
+    await check('grep -vc -f none t', '3\n', lines)
+  })
 })
