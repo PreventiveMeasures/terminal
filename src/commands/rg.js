@@ -9,7 +9,7 @@ import { parseArgs } from '../args.js'
 import { unsupported, unsupportedNote } from '../unsupported.js'
 import { ARGS, checkPatterns, patternArgs, rgOptions } from './rg-options.js'
 import { grep } from './grep.js'
-import { literalsMissing } from './grep-pattern.js'
+import { literalsMissing } from './grep-literal.js'
 
 const gap = (detail, message) => unsupported('feature', 'rg', detail, `rg: ${message}`, 2)
 

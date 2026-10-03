@@ -81,6 +81,7 @@
     "src/commands/find-parse.js",
     "src/commands/find.js",
     "src/commands/fs-tools.js",
+    "src/commands/grep-literal.js",
     "src/commands/grep-output.js",
     "src/commands/grep-pattern-files.js",
     "src/commands/grep-pattern.js",
