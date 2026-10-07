@@ -1,3 +1,5 @@
+import { joinBytes } from './bytes.js'
+
 // The network is the runtime's work rather than this code's, exactly as
 // compression is (./compression.js): `fetch` makes the request, and it
 // answers asynchronously where everything over the tree answers at once — so
@@ -14,10 +16,10 @@
 // whole of what a line inside such a terminal is told about it.
 //
 // Two rules hold whatever is asked for. What it will speak is http and https
-// and nothing else: `file:` would be the host filesystem this package does
-// not have, `data:` is bytes pretending to be a transfer, and every other
-// scheme is a protocol nothing here speaks — a redirect is held to the same
-// rule, since a hop is a request. And nothing is read off the host to make
+// and nothing else (./commands/curl-url.js reads a URL): `file:` would be the
+// host filesystem this package does not have, `data:` is bytes pretending to
+// be a transfer, and every other scheme is a protocol nothing here speaks —
+// a redirect is held to the same rule, since a hop is a request. And nothing is read off the host to make
 // the request with: no environment, no `.netrc`, no cookie jar, no client
 // certificate. What goes out is what the command line said.
 
@@ -38,27 +40,14 @@ export function networkOption(opts) {
   return opts.network === true
 }
 
-const SCHEMES = Object.freeze(['http:', 'https:'])
-const SCHEME_WRITTEN = /^[a-zA-Z][a-zA-Z0-9+.-]*:/u
-
-// curl reads a bare host as http — the one guess it makes about a URL, and
-// the one made here. Everything else a URL can be wrong in is the URL
-// parser's to say, and what it refuses is curl's code 3.
-export function readUrl(text) {
-  const spelt = SCHEME_WRITTEN.test(text) ? text : 'http://' + text
-  let url
-  try { url = new URL(spelt) } catch { return { malformed: true } }
-  if (!SCHEMES.includes(url.protocol)) return { protocol: url.protocol.slice(0, -1) }
-  if (url.hostname === '') return { malformed: true }
-  return { url }
-}
-
 // What the runtime says went wrong, in the numbers curl gives the same
 // trouble. A `fetch` that fails says little and says it differently in every
 // runtime, so the classification goes by the error code underneath where
-// there is one, and what is left is reported as the connection failure it
-// most often is — with the runtime's own words kept, rather than dropped for
-// a tidier guess.
+// there is one. curl's own words for most of these carry what only a
+// connection it held could say — how long it waited, how many bytes came —
+// so `exact` says whether the message here is curl's word for word; a caller
+// that would print one that is not has a gap to report instead. `refused` is
+// a request the runtime would not make at all, which curl would have made.
 const RESOLVE = new Set(['ENOTFOUND', 'EAI_AGAIN'])
 const TIMEOUT = new Set(['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'])
 const RESET = new Set(['ECONNRESET', 'ECONNABORTED', 'EPIPE'])
@@ -66,23 +55,26 @@ const CERTIFICATE = new Set([
   'CERT_HAS_EXPIRED', 'CERT_NOT_YET_VALID', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN',
   'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'ERR_TLS_CERT_ALTNAME_INVALID',
 ])
+// What undici says of a request it will not send: a header or a port the
+// Fetch standard keeps for itself, or an argument it does not take.
+const REFUSALS = new Set(['UND_ERR_INVALID_ARG', 'UND_ERR_NOT_SUPPORTED'])
 
 // A request carries no deadline of its own unless one was asked for, so an
 // abort is `--max-time` running out; a runtime that aborts for its own
 // reasons reports the same timeout, which is what it is.
 const ABORTS = new Set(['TimeoutError', 'AbortError'])
 
-function failure(e, url, timeout) {
+function failure(e, url) {
   const code = causeCode(e)
   const why = reasonOf(e)
-  const where = `Failed to connect to ${url.hostname} port ${portOf(url)}`
-  if (ABORTS.has(e?.name) || TIMEOUT.has(code)) {
-    return { code: 28, message: timeout === null ? `Operation timed out: ${why}` : `Operation timed out after ${timeout} milliseconds` }
-  }
-  if (RESOLVE.has(code)) return { code: 6, message: `Could not resolve host: ${url.hostname}` }
-  if (CERTIFICATE.has(code)) return { code: 60, message: `SSL certificate problem: ${why}` }
-  if (RESET.has(code)) return { code: 56, message: `Recv failure: ${why}` }
-  return { code: 7, message: `${where}: ${why}` }
+  if (ABORTS.has(e?.name) || TIMEOUT.has(code)) return { code: 28, message: `Operation timed out: ${why}`, exact: false }
+  if (RESOLVE.has(code)) return { code: 6, message: `Could not resolve host: ${url.hostname}`, exact: true }
+  // A Request that cannot be built is thrown bare; a port the standard bars
+  // is a network error naming it.
+  if (REFUSALS.has(code) || (e instanceof TypeError && e.cause === undefined) || why === 'bad port') return { refused: why }
+  if (CERTIFICATE.has(code)) return { code: 60, message: `SSL certificate problem: ${why}`, exact: false }
+  if (RESET.has(code)) return { code: 56, message: `Recv failure: ${why}`, exact: false }
+  return { code: 7, message: `Failed to connect to ${url.hostname} port ${portOf(url)}: ${why}`, exact: false }
 }
 
 const portOf = (url) => url.port === '' ? (url.protocol === 'https:' ? 443 : 80) : url.port
@@ -109,25 +101,45 @@ function reasonOf(e) {
 
 // One request and what came back, or what stopped it. Nothing is thrown from
 // here: a transfer that fails is an answer a command has words for.
-export async function transfer(url, init, timeout = null) {
+export async function transfer(url, init) {
   try {
     return { response: await fetch(url.href, init) }
   } catch (e) {
-    return { failed: failure(e, url, timeout) }
+    return { failed: failure(e, url) }
   }
 }
 
-// The body, whole, as the bytes it is — what a terminal carrying its output
-// as a string then makes of them is the caller's business, as it is for every
-// other command here that writes bytes. A body that stops early is its own
-// failure, told apart from a connection that never opened.
-export async function receive(response, url, timeout = null) {
+// The body as the bytes it is, read as it arrives — what a terminal carrying
+// its output as a string then makes of them is the caller's business, as it
+// is for every other command here that writes bytes. A body that stops early
+// hands back what did arrive, which curl has written by then, and the
+// failure: one that stops short of the length it was given is curl's code 18
+// in curl's words, since the count is the response's own.
+export async function receive(response, url) {
+  const chunks = []
+  let received = 0
   try {
-    return { bytes: new Uint8Array(await response.arrayBuffer()) }
+    const reader = response.body?.getReader()
+    // oxlint-disable-next-line no-await-in-loop -- the body arrives a piece after the last.
+    for (let part = await reader?.read(); part && !part.done; part = await reader.read()) {
+      chunks.push(part.value)
+      received += part.value.length
+    }
+    return { bytes: joinBytes([...chunks, new Uint8Array()]) }
   } catch (e) {
-    const { code, message } = failure(e, url, timeout)
-    return { failed: code === 7 ? { code: 56, message: `Recv failure: ${reasonOf(e)}` } : { code, message } }
+    return { bytes: joinBytes([...chunks, new Uint8Array()]), failed: bodyFailure(e, response, url, received) }
   }
+}
+
+function bodyFailure(e, response, url, received) {
+  const found = failure(e, url)
+  if (found.code === 28 || found.code === 56) return found
+  const length = response.headers.get('content-length')
+  if (/^\d+$/u.test(length ?? '') && !response.headers.has('content-encoding')) {
+    return { code: 18, message: `transfer closed with ${Number(length) - received} bytes remaining to read`, exact: true }
+  }
+  if (/chunked/iu.test(response.headers.get('transfer-encoding') ?? '')) return { code: 18, message: 'transfer closed with outstanding read data remaining', exact: true }
+  return { code: 56, message: `Recv failure: ${reasonOf(e)}`, exact: false }
 }
 
 // A redirect whose body nobody will read is still a body the runtime is
