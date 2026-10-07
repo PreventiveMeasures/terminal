@@ -407,15 +407,16 @@ describe('GNU conformance — what a tool says it could not read on the command 
     assert.equal((await createTerminal(rows).run("sort -t'ab' pairs")).exitCode, 2)
   })
 
-  // coreutils exits 1 when it cannot read the command line at all. `grep`
-  // exits 2, and so does awk, and bash's printf builtin. This exited 2 for
-  // every one of them. Debian's which, given nothing, says nothing either.
+  // coreutils exits 1 when it cannot read the command line at all, and so
+  // does gawk, which prints its usage. `grep` exits 2, and so does bash's
+  // printf builtin. This exited 2 for every one of them. Debian's which,
+  // given nothing, says nothing and exits 1.
   it('exits the way the tool does when the command line will not read', async () => {
     const files = { f: 'hi\n', pairs: 'a 1\n' }
     for (const [command, exitCode] of [
       ['seq', 1], ['cut pairs', 1], ['cut -c1 -f1 pairs', 1], ['tr a', 1],
       ['basename', 1], ['dirname', 1], ['printf', 2], ['cp f', 1], ['rm', 1], ['realpath', 1],
-      ['grep', 2], ['awk', 2],
+      ['grep', 2], ['awk', 1],
     ]) {
       const r = await createTerminal(files).run(command)
       assert.equal(r.exitCode, exitCode, command)
@@ -572,7 +573,7 @@ describe('GNU conformance — a call awk finds when it runs one', () => {
   it('runs everything up to the call, then fails on it', async () => {
     const r = await awked('BEGIN {print "a"; print foo(1)}')
     assert.deepEqual([r.stdout, r.exitCode], ['a\n', 2])
-    assert.equal(r.stderr, 'awk: function `foo` not defined\n')
+    assert.equal(r.stderr, "awk: cmd. line:1: fatal: function `foo' not defined\n")
   })
 
   it('runs a program whose call is never reached', async () => {
@@ -586,7 +587,7 @@ describe('GNU conformance — a call awk finds when it runs one', () => {
   it('looks a call up in the program and nowhere else', async () => {
     for (const name of ['eval', 'Function', 'require', 'constructor', '__proto__', 'toString']) {
       const r = await awked(`BEGIN { print ${name}("1+1") }`)
-      assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', `awk: function \`${name}\` not defined\n`, 2], name)
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', `awk: cmd. line:1: fatal: function \`${name}' not defined\n`, 2], name)
     }
   })
 })

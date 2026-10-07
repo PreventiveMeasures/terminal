@@ -24,7 +24,11 @@ export function parseFormat(fmt) {
     }
     if (lit !== '') { pieces.push(lit); lit = '' }
     const flags = m[1]
+    // Where the conversion and any `*` are, for a message about the
+    // argument one of them lacks.
+    const at = { conv: i + m[0].length - 1, width: i + 1 + flags.length, precision: i + m[0].indexOf('.') + 1 }
     pieces.push({
+      at,
       minus: flags.includes('-'),
       plus: flags.includes('+'),
       space: flags.includes(' '),

@@ -43,7 +43,7 @@ describe('missing option arguments and arguments to flags', () => {
   })
 
   it('refuses where the tool goes on to print a usage text this does not carry', async () => {
-    for (const [command, cmd, detail] of [['awk -F', 'awk', '-F'], ['xxd -s', 'xxd', '-s']]) {
+    for (const [command, cmd, detail] of [['xxd -s', 'xxd', '-s']]) {
       const r = await run(command)
       assert.equal(r.exitCode, 1, command)
       assert.deepEqual(r.unsupported.map(({ kind, command: name, detail: what }) => ({ kind, command: name, detail: what })), [{ kind: 'option', command: cmd, detail }], command)

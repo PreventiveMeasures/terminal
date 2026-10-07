@@ -11,9 +11,10 @@ const identity = (result) => result.unsupported.map(({ kind, command, detail }) 
 
 // These builtins interpret option-like tokens as data, counts, or expressions;
 // bash's printf calls one an invalid option, as bash does, and coreutils'
-// prints it as a format. Every other registered command must diagnose
-// unavailable options.
-const NO_OPTIONS = new Set(['echo', 'printf', 'true', 'false', ':', 'exit', 'break', 'continue', 'test', '['])
+// prints it as a format. awk rejects an option gawk does not know exactly as
+// gawk does, with its usage text and status 1, which is no gap. Every other
+// registered command must diagnose unavailable options.
+const NO_OPTIONS = new Set(['echo', 'printf', 'true', 'false', ':', 'exit', 'break', 'continue', 'test', '[', 'awk'])
 const registered = { ...DEFAULT_REGISTRY.commands, ...DEFAULT_REGISTRY.hidden }
 
 describe('diagnostic completeness — command dispatch', () => {
@@ -87,8 +88,6 @@ const COMMAND_GAPS = [
   [String.raw`awk 'BEGIN {x="out";printf "%s", "lost" >> x}'`, 'output redirection'],
   [String.raw`awk 'BEGIN {a[1][2]=3}'`, 'arrays of arrays'],
   [String.raw`awk 'BEGIN {delete a[1][2]}'`, 'arrays of arrays'],
-  [String.raw`awk 'BEGIN {print sub(/a/,"b","a")}'`, 'substitution into temporary value'],
-  [String.raw`awk 'BEGIN {print gsub(/a/,"b",42)}'`, 'substitution into temporary value'],
   [String.raw`awk 'BEGIN {x=@/a/}'`, '@ extensions'],
   [String.raw`awk '@include "f"'`, '@ extensions'],
   [String.raw`awk 'BEGIN {print audit::value}'`, 'namespaces'],
@@ -109,9 +108,6 @@ const COMMAND_GAPS = [
   [String.raw`awk 'BEGIN {print "é" ~ /\303\251/}'`, 'regex byte escapes'],
   [String.raw`awk 'BEGIN {print "é" ~ /[\x80-\xff]/}'`, 'regex byte escapes'],
   [String.raw`awk 'BEGIN {IGNORECASE=1; print "ᲀ" ~ /в/}'`, 'locale-sensitive regex'],
-  [String.raw`awk 'BEGIN {print toupper("ß")}'`, 'Unicode case mapping'],
-  [String.raw`awk 'BEGIN {print tolower("İ")}'`, 'Unicode case mapping'],
-  [String.raw`awk 'BEGIN {IGNORECASE=1; print index("İ","i")}'`, 'Unicode case mapping'],
   [String.raw`awk 'BEGIN {print "a" ~ /a{1001}/}'`, 'regex interval limit'],
   [String.raw`awk 'BEGIN {r="a{1001}";print "a" ~ r}'`, 'regex interval limit'],
   [String.raw`awk 'BEGIN {print match("",/(a{1000}){1000}/)}'`, 'regex state limit'],

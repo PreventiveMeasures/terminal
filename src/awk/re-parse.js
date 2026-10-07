@@ -16,7 +16,8 @@ import { LOCALE, classTables, foldedClass } from '../locale.js'
 import { codePointSize } from '../unicode.js'
 
 const CONTROL = { __proto__: null, n: 10, t: 9, r: 13, f: 12, v: 11, a: 7, b: 8 }
-const SYNTAX = '^$.[]|()*+?{}\\/"'
+// The escapes gawk passes to GNU regex without a warning.
+const KNOWN_ESCAPES = '<>`\'BywWsS{}()|*+?.^$\\[]/-'
 const MAX_INTERVAL = 1000
 const isHex = (c) => c !== undefined && /[0-9a-fA-F]/u.test(c)
 const isOctal = (c) => c !== undefined && c >= '0' && c <= '7'
@@ -31,7 +32,14 @@ class EreParser {
     this.groups = 0
   }
 
-  fail(msg) { throw new AwkError(`invalid regex /${this.src}/: ${msg}`) }
+  // What GNU regex says of a pattern it refuses (`gnu`), in gawk's runtime
+  // words; a refusal GNU's words are not known for is reported as ours.
+  fail(msg, gnu = null) {
+    if (gnu === null) throw new AwkError(`invalid regex /${this.src}/: ${msg}`, null, 'regex error message')
+    const e = new AwkError(`invalid regexp: ${gnu}: /${this.src}/`)
+    e.gnu = gnu
+    throw e
+  }
   peek() { return this.src[this.i] }
   // Next code point as a char node, surrogate pairs kept whole.
   literal() {
@@ -87,11 +95,11 @@ class EreParser {
         // A `{...}` of digits and commas that is not a well-formed
         // interval is an error, as in GNU regex; a `{` that never
         // closes (`a{1`) is a literal.
-        if (!m && /^\{[\d,]*\}/u.test(this.src.slice(this.i))) this.fail('invalid content of {}')
+        if (!m && /^\{[\d,]*\}/u.test(this.src.slice(this.i))) this.fail('invalid content of {}', 'Invalid content of \\{\\}')
         if (!m || (m[1] === '' && m[2] === undefined)) return node
         const min = m[1] === '' ? 0 : Number(m[1])
         const max = m[2] === undefined ? min : m[3] === '' ? null : Number(m[3])
-        if (max !== null && max < min) this.fail(`invalid interval {${min},${max}}`)
+        if (max !== null && max < min) this.fail(`invalid interval {${min},${max}}`, 'Invalid content of \\{\\}')
         if (min > MAX_INTERVAL || (max !== null && max > MAX_INTERVAL)) throw new AwkError(`interval count above ${MAX_INTERVAL} is not supported`, null, 'regex interval limit')
         this.i += m[0].length
         node = { type: 'rep', node, min, max }
@@ -107,7 +115,7 @@ class EreParser {
       this.i++
       const index = ++this.groups
       const node = this.alternation(depth + 1)
-      if (this.peek() !== ')') this.fail('missing `)`')
+      if (this.peek() !== ')') this.fail('missing `)`', 'Unmatched ( or \\(')
       this.i++
       return { type: 'group', index, node }
     }
@@ -125,7 +133,7 @@ class EreParser {
   escape() {
     this.i++
     const c = this.peek()
-    if (c === undefined) this.fail('trailing backslash')
+    if (c === undefined) this.fail('trailing backslash', 'Trailing backslash')
     this.i++
     if (c === 'y') return { type: 'assert', kind: 'y' }
     if (c === '<' || c === '>' || c === 'B') return { type: 'assert', kind: c }
@@ -133,25 +141,35 @@ class EreParser {
     if (c === "'") return { type: 'assert', kind: '$' }
     if (c === 's' || c === 'S') return { type: 'set', negate: c === 'S', items: this.tables.ranges('space') }
     if (c === 'w' || c === 'W') return { type: 'set', negate: c === 'W', items: this.tables.ranges('word') }
-    if (c === 'b') this.warn?.('regexp escape sequence `\\b\' is a backspace here, as in gawk; `\\y\' is the word boundary')
-    return this.charNode(this.escapedCode(c, true))
+    return this.charNode(this.escapedCode(c))
   }
 
-  // The code point an escape denotes; used outside and inside brackets.
-  escapedCode(c, warnUnknown) {
+  // The code point an escape denotes; used outside and inside brackets,
+  // where gawk reads escapes alike. Its warnings: `\x` with no digits each
+  // time, `\8` and `\9` and an escape that is no regex operator once per
+  // character in a run.
+  escapedCode(c) {
     if (c in CONTROL) return CONTROL[c]
     if (isOctal(c)) {
       let digits = c
       while (digits.length < 3 && isOctal(this.peek())) digits += this.src[this.i++]
       return regexByte(digits, 8)
     }
-    if (c === 'x' && isHex(this.peek())) {
+    if (c === 'x') {
+      if (!isHex(this.peek())) {
+        this.warn?.("no hex digits in `\\x' escape sequence")
+        return 120
+      }
       let digits = ''
       while (digits.length < 2 && isHex(this.peek())) digits += this.src[this.i++]
       return regexByte(digits, 16)
     }
     const code = this.src.codePointAt(this.i - 1)
-    if (!SYNTAX.includes(c) && warnUnknown) this.warn?.(`regexp escape sequence \`\\${String.fromCodePoint(code)}' is not a known regexp operator`)
+    // gawk escapes the first byte of a multibyte character and names that
+    // byte alone in its warning, which is no text this terminal can write.
+    if (code > 127) throw new AwkError('non-ASCII characters after a regex escape are not supported', null, 'non-ASCII regex escape')
+    if (c === '8' || c === '9') this.warn?.(`regexp escape sequence \`\\${c}' treated as plain \`${c}'`, `regex \\${c} plain`)
+    else if (!KNOWN_ESCAPES.includes(c)) this.warn?.(`regexp escape sequence \`\\${String.fromCodePoint(code)}' is not a known regexp operator`, `regex \\${c}`)
     this.i += codePointSize(code) - 1
     return code
   }
@@ -163,7 +181,8 @@ class EreParser {
     const items = []
     let first = true
     for (;;) {
-      if (this.i >= this.src.length) this.fail('unterminated bracket expression')
+      // GNU regex: a list with nothing in it at all is an invalid pattern.
+      if (this.i >= this.src.length) this.fail('unterminated bracket expression', first ? 'Invalid regular expression' : 'Unmatched [, [^, [:, [., or [=')
       const c = this.peek()
       if (c === ']' && !first) { this.i++; break }
       first = false
@@ -172,7 +191,7 @@ class EreParser {
         if (close !== -1) {
           const name = this.src.slice(this.i + 2, close)
           const ranges = this.tables.ranges(this.ignoreCase ? foldedClass(name) : name)
-          if (ranges === undefined) this.fail(`invalid character class \`[:${name}:]\``)
+          if (ranges === undefined) this.fail(`invalid character class \`[:${name}:]\``, 'Invalid character class name')
           items.push(...ranges)
           this.i = close + 2
           continue
@@ -183,7 +202,7 @@ class EreParser {
         this.i++
         const hi = this.bracketChar()
         const range = this.ignoreCase ? this.tables.foldRange(lo, hi) : hi < lo ? null : [[lo, hi]]
-        if (range === null) this.fail('invalid range end')
+        if (range === null) this.fail('invalid range end', 'Invalid range end')
         items.push(...range)
       } else if (this.ignoreCase) items.push(...this.tables.fold(lo).map((code) => [code, code]))
       else items.push([lo, lo])
@@ -199,7 +218,7 @@ class EreParser {
     if (c === '[' && (this.src[this.i + 1] === '.' || this.src[this.i + 1] === '=')) {
       const close = this.src.indexOf(this.src[this.i + 1] + ']', this.i + 2)
       if (close !== -1 && close > this.i + 2) {
-        if (Array.from(this.src.slice(this.i + 2, close)).length !== 1) this.fail('invalid collation character')
+        if (Array.from(this.src.slice(this.i + 2, close)).length !== 1) this.fail('invalid collation character', 'Invalid collation character')
         const code = this.src.codePointAt(this.i + 2)
         this.i = close + 2
         return code
@@ -207,9 +226,9 @@ class EreParser {
     }
     if (c === '\\') {
       this.i++
-      if (this.peek() === undefined) this.fail('trailing backslash')
+      if (this.peek() === undefined) this.fail('trailing backslash', 'Unmatched [, [^, [:, [., or [=')
       const e = this.src[this.i++]
-      return this.escapedCode(e, false)
+      return this.escapedCode(e)
     }
     const code = this.src.codePointAt(this.i)
     this.i += codePointSize(code)

@@ -6,7 +6,8 @@
 
 import { AwkError, MAX_STEPS } from './common.js'
 import { unescapeAwkString } from './lex.js'
-import { AwkRegex, compileRegex, nonEmptyMatch, splitByRegex, stepAt } from './regex.js'
+import { subscript } from './array.js'
+import { AwkRegex, compileRegex, splitByRegex, stepAt } from './regex.js'
 import { StrNum, checkText, ignoreCase, toNum, toStr } from './value.js'
 import { lookupWithNote } from '../notes.js'
 import { consumeStdin } from '../util.js'
@@ -25,9 +26,23 @@ export function readRecord(src, rs, ic) {
     start = at === -1 ? text.length : at
     end = at === -1 ? text.length : at + 1
   } else {
-    const match = nonEmptyMatch(text, compileRegex(rs, ic), src.pos)
-    start = match?.start ?? text.length
-    end = match?.end ?? text.length
+    // gawk searches the rest of its buffer for the next match, as text of
+    // its own: a word boundary where the record starts is read as if
+    // nothing preceded it, which differs from reading it here only after a
+    // word character. A match that is empty before the end gawk then steps
+    // over in a way that drops text from the record; at the end it is no
+    // terminator, as here.
+    const re = compileRegex(rs, ic)
+    if (re.wordAnchored && src.pos > 0 && re.tables.has('word', text.codePointAt(src.pos - 1))) {
+      throw new AwkError('a regex RS with word-boundary operators after a word character is not supported', null, 'word-boundary RS')
+    }
+    const match = re.search(text, src.pos)
+    if (match && match.start === match.end && match.start < text.length) {
+      throw new AwkError('a regex RS that matches the empty string inside a record is not supported', null, 'empty-matching RS')
+    }
+    const found = match && match.start !== match.end ? match : null
+    start = found?.start ?? text.length
+    end = found?.end ?? text.length
   }
   const rec = text.slice(src.pos, start)
   src.pos = end
@@ -53,19 +68,41 @@ function readParagraph(src) {
 
 // Split with an FS-style separator: a string under the FS rules, or a
 // compiled regex (a regex literal handed to split()). Backs split() and
-// the FS mode of record splitting.
-export function splitOn(str, sep, paragraph, ic) {
+// the FS mode of record splitting. `seps`, when given, collects split()'s
+// fourth array as [index, separator] pairs.
+export function splitOn(str, sep, paragraph, ic, seps = null) {
   if (str === '') return []
-  if (sep instanceof AwkRegex) return splitByRegex(str, sep)
+  if (sep instanceof AwkRegex) return splitByRegex(str, sep, seps)
   if (sep === ' ') {
+    if (seps !== null) return splitBlanks(str, seps)
     const trimmed = str.replace(/^[ \t\n]+|[ \t\n]+$/gu, '')
     return trimmed === '' ? [] : trimmed.split(/[ \t\n]+/u)
   }
-  if (sep === '') return [...str]
-  if (sep.length === 1 && (!paragraph || sep === '\n')) return str.split(sep)
+  if (sep === '') {
+    const chars = [...str]
+    for (let i = 1; i < chars.length; i++) seps?.push([i, ''])
+    return chars
+  }
+  if (sep.length === 1 && (!paragraph || sep === '\n')) {
+    const parts = str.split(sep)
+    for (let i = 1; i < parts.length; i++) seps?.push([i, sep])
+    return parts
+  }
   if (paragraph && sep === '^') throw new AwkError('paragraph splitting with FS="^" is not supported', null, 'paragraph FS caret')
   const source = sep.length === 1 ? `[${'^$.[]|()*+?{}\\'.includes(sep) ? '\\' + sep : sep}\n]` : sep
-  return splitByRegex(str, compileRegex(source, ic))
+  return splitByRegex(str, compileRegex(source, ic), seps)
+}
+
+// Default splitting, keeping the blanks: seps[0] holds any before the
+// first field, seps[n] any after the last.
+function splitBlanks(str, seps) {
+  const pieces = str.split(/([ \t\n]+)/u)
+  const parts = []
+  for (let i = 0; i < pieces.length; i += 2) {
+    if (pieces[i] !== '') parts.push(pieces[i])
+    if (i + 1 < pieces.length) seps.push([parts.length, pieces[i + 1]])
+  }
+  return parts
 }
 
 // FIELDWIDTHS: blank-separated column widths, each `width` or
@@ -116,7 +153,7 @@ function splitPattern(str, re) {
 export function splitRecord(m, str) {
   const ic = ignoreCase(m)
   if (m.fieldMode === 'FIELDWIDTHS') return splitWidths(str, m.widths)
-  if (m.fieldMode === 'FPAT') return splitPattern(str, compileRegex(toStr(m.globals.get('FPAT'), m), ic, m.warn))
+  if (m.fieldMode === 'FPAT') return splitPattern(str, compileRegex(toStr(m.globals.get('FPAT'), m), ic))
   return splitOn(str, toStr(m.globals.get('FS'), m), toStr(m.globals.get('RS'), m) === '', ic)
 }
 
@@ -162,12 +199,17 @@ export class Input {
   open(m) {
     while (this.idx < Math.trunc(toNum(m.globals.get('ARGC')))) {
       if (++m.steps > MAX_STEPS) throw new AwkError('input operand scan exceeded execution limit', null, 'execution limit')
-      const op = toStr(m.globals.get('ARGV').get(String(this.idx++)), m)
+      const index = this.idx++
+      const op = toStr(m.globals.get('ARGV').get(subscript(index, String(index)))?.value, m)
       if (op === '') continue
       m.globals.set('ARGIND', this.idx - 1)
       const asg = ASSIGNMENT.exec(op)
-      if (asg) { m.assign(asg[1], new StrNum(unescapeAwkString(asg[2], m.warn))); continue }
+      // gawk reads an assignment as it does -v, naming no place in its
+      // warnings; a file it names in FILENAME, with FNR 0, before opening.
+      if (asg) { m.assign(asg[1], new StrNum(unescapeAwkString(asg[2], (msg, key) => m.warnAt('', msg, key)))); continue }
       this.sawFile = true
+      m.globals.set('FILENAME', op)
+      m.globals.set('FNR', 0)
       const { text, error } = this.readOperand(op)
       if (error === 'Is a directory') {
         this.failFile(m, op, error)
@@ -178,7 +220,7 @@ export class Input {
         const sig = this.failFile(m, op, error)
         if (sig !== undefined && sig.type === 'nextfile') continue
         if (this.exitSignal !== undefined) return false
-        throw new AwkError(`${op}: ${error}`)
+        throw new AwkError(`cannot open file \`${op}' for reading: ${error}`)
       }
       if (this.use(m, op, text)) return true
     }
@@ -240,6 +282,7 @@ export class Input {
   // `getline < name`: 1 with a record, 0 at end of file, -1 when the
   // file cannot be opened. Each name keeps its cursor until close().
   readNamed(m, name) {
+    if (name === '') throw new AwkError("expression for `<' redirection has null string value")
     let src = this.readers.get(name)
     if (!src) {
       const { text, error } = this.readOperand(name)

@@ -2,68 +2,91 @@
 // signals; user functions throw them across expression evaluation boundaries.
 
 import { classTables } from '../locale.js'
-import { AwkError, MAX_STEPS } from './common.js'
+import { AwkError, MAX_STEPS, sourceName } from './common.js'
 import { callBuiltin } from './builtins.js'
-import { Signal, evalExpr, getArray, regexOf, setRecord, setVar, subscriptKeys } from './eval.js'
+import { AwkArray, subscript } from './array.js'
+import { Signal, evalExpr, getArray, record, regexOf, setRecord, setVar, subscriptOf } from './eval.js'
 import { Input } from './input.js'
 import { initialRng } from './math.js'
 import { redirectMessage } from './parse.js'
 import { awkSprintf } from './printf.js'
-import { StrNum, byteLocale, compare, toNum, toOutStr, toStr, truthy } from './value.js'
+import { NULL_FIELD, StrNum, byteLocale, compare, toNum, toOutStr, toStr, truthy } from './value.js'
 
 const BREAK = { type: 'break' }
 const CONTINUE = { type: 'continue' }
 const NEXT = { type: 'next' }
 const NEXTFILE = { type: 'nextfile' }
 const EXIT = { type: 'exit' }
+const BARE_PRINT = { dest: null }
 
-export function createMachine(program, ctx, stdin, operands) {
-  const argv = new Map([['0', 'awk']])
-  operands.forEach((op, i) => argv.set(String(i + 1), new StrNum(op)))
+// `once` holds the warnings gawk gives once per run, shared with what the
+// parser warned of.
+export function createMachine(program, ctx, stdin, operands, once = new Set()) {
+  const argv = new AwkArray('ARGV')
+  argv.lookup(subscript(0, '0')).value = 'awk'
+  operands.forEach((op, i) => { argv.lookup(subscript(i + 1, String(i + 1))).value = new StrNum(op) })
+  const procinfo = new SystemArray('PROCINFO')
+  procinfo.lookup(subscript('FS', 'FS')).value = 'FS'
   const globals = new Map([
     ['FS', ' '], ['OFS', ' '], ['ORS', '\n'], ['RS', '\n'], ['RT', ''],
     ['NR', 0], ['NF', 0], ['FNR', 0], ['FILENAME', ''],
     ['SUBSEP', '\u001C'], ['CONVFMT', '%.6g'], ['OFMT', '%.6g'],
     ['RSTART', 0], ['RLENGTH', -1], ['ERRNO', ''], ['IGNORECASE', 0],
     ['FIELDWIDTHS', ''], ['FPAT', '[^[:space:]]+'],
-    ['ENVIRON', new SystemArray('ENVIRON')], ['PROCINFO', new SystemArray('PROCINFO', [['FS', 'FS']])],
+    ['ENVIRON', new SystemArray('ENVIRON')], ['PROCINFO', procinfo],
     ['ARGC', operands.length + 1], ['ARGV', argv], ['ARGIND', 0],
   ])
+  // Before any input $0 is an empty null field, as in gawk's BEGIN. `line`
+  // and `src` are gawk's sourceline and source: where the statement running
+  // now was read, which runtime messages name.
   const m = {
-    program, globals, frame: undefined, callDepth: 0, record: '', recordValue: new StrNum(''), fields: [undefined], nf: 0,
-    fieldMode: 'FS', out: [], errOut: [], steps: 0, exitCode: 0, ranges: [], rng: initialRng(),
+    program, globals, frame: undefined, callDepth: 0, record: '', recordValue: NULL_FIELD, dirty: false, fields: [undefined], nf: 0,
+    fieldMode: 'FS', out: [], errOut: [], outputs: new Set(), steps: 0, exitCode: 0, ranges: [], rng: initialRng(),
     input: new Input(ctx, stdin), byteLocale: byteLocale(ctx), tables: classTables(ctx.locale),
-    hasFileRules: program.beginFile.length > 0,
+    hasFileRules: program.beginFile.length > 0, line: 0, src: 0, once,
     // Injected so ./eval.js and ./input.js need no import of this
     // module or of the builtins.
     callBuiltin, execStmts,
     assign: (name, v) => setVar(m, name, v),
-    warn: (msg) => m.errOut.push(`awk: warning: ${msg}\n`),
+    warn: (msg, key) => m.warnAt(where(m), msg, key),
+    warnAt: (place, msg, key) => {
+      if (key) {
+        if (once.has(key)) return
+        once.add(key)
+      }
+      m.errOut.push(`awk: ${place}warning: ${msg}\n`)
+    },
     fileRule: (kind) => fileRule(m, kind),
   }
   return m
 }
 
+// The place gawk names in a runtime message: the program line running, and
+// the input record being read (FNR as an integer above 0).
+export function where(m) {
+  let place = m.line > 0 ? `${sourceName(m.program.sources, m.src)}:${m.line}: ` : ''
+  const fnr = Math.trunc(toNum(m.globals.get('FNR')))
+  if (fnr > 0) place += `(FILENAME=${toStr(m.globals.get('FILENAME'), m)} FNR=${fnr}) `
+  return place
+}
+
 // Never present an absent process environment or a partial PROCINFO as
 // complete data. In particular sorted_in controls iteration in gawk;
 // accepting that key as an ordinary array entry silently ignores it.
-class SystemArray extends Map {
-  constructor(name, entries = []) { super(entries); this.systemName = name }
-  check(key) {
-    if (!this.systemName || (this.systemName === 'PROCINFO' && key === 'FS')) return
-    const detail = this.systemName === 'ENVIRON' ? 'ENVIRON' : `PROCINFO[${key ?? '*'}]`
+class SystemArray extends AwkArray {
+  constructor(name) { super(name); this.systemName = name }
+  check(sub) {
+    if (this.systemName === 'PROCINFO' && sub?.key === 'FS') return
+    const detail = this.systemName === 'ENVIRON' ? 'ENVIRON' : `PROCINFO[${sub?.key ?? '*'}]`
     throw new AwkError(`${detail} is not supported without the corresponding environment or process metadata`, null, detail)
   }
-  get(key) { this.check(key); return super.get(key) }
-  has(key) { this.check(key); return super.has(key) }
-  set(key, value) { this.check(key); return super.set(key, value) }
-  delete(key) { this.check(key); return super.delete(key) }
-  clear() { this.check(); return super.clear() }
+  lookup(sub) { this.check(sub); return super.lookup(sub) }
+  get(sub) { this.check(sub); return super.get(sub) }
+  has(sub) { this.check(sub); return super.has(sub) }
+  remove(sub) { this.check(sub); return super.remove(sub) }
+  clear() { this.check(); super.clear() }
   get size() { this.check(); return super.size }
   keys() { this.check(); return super.keys() }
-  values() { this.check(); return super.values() }
-  entries() { this.check(); return super.entries() }
-  [Symbol.iterator]() { this.check(); return super[Symbol.iterator]() }
 }
 
 // The whole program. Returns the exit status; fatal errors propagate
@@ -86,7 +109,7 @@ const isExit = (sig) => sig !== undefined && sig.type === 'exit'
 function runSection(m, stmts, label) {
   const sig = execAction(m, stmts)
   if (sig !== undefined && (sig.type === 'next' || (sig.type === 'nextfile' && (label === 'BEGIN' || label === 'END')))) {
-    throw new AwkError(`\`${sig.type}' cannot be called from a ${label} rule`)
+    throw new AwkError(`\`${sig.type}' cannot be called from a \`${label}' rule`)
   }
   return sig
 }
@@ -113,7 +136,7 @@ function runRules(m) {
     const rule = rules[i]
     if (!ruleMatches(m, rule, i)) continue
     if (rule.action === null) {
-      emit(m, null, m.record + toStr(m.globals.get('ORS'), m))
+      emit(m, BARE_PRINT, record(m) + toStr(m.globals.get('ORS'), m))
       continue
     }
     const sig = execAction(m, rule.action)
@@ -134,6 +157,8 @@ function execAction(m, stmts) {
 function ruleMatches(m, rule, i) {
   const { pattern } = rule
   if (pattern === null) return true
+  m.line = rule.line
+  m.src = rule.src
   if (pattern.type !== 'range') return truthy(evalExpr(m, pattern))
   if (!m.ranges[i]) {
     if (!truthy(evalExpr(m, pattern.from))) return false
@@ -152,6 +177,8 @@ export function execStmts(m, stmts) {
 
 function execStmt(m, s) {
   if (++m.steps > MAX_STEPS) throw new AwkError(`execution stopped after ${MAX_STEPS} statements (infinite loop?)`, null, 'execution limit')
+  m.line = s.line
+  m.src = s.src
   switch (s.type) {
     case 'block': return execStmts(m, s.body)
     case 'empty': return
@@ -173,7 +200,7 @@ function execStmt(m, s) {
     case 'delete': {
       const arr = getArray(m, s.name)
       if (s.subs === null) arr.clear()
-      else arr.delete(subscriptKeys(m, s.subs))
+      else arr.remove(subscriptOf(m, s.subs))
       return
     }
     default: throw new AwkError(`unknown statement: ${s.type}`)
@@ -181,7 +208,7 @@ function execStmt(m, s) {
 }
 
 function execLoop(m, s) {
-  if (s.init) evalExpr(m, s.init)
+  if (s.init) execSimple(m, s.init)
   let first = true
   while ((s.type === 'do' && first) || s.test === null || truthy(evalExpr(m, s.test))) {
     first = false
@@ -189,16 +216,24 @@ function execLoop(m, s) {
     // break exits before a for-loop's step expression; continue still runs it.
     if (sig === BREAK) return
     if (sig !== undefined && sig !== CONTINUE) return sig
-    if (s.step) evalExpr(m, s.step)
+    if (s.step) execSimple(m, s.step)
   }
 }
 
-// Snapshot keys before iteration, including keys the body later deletes.
-// Numeric-looking keys retain their numeric-string type.
+// A for loop's first and third parts are simple statements: an expression,
+// or — as gawk's grammar has it — a print or a delete.
+function execSimple(m, s) {
+  if (s.type === 'expr') evalExpr(m, s.expr)
+  else execStmt(m, s)
+}
+
+// Snapshot keys before iteration, including keys the body later deletes,
+// in gawk's order (./array.js). A key is a string — even an integer one —
+// unless it is input text a str array kept as it came.
 function execForIn(m, s) {
   const arr = getArray(m, s.array)
-  for (const key of Array.from(arr.keys())) {
-    setVar(m, s.name, new StrNum(key))
+  for (const key of arr.keys()) {
+    setVar(m, s.name, key)
     const sig = execStmt(m, s.body)
     if (sig === BREAK) return
     if (sig !== undefined && sig !== CONTINUE) return sig
@@ -222,29 +257,32 @@ function execSwitch(m, s) {
 
 // Output goes to stdout unless redirected to one of the three device
 // names the parser lets through as literals; a computed name is checked
-// here with the same rule.
-function emit(m, dest, text) {
-  if (dest === null) { m.out.push(text); return }
-  const name = toStr(evalExpr(m, dest), m)
+// here with the same rule. An empty name is gawk's own runtime error.
+function emit(m, s, text) {
+  if (s.dest === null) { m.out.push(text); return }
+  const name = toStr(evalExpr(m, s.dest), m)
+  if (name === '') throw new AwkError(`expression for \`${s.mode}' redirection has null string value`)
   if (name === '/dev/stdout') m.out.push(text)
   else if (name === '/dev/stderr') m.errOut.push(text)
   else if (name !== '/dev/null') throw new AwkError(redirectMessage(name), null, 'output redirection')
+  m.outputs.add(name)
 }
 
 function execPrint(m, s) {
   const ors = toStr(m.globals.get('ORS'), m)
   let text
-  if (s.args.length === 0) text = m.record
+  if (s.args.length === 0) text = record(m)
   else {
     const ofs = toStr(m.globals.get('OFS'), m)
     text = s.args.map((a) => toOutStr(evalExpr(m, a), m)).join(ofs)
   }
-  emit(m, s.dest, text + ors)
+  emit(m, s, text + ors)
 }
 
 function execPrintf(m, s) {
+  if (s.args.length === 0) throw new AwkError('printf: no arguments')
   const values = s.args.map((a) => evalExpr(m, a))
-  emit(m, s.dest, awkSprintf(m, toStr(values[0], m), values.slice(1)))
+  emit(m, s, awkSprintf(m, toStr(values[0], m), values.slice(1)))
 }
 
 // `exit N` sets the status as the OS would see it; a later bare `exit`

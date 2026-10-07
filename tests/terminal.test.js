@@ -1912,8 +1912,6 @@ describe('createTerminal — strict option parsing', () => {
     'basename -z foo',
     'dirname -z foo',
     'xargs -z echo',
-    "awk -z '{ print }'",
-    "awk --bogus '{ print }'",
   ]
   for (const line of cases) {
     it(`rejects: ${line}`, async () => {
@@ -1921,6 +1919,15 @@ describe('createTerminal — strict option parsing', () => {
       const r = await t.run(line)
       assert.notEqual(r.exitCode, 0, 'expected non-zero exit')
       assert.match(r.stderr, /unknown option/u, 'expected "unknown option" in stderr')
+    })
+  }
+
+  // gawk names no option it does not know: it prints its usage, and exits 1.
+  for (const line of ["awk -z '{ print }'", "awk --bogus '{ print }'"]) {
+    it(`rejects: ${line}`, async () => {
+      const r = await createTerminal(SOURCES).run(line)
+      assert.equal(r.exitCode, 1)
+      assert.match(r.stderr, /^Usage: awk \[POSIX or GNU style options\] -f progfile \[--\] file \.\.\.\n/u)
     })
   }
 
@@ -6355,19 +6362,27 @@ describe('createTerminal — awk', () => {
     assert.equal(await out("awk 'BEGIN { print 1e, 1e5x }'"), '1 100000\n')
     assert.equal(await out("awk 'BEGIN { x = 5; print x \" \" x++ \" \" x, ++x, x--, --x; y = 10; y += 5; y -= 3; y *= 2; y /= 4; y %= 4; y ^= 3; print y; a = b = 7; print a, b }'"), '5 5 6 7 7 5\n8\n7 7\n')
     assert.equal(await out("echo '5 7' | awk '{ $1++; ++$2; print; i = 1; print $i++, i, $i }'"), '6 8\n6 1 7\n')
-    // Dividing a constant by nought is worked out where the program is read,
-    // and a program that reads is not one with a syntax error in it: gawk
-    // calls that an error, and exits 1 for it where a division it only meets
-    // while running is fatal and exits 2.
+    // Dividing by a constant nought is found where the program is read, as
+    // gawk folds constants: an error it reads on past, exit 1, where a
+    // division it only meets while running is fatal and exits 2. `+0` and
+    // `(0)` are not constants to gawk; `!1` and `-0` are.
     const folded = await run("awk 'BEGIN { print 1 / 0 }'")
-    assert.deepEqual([folded.stderr, folded.exitCode], ['awk: error at line 1: division by zero attempted\n', 1])
+    assert.deepEqual([folded.stderr, folded.exitCode], ['awk: cmd. line:1: error: division by zero attempted\n', 1])
     const modulo = await run("awk 'BEGIN { print 1 % 0 }'")
-    assert.deepEqual([modulo.stderr, modulo.exitCode], ['awk: error at line 1: division by zero attempted in `%`\n', 1])
+    assert.deepEqual([modulo.stderr, modulo.exitCode], ["awk: cmd. line:1: error: division by zero attempted in `%'\n", 1])
+    const variable = await run("awk 'BEGIN { x = 5; print x / 0, x / !1 }'")
+    assert.deepEqual([variable.stderr, variable.exitCode], ['awk: cmd. line:1: error: division by zero attempted\n'.repeat(2), 1])
     // Nothing is printed before it, the whole program having been refused.
     const guarded = await run(String.raw`awk 'BEGIN { if (0) print 1 / 0; print "reached" }'`)
     assert.deepEqual([guarded.stdout, guarded.exitCode], ['', 1])
     const met = await run("awk 'BEGIN { x = 0; print 1 / x }'")
-    assert.deepEqual([met.stderr, met.exitCode], ['awk: division by zero attempted\n', 2])
+    assert.deepEqual([met.stderr, met.exitCode], ['awk: cmd. line:1: fatal: division by zero attempted\n', 2])
+    for (const divisor of ['+0', '(0)']) {
+      assert.deepEqual([(await run(`awk 'BEGIN { x = 5; print x / ${divisor} }'`)).exitCode], [2], divisor)
+    }
+    // `^` with an integer exponent multiplies by repeated squaring, as gawk's
+    // does, which rounds differently from pow().
+    assert.equal(await out("awk 'BEGIN { printf \"%.17g %.17g\\n\", 1.1 ^ 100, 1.0001 ^ 12345 }'"), '13780.612339822364 3.4364476540319311\n')
   })
 
   it('string builtins: length, substr, index, split, tolower/toupper, sprintf', async () => {
@@ -6482,13 +6497,14 @@ describe('createTerminal — awk', () => {
   it('-v assigns before BEGIN with escape processing, and the value is a numeric string', async () => {
     assert.equal(await out("awk -v 'x=a\\tb' -v n=010 -v 'msg=two words' 'BEGIN { print x; print n + 0, n, (n == 10), (n == \"010\"), msg }'"), 'a\tb\n10 010 1 1 two words\n')
     assert.equal(await out("awk -v OFS=, '{ $1 = $1; print }' people.txt"), 'ann,25,la\nbob,30,ny\ncid,35,la\n')
-    await rejects("awk -v bad 'BEGIN { print 1 }'", /-v: expected var=value/u)
+    await rejects("awk -v bad 'BEGIN { print 1 }'", /^awk: `bad' argument to `-v' not in `var=value' form\n\nUsage: awk /u)
   })
 
   it('-f reads the program from a file in the virtual FS (several concatenate)', async () => {
     assert.equal(await out('awk -f prog.awk people.txt'), '9\n')
     assert.equal(await out('awk -f prog.awk -f prog.awk people.txt'), '18\n18\n')
-    await rejects('awk -f missing.awk people.txt', /cannot open program file `missing\.awk`/u)
+    const missing = await run('awk -f missing.awk people.txt')
+    assert.deepEqual([missing.stderr, missing.exitCode], ["awk: fatal: cannot open source file `missing.awk' for reading: No such file or directory\n", 2])
   })
 
   it('records: RS as a character, paragraph mode (RS = ""), a regex RS, and a file without a final newline', async () => {
@@ -6513,14 +6529,16 @@ describe('createTerminal — awk', () => {
     assert.equal(await out("awk 'function clear(arr,  k) { for (k in arr) delete arr[k] } BEGIN { z[1]; z[2]; clear(z); print length(z) }'"), '0\n')
     // A space before the paren makes a call ambiguous with concatenation;
     // gawk refuses it, and so does this.
-    rejects("awk 'function twice(x) { return x x } BEGIN { print twice (\"ab\") }'", /function `twice` called with space between name and `\(`/u)
+    await rejects("awk 'function twice(x) { return x x } BEGIN { print twice (\"ab\") }'", /function `twice' called with space between name and `\('/u)
     // exit and next from inside a function.
     const r = await run("awk 'function die(msg) { print msg > \"/dev/stderr\"; exit 7 } function skip() { next } /x/ { skip() } NR == 3 { die(\"boom\") } { print }' a.txt b.txt")
     assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['y\n', 'boom\n', 7])
-    await rejects("awk 'function f(a) { } BEGIN { f(1, 2) }'", /called with 2 arguments, but it accepts only 1/u)
+    // An argument more than the function takes is a warning; the call runs.
+    const extra = await run("awk 'function f(a) { print a } BEGIN { f(1, 2) }'")
+    assert.deepEqual([extra.stdout, extra.stderr, extra.exitCode], ['1\n', "awk: cmd. line:1: warning: function `f' called with more arguments than declared\n", 0])
     await rejects("awk 'function d(n) { return 1 + d(n + 1) } BEGIN { print d(0) }'", /nesting deeper than 100 levels/u)
-    await rejects("awk 'BEGIN { x[1] = 1; x = 2 }'", /attempt to use array `x` in a scalar context/u)
-    await rejects("awk 'BEGIN { x = 2; x[1] = 1 }'", /attempt to use scalar `x` as an array/u)
+    await rejects("awk 'BEGIN { x[1] = 1; x = 2 }'", /^awk: cmd\. line:1: fatal: attempt to use array `x' in a scalar context\n$/u)
+    await rejects("awk 'BEGIN { x = 2; x[1] = 1 }'", /^awk: cmd\. line:1: fatal: attempt to use scalar `x' as an array\n$/u)
   })
 
   it('regexes are EREs: classes, intervals, escapes, dynamic regexes from strings, regex literals as values', async () => {
@@ -6534,13 +6552,20 @@ describe('createTerminal — awk', () => {
     assert.equal(await out("echo 'a.b' | awk '{ print ($0 ~ \"a\\\\.b\"), (\"axb\" ~ \"a\\\\.b\"), (\"axb\" ~ \"a.b\"), /a\\.b/, /x/ }'"), '1 0 1 1 0\n')
     const warned = await run("echo 'a.b' | awk '{ print ($0 ~ \"a\\.b\"), (\"axb\" ~ \"a\\.b\") }'")
     assert.equal(warned.stdout, '1 1\n')
-    // One warning per occurrence, as gawk.
-    assert.equal(warned.stderr, "awk: warning: escape sequence `\\.' treated as plain `.'\n".repeat(2))
+    // gawk warns once a run for each character escaped so.
+    assert.equal(warned.stderr, "awk: cmd. line:1: warning: escape sequence `\\.' treated as plain `.'\n")
     assert.equal(warned.exitCode, 0)
     assert.equal(await out("awk 'BEGIN { re = \"^[0-9]+$\"; print (\"42\" ~ re), (\"4x\" ~ re) }'"), '1 0\n')
-    await rejects("awk 'BEGIN { print \"a\" ~ /(/ }'", /syntax error at line 1: invalid regex \/\(\//u)
-    await rejects("awk 'BEGIN { re = \"(\"; print \"a\" ~ re }'", /invalid regex/u)
-    await rejects("awk 'BEGIN { print \"a\" ~ /[[:bogus:]]/ }'", /invalid character class `\[:bogus:\]`/u)
+    // GNU regex's own words: an error when the program is read for a
+    // regex constant, fatal when it runs for a dynamic one.
+    for (const [line, stderr, code] of [
+      ["awk 'BEGIN { print \"a\" ~ /(/ }'", 'awk: cmd. line:1: error: Unmatched ( or \\(: /(/\n', 1],
+      ["awk 'BEGIN { re = \"(\"; print \"a\" ~ re }'", 'awk: cmd. line:1: fatal: invalid regexp: Unmatched ( or \\(: /(/\n', 2],
+      ["awk 'BEGIN { print \"a\" ~ /[[:bogus:]]/ }'", 'awk: cmd. line:1: error: Invalid character class name: /[[:bogus:]]/\n', 1],
+    ]) {
+      const r = await run(line)
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', stderr, code], line)
+    }
   })
 
   it('rejects every form that would spawn a process — at parse time, even in a branch that never runs', async () => {
@@ -6553,8 +6578,9 @@ describe('createTerminal — awk', () => {
     ]
     for (const [line, re] of cases) {
       const r = await rejects(line, re)
-      assert.equal(r.exitCode, 1, `${line}: syntax errors exit 1`)
-      assert.match(r.stderr, /^awk: syntax error at line 1: /u, line)
+      // Refused as the program is read, as gawk refuses what it will not run.
+      assert.equal(r.exitCode, 1, line)
+      assert.equal(r.unsupported.length, 1, line)
     }
   })
 
@@ -6574,37 +6600,47 @@ describe('createTerminal — awk', () => {
   it('rejects gawk-only builtins, undefined functions and unsupported options by name', async () => {
     await rejects("awk 'BEGIN { print strftime(\"%Y\") }'", /strftime\(\) is not supported \(gawk extension\)/u)
     await rejects("awk 'BEGIN { n = asort(a) }'", /asort\(\) is not supported/u)
-    await rejects("awk 'BEGIN { print foo(1) }'", /function `foo` not defined/u)
-    await rejects("awk -z '{ print }'", /unknown option: -z/u)
-    await rejects("awk --posix '{ print }'", /unknown option: --posix/u)
+    await rejects("awk 'BEGIN { print foo(1) }'", /^awk: cmd\. line:1: fatal: function `foo' not defined\n$/u)
+    await rejects("awk -z '{ print }'", /^Usage: awk /u)
+    await rejects("awk --posix '{ print }'", /^awk: option --posix is not supported\n$/u)
+    // gawk with no program prints its usage and exits 1.
     const r = await run('awk')
-    assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /^usage: awk \[-F fs\] \[-v var=value\] 'program' \[file \.\.\.\]/u)
+    assert.equal(r.exitCode, 1)
+    assert.match(r.stderr, /^Usage: awk \[POSIX or GNU style options\] -f progfile \[--\] file \.\.\.\nUsage: awk \[POSIX or GNU style options\] \[--\] 'program' file \.\.\.\n/u)
   })
 
+  // gawk's yyerror(): the line, a caret under the token it stopped at, and
+  // its message; or an error it reads on past, and some it finds only when
+  // the program runs. Recorded from GNU Awk 5.2.1.
   it('reports syntax errors with the line number and what was found', async () => {
-    await rejects("awk 'BEGIN {'", /syntax error at line 1: missing `\}` at end of program/u)
-    await rejects("awk 'BEGIN { print \"abc }'", /syntax error at line 1: unterminated string/u)
-    await rejects("awk 'BEGIN { /abc }'", /syntax error at line 1: unterminated regexp/u)
-    await rejects("awk 'BEGIN { print length(\"x\" }'", /expected `\)` but found `\}`/u)
-    await rejects("awk 'BEGIN { x = 1 +* 2 }'", /unexpected `\*`/u)
-    await rejects("awk 'BEGIN { print 1,, 2 }'", /unexpected `,`/u)
-    await rejects("awk 'BEGIN { break }'", /`break` is not allowed outside a loop/u)
-    await rejects("awk 'BEGIN { return 1 }'", /`return` is only allowed inside a function/u)
-    await rejects("awk 'BEGIN { next }'", /`next` cannot be used in a BEGIN action/u)
-    await rejects("awk 'BEGIN { substr(\"a\") }'", /substr\(\) called with 1 argument; it takes 2 to 3/u)
-    await rejects("awk 'BEGIN { split(\"a b\", 3) }'", /split\(\): second argument must be an array name/u)
-    await rejects("awk 'BEGIN { printf }'", /printf needs a format string/u)
-    await rejects("awk 'function f(a, a) { }'", /duplicate parameter `a`/u)
-    await rejects("awk 'function length(x) { }'", /cannot redefine builtin function `length`/u)
-    await rejects("awk 'BEGIN\n{ print 1 }'", /BEGIN requires an action/u)
-    // Multi-line programs name the offending line.
-    rejects("awk 'BEGIN {\n  x = 1\n  y = = 2\n}'", /syntax error at line 3: unexpected `=`/u)
+    const at = (line, caret, message) => `awk: cmd. line:${line}: ${caret}\nawk: cmd. line:${line}: ${' '.repeat(caret.indexOf('\u0000'))}^ ${message}\n`.replace('\u0000', '')
+    for (const [line, stderr, code] of [
+      ["awk 'BEGIN {'", at(1, 'BEGIN {\u0000', 'unexpected newline or end of string'), 1],
+      ["awk 'BEGIN { print \"abc }'", at(1, 'BEGIN { print \u0000"abc }', 'unterminated string'), 1],
+      ["awk 'BEGIN { /abc }'", at(1, 'BEGIN { /\u0000abc }', 'unterminated regexp'), 1],
+      ["awk 'BEGIN { print length(\"x\" }'", at(1, 'BEGIN { print length("x" \u0000}', 'syntax error'), 1],
+      ["awk 'BEGIN { x = 1 +* 2 }'", at(1, 'BEGIN { x = 1 +\u0000* 2 }', 'syntax error'), 1],
+      ["awk 'BEGIN { print 1,, 2 }'", at(1, 'BEGIN { print 1,\u0000, 2 }', 'syntax error'), 1],
+      ["awk 'BEGIN { break }'", "awk: cmd. line:1: error: `break' is not allowed outside a loop or switch\n".repeat(2), 1],
+      ["awk 'BEGIN { return 1 }'", at(1, 'BEGIN { \u0000return 1 }', "`return' used outside function context"), 1],
+      ["awk 'BEGIN { next }'", "awk: cmd. line:1: error: `next' used in BEGIN action\n", 1],
+      ["awk 'BEGIN { substr(\"a\") }'", at(1, 'BEGIN { substr("a"\u0000) }', '1 is invalid as number of arguments for substr'), 1],
+      ["awk 'BEGIN { split(\"a b\", 3) }'", 'awk: cmd. line:1: fatal: split: second argument is not an array\n', 2],
+      ["awk 'BEGIN { printf }'", 'awk: cmd. line:1: fatal: printf: no arguments\n', 2],
+      ["awk 'function f(a, a) { }'", "awk: cmd. line:1: error: function `f': parameter #2, `a', duplicates parameter #1\n", 1],
+      ["awk 'function length(x) { }'", at(1, 'function \u0000length(x) { }', "`length' is a built-in function, it cannot be redefined"), 1],
+      ["awk 'BEGIN\n{ print 1 }'", 'awk: cmd. line:2: BEGIN blocks must have an action part\n', 1],
+      // Multi-line programs name the offending line.
+      ["awk 'BEGIN {\n  x = 1\n  y = = 2\n}'", at(3, '  y = \u0000= 2', 'syntax error'), 1],
+    ]) {
+      const r = await run(line)
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.unsupported], ['', stderr, code, []], line)
+    }
   })
 
   it('input errors: a missing file is fatal after the output so far (exit 2); a directory is skipped with a warning', async () => {
     let r = await run("awk '{ print $1 }' a.txt nope b.txt")
-    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['x\ny\n', 'awk: nope: No such file or directory\n', 2])
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['x\ny\n', "awk: cmd. line:1: fatal: cannot open file `nope' for reading: No such file or directory\n", 2])
     r = await run("awk '{ print }' src a.txt")
     assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['x\ny\n', "awk: warning: command line argument `src' is a directory: skipped\n", 0])
   })
@@ -6639,25 +6675,31 @@ describe('createTerminal — awk', () => {
     assert.equal(await out("awk 'BEGIN { s = \"abc\"; gsub(/b*/, \"-\", s); print s; s = \"aaa\"; gsub(/a*/, \"-\", s); print s; s = \"abc\"; gsub(/x*/, \"-\", s); print s }'"), '-a-c-\n-\n-a-b-c-\n')
     assert.equal(await out("awk 'BEGIN { print gensub(/b*/, \"{&}\", 2, \"abb\"), gensub(/b*/, \"{&}\", 3, \"abb\"), gensub(/b*/, \"{&}\", \"g\", \"abb\"), gensub(/c*/, \"{&}\", 2, \"ccbc\") }'"), 'a{bb} abb{} {}a{bb} cc{}bc\n')
     const r = await run("awk 'BEGIN { print gensub(/x/, \"y\", \"z\", \"xx\") }'")
-    assert.deepEqual([r.stdout, r.stderr], ['yx\n', "awk: warning: gensub: third argument `z' treated as 1\n"])
+    assert.deepEqual([r.stdout, r.stderr], ['yx\n', "awk: cmd. line:1: warning: gensub: third argument `z' treated as 1\n"])
   })
 
-  it('reads the regex escapes as gawk does: `\\b` is a backspace, `\\d` a plain d, both with a warning', async () => {
+  it('reads the regex escapes as gawk does: `\\b` is a backspace, `\\d` a plain d with a warning', async () => {
     const r = await run("awk 'BEGIN { print (\"a b\" ~ /a\\b/), (\"a\\bb\" ~ /a\\bb/), (\"5\" ~ /\\d/), (\"d\" ~ /\\d/), (\"a b\" ~ /a\\yb/), (\"a b\" ~ /a\\y/), (\"a\" ~ /\\a/) }'")
     assert.equal(r.stdout, '0 1 0 1 0 1 0\n')
-    assert.match(r.stderr, /warning: regexp escape sequence `\\b' is a backspace here/u)
-    assert.match(r.stderr, /warning: regexp escape sequence `\\d' is not a known regexp operator/u)
+    // gawk 5.2.1 says nothing of `\b`.
+    assert.equal(r.stderr, "awk: cmd. line:1: warning: regexp escape sequence `\\d' is not a known regexp operator\n")
     assert.equal(r.exitCode, 0)
   })
 
   it('regex leniency and strictness follow GNU: literal leading quantifiers and stray `)`, errors for bad intervals and ranges', async () => {
     assert.equal(await out("awk 'BEGIN { print (\"*a\" ~ /*a/), (\"aaa\" ~ /a**/), (\"+\" ~ /+/), (\"a)\" ~ /a)/), (\"a{1\" ~ /a{1/), (\"a{\" ~ /a{/), (\"aa\" ~ /^a{,2}$/), (\"aaa\" ~ /^a{,2}$/), (\"x\" ~ /()/), (\"\" ~ /(|a)/) }'"), '1 1 1 1 1 1 1 0 1 1\n')
-    await rejects("awk 'BEGIN { print (\"a\" ~ /a{1,2,3}/) }'", /invalid regex \/a\{1,2,3\}\/: invalid content of \{\}/u)
-    await rejects("awk 'BEGIN { print (\"a\" ~ /a{2,1}/) }'", /invalid interval/u)
-    await rejects("awk 'BEGIN { print (\"a\" ~ /[b-a]/) }'", /invalid range end/u)
-    await rejects("awk 'BEGIN { print (\"a\" ~ /(a/) }'", /missing `\)`/u)
-    await rejects("awk 'BEGIN { print (\"a\" ~ /[a/) }'", /unterminated regexp/u)
-    await rejects("awk 'BEGIN { re = \"[a\"; print (\"a\" ~ re) }'", /unterminated bracket expression/u)
+    for (const [line, stderr, code] of [
+      ["awk 'BEGIN { print (\"a\" ~ /a{1,2,3}/) }'", 'awk: cmd. line:1: error: Invalid content of \\{\\}: /a{1,2,3}/\n', 1],
+      ["awk 'BEGIN { print (\"a\" ~ /a{2,1}/) }'", 'awk: cmd. line:1: error: Invalid content of \\{\\}: /a{2,1}/\n', 1],
+      ["awk 'BEGIN { print (\"a\" ~ /[b-a]/) }'", 'awk: cmd. line:1: error: Invalid range end: /[b-a]/\n', 1],
+      ["awk 'BEGIN { print (\"a\" ~ /(a/) }'", 'awk: cmd. line:1: error: Unmatched ( or \\(: /(a/\n', 1],
+      // The lexer reads `[a/)...` as a bracket expression the line ends in.
+      ["awk 'BEGIN { print (\"a\" ~ /[a/) }'", 'awk: cmd. line:1: BEGIN { print ("a" ~ /[a/) }\nawk: cmd. line:1:                       ^ unterminated regexp\n', 1],
+      ["awk 'BEGIN { re = \"[a\"; print (\"a\" ~ re) }'", 'awk: cmd. line:1: fatal: invalid regexp: Unmatched [, [^, [:, [., or [=: /[a/\n', 2],
+    ]) {
+      const r = await run(line)
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', stderr, code], line)
+    }
   })
 
   it('IGNORECASE makes regex matching, string comparison and index() case-blind; single-character separators stay exact', async () => {
@@ -6690,30 +6732,30 @@ describe('createTerminal — awk', () => {
     assert.equal(await out("awk 'BEGINFILE { if (ERRNO) { print \"skip\", FILENAME, ERRNO; nextfile } print \"open\", FILENAME } { print } ENDFILE { print \"end\", FILENAME, FNR }' a.txt nope b.txt", files), 'open a.txt\nx\ny\nend a.txt 2\nskip nope No such file or directory\nopen b.txt\ny\nz\nend b.txt 2\n')
     // Without the idiom a missing file is still fatal, after BEGINFILE ran.
     let r = await run("awk 'BEGINFILE { print \"bf\" } { print }' nope", files)
-    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['bf\n', 'awk: nope: No such file or directory\n', 2])
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['bf\n', "awk: cmd. line:1: fatal: cannot open file `nope' for reading: No such file or directory\n", 2])
     assert.equal(await out("awk 'BEGINFILE { nextfile } ENDFILE { print \"ef\", FILENAME } END { print NR }' a.txt b.txt", files), 'ef a.txt\nef b.txt\n0\n')
     assert.equal(await out("awk 'FNR == 1 { nextfile } ENDFILE { print \"ef\", FILENAME, FNR, NR }' a.txt b.txt", files), 'ef a.txt 1 1\nef b.txt 1 2\n')
     r = await run("awk 'ENDFILE { exit 4 } END { print \"end\" }' a.txt b.txt", files)
     assert.deepEqual([r.stdout, r.exitCode], ['end\n', 4])
     r = await run("awk 'BEGINFILE { print \"[\" ERRNO \"]\" } { print }' d a.txt", files)
-    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['[Is a directory]\n[]\nx\ny\n', "awk: warning: command line argument `d' is a directory: skipped\n", 0])
-    await rejects("awk 'BEGINFILE { next }' a.txt", /`next` cannot be used in a BEGINFILE action/u, files)
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['[Is a directory]\n[]\nx\ny\n', "awk: cmd. line:1: warning: command line argument `d' is a directory: skipped\n", 0])
+    await rejects("awk 'BEGINFILE { next }' a.txt", /^awk: cmd\. line:1: error: `next' used in BEGINFILE action\n$/u, files)
   })
 
   it('switch falls through like C, matches by `==` or a regex, and rejects duplicate cases', async () => {
     assert.equal(await out("awk 'BEGIN { x = \"abc\"; switch (x) { case /^a/: print \"re\"; case \"abc\": print \"str\"; break; case 5: print \"five\"; default: print \"def\" } switch (5) { case \"5\": print \"s5\"; break; case 6: print \"n6\" } switch (u) { default: print \"d\" } switch (\"x\") { case \"y\": print \"no\" } print \"after\" }'"), 're\nstr\ns5\nd\nafter\n')
     assert.equal(await out("echo -e '5 abc\\n6 x\\n7 b' | awk '{ switch ($1) { case 5: print \"num\"; break; case \"6\": print \"str\"; break; default: print \"d\" } switch ($2) { case /b/: print \"rx\"; break; default: print \"d2\" } }'"), 'num\nrx\nstr\nd2\nd\nrx\n')
     assert.equal(await out("awk 'BEGIN { for (i = 1; i <= 3; i++) { switch (i) { case 2: continue; default: print i } } switch (-1) { case -1: print \"neg\" } }'"), '1\n3\nneg\n')
-    await rejects("awk 'BEGIN { switch (5) { case 5: print \"a\"; case \"5\": print \"b\" } }'", /duplicate case values in switch body: 5/u)
-    await rejects("awk 'BEGIN { switch (1) { print \"x\" } }'", /expected `case` or `default` in switch body/u)
+    await rejects("awk 'BEGIN { switch (5) { case 5: print \"a\"; case \"5\": print \"b\" } }'", /^awk: cmd\. line:1: error: duplicate case values in switch body: 5\n$/u)
+    await rejects("awk 'BEGIN { switch (1) { print \"x\" } }'", /^awk: cmd\. line:1: BEGIN \{ switch \(1\) \{ print "x" \} \}\nawk: cmd\. line:1: {22}\^ syntax error\n$/u)
   })
 
   it('gawk builtins: strtonum, the bit operations, typeof and isarray', async () => {
     assert.equal(await out("awk 'BEGIN { print and(7, 3, 1), or(1, 2, 4), xor(1, 3, 5), lshift(1, 62), rshift(16, 2), compl(5), compl(0), and(5.9, 3) }'"), '1 7 7 4611686018427387904 4 18014398509481978 9007199254740991 1\n')
     assert.equal(await out("awk 'BEGIN { print strtonum(\"017\"), strtonum(\"0x1f\"), strtonum(\" 0x1f \"), strtonum(\"12abc\"), strtonum(\"1e3\"), strtonum(\"08\"), strtonum(17) }'"), '15 31 0 12 1000 8 17\n')
     assert.equal(await out("echo '10 abc' | awk '{ x = 1; y = \"s\"; z[1]; print typeof($1), typeof($2), typeof(x), typeof(y), typeof(z), typeof(w), typeof(1 \"\"), typeof(NF); a[1]; print isarray(a), isarray(b) }'"), 'strnum string number string array untyped string number\n1 0\n')
-    await rejects("awk 'BEGIN { print and(-1, 1) }'", /and: argument 1 negative value -1 is not allowed/u)
-    await rejects("awk 'BEGIN { print and(1) }'", /and\(\) called with 1 argument; it takes 2 to any number/u)
+    await rejects("awk 'BEGIN { print and(-1, 1) }'", /^awk: cmd\. line:1: fatal: and: argument 1 negative value -1 is not allowed\n$/u)
+    await rejects("awk 'BEGIN { print and(1) }'", /^awk: cmd\. line:1: fatal: and: called with less than two arguments\n$/u)
   })
 
   it('$0 is a numeric string from input but a plain string once the program rebuilds it (gawk)', async () => {
@@ -6745,20 +6787,20 @@ describe('createTerminal — awk', () => {
   })
 
   it('grammar corners follow gawk: comparisons do not chain, `~` does, a space before a call is an error, empty rules are errors', async () => {
-    await rejects("awk 'BEGIN { print 1 < 2 < 3 }'", /comparison operators do not chain \(`a < b < c`\)/u)
-    await rejects("awk 'BEGIN { x = 1 == 1 == 1 }'", /comparison operators do not chain/u)
+    await rejects("awk 'BEGIN { print 1 < 2 < 3 }'", /^awk: cmd\. line:1: BEGIN \{ print 1 < 2 < 3 \}\nawk: cmd\. line:1: {21}\^ syntax error\n$/u)
+    await rejects("awk 'BEGIN { x = 1 == 1 == 1 }'", /^awk: cmd\. line:1: BEGIN \{ x = 1 == 1 == 1 \}\nawk: cmd\. line:1: {20}\^ syntax error\n$/u)
     assert.equal(await out("awk 'BEGIN { print \"a\" ~ \"b\" ~ \"c\", (\"aa\" ~ \"a\") ~ 1 }'"), '0 1\n')
-    await rejects("awk ';;BEGIN { print 1 }'", /each rule must have a pattern or an action part/u)
-    await rejects("awk 'BEGIN { print 1 };;'", /each rule must have a pattern or an action part/u)
+    await rejects("awk ';;BEGIN { print 1 }'", /^(?:awk: cmd\. line:1: each rule must have a pattern or an action part\n){2}$/u)
+    await rejects("awk 'BEGIN { print 1 };;'", /^awk: cmd\. line:1: each rule must have a pattern or an action part\n$/u)
     assert.equal(await out("awk 'BEGIN { print 1 }; END { print 2 };'"), '1\n2\n')
-    await rejects("awk 'BEGIN { if (1) { print \"a\" } ; else print \"b\" }'", /unexpected `else`/u)
+    await rejects("awk 'BEGIN { if (1) { print \"a\" } ; else print \"b\" }'", /^awk: cmd\. line:1: BEGIN \{ if \(1\) \{ print "a" \} ; else print "b" \}\nawk: cmd\. line:1: {32}\^ syntax error\n$/u)
     assert.equal(await out("awk 'BEGIN { if (0) { print \"a\" }\n\nelse print \"b\" }'"), 'b\n')
     // Constant folding: division by a constant zero is refused when the
     // program is read, even in a branch that never runs.
-    await rejects("awk 'BEGIN { if (0) print 2 ^ 3 / 0; print \"never\" }'", /error at line 1: division by zero attempted/u)
-    await rejects("awk 'BEGIN { print 5 % 0 }'", /division by zero attempted in `%`/u)
+    await rejects("awk 'BEGIN { if (0) print 2 ^ 3 / 0; print \"never\" }'", /^awk: cmd\. line:1: error: division by zero attempted\n$/u)
+    await rejects("awk 'BEGIN { print 5 % 0 }'", /^awk: cmd\. line:1: error: division by zero attempted in `%'\n$/u)
     const r = await run("awk 'BEGIN { print \"a\"; x = 0; print 1 / x; print \"b\" }'")
-    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['a\n', 'awk: division by zero attempted\n', 2])
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['a\n', 'awk: cmd. line:1: fatal: division by zero attempted\n', 2])
   })
 
   it('warnings go to stderr without failing: dubious escapes in -v values and operands, math domain errors', async () => {
@@ -6773,9 +6815,9 @@ describe('createTerminal — awk', () => {
 
   it('`next` reaching BEGIN or END through a function is a fatal error, as in gawk', async () => {
     let r = await run("awk 'function f() { next } BEGIN { f() }'")
-    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', "awk: `next' cannot be called from a BEGIN rule\n", 2])
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', "awk: cmd. line:1: fatal: `next' cannot be called from a `BEGIN' rule\n", 2])
     r = await run("awk 'function f() { next } END { f() }' a.txt", { 'a.txt': 'x\n' })
-    assert.deepEqual([r.stderr, r.exitCode], ["awk: `next' cannot be called from a END rule\n", 2])
+    assert.deepEqual([r.stderr, r.exitCode], ["awk: cmd. line:1: (FILENAME=a.txt FNR=1) fatal: `next' cannot be called from a `END' rule\n", 2])
   })
 
   it('is a first-class command: listed in the not-found hint, resolved by which, and tab-completed after a pipe', async () => {

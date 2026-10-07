@@ -36,6 +36,13 @@ export class AwkRegex {
 
   test(s) { this.checkCase(s); return this.js.test(s) }
 
+  // Whether the pattern holds `\y`, `\B`, `\<` or `\>`, which read the
+  // character before where a match starts.
+  get wordAnchored() {
+    const walk = (node) => (node.type === 'assert' && 'yB<>'.includes(node.kind)) || (node.nodes ?? (node.node ? [node.node] : [])).some(walk)
+    return this.anchored ??= walk(this.ast)
+  }
+
   // GNU's two matchers fold the Cyrillic Extended-C letters differently
   // (see EXTENDED_C), so a case-insensitive match over them is refused.
   checkCase(s) {
@@ -81,15 +88,26 @@ function captureShape(node) {
   return { groups, nullable, unsafe: repeated || (node.type === 'alt' && groups > 0) || shapes.some((s) => s.unsafe) }
 }
 
+// The cache keeps a compiled pattern and the warnings compiling it gave,
+// which are handed to `warn` every time: whether a run sees them is up to
+// that run (gawk gives most of them once per run), never to whether
+// another run compiled the pattern first.
 export function compileRegex(src, ignoreCase = false, warn = null, tables = classTables(LOCALE)) {
   const key = (ignoreCase ? 'i' : 'c') + tables.name + '\0' + src
-  const cached = CACHE.get(key)
-  if (cached) return cached
-  if (CACHE.size >= 500) CACHE.clear()
-  const re = new AwkRegex(src, ignoreCase, warn, tables)
-  CACHE.set(key, re)
-  return re
+  let cached = CACHE.get(key)
+  if (!cached) {
+    if (CACHE.size >= 500) CACHE.clear()
+    const warnings = []
+    cached = { re: new AwkRegex(src, ignoreCase, (msg, once) => warnings.push([msg, once]), tables), warnings }
+    CACHE.set(key, cached)
+  }
+  if (warn) for (const [msg, once] of cached.warnings) warn(msg, once)
+  return cached.re
 }
+
+// GNU regex's own words for a pattern it refuses, or null when this
+// refusal has no counterpart known to be the same.
+export const regexErrorMessage = (e) => e.gnu ?? null
 
 // Empty matches delimit neither RS records nor FS fields.
 export function nonEmptyMatch(str, re, from) {
@@ -101,13 +119,14 @@ export function nonEmptyMatch(str, re, from) {
   }
 }
 
-export function splitByRegex(str, re) {
+export function splitByRegex(str, re, seps = null) {
   const out = []
   let pos = 0
   for (;;) {
     const match = nonEmptyMatch(str, re, pos)
     if (!match) break
     out.push(str.slice(pos, match.start))
+    seps?.push([out.length, str.slice(match.start, match.end)])
     pos = match.end
   }
   out.push(str.slice(pos))
