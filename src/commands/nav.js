@@ -11,8 +11,10 @@ import { unsupported } from '../unsupported.js'
 import { hiddenEntryNotes, lookupWithNote } from '../notes.js'
 import { FS_TOOLS } from './fs-tools.js'
 
+// bash's pwd takes -L and -P, which print the same directory here: one
+// reached through a link is refused where it would be entered.
 function pwd(_stdin, tokens, ctx) {
-  parseArgs(tokens)
+  parseArgs(tokens, { short: ['L', 'P'] })
   return ok(ctx.cwd + '\n')
 }
 

@@ -174,6 +174,7 @@ describe('the programs a path, xargs or find -exec runs', () => {
   it('true, false and pwd take their arguments as coreutils does', async () => {
     assert.deepEqual(await said('/bin/false x'), ['', '', 1])
     assert.deepEqual(await said('echo x | xargs pwd'), ['/\n', 'pwd: ignoring non-option arguments\n', 0])
+    assert.deepEqual(await said('pwd -P x'), ['/\n', '', 0])
     assert.equal((await run('/bin/true --help')).unsupported[0].detail, '--help')
   })
 })
