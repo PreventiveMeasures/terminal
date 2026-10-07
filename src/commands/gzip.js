@@ -1,8 +1,8 @@
 import { parseArgs } from '../args.js'
 import { lookup } from '../fs.js'
 import { consumeStdin, encodeUtf8, encodeUtf8Loose, readBytesOf, stdinIsTerminal, stdoutIsTerminal } from '../util.js'
-import { lookupWithNote } from '../notes.js'
-import { unsupported } from '../unsupported.js'
+import { missingPathNote } from '../notes.js'
+import { unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { compress as compressBytes, supports } from '@preventive/archive/compression.js'
 import { decompressMembers } from '../compression.js'
 
@@ -55,45 +55,67 @@ function refuseForeign(name, state) {
 const REPORTS = { __proto__: null, 'unexpected end of file': 'unexpected end of file', 'incorrect data check': 'invalid compressed data--crc error' }
 const reportOf = (error) => REPORTS[error] ?? 'invalid compressed data--format violated'
 
-// The method every gzip member is written with, and the only one there is.
-const DEFLATE = 8
-
 // What followed the last whole member decides what gzip says of it. A tail of
 // zero bytes is the padding a block device leaves rather than anything it was
 // meant to read, and it passes over that without a word. Other bytes that
 // begin no member are the garbage it ignores: it decompressed everything it
 // was asked for, so it warns rather than errors and keeps what it wrote. A
 // single byte begins nothing it can tell from a header, so it is the header
-// it ran out of. Bytes that do begin a member are a member it could not read,
-// and it names a method it does not know where the header gives one;
-// anything else is what the stream ran into.
+// it ran out of. Bytes that do begin a member are a member it could not read
+// (../compression.js says what of it): what it refuses in the header it says
+// as it comes to it and goes on to the next file, and data it cannot go on
+// with — run out of, failing the check and the count that close it, or not
+// deflate at all — it says once it has written what it inflated, and stops
+// there: gzip exits on the spot, and the files after it are never read.
 //
 // What it says is also what `tar -z` passes on of it, so it is handed back as
 // the text and the status, and whether what gzip wrote before it was every
-// member whole — which is all `tar` then has to read.
+// member whole — which is all `tar` then has to read. `kept` is whether a file
+// it was writing stays, and `header` whether it was refused in the header.
 export function gzipTrouble(name, inflated) {
-  const rest = inflated.rest
-  const data = (message) => ({ text: `\ngzip: ${name}: ${message}\n`, status: 1, whole: false })
-  if (rest === null) return data(reportOf(inflated.error))
+  const { rest, trouble } = inflated
+  const fatal = (...messages) => ({ text: messages.map((message) => `\ngzip: ${name}: ${message}\n`).join(''), status: 1, whole: false, kept: false, fatal: true })
+  if (trouble?.header) return headerTrouble(name, trouble.header) ?? { ...fatal('unexpected end of file'), header: true }
+  if (trouble?.eof) return fatal('unexpected end of file')
+  if (trouble?.crc !== undefined) {
+    return fatal(...trouble.crc ? ['invalid compressed data--crc error'] : [], ...trouble.length ? ['invalid compressed data--length error'] : [])
+  }
+  if (rest === null) return fatal(reportOf(inflated.error))
   if (rest.every((byte) => byte === 0)) return null
-  if (rest.length >= 2 && !looksCompressed(rest)) return { text: `\ngzip: ${name}: decompression OK, trailing garbage ignored\n`, status: 2, whole: true }
-  if (rest.length > 2 && rest[2] !== DEFLATE) return { text: `gzip: ${name}: unknown method ${rest[2]} -- not supported\n`, status: 1, whole: true }
-  return data(reportOf(inflated.error))
+  if (rest.length >= 2 && !looksCompressed(rest)) return { text: `\ngzip: ${name}: decompression OK, trailing garbage ignored\n`, status: 2, whole: true, kept: true, fatal: false }
+  if (rest.length < 2) return fatal('unexpected end of file')
+  return fatal(reportOf(inflated.error))
 }
 
-function trouble(state, name, inflated) {
-  const found = gzipTrouble(name, inflated)
-  if (found === null) return false
-  state.stderr += found.text
+// What GNU refuses in a header it says without the newline ahead of a data
+// error, and leaves the file it would have written unwritten.
+function headerTrouble(name, [kind, value, computed]) {
+  const refused = (text) => ({ text: `gzip: ${text}\n`, status: 1, whole: true, kept: false, fatal: false, header: true })
+  const hex = (n) => n.toString(16).padStart(4, '0')
+  if (kind === 'method') return refused(`${name}: unknown method ${value} -- not supported`)
+  if (kind === 'encrypted') return refused(`${name} is encrypted -- not supported`)
+  if (kind === 'flags') return refused(`${name} has flags 0x${value.toString(16)} -- not supported`)
+  if (kind === 'checksum') return refused(`${name}: header checksum 0x${hex(value)} != computed checksum 0x${hex(computed)}`)
+  return null
+}
+
+function report(state, found) {
+  say(state, found.text)
   state.status = state.status === 1 ? 1 : found.status
-  return false
+  if (found.fatal) state.stopped = true
 }
 
 // The suffixes GNU knows. Decompressing takes one off to name the file it
 // writes, and refuses a name it cannot shorten; compressing reads the same
 // table the other way, and leaves a file already named as a member alone.
-const SUFFIXES = Object.freeze({ __proto__: null, '.gz': '', '.tgz': '.tar', '.taz': '.tar', '-gz': '', '.z': '', '-z': '', '_z': '' })
+// GNU reads a name's end in lower case, so `F.GZ` carries one, and only where
+// something comes before it other than the slash a directory ends with: `.gz`
+// and `d/.gz` are names with no suffix at all.
+const SUFFIXES = Object.freeze(['.gz', '.z', '.taz', '.tgz', '-gz', '-z', '_z'])
+const TAR = Object.freeze(['.tgz', '.taz'])
 const SUFFIX = '.gz'
+// What a name that is not there is tried with when decompressing, in turn.
+const TRIED = Object.freeze(['.gz', '.z', '-z', '.Z'])
 const LEVELS = Object.freeze(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
 
 export async function gzip(stdin, tokens, ctx) {
@@ -114,7 +136,7 @@ export async function gzip(stdin, tokens, ctx) {
     // and, decompressing to stdout, hands on as it is what is not a member.
     force: flags.has('f') || flags.has('force'),
   }
-  const state = { ctx, events: [], stderr: '', status: 0, gap: null, stopped: false }
+  const state = { ctx, events: [], status: 0, gap: null, stopped: false }
   if (positional.length === 0) await fromStdin(opts, state)
   else {
     for (const name of positional) {
@@ -125,9 +147,10 @@ export async function gzip(stdin, tokens, ctx) {
   }
   if (state.gap) return state.gap
   // What it wrote, in the order it wrote it: the bytes go to a pipe or a file
-  // as they are, and to a terminal as the text they spell.
-  const events = [...state.events, ...(state.stderr ? [{ fd: 2, text: state.stderr }] : [])]
-  return { stdout: '', stderr: state.stderr, exitCode: state.status, events }
+  // as they are, and to a terminal as the text they spell, and what it said
+  // goes between them where it said it.
+  const stderr = state.events.filter((event) => event.fd === 2).map((event) => event.text).join('')
+  return { stdout: '', stderr, exitCode: state.status, events: state.events }
 }
 
 // A pipe carries text unless a stage upstream wrote bytes into it, and a
@@ -141,7 +164,7 @@ async function fromStdin(opts, state) {
   // was piped or redirected into it, and nothing is ever typed there.
   if (!opts.force && (opts.decompressing ? stdinIsTerminal(state.ctx) : stdoutIsTerminal(state.ctx))) {
     const [way, what] = opts.decompressing ? ['read from', 'decompression'] : ['written to', 'compression']
-    state.stderr += `gzip: compressed data not ${way} a terminal. Use -f to force ${what}.\nFor help, type: gzip -h\n`
+    say(state, `gzip: compressed data not ${way} a terminal. Use -f to force ${what}.\nFor help, type: gzip -h\n`)
     state.status = 1
     state.stopped = true
     return
@@ -156,23 +179,47 @@ async function fromStdin(opts, state) {
   // What a pipe hands over has no name to write a file beside, so it is
   // read out where GNU reads it: stdout.
   if (opts.decompressing) return decompress('stdin', piped ?? encodeUtf8(stdin), { ...opts, stdout: true }, state)
-  // A member of a pipe is the one GNU writes for a pipe: no name, and no
-  // moment, because there was no file to take either from.
-  return toStdout(await compressBytes(piped ?? encodeUtf8(stdin), FORMAT), state)
+  // A member of stdin carries no name, there being none to take, and the
+  // moment of the file stdin is where it is one — a pipe has none to give.
+  const modified = state.ctx.stdinFile ? moment(state.ctx) : 0
+  return toStdout(headed(await compressBytes(piped ?? encodeUtf8(stdin), FORMAT), null, modified), state)
 }
 
-function one(name, opts, state) {
+function one(operand, opts, state) {
   const { ctx } = state
   // `-` is the stream, not a file of that name: GNU reads stdin for it and
   // writes to stdout, there being no file beside which to write the answer.
-  if (name === '-') return fromStdin(opts, state)
-  // GNU opens the name itself, not what a link there names, unless it is
-  // writing to stdout or forced.
-  if (!opts.stdout && !opts.force && isLink(name, ctx)) return fail(state, `${name}: Too many levels of symbolic links`, 1)
-  const found = lookupWithNote(ctx, 'gzip', name)
+  if (operand === '-') return fromStdin(opts, state)
+  const { name, found } = opened(operand, opts, ctx)
   if (found.error) return fail(state, `${name}: ${found.error}`, 1)
   if (ctx.fs.isDir(found.path)) return fail(state, `${name} is a directory -- ignored`, 2)
   return opts.decompressing ? decompressFile(name, found.path, opts, state) : compress(name, found.path, opts, state)
+}
+
+// The name GNU opens, and what opening it found. Decompressing, a name that is
+// not there and carries no suffix is tried with each of a few on the end in
+// turn, and the first that is there — or that fails other than by not being
+// there — is the one it goes on with, under that name; where none is, it is
+// the first of them that is said not to be there.
+function opened(name, opts, ctx) {
+  const found = openOne(name, opts, ctx)
+  if (found.error !== 'No such file or directory' || !opts.decompressing || suffixOf(name) !== undefined) {
+    missingPathNote(ctx, 'gzip', name, found.error)
+    return { name, found }
+  }
+  for (const end of TRIED) {
+    const tried = openOne(name + end, opts, ctx)
+    if (tried.error !== 'No such file or directory') return { name: name + end, found: tried }
+  }
+  missingPathNote(ctx, 'gzip', name, found.error)
+  return { name: name + TRIED[0], found }
+}
+
+// GNU opens the name itself, not what a link there names, unless it is
+// writing to stdout or forced.
+function openOne(name, opts, ctx) {
+  if (!opts.stdout && !opts.force && isLink(name, ctx)) return { path: null, error: 'Too many levels of symbolic links' }
+  return lookup(ctx.cwd, name, ctx.fs)
 }
 
 function isLink(name, ctx) {
@@ -186,8 +233,8 @@ function isLink(name, ctx) {
 async function compress(name, path, opts, state) {
   const { ctx } = state
   const suffix = suffixOf(name)
-  if (!opts.stdout && !opts.force && suffix !== undefined) return note(state, `${name} already has ${suffix} suffix -- unchanged`)
-  const member = named(await compressBytes(readBytesOf(ctx.fs, path), FORMAT), name.slice(name.lastIndexOf('/') + 1), moment(ctx))
+  if (!opts.stdout && !opts.force && suffix !== undefined) return note(state, `${name} already has ${name.slice(-suffix.length)} suffix -- unchanged`)
+  const member = headed(await compressBytes(readBytesOf(ctx.fs, path), FORMAT), name.slice(name.lastIndexOf('/') + 1), moment(ctx))
   return opts.stdout ? toStdout(member, state) : toFile(name + SUFFIX, member, name, opts, state)
 }
 
@@ -196,23 +243,28 @@ async function compress(name, path, opts, state) {
 const moment = (ctx) => Math.floor(ctx.createdAt / 1000)
 
 // GNU records where a member came from: the name the file had, without the
-// directory it stood in, and the moment it carried. A stream writes neither —
-// what it writes is the header of a member that came from no file, which is
-// the very one GNU writes for a pipe. Everything past the header is the
-// member's own and says nothing about either, so the name and the moment go
-// in front of it. A header that is not the plain ten bytes is one this does
-// not know how to add to, and it is left as the runtime wrote it.
-const HEADER = 10, NAME_FLAG = 0x08
-function named(member, name, modified) {
-  const label = encodeUtf8(name)
+// directory it stood in, and the moment it carried — none and nought for a
+// pipe — beside the level it was made at, the default here and so no mark at
+// all, and the system that made it, Unix's 3. A stream writes the header of a
+// member that came from no file, marked with whatever system the runtime was
+// built for. Everything past the header is the member's own and says nothing
+// about any of it, so the header is written over and the name goes in front
+// of the rest. A header that is not the plain ten bytes is one this does not
+// know how to add to, and it is left as the runtime wrote it.
+const DEFAULT_LEVEL = 0, HEADER = 10, NAME_FLAG = 0x08, UNIX = 3
+function headed(member, name, modified) {
+  const label = encodeUtf8(name ?? '')
   if (member.length < HEADER || member[3] !== 0 || label.includes(0)) return member
-  const out = new Uint8Array(member.length + label.length + 1)
+  const room = name === null ? 0 : label.length + 1
+  const out = new Uint8Array(member.length + room)
   out.set(member.subarray(0, HEADER))
-  out[3] = NAME_FLAG
+  out[3] = name === null ? 0 : NAME_FLAG
   for (let i = 0; i < 4; i++) out[4 + i] = modified >>> (8 * i) & 0xff
+  out[8] = DEFAULT_LEVEL
+  out[9] = UNIX
   out.set(label, HEADER)
   // The name is closed by the zero the array already holds there.
-  out.set(member.subarray(HEADER), HEADER + label.length + 1)
+  out.set(member.subarray(HEADER), HEADER + room)
   return out
 }
 
@@ -242,19 +294,29 @@ async function decompress(name, bytes, opts, state, path = null) {
   const rest = inflated.rest
   const tail = rest !== null && rest.length > 0 && !looksCompressed(rest) ? rest : null
   if (tail !== null && foreign(tail, false)) return refuseForeign(name, state)
-  const suffix = suffixOf(name)
-  const written = opts.stdout ? toStdout(inflated.bytes, state) : toFile(name.slice(0, -suffix.length) + SUFFIXES[suffix], inflated.bytes, name, opts, state)
+  const found = inflated.error === null ? null : gzipTrouble(name, inflated)
+  // GNU writes what it inflated before the trouble it then reports — to a
+  // file too, which it removes again where the trouble is not one it lets
+  // stand, leaving the file it read where it was. What it refuses in the
+  // first header it refuses before it has made a file at all.
+  if (found?.header && rest.length === bytes.length) return report(state, found)
+  const kept = found === null || found.kept
+  const written = opts.stdout ? toStdout(inflated.bytes, state) : toFile(unsuffixed(name), kept ? inflated.bytes : null, name, opts, state)
   if (!written) return
   if (tail !== null && handOn) return toStdout(tail, state)
-  // GNU writes what it inflated before the trouble it then reports. Where the
-  // trouble is the check at the end of a member, it has already written the
-  // bytes that failed it and this has not: a stream hands nothing over until
-  // it is sure of it, so a file whose data is corrupt reports the same error
-  // with nothing written before it.
-  if (inflated.error) trouble(state, name, inflated)
+  if (found !== null) report(state, found)
 }
 
-const suffixOf = (name) => Object.keys(SUFFIXES).find((end) => name.length > end.length && name.endsWith(end))
+// GNU's `strlwr`, which lowers ASCII letters alone.
+const lower = (text) => text.replace(/[A-Z]/gu, (letter) => letter.toLowerCase())
+function suffixOf(name) {
+  const end = lower(name)
+  return SUFFIXES.find((suffix) => end.length > suffix.length && end.endsWith(suffix) && end[end.length - suffix.length - 1] !== '/')
+}
+function unsuffixed(name) {
+  const suffix = suffixOf(name)
+  return name.slice(0, -suffix.length) + (TAR.includes(suffix) ? '.tar' : '')
+}
 
 // GNU reads the two header bytes before anything else: input it runs out of
 // before them is too short to tell, and one whose two say something else is
@@ -282,10 +344,23 @@ function toFile(target, bytes, source, opts, state) {
   if (taken !== null && ctx.fs.isLink?.(taken) !== true && ctx.fs.isDir(taken)) return fail(state, `${target}: Is a directory`, 1)
   if (taken !== null) ctx.fs.removeWritable(ctx.cwd, target)
   let handle
-  try { handle = ctx.writable && ctx.fs.openWritable?.(ctx.cwd, target) } catch (e) { return fail(state, `${target}: ${e.message}`, 1) }
+  try { handle = ctx.writable && ctx.fs.openWritable?.(ctx.cwd, target) } catch (e) {
+    // A refusal met on the way is the run's to report, not a file it failed.
+    if (unsupportedNote(e)) {
+      state.gap ??= unsupportedFrom(e, 'gzip', `gzip: ${e.message}`, 1)
+      return false
+    }
+    return fail(state, `${target}: ${e.message}`, 1)
+  }
   if (!handle) {
     state.gap ??= unsupported('feature', 'gzip', 'read-only target', `gzip: ${target}: file system is read-only`, 1)
     return false
+  }
+  // Data that failed GNU after it was written is removed again, and the file
+  // it came from stays.
+  if (bytes === null) {
+    ctx.fs.removeWritable(ctx.cwd, target)
+    return true
   }
   handle.writeBytes(bytes)
   // What was compressed, or decompressed, is gone once it has been, unless
@@ -302,8 +377,11 @@ const dataError = (state, message) => fail(state, message, 1, '\n')
 const note = (state, message) => fail(state, message, state.status)
 
 function fail(state, message, status, lead = '') {
-  state.stderr += `${lead}gzip: ${message}\n`
+  say(state, `${lead}gzip: ${message}\n`)
   // An error is worth reporting over a warning, as GNU reports it.
   state.status = state.status === 1 ? 1 : status
   return false
 }
+
+// Said where it was said, between whatever was written before and after it.
+const say = (state, text) => { state.events.push({ fd: 2, text }) }

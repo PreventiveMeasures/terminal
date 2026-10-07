@@ -277,9 +277,19 @@ takes a terminal, a link, and a name already taken or already named as
 compressed, and decompressing to stdout hands on unchanged what is not gzip
 data, as `zcat -f` of a plain file. Without it a link is refused, as GNU
 refuses one, and a name already taken is asked about where stdin is the
-terminal, which answers with its end. What another compressor made —
-compress, pack, a zip — GNU gzip also reads, and it is refused here, as is a
-compression level.
+terminal, which answers with its end. A name that is not there is tried, when
+decompressing, with `.gz`, `.z`, `-z` and `.Z` on the end, and a suffix is
+read in any case, `F.GZ` as much as `f.gz`. A member is read in GNU's order: a
+header asking for what gzip does not do — another method, encryption, flags
+it does not know, a header check that fails — is said and the next file read;
+the data is written as it is inflated, and then a check or a count that fails
+it, or an end that comes too soon, is said and the run stops there, as gzip
+exits there, taking away a file it was writing. A member records the name and
+the moment of the file it came from, and one of stdin the moment of the file
+stdin is, or none for a pipe; what is deflated inside it is the runtime's
+stream rather than GNU's own deflate, so it can come out a few bytes apart
+from GNU's. What another compressor made — compress, pack, a zip — GNU gzip
+also reads, and it is refused here, as is a compression level.
 
 `tar` lists (`-t`), extracts (`-x`) and creates (`-c`) archives as GNU tar
 1.35 does, with its listings, messages and statuses: the old-style `tar czf`

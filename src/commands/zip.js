@@ -20,7 +20,7 @@ import { ArchiveError, zip as writeZip } from '@preventive/archive/zip.js'
 import { basename, compareNames, joinPath, lookup, resolve } from '../fs.js'
 import { readBytesOf, stdoutIsTerminal } from '../util.js'
 import { inOverlay } from '../writable.js'
-import { UnsupportedError, markUnsupported } from '../unsupported.js'
+import { UnsupportedError, markUnsupported, unsupportedNote } from '../unsupported.js'
 
 const MODES = { file: 0o600, directory: 0o700, symlink: 0o777 }
 const FLAGS = { __proto__: null, r: 'recurse', q: 'quiet', j: 'junk', 0: 'store', y: 'symlinks', D: 'noDirectories' }
@@ -106,6 +106,8 @@ export async function zip(_stdin, tokens, ctx) {
 
 function openArchive(ctx, name) {
   try { return ctx.fs.openWritable(ctx.cwd, name) } catch (error) {
+    // A refusal met on the way is the run's to report, not a file it failed.
+    if (unsupportedNote(error)) throw error
     return { error: error.fsError ?? 'No such file or directory' }
   }
 }

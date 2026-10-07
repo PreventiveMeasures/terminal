@@ -81,7 +81,8 @@ describe('gzip decompresses what a runtime inflated for it', () => {
     assert.deepEqual(await t.run('gzip -dc empty.gz'), result('', { stderr: '\ngzip: empty.gz: unexpected end of file\n', exitCode: 1 }))
     // What it inflated before the end it ran into is still written.
     assert.deepEqual(await t.run('gzip -dc trunc.gz'), result('alpha\nbeta\n', { stderr: '\ngzip: trunc.gz: unexpected end of file\n', exitCode: 1 }))
-    assert.deepEqual(await t.run('gzip -dc crc.gz'), result('', { stderr: '\ngzip: crc.gz: invalid compressed data--crc error\n', exitCode: 1 }))
+    // So is what failed the check that closes the member, which is read last.
+    assert.deepEqual(await t.run('gzip -dc crc.gz'), result('alpha\nbeta\n', { stderr: '\ngzip: crc.gz: invalid compressed data--crc error\n', exitCode: 1 }))
     // A file it could not open, and one it passed over, are reported as they
     // stand — and a warning is a status of its own.
     assert.deepEqual(await t.run('gzip -dc missing.gz'), result('', { stderr: 'gzip: missing.gz: No such file or directory\n', exitCode: 1 }))
@@ -203,6 +204,16 @@ describe('gzip compresses with the stream the runtime has', () => {
     })
     assert.equal(r.stderr, '')
     assert.deepEqual(bytesOf(r.stdout), MEMBER)
+  })
+
+  it('dates a member of stdin by the file stdin is, and one of a pipe by nothing', async () => {
+    // No name either way, there being none to take: `gzip < f` and
+    // `cat f | gzip` over the same f, as GNU wrote them.
+    const r = await stopped(() => {
+      const t = createTerminal({ f: 'alpha\nbeta\n' }, { mount: '/repo', writable: '/tmp/' })
+      return Promise.all([t.run('gzip < f | base64'), t.run('cat f | gzip | base64')])
+    })
+    assert.deepEqual(r.map((each) => each.stdout), ['H4sIAIDRrGoAA0vMKchI5EpKLUnkAgBuUDBuCwAAAA==\n', 'H4sIAAAAAAAAA0vMKchI5EpKLUnkAgBuUDBuCwAAAA==\n'])
   })
 
   it('writes the member beside the file it came from, and takes that file with it', async () => {
@@ -458,5 +469,78 @@ describe('gzip keeps the members it read, whatever followed them', () => {
     const t = terminal(TAILS)
     assert.deepEqual(await t.run('zcat method.gz'),
       result('alpha\nbeta\n', { stderr: 'gzip: method.gz: unknown method 1 -- not supported\n', exitCode: 1 }))
+  })
+})
+
+// A member is read in GNU's order: its header, refused as soon as it asks for
+// something gzip does not do, then its data, written as it is inflated, then
+// the eight bytes that close it. Recorded from GNU gzip 1.12 over the same
+// bytes written to disk.
+describe('gzip reads a member the way GNU reads one, header first and check last', () => {
+  const changed = (bytes, at, byte) => Uint8Array.from(bytes, (old, i) => (i === at ? byte : old))
+  const MEMBERS = {
+    'data.gz': GOOD,
+    'crc.gz': CORRUPT,
+    'length.gz': changed(GOOD, GOOD.length - 4, 0x0c),
+    'both.gz': changed(CORRUPT, GOOD.length - 4, 0x0c),
+    'cut.gz': GOOD.slice(0, -3),
+    'enc.gz': changed(GOOD, 3, 0x20),
+    'flags.gz': changed(GOOD, 3, 0x40),
+    'checked.gz': Uint8Array.of(...changed(GOOD.slice(0, 10), 3, 0x02), 0xef, 0xbe, ...GOOD.slice(10)),
+    'method.gz': changed(GOOD, 2, 7),
+  }
+  const failed = (name, ...why) => ({ stderr: why.map((text) => `\ngzip: ${name}: ${text}\n`).join(''), exitCode: 1 })
+
+  it('writes what a member held before saying the check that closes it failed', async () => {
+    const t = terminal(MEMBERS)
+    assert.deepEqual(await t.run('zcat crc.gz'), result('alpha\nbeta\n', failed('crc.gz', 'invalid compressed data--crc error')))
+    assert.deepEqual(await t.run('zcat length.gz'), result('alpha\nbeta\n', failed('length.gz', 'invalid compressed data--length error')))
+    assert.deepEqual(await t.run('zcat both.gz'),
+      result('alpha\nbeta\n', failed('both.gz', 'invalid compressed data--crc error', 'invalid compressed data--length error')))
+    assert.deepEqual(await t.run('zcat cut.gz'), result('alpha\nbeta\n', failed('cut.gz', 'unexpected end of file')))
+  })
+
+  it('stops the run there, as gzip exits on the spot', async () => {
+    const t = terminal(MEMBERS)
+    assert.deepEqual(await t.run('zcat crc.gz data.gz'), result('alpha\nbeta\n', failed('crc.gz', 'invalid compressed data--crc error')))
+    assert.deepEqual(await t.run('zcat cut.gz data.gz'), result('alpha\nbeta\n', failed('cut.gz', 'unexpected end of file')))
+    // And a file it was writing is removed again, the one it read staying.
+    assert.deepEqual(await t.run('cp crc.gz data.gz /tmp && gunzip /tmp/crc.gz /tmp/data.gz; ls /tmp'),
+      result('crc.gz\ndata.gz\n', { ...failed('/tmp/crc.gz', 'invalid compressed data--crc error'), exitCode: 0 }))
+  })
+
+  it('refuses what a header asks for that it does not do, and goes on to the next', async () => {
+    const t = terminal(MEMBERS)
+    // Said as it comes to it, before what the next file holds, and without
+    // the newline ahead of a data error.
+    const refused = async (line, said) => assert.deepEqual(await t.run(line), result(`${said}\nalpha\nbeta\n`, { exitCode: 1 }))
+    await refused('zcat enc.gz data.gz 2>&1', 'gzip: enc.gz is encrypted -- not supported')
+    await refused('zcat flags.gz data.gz 2>&1', 'gzip: flags.gz has flags 0x40 -- not supported')
+    await refused('zcat checked.gz data.gz 2>&1', 'gzip: checked.gz: header checksum 0xbeef != computed checksum 0x1525')
+    await refused('zcat method.gz data.gz 2>&1', 'gzip: method.gz: unknown method 7 -- not supported')
+    // No file is made for it, and the one it read stays.
+    assert.deepEqual(await t.run('cp enc.gz /tmp && gunzip /tmp/enc.gz; ls /tmp'),
+      result('enc.gz\n', { stderr: 'gzip: /tmp/enc.gz is encrypted -- not supported\n' }))
+  })
+})
+
+// GNU opens a name that is not there with a suffix on the end, and reads a
+// suffix without regard to case. Recorded from GNU gzip 1.12.
+describe('gzip finds a member by the names GNU tries', () => {
+  it('tries a missing name with its suffixes, and names the first of them', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('zcat data'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('gunzip -c data'), result('alpha\nbeta\n'))
+    assert.deepEqual(await t.run('zcat missing'), result('', { stderr: 'gzip: missing.gz: No such file or directory\n', exitCode: 1 }))
+    // A name that already carries one is not tried with another.
+    assert.deepEqual(await t.run('zcat missing.Z'), result('', { stderr: 'gzip: missing.Z: No such file or directory\n', exitCode: 1 }))
+    assert.deepEqual(await t.run('cp data.gz /tmp/x.z && gunzip /tmp/x && ls /tmp'), result('x\n'))
+  })
+
+  it('reads a suffix in any case, and none straight after a slash', async () => {
+    const t = terminal()
+    assert.deepEqual(await t.run('cp data.gz /tmp/F.GZ && cp data.gz /tmp/T.TGZ && gunzip /tmp/F.GZ /tmp/T.TGZ && ls /tmp'), result('F\nT.tar\n'))
+    assert.deepEqual(await t.run('cp plain.txt /tmp/P.GZ && gzip /tmp/P.GZ'), result('', { stderr: 'gzip: /tmp/P.GZ already has .GZ suffix -- unchanged\n' }))
+    assert.deepEqual(await t.run('cp data.gz /tmp/.gz && gunzip /tmp/.gz'), result('', { stderr: 'gzip: /tmp/.gz: unknown suffix -- ignored\n', exitCode: 2 }))
   })
 })
