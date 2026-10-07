@@ -86,7 +86,13 @@ const continues = (steps, index) => ['and', 'or'].includes(steps[index + 1]?.gat
 
 // Multi-stage pipelines isolate shell state and take the last stage's status.
 // Only the first stage consumes the enclosing list's shared input stream.
-async function runPipeline(stages, ctx, stream) {
+// The I/O guard watches what each stage reads and writes, which a pipeline
+// whose stages run in turn here rather than side by side has to answer for.
+function runPipeline(stages, ctx, stream) {
+  return stages.length > 1 ? ctx.io.pipeline((enter) => runStages(stages, ctx, stream, enter)) : runStages(stages, ctx, stream)
+}
+
+async function runStages(stages, ctx, stream, enter = () => {}) {
   const output = emptyOutput()
   let input = stream.text
   // What a pipe carries: the text a stage wrote, or the bytes it wrote where
@@ -100,6 +106,7 @@ async function runPipeline(stages, ctx, stream) {
     const fds = { ...ctx.outputFds }
     if (sink) fds[1] = sink
     const stageBytes = inputBytes, stageInput = input
+    enter(i)
     const run = () => pipelineStage(stage, ctx, { stdin: stageInput, stdinBytes: stageBytes, stdinFile: first && ctx.stdinFile, stdinDirectory: first && ctx.stdinDirectory, fds, stdinPiped: first ? ctx.stdinPiped : true, stdinTerminal: first && ctx.stdinTerminal })
     // Every stage of a real pipeline is its own process, and what `set -e`
     // ignored in there is as much its own business as the rest of its state.
