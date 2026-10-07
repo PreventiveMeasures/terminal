@@ -255,16 +255,17 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
   if (operand) refuseLinkedCopy(source, destination, state)
   const { dirs, files, links } = ctx.fs.listDir(absolute)
   if (dest.path === null && !makeDirectory(source, destination, named, target, state)) return
-  // A directory made by the copy takes the mode of the one it copies, less
-  // what the umask takes, as a file does (writable.js).
-  const mode = dest.path === null ? ctx.fs.metadataOf?.(absolute)?.mode : undefined
-  if (mode !== undefined) ctx.fs.keepMetadata(target, { mode: mode & 0o777 & ~UMASK })
   const from = source.replace(/\/+$/u, ''), into = destination.replace(/\/+$/u, '')
   for (const name of [...dirs, ...files, ...links].sort(compareNames)) {
     // Each entry finishes before the next is opened, as each operand does.
     ctx.io.setReads([])
     copyFile(`${from}/${name}`, `${into}/${name}`, state, top)
   }
+  // A directory made by the copy takes the mode of the one it copies, less
+  // what the umask takes, as a file does (writable.js) — once what goes in
+  // it is in, as GNU sets it.
+  const mode = dest.path === null ? ctx.fs.metadataOf?.(absolute)?.mode : undefined
+  if (mode !== undefined) ctx.fs.keepMetadata(target, { mode: mode & 0o777 & ~UMASK })
 }
 
 function makeDirectory(source, destination, named, target, state) {

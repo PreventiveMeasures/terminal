@@ -1,6 +1,6 @@
 import { parseArgs } from '../args.js'
 import { compareNames, joinPath, lookup } from '../fs.js'
-import { err, ok, reason } from '../util.js'
+import { err, ok, reason, stdinIsTerminal } from '../util.js'
 import { unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
 import { missingPathNote } from '../notes.js'
@@ -12,7 +12,7 @@ export function rm(_stdin, tokens, ctx) {
   const verbose = flags.has('v') || flags.has('verbose')
   const recursive = flags.has('r') || flags.has('R') || flags.has('recursive')
   if (positional.length === 0) return force ? ok('') : err('rm: missing operand')
-  const state = { ctx, force, verbose, recursive, events: [], stdout: '', stderr: '' }
+  const state = { ctx, force, verbose, recursive, events: [], stdout: '', stderr: '', failed: false }
   try {
     for (const name of positional) removeOperand(name, state)
   } catch (e) {
@@ -23,7 +23,7 @@ export function rm(_stdin, tokens, ctx) {
     result.stderr = state.stderr + result.stderr
     return result
   }
-  return { stdout: state.stdout, stderr: state.stderr, events: state.events, exitCode: state.stderr ? 1 : 0 }
+  return { stdout: state.stdout, stderr: state.stderr, events: state.events, exitCode: state.failed ? 1 : 0 }
 }
 
 function removeOperand(name, state) {
@@ -69,6 +69,7 @@ function crossedLink(ctx, name) {
 function removeTree(name, absolute, state, last = null) {
   const { ctx } = state
   const { dirs, files, links = [] } = ctx.fs.listDir(absolute)
+  if (dirs.length + files.length + links.length > 0 && declined(name, absolute, 'descend into', state)) return
   const base = name.replace(/\/+$/u, '')
   for (const child of [...dirs, ...files, ...links].sort(compareNames)) {
     const path = joinPath(absolute, child)
@@ -82,6 +83,7 @@ function removeEntry(name, path, state, directory, error) {
   const { ctx } = state
   const shown = state.verbose || error !== null || !ctx.writable || !path?.startsWith('/tmp/') ? quoteName(name, ctx) : ''
   const remove = () => directory ? ctx.fs.removeWritableDir?.(ctx.cwd, name) : ctx.fs.removeWritable?.(ctx.cwd, name)
+  if (error === null && declined(name, path, 'remove', state)) return
   try {
     if (error === null && !remove()) error = 'Read-only file system'
   } catch (e) {
@@ -98,8 +100,23 @@ function removeEntry(name, path, state, directory, error) {
   if (state.verbose) report(state, `removed ${directory ? 'directory ' : ''}${shown}\n`, 1)
 }
 
-function report(state, text, fd = 2) {
+function report(state, text, fd = 2, failed = fd === 2) {
   if (fd === 1) state.stdout += text
   else state.stderr += text
   state.events.push({ fd, text })
+  state.failed ||= failed
+}
+
+// GNU asks before it goes into or takes away what its mode keeps its owner
+// from writing, unless forced, where stdin is a terminal — which here has
+// nothing typed on it, so the question meets its end, which is no: the name
+// is left where it is, and that is no failure. A link is never asked about.
+function declined(name, path, doing, state) {
+  const { ctx } = state
+  if (state.force || !stdinIsTerminal(ctx) || ctx.fs.isLink?.(path)) return false
+  const mode = ctx.fs.metadataOf?.(path)?.mode
+  if (mode === undefined || (mode & 0o200) !== 0) return false
+  const what = doing === 'descend into' ? 'directory' : ctx.fs.isDir(path) ? 'directory' : ctx.fs.fileSize(path) === 0 ? 'regular empty file' : 'regular file'
+  report(state, `rm: ${doing} write-protected ${what} ${quoteName(name, ctx)}? `, 2, false)
+  return true
 }

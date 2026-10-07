@@ -148,6 +148,34 @@ describe('ls -l lists an entry that keeps a mode and a time of its own with them
     // A copy is a new file, made in the mode of what it copies.
     assert.deepEqual(await run(t, 'cp pkg/run.sh copy && ls -l copy'), expected('-rwxr-xr-x 1 user user 5 Sep 18 05:52 copy\n', [], { cwd: '/tmp' }))
   })
+
+  it('refuses what a kept mode keeps its owner from, and rm asks before it', async () => {
+    const t = await made({
+      'ro.tar': pack([
+        { name: 'ro/', type: 'directory', mode: 0o555, mtime: STORED, ...owner },
+        { name: 'ro/f', mode: 0o444, mtime: STORED, data: Buffer.from('f\n'), ...owner },
+        { name: 'w', mode: 0o444, mtime: STORED, data: Buffer.from(''), ...owner },
+        { name: 'hidden', mode: 0o200, mtime: STORED, data: Buffer.from('h\n'), ...owner },
+      ]),
+    }, { mount: '/repo', writable: '/tmp/' })
+    await run(t, 'cd /tmp && tar -xf /repo/ro.tar')
+    // GNU is told "Permission denied", each command in its own words.
+    const refused = async (line, path, doing) => {
+      const r = await run(t, line)
+      assert.deepEqual(r.unsupported.map((u) => u.detail), ['permission denied'], line)
+      assert.match(r.stderr, new RegExp(`${path}: ${doing} where its mode denies it is not supported \\(GNU says Permission denied\\)\n$`, 'u'), line)
+      assert.notEqual(r.exitCode, 0, line)
+    }
+    await refused('echo x >> w', '/tmp/w', 'writing a file')
+    await refused('touch ro/new', '/tmp/ro', 'changing the names in a directory')
+    await refused('rm -f ro/f', '/tmp/ro', 'changing the names in a directory')
+    await refused('cat hidden', '/tmp/hidden', 'reading a file')
+    // rm asks first where stdin is the terminal, whose end answers no; it
+    // asks nothing of a stdin that is not one, nor under -f.
+    assert.deepEqual(await run(t, 'rm w ro; echo $?'), expected('1\n', [], { cwd: '/tmp', stderr: "rm: remove write-protected regular empty file 'w'? rm: cannot remove 'ro': Is a directory\n" }))
+    assert.deepEqual(await run(t, 'rm -r ro; echo $?'), expected('0\n', [], { cwd: '/tmp', stderr: "rm: descend into write-protected directory 'ro'? " }))
+    assert.deepEqual(await run(t, 'rm w < /dev/null && ls w'), expected('', [], { cwd: '/tmp', stderr: "ls: cannot access 'w': No such file or directory\n", exitCode: 2 }))
+  })
 })
 
 describe('ls -l ownership and time', () => {

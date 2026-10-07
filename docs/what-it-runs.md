@@ -176,7 +176,12 @@ under the common umask, 022, and is listed with them — marked `*` by `-F`
 where they make it executable — until a write dates it to now, as making or
 removing a name in a directory dates the directory; `cp` makes a file in the
 mode of one it copies, `gzip` carries both over to what it writes, and
-`tar -c` and `zip` store them. Link counts, directory sizes and
+`tar -c` and `zip` store them. What such a mode keeps its owner from —
+reading a file, writing one, making or removing a name in a directory — GNU
+is told "Permission denied" of, in words each command has its own way of
+saying, so that is refused with an unsupported diagnostic; `rm` asks before
+it takes away a write-protected entry, as GNU asks where stdin is the
+terminal, and the terminal's empty stdin answers no. Link counts, directory sizes and
 the `total` line are what ext4 would report for the same tree, and `-h`
 rounds sizes as `du -h` does. A symbolic link — one a source entry declares,
 or one `ln -s` made — is the row the model has nothing to guess at:
@@ -376,7 +381,9 @@ on it answers with its end, which UnZip takes as "None". A link is made last,
 its name held until then by a placeholder of its target, as UnZip holds it, so
 a later entry of that name, which `-j` can make, meets it as it would there. A
 file keeps the mode it was stored with, less its set-id and sticky bits but
-with no umask taken from it, and its time; a directory UnZip made for an entry
+with no umask taken from it, and its time — or, where a maker other than
+Unix recorded DOS attributes alone, the mode UnZip expands them into, less the
+umask; a directory UnZip made for an entry
 of its own takes the entry's once everything is written, and one made on the
 way, or for `-d`, is `drwxr-xr-x`, dated to when it was made, as a link is. A
 name stored with a `.` segment, which Info-ZIP never writes and other tools

@@ -243,6 +243,18 @@ describe('unzip extracts into the writable overlay', () => {
     assert.deepEqual(await t.run('unzip -qq /repo/pkg.zip pkg/README.md -d out'), result('', { stderr: replace('out/pkg/README.md'), exitCode: 1, cwd: '/tmp' }))
   })
 
+  it('gives what a DOS maker stored the mode UnZip gives it', async () => {
+    // Two files marked by DOS's attributes alone, one of them read-only:
+    // UnZip expands that bit into no write permission, and takes the umask,
+    // 022, off what is left.
+    const DOS = bytesOf(`
+UEsDBBQAAAAAAIAYIlh+8EwyBAAAAAQAAAAGAAAAcm8udHh0ZG9zClBLAwQUAAAAAACAGCJYfvBMMgQAAAAEAAAABgAAAHJ3LnR4dGRvcwpQSwECFAAUAAAAAACAGCJYfvBM
+MgQAAAAEAAAABgAAAAAAAAAAACEAAAAAAAAAcm8udHh0UEsBAhQAFAAAAAAAgBgiWH7wTDIEAAAABAAAAAYAAAAAAAAAAAAgAAAAKAAAAHJ3LnR4dFBLBQYAAAAAAgACAGgA
+AABQAAAAAAA=`)
+    const t = createTerminal({ 'dos.zip': DOS }, { mount: '/repo', writable: '/tmp/' })
+    assert.deepEqual(await t.run('cd /tmp && unzip -q /repo/dos.zip && ls -l | cut -c 1-10'), result('total 8\n-r--r--r--\n-rw-r--r--\n', { cwd: '/tmp' }))
+  })
+
   it('keeps the mode and the time each entry was stored with, as UnZip does', async () => {
     const t = await terminal()
     // No umask is taken from an entry's own mode; a directory made for -d is

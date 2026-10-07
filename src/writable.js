@@ -1,6 +1,7 @@
 import { VfsError } from '@preventive/vfs'
 import { dirname, lookup, sameBytes, walkPath, writeTarget } from './fs.js'
 import { decodeUtf8, encodeUtf8 } from './util.js'
+import { UnsupportedError } from './unsupported.js'
 
 // The overlay is mounted at /tmp, so what may be written is what falls inside
 // it. Commands ask before acting, where the answer decides more than whether a
@@ -17,6 +18,19 @@ const EMPTY = new Uint8Array()
 export const UMASK = 0o022
 export const MADE_MODE = 0o777 & ~UMASK
 
+// What a mode an entry keeps denies its owner, who is the one user here:
+// reading a file without its read bit, writing one without its write bit,
+// and making or taking away a name in a directory without its write and
+// search bits. GNU is told "Permission denied" there, which each command
+// says in words of its own, so such an access is refused rather than made.
+const NAMES = 0o300, READ = 0o400, WRITE = 0o200
+function permitted(overlay, path, bits, doing) {
+  const mode = overlay.metadataOf(path)?.mode
+  if (mode === undefined || (mode & bits) === bits) return
+  throw new UnsupportedError('feature', 'permission denied', `${path}: ${doing} where its mode denies it is not supported (GNU says Permission denied)`)
+}
+const naming = (overlay, path) => permitted(overlay, dirname(path), NAMES, 'changing the names in a directory')
+
 // Writes land in the tree the sources are in, and only under /tmp: every
 // method here answers `false` or `null` for a name outside it, which is the
 // read-only filesystem every other write meets.
@@ -24,7 +38,10 @@ export function writableFs(base) {
   base.vfs.mkdir('/tmp', { recursive: true })
   base.writableAt('/tmp')
   const overlay = overlayOf(base)
-  const observe = (path) => overlay.observer?.read(overlay.identity(path) ?? path)
+  const observe = (path) => {
+    permitted(overlay, path, READ, 'reading a file')
+    overlay.observer?.read(overlay.identity(path) ?? path)
+  }
   const fs = {
     ...base,
     observeIo: (value) => { overlay.observer = value },
@@ -141,6 +158,8 @@ function openFile(fs, overlay, cwd, path, append) {
   if (!inOverlay(absolute)) return null
   checkTarget(fs, cwd, path)
   let cell = overlay.identity(absolute)
+  if (cell === undefined) naming(overlay, absolute)
+  else permitted(overlay, absolute, WRITE, 'writing a file')
   if (cell === undefined) {
     overlay.change(path, () => overlay.vfs.writeFile(absolute, EMPTY))
     overlay.named(absolute)
@@ -168,6 +187,7 @@ function addDirectory(fs, overlay, cwd, path) {
   // checkTarget passes a name already taken by a file or a link, which is not
   // a name a directory can take.
   if (fs.isFile(absolute) || fs.isLink(absolute)) throw new Error(`${path}: File exists`)
+  naming(overlay, absolute)
   overlay.change(path, () => overlay.vfs.mkdir(absolute))
   overlay.named(absolute)
   return true
@@ -179,6 +199,7 @@ function addLink(fs, overlay, cwd, path, target) {
   const absolute = writeTarget(fs, cwd, path, false)
   if (!absolute.startsWith('/tmp/')) return false
   checkNewName(fs, cwd, path)
+  naming(overlay, absolute)
   overlay.change(path, () => overlay.vfs.symlink(target, absolute))
   overlay.named(absolute)
   return true
@@ -190,6 +211,7 @@ function copyFile(fs, overlay, cwd, source, target) {
   checkTarget(fs, cwd, target)
   const cell = overlay.identity(source)
   if (source === absolute || cell !== undefined && cell === overlay.identity(absolute)) throw new Error('source and destination are the same file')
+  permitted(overlay, source, READ, 'reading a file')
   overlay.observer?.read(cell ?? source)
   const made = overlay.identity(absolute) === undefined
   // A copy carries bytes, which either side may hold without a string
@@ -215,6 +237,8 @@ function replaceFile(fs, overlay, cwd, path, content, backupPath) {
   checkTarget(fs, cwd, path)
   if (!fs.isFile(absolute) && !fs.isLink(absolute)) throw pathError(path, 'No such file or directory')
   if (backup !== null) checkTarget(fs, cwd, backupPath)
+  naming(overlay, absolute)
+  if (backup !== null) naming(overlay, backup)
   const bytes = encodeUtf8(content)
   const { vfs } = overlay
   // The file written in its place takes its mode, as GNU gives it.
@@ -253,6 +277,7 @@ function removeFile(fs, overlay, cwd, path) {
   if (found.error) throw pathError(path, found.error)
   if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
   if (!inOverlay(found.path)) return false
+  naming(overlay, found.path)
   // Open handles retain the unlinked file until their last writer ends.
   const left = overlay.leaving(found.path)
   overlay.forget(found.path)
@@ -275,6 +300,7 @@ function dropDirectory(fs, overlay, cwd, path) {
   if (found.path === '/tmp') throw new Error(`${path}: Device or resource busy`)
   const { dirs, files, links } = fs.listDir(found.path)
   if (dirs.length || files.length || links.length) throw new Error(`${path}: Directory not empty`)
+  naming(overlay, found.path)
   overlay.forget(found.path)
   overlay.change(path, () => overlay.vfs.rmdir(found.path))
   overlay.named(found.path)

@@ -17,8 +17,9 @@
 
 import { ArchiveError, unzip as readZip } from '@preventive/archive/zip.js'
 import { lookupWithNote } from '../../notes.js'
-import { encodeUtf8, readBytesOf } from '../../util.js'
+import { decodeUtf8Maybe, encodeUtf8, readBytesOf } from '../../util.js'
 import { markUnsupported } from '../../unsupported.js'
+import { UMASK } from '../../writable.js'
 import { formatDate } from '../extra.js'
 import { refusalOf, rewritten, storedName } from '../stored-names.js'
 import { extractMembers } from './extract.js'
@@ -82,7 +83,7 @@ export async function unzip(_stdin, tokens, ctx) {
   else if (opts.mode === 'pipe') for (const entry of chosen.entries) run.bytes(entry.type === 'symlink' ? encodeUtf8(entry.linkname) : entry.data)
   else if (twoReadings(chosen.entries.filter((entry) => entry.type !== 'symlink'), ctx)) {
     return run.refuse('feature', 'archive times', 'whether an entry\'s time is exact or a DOS time is not known here, and outside UTC the two date what is extracted differently (TZ=UTC answers it)')
-  } else if (!extractMembers(chosen.entries, opts, run)) return run.end(run.gap ? 1 : run.status)
+  } else if (!extractMembers(withModes(chosen.entries, bytes), opts, run)) return run.end(run.gap ? 1 : run.status)
   cautions(chosen, run)
   if (opts.mode === 'test') summary(chosen, found.name, run)
   return run.end(chosen.missed ? 11 : run.status)
@@ -107,6 +108,43 @@ function endRecord(bytes) {
   return -1
 }
 const hasEndRecord = (bytes) => endRecord(bytes) >= 0
+
+// The mode UnZip gives what it extracts, which is its mapattr's: a Unix-like
+// maker's stored mode as it stands, which is the one the reader hands out,
+// and any other maker's DOS attributes expanded — read-only into no write
+// permission, a directory into execute — with the umask taken off, where the
+// reader hands out the mode it gives every such entry. A Unix mode stored
+// beside them that agrees with them, as PKZip for Unix stores one, is kept;
+// an Amiga's own bits are spread over all three. The central directory says
+// who made each entry, and the reader has read it whole already.
+const UNIX_LIKE = new Set([2, 3, 5, 12, 13, 16, 17, 18, 30])
+const AMIGA = 1, FAT = 0
+function unzipMode(host, attributes, name) {
+  let mode = attributes >>> 16
+  if (host === AMIGA) mode = (attributes >>> 17 & 7) * 0o111
+  else if (UNIX_LIKE.has(host) && mode !== 0) return mode
+  else {
+    if (host !== FAT && !UNIX_LIKE.has(host)) mode = 0
+    const dos = attributes & 0xff | (name.endsWith('/') ? 0x10 : 0)
+    const bits = ((dos & 1) === 0 ? 2 : 0) | (dos & 0x10) >> 4
+    if ((mode & 0o700) === (0o400 | bits << 6)) return mode
+    mode = 0o444 | bits * 0o111
+  }
+  return mode & ~UMASK
+}
+
+function withModes(entries, bytes) {
+  const at = endRecord(bytes)
+  const u16 = (i) => bytes[i] + bytes[i + 1] * 0x100
+  const modes = new Map()
+  for (let i = u16(at + 16) + u16(at + 18) * 0x10000, n = u16(at + 10); n > 0 && i + 46 <= bytes.length; n--) {
+    const length = u16(i + 28)
+    const name = decodeUtf8Maybe(bytes.subarray(i + 46, i + 46 + length))
+    if (name !== undefined) modes.set(name, unzipMode(bytes[i + 5], u16(i + 38) + u16(i + 40) * 0x10000, name))
+    i += 46 + length + u16(i + 30) + u16(i + 32)
+  }
+  return entries.map((entry) => ({ ...entry, mode: modes.get(entry.storedName) ?? entry.mode }))
+}
 
 // The archive's comment as UnZip shows it under the archive's name: as far
 // as a NUL, which ends it as a C string, without a carriage return, an
