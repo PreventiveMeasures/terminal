@@ -150,13 +150,11 @@ function fetch(st, extra = 0) {
 // backslash made literal (`escapes`), whether or not the tree still holds
 // either, as an interval of `{0}` drops what it repeats. `multibyte` says
 // whether a character of the locale can take more than one byte, and `up` is
-// its towupper, which RE_ICASE reads the pattern through. `foldRangeNames`
-// keeps grep's reading of a collating symbol that ends a range, which its
-// own port had: the name as written, where glibc upper-cases it too. The
-// state the parser keeps carries the bits a bracket reads.
-export function regcomp(pattern, syntax, { multibyte = true, up = (code) => code, foldRangeNames = true } = {}) {
+// its towupper, which RE_ICASE reads the pattern through. The state the
+// parser keeps carries the bits a bracket reads.
+export function regcomp(pattern, syntax, { multibyte = true, up = (code) => code } = {}) {
   const st = {
-    s: encodeUtf8Loose(pattern), i: 0, syntax, multibyte, up, foldRangeNames,
+    s: encodeUtf8Loose(pattern), i: 0, syntax, multibyte, up,
     icase: Boolean(syntax & RE_ICASE), charClasses: Boolean(syntax & RE_CHAR_CLASSES), noEmptyRanges: Boolean(syntax & RE_NO_EMPTY_RANGES),
     nsub: 0, completed: 0, token: null, brackets: [], escapes: [],
   }

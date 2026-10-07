@@ -23,7 +23,7 @@ import { dfaDiagnostics } from './grep-dfa.js'
 export function gnuDiagnostics(patterns, origins, { extended, icase = false, lines = false, words = false, multibyte = true, up }) {
   const syntax = (extended ? RE_SYNTAX_EGREP : RE_SYNTAX_GREP) | (icase ? RE_ICASE : 0)
   const errors = patterns.flatMap((pattern, k) => {
-    const { error } = regcomp(pattern, syntax, { multibyte, up, foldRangeNames: false })
+    const { error } = regcomp(pattern, syntax, { multibyte, up })
     return error ? [`grep: ${origins[k] ?? ''}${error}\n`] : []
   })
   if (errors.length) return { error: errors.join('') }

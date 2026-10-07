@@ -65,6 +65,17 @@ const CASES = {
     [String.raw`grep -E 'A|?b' f`, 'Ab\nab\n a:b\n', 'grep: warning: ? at start of expression\n', 0],
     [String.raw`grep -c '[[:alpha:]-z]' f`, '', 'grep: Invalid range end\n', 2],
   ],
+  // glibc reads the pattern through towupper under -i, a bracket symbol's
+  // name with it, and counts the name's 31 bytes in what it reads: sixteen
+  // `ı` are sixteen `I`, which fit and name no character, and eleven `ȿ` are
+  // eleven three-byte `Ȿ`, which do not fit.
+  'under -i a collating name is read upper-cased, and its bytes counted so': [
+    [`grep -i '[[.${'ı'.repeat(16)}.]]' f`, '', 'grep: Invalid collation character\n', 2],
+    [`grep -i '[[=${'ı'.repeat(16)}=]]' f`, '', 'grep: Invalid collation character\n', 2],
+    [`grep '[[.${'ı'.repeat(16)}.]]' f`, '', 'grep: Unmatched [, [^, [:, [., or [=\n', 2],
+    [`grep -i '[[.${'ȿ'.repeat(11)}.]]' f`, '', 'grep: Unmatched [, [^, [:, [., or [=\n', 2],
+    [`grep -i '[[:${'ı'.repeat(16)}:]]' f`, '', 'grep: Invalid character class name\n', 2],
+  ],
   '--include and --exclude match a named file by any trailing part of its name': [
     [String.raw`grep -H x --exclude=a.txt d/a.txt a.txt`, '', '', 1],
     [String.raw`grep --exclude='d/*' x d/a.txt a.txt`, 'a.txt:x c\n', '', 0],
@@ -155,6 +166,18 @@ describe('grep answers as GNU grep 3.11 does', () => {
   for (const [title, cases] of Object.entries(CASES)) {
     describe(title, () => {
       for (const [command, stdout, stderr, exitCode] of cases) it(command, () => check(command, stdout, stderr, exitCode))
+    })
+  }
+})
+
+describe('grep refuses a collating symbol past ASCII that -i makes one byte', () => {
+  // glibc takes `[.ı.]` under -i, as `[.I.]`; the translation for the JS
+  // matcher reads it as written, and cannot.
+  for (const command of ["grep -i '[[.ı.]]' f", "grep -i '[[=ſ=]]' f", "grep -i '[[.ı.]-Z]' f"]) {
+    it(command, async () => {
+      const r = await createTerminal(FILES).run(command)
+      assert.deepEqual(r.unsupported.map((u) => u.detail), ['GNU regex syntax'])
+      assert.equal(r.exitCode, 2)
     })
   }
 })

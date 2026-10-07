@@ -6,7 +6,7 @@
 // more than one byte is a member but no end of a range, and a collating
 // symbol or an equivalence class is the one byte it names.
 
-import { decodeUtf8Loose, encodeUtf8Loose } from './bytes.js'
+import { encodeUtf8Loose } from './bytes.js'
 
 // __re_error_msgid, for the codes the parser can give.
 const MESSAGES = {
@@ -130,38 +130,41 @@ function parseElement(st, token, acceptHyphen) {
   return { type: E.SB_CHAR, code: token.c }
 }
 
-// parse_bracket_symbol: [:name:], [.name.] or [=name=], its name as bytes,
-// at most 31 of them.
-function parseSymbol(st, token) {
-  const { s } = st
-  if (st.i >= s.length) fail('EBRACK')
-  const name = []
-  for (;;) {
-    if (name.length >= 32) fail('EBRACK')
-    const ch = s[st.i++]
-    if (st.i >= s.length) fail('EBRACK')
-    if (ch === token.c && s[st.i] === 0x5d) break
-    name.push(ch)
-  }
-  st.i++
-  return { type: SYMBOLS[token.type], name }
-}
-
 // Under RE_ICASE regcomp reads the pattern through towupper, so a member is
 // its upper case, and one past ASCII becomes a byte where its upper case is
 // one. In a byte locale a byte past ASCII has no case.
 const fold = (st, code) => (st.icase && (st.multibyte || code < 0x80) ? st.up(code) : code)
 
-// The characters of a name, as code points: those its bytes spell in a
-// multibyte locale, and the bytes themselves in a byte locale.
-const nameChars = (st, name) => (st.multibyte ? [...decodeUtf8Loose(Uint8Array.from(name))].map((c) => c.codePointAt(0)) : name)
+// The bytes that spell a character.
+const bytesOf = (st, code) => (st.multibyte && code > 0x7f ? [...encodeUtf8Loose(String.fromCodePoint(code))] : [code])
 
-// A name as regcomp reads it under RE_ICASE: each character of it upper-
-// cased, in the bytes that spell that.
-function foldedName(st, name) {
-  if (!st.icase) return name
-  const chars = nameChars(st, name).map((code) => fold(st, code))
-  return st.multibyte ? [...encodeUtf8Loose(String.fromCodePoint(...chars))] : chars
+// parse_bracket_symbol: [:name:], [.name.] or [=name=], its name as bytes,
+// at most 31 of them, and the first character it is written with. Under
+// RE_ICASE the bytes are those of the upper-cased pattern regcomp reads, so
+// `[.ı.]` names the one byte `I` and the 31 are counted in those — save
+// that a class name keeps its ASCII as written (re_string_fetch_byte_case),
+// which is what decides whether it names a class at all.
+function parseSymbol(st, token) {
+  const { s } = st
+  if (st.i >= s.length) fail('EBRACK')
+  const folds = token.type === B.OP_OPEN_CHAR_CLASS ? (code) => code > 0x7f : () => true
+  const first = charAt(st, st.i).code
+  const name = []
+  let pending = []
+  for (;;) {
+    if (name.length >= 32) fail('EBRACK')
+    if (pending.length === 0) {
+      const { code, width } = charAt(st, st.i)
+      pending = st.icase && folds(code) ? bytesOf(st, fold(st, code)) : [...s.subarray(st.i, st.i + width)]
+      st.i += width
+    }
+    const ch = pending.shift()
+    if (pending.length === 0 && st.i >= s.length) fail('EBRACK')
+    if (ch === token.c && pending.length === 0 && s[st.i] === 0x5d) break
+    name.push(ch)
+  }
+  st.i++
+  return { type: SYMBOLS[token.type], name, first }
 }
 
 // The collation sequence value of a range's end, which without collation
@@ -174,19 +177,13 @@ function rangeValue(st, element) {
       const code = fold(st, element.code)
       return code < 0x80 ? code : null
     }
-    case E.COLL_SYM: {
-      // grep's port read the name as written, upper-casing only a name of
-      // one byte; sed's, as regcomp does.
-      const name = st.foldRangeNames ? foldedName(st, element.name) : element.name
-      if (name.length !== 1) return null
-      return st.foldRangeNames ? name[0] : fold(st, name[0])
-    }
+    case E.COLL_SYM: return element.name.length === 1 ? element.name[0] : null
     default: return null
   }
 }
 
 // What a range's end is written as: a collating symbol's first character.
-const written = (st, element) => (element.type === E.COLL_SYM ? nameChars(st, element.name)[0] : element.code)
+const written = (element) => (element.type === E.COLL_SYM ? element.first : element.code)
 
 // build_range_exp. A range may not run backwards with RE_NO_EMPTY_RANGES.
 function buildRange(st, first, last) {
@@ -196,21 +193,21 @@ function buildRange(st, first, last) {
   const hi = rangeValue(st, last)
   if (lo === null || hi === null) fail('ECOLLATE')
   if (st.noEmptyRanges && lo > hi) fail('ERANGE')
-  return { k: 'range', lo: written(st, first), hi: written(st, last) }
+  return { k: 'range', lo: written(first), hi: written(last) }
 }
 
 // The classes glibc knows by name. GNU's `[:word:]` is not one of them.
 const CLASSES = new Set(['alnum', 'cntrl', 'lower', 'space', 'alpha', 'digit', 'print', 'upper', 'blank', 'graph', 'punct', 'xdigit'])
 
 // build_collating_symbol, build_equiv_class and build_charclass: a
-// collating symbol or an equivalence class is the one byte it names, and a
-// class name is read as written.
+// collating symbol or an equivalence class is the one byte it names, and
+// stands here for the character it is written with.
 function buildElement(element) {
   switch (element.type) {
     case E.COLL_SYM:
     case E.EQUIV_CLASS:
       if (element.name.length !== 1) fail('ECOLLATE')
-      return { k: 'char', code: element.name[0], coll: true }
+      return { k: 'char', code: element.first, coll: true }
     case E.CHAR_CLASS: {
       const name = String.fromCodePoint(...element.name)
       if (!CLASSES.has(name)) fail('ECTYPE')
