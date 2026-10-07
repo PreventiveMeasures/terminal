@@ -26,6 +26,11 @@ describe('grep count and attached match limits', () => {
     ['grep -c -e hit -e hit src/a.js', '2\n'],
     ['grep -cv hit src/a.js', '3\n'],
     ['grep -c -A2 -B1 hit src/a.js', '2\n'],
+    // -l and -L outrank -c, and the later of the two the other, as in GNU.
+    ['grep -cl hit src/a.js', 'src/a.js\n'],
+    ['grep -cL hit src/a.js', ''],
+    ['grep -lL hit src/a.js', ''],
+    ['grep -Ll hit src/a.js', 'src/a.js\n'],
     ['grep -c hit src/a.js src/c.js empty', 'src/a.js:2\nsrc/c.js:0\nempty:0\n'],
     ['grep -c hit src/c.js empty', 'src/c.js:0\nempty:0\n', 1],
     ['grep -ch hit src/a.js src/c.js', '2\n0\n'],
@@ -70,8 +75,6 @@ describe('grep count and attached match limits', () => {
     const unsupportedCases = [
       ['grep -m1 hit < src/a.js', 'feature', 'partial stdin reads', earlyRead],
       ['grep -cm1 hit - < src/a.js', 'feature', 'partial stdin reads', earlyRead],
-      ['grep -cl hit src/a.js', 'option', 'combined output modes', 'grep: -l / -c are mutually exclusive'],
-      ['grep -cL hit src/a.js', 'option', 'combined output modes', 'grep: -L / -c are mutually exclusive'],
     ]
     for (const [command, kind, detail, message] of unsupportedCases) {
       const result = await createTerminal(FILES).run(command + ' 2>/dev/null | cat')

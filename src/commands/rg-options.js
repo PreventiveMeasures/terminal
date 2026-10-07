@@ -5,8 +5,8 @@
 
 import { UnsupportedError } from '../unsupported.js'
 
-const SHORT = ['n', 'N', 'i', 's', 'w', 'F', 'v', 'l', 'c', 'q', 'u', 'a', 'H', 'I']
-const LONG = ['line-number', 'no-line-number', 'ignore-case', 'case-sensitive', 'word-regexp',
+const SHORT = ['n', 'N', 'i', 's', 'w', 'x', 'F', 'v', 'l', 'c', 'q', 'u', 'a', 'H', 'I']
+const LONG = ['line-number', 'no-line-number', 'ignore-case', 'case-sensitive', 'word-regexp', 'line-regexp',
   'fixed-strings', 'invert-match', 'files-with-matches', 'files-without-match', 'count', 'quiet',
   'hidden', 'no-ignore', 'no-heading', 'with-filename', 'no-filename', 'text', 'unrestricted']
 export const ARGS = {
@@ -17,7 +17,7 @@ export const ARGS = {
 // Long spellings folded onto the short flag that carries the same meaning.
 const CANONICAL = new Map(Object.entries({
   'line-number': 'n', 'no-line-number': 'N', 'ignore-case': 'i', 'case-sensitive': 's',
-  'word-regexp': 'w', 'fixed-strings': 'F', 'invert-match': 'v', 'files-with-matches': 'l',
+  'word-regexp': 'w', 'line-regexp': 'x', 'fixed-strings': 'F', 'invert-match': 'v', 'files-with-matches': 'l',
   'files-without-match': 'L', count: 'c', quiet: 'q', text: 'a', unrestricted: 'u',
   'with-filename': 'H', 'no-filename': 'I', regexp: 'e',
   'after-context': 'A', 'before-context': 'B', context: 'C',
@@ -31,7 +31,7 @@ const gap = (detail, message) => new UnsupportedError('feature', detail, `rg: ${
 export function rgOptions(parsed) {
   const state = {
     patterns: [], context: [], mode: null, showName: null,
-    ignoreCase: false, lineNumbers: false, word: false, literal: false,
+    ignoreCase: false, lineNumbers: false, word: false, line: false, literal: false,
     invert: false, quiet: false, text: false, hidden: false, unrestricted: 0,
   }
   for (const { name, value } of parsed.order) {
@@ -62,6 +62,8 @@ function apply(state, flag, value, spelling) {
     case 'H': state.showName = 'H'; return
     case 'I': state.showName = 'h'; return
     case 'w': state.word = true; return
+    // -x outranks -w whichever comes first, as grep's does.
+    case 'x': state.line = true; return
     case 'F': state.literal = true; return
     case 'v': state.invert = true; return
     case 'q': state.quiet = true; return
@@ -83,46 +85,3 @@ function contextValue(value, flag) {
 }
 
 export const shown = (name) => (name.length === 1 ? '-' : '--') + name
-
-// grep -P takes one pattern; ripgrep takes any number and matches their union.
-// Wrapping each keeps a trailing alternation or anchor inside its own branch.
-export function patternArgs(patterns, literal) {
-  // grep -F accepts several patterns; grep -P takes one, so a regex run joins
-  // them, wrapping each so a trailing alternation or anchor stays in its branch.
-  if (literal) return patterns.flatMap((p) => ['-e', p])
-  return ['-e', patterns.length === 1 ? patterns[0] : patterns.map((p) => `(?:${p})`).join('|')]
-}
-
-// Rust's regex crate has no backtracking, so these parse there rather than
-// matching. PCRE accepts all of them, which would answer where ripgrep errors.
-const REJECTED = [
-  [/\\[1-9]/u, 'backreference'],
-  [/\(\?<?[=!]/u, 'look-around'],
-  [/\\[QE]/u, String.raw`\Q…\E literal span`],
-]
-
-// ripgrep searches a line at a time, so a pattern that spells out a newline is
-// rejected outright rather than simply never matching. `\s` and `\r` are fine;
-// only an explicit newline is not.
-function newlineLiteral(source) {
-  for (let i = 0; i < source.length; i++) {
-    const c = source[i]
-    if (c === '\n') return true
-    if (c !== '\\') continue
-    const next = source[i + 1]
-    if (next === 'n') return true
-    if (next === 'x' && /^x\{?0*a\}?/iu.test(source.slice(i + 1))) return true
-    i++
-  }
-  return false
-}
-
-export function checkPatterns(patterns, literal) {
-  if (literal) return
-  for (const source of patterns) {
-    for (const [re, detail] of REJECTED) {
-      if (re.test(source)) throw gap(detail, `${detail} is not supported; ripgrep's regex engine rejects it too`)
-    }
-    if (newlineLiteral(source)) throw gap('newline in a pattern', 'a newline in a pattern is not supported; ripgrep rejects one outside multiline mode')
-  }
-}

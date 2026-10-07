@@ -1,17 +1,24 @@
-// ripgrep over the same engine `grep -P` uses. The two dialects agree on every
-// construct both accept, so the work here is deciding what to refuse: rg's
-// defaults filter the tree before searching it, and a filter this runtime does
-// not model would silently shrink the answer.
+// ripgrep over the same engine `grep -P` uses, with its patterns read as the
+// Rust regex syntax they are and spelt for that engine (./rg-regex.js). The
+// rest of the work is deciding what to refuse: rg's defaults filter the tree
+// before searching it, and a filter this runtime does not model would silently
+// shrink the answer.
 
 import { basename, dirname, lookup, relativeTo, walkTree } from '../fs.js'
-import { decodeUtf8Maybe, inputLabel, readTextOrBytes } from '../util.js'
+import { decodeUtf8Maybe, encodeUtf8, inputLabel, readTextOrBytes } from '../util.js'
 import { parseArgs } from '../args.js'
-import { unsupported, unsupportedNote } from '../unsupported.js'
-import { ARGS, checkPatterns, patternArgs, rgOptions } from './rg-options.js'
+import { markUnsupported, unsupported, unsupportedNote } from '../unsupported.js'
+import { ARGS, rgOptions } from './rg-options.js'
+import { rgPattern } from './rg-regex.js'
+import { binaryStdin, cutFs, cutOutput, walkedBinaries } from './rg-binary.js'
 import { grep } from './grep.js'
 import { literalsMissing } from './grep-literal.js'
 
 const gap = (detail, message) => unsupported('feature', 'rg', detail, `rg: ${message}`, 2)
+const BINARY_GAPS = {
+  'unreadable bytes': 'a binary file holds bytes that are not text before its first NUL, and searching them is not supported',
+  'binary file search order': 'how much of a binary file ripgrep reads before its NUL turns on what its threads searched first, beside a line over 64 KiB long, and is not modelled',
+}
 
 // A refusal always reaches the diagnostic feed. A plain Error carries no detail
 // of its own, so the message stands in for one.
@@ -32,8 +39,14 @@ export function rg(stdin, tokens, ctx) {
     if (!operands.length) return gap('usage', 'a pattern is required')
     options.patterns.push(operands.shift())
   }
-  try { checkPatterns(options.patterns, options.literal) }
-  catch (e) { return labelled(e, e.message, 'feature') }
+  // ripgrep reads its patterns before it opens anything, and reports one Rust
+  // rejects in Rust's words.
+  let regex = null
+  if (!options.literal) {
+    const read = rgPattern(options.patterns)
+    if (read.error) return read.error
+    regex = read.pattern
+  }
   // With readable stdin and no path operand, ripgrep searches stdin rather than
   // the tree. A pipe or a `<` redirect counts as connected even when it carries
   // nothing, which is why this asks the shell rather than looking at content.
@@ -47,12 +60,24 @@ export function rg(stdin, tokens, ctx) {
   // What this run would read, which is what it can be refused over: a file a
   // walk never opens is one ripgrep never answers for either.
   const files = openedFiles(operands, targets, options, ctx)
-  // A walk skips binary files, which `grep -I` also does; a named one draws
-  // ripgrep's "binary file matches" line, which this runtime cannot produce.
+  // A file a walk found, and standard input, are read as ./rg-binary.js says
+  // where they hold a NUL; a named file is searched another way, and refused.
   const binary = options.text ? null : namedBinary(operands, ctx)
   if (binary) return gap('named binary file', `${JSON.stringify(binary)} is binary, and reporting a binary match is not supported`)
   const refused = refusedFile(files, options, ctx) ?? (targets.stdin ? refusedStdin(options, ctx) : null)
   if (refused) return gap(refused.detail, refused.message)
+  // `-` names standard input, which reads the same way alone; beside other
+  // paths its place among them is not followed.
+  const stdinOnly = targets.stdin || (operands.length === 1 && operands[0] === '-')
+  const nul = (stdinOnly || operands.includes('-')) && !options.text ? stdinWithNul(stdin, options, ctx) : null
+  if (nul && !stdinOnly) return gap('binary input among files', 'binary standard input searched beside other paths is not supported')
+  if (nul) return binaryInput(nul, options, regex, ctx)
+  const walked = options.text || !targets.recursive ? { cut: new Map() } : walkedBinaries(files.map((file) => ({ ...file, ...(file.named ? {} : readTextOrBytes(ctx.fs, file.path)) })), options.mode === 'c' || options.mode === 'L')
+  if (walked.gap) return gap(walked.gap, BINARY_GAPS[walked.gap])
+  const { cut } = walked
+  if ((options.after || options.before || options.showName === 'h') && [...cut.values()].some((c) => c.text !== '')) {
+    return gap('binary file read in part', 'context around, or unnamed lines from, a binary file ripgrep stops reading part way is not supported')
+  }
   // ripgrep treats a run that opened nothing as a mistake rather than a miss,
   // since a filter it applied is the usual cause. Only when it chose the
   // starting point itself: name one, even `.`, and an empty walk is just a miss.
@@ -60,7 +85,7 @@ export function rg(stdin, tokens, ctx) {
   if (opened === 0) {
     return { stdout: '', exitCode: 2, stderr: 'rg: No files were searched, which means ripgrep probably applied a filter you didn\'t expect.\nRunning with --debug will show why files are being skipped.\n' }
   }
-  return runGrep(stdin, options, operands, targets, ctx)
+  return runGrep(stdin, options, regex, operands, targets, ctx, cut)
 }
 
 // What a run would open: the paths it was given, and the files a walk finds
@@ -118,11 +143,17 @@ function unreadableBytes(bytes, name, options, ctx) {
   return { detail: 'unreadable bytes', message: `${name} holds bytes that are not text, and searching them is not supported` }
 }
 
-// Piped bytes are asked the same, unless a NUL in them makes them binary,
-// which a search without `--text` passes over as it does a walked file.
+// Standard input holding a NUL, read as ripgrep reads it, or null.
+function stdinWithNul(stdin, options, ctx) {
+  const bytes = ctx.stdinBytes ?? (stdin.includes('\0') ? encodeUtf8(stdin) : null)
+  return bytes?.includes(0) ? binaryStdin(bytes, options.showName === 'H') : null
+}
+
+// Piped bytes are asked the same; what a NUL in them does is answered for
+// apart (stdinWithNul).
 function refusedStdin(options, ctx) {
   const bytes = ctx.stdinBytes
-  if (!bytes || (!options.text && bytes.includes(0)) || decodeUtf8Maybe(bytes) !== undefined) return null
+  if (!bytes || decodeUtf8Maybe(bytes) !== undefined) return null
   return unreadableBytes(bytes, inputLabel(null, ctx), options, ctx)
 }
 
@@ -197,11 +228,14 @@ function namedBinary(operands, ctx) {
   return null
 }
 
-function runGrep(stdin, options, operands, targets, ctx) {
+// grep's command line for a run of rg's: the options it has, and the one
+// pattern rg's own read to (`regex`, from ./rg-regex.js) or the literals.
+function grepArgv(options, regex, targets, operands) {
   const argv = options.literal ? ['-F'] : ['-P']
   if (options.ignoreCase) argv.push('-i')
   if (options.lineNumbers) argv.push('-n')
   if (options.word) argv.push('-w')
+  if (options.line) argv.push('-x')
   if (options.invert) argv.push('-v')
   if (options.quiet) argv.push('-q')
   if (options.mode) argv.push('-' + options.mode)
@@ -216,22 +250,92 @@ function runGrep(stdin, options, operands, targets, ctx) {
   // globs spell that without catching `.` or `..`, either of which can be the
   // starting point: the first takes `.hidden`, the second `..odd`.
   if (targets.recursive && !options.hidden) argv.push('--exclude=.*', '--exclude-dir=.[!.]*', '--exclude-dir=..?*')
-  argv.push(...patternArgs(options.patterns, options.literal))
+  argv.push(...(options.literal ? options.patterns.flatMap((p) => ['-e', p]) : ['-e', regex]))
   if (!targets.stdin) argv.push('--', ...(operands.length ? operands : ['.']))
+  return argv
+}
+
+// The walked files holding a NUL are read cut where ripgrep stops reading them
+// (./rg-binary.js), and what grep printed of them is put the way ripgrep
+// prints it.
+function runGrep(stdin, options, regex, operands, targets, ctx, cut) {
   const before = new Set(ctx.notes)
+  const fs = ctx.fs
+  if (cut.size) ctx.fs = cutFs(fs, cut)
   // grep's ordered output is its own wording, which rg rewrites below; the
   // rewritten streams are what rg writes.
-  const result = grep(stdin, argv, ctx)
+  let result
+  try { result = grep(stdin, grepArgv(options, regex, targets, operands), ctx) } finally { ctx.fs = fs }
   delete result.events
   relabelNotes(ctx.notes, before, targets)
-  return relabel(countOnly(result, options), operands, options.patterns)
+  if (cut.size && !unsupportedNote(result)) result.stdout = cutOutput(result.stdout, cut, options.mode, (path) => shownName(path, operands, ctx))
+  return relabel(listed(countOnly(result, options), options, cut.size > 0), operands, targets)
+}
+
+// What grep calls a file a walk found under one of the operands, or `.`.
+function shownName(path, operands, ctx) {
+  for (const operand of operands.length ? operands : ['.']) {
+    const root = lookup(ctx.cwd, operand, ctx.fs).path
+    if (root === null || !ctx.fs.isDir(root) || !(root === '/' || path.startsWith(root + '/'))) continue
+    const rel = relativeTo(root, path)
+    return operand.endsWith('/') ? operand + rel : operand + '/' + rel
+  }
+  return path
+}
+
+// Standard input holding a NUL, which ripgrep reads as ./rg-binary.js says:
+// a count, a listing or a status over all of it with every NUL a line end,
+// and otherwise the lines selected before the read that brought the first
+// NUL, and the line saying the input is binary where anything was selected.
+// What context would print around that is not followed.
+function binaryInput(read, options, regex, ctx) {
+  if (options.after || options.before) return gap('binary input with context', 'context around binary standard input is not supported')
+  const search = (text, mode) => {
+    const bytes = ctx.stdinBytes
+    ctx.stdinBytes = null
+    const showName = mode === 'c' ? null : options.showName
+    try { return grep(text, grepArgv({ ...options, mode, showName, quiet: false }, regex, { stdin: true }, []), ctx) } finally { ctx.stdinBytes = bytes }
+  }
+  const counted = search(read.all, 'c')
+  if (unsupportedNote(counted) || counted.exitCode === 2) return relabel(counted, [], { stdin: true })
+  const count = Number(counted.stdout)
+  const result = { stdout: '', stderr: '', exitCode: count > 0 ? 0 : 1 }
+  const label = options.showName === 'H' ? '<stdin>' : null
+  if (options.quiet) return result
+  if (options.mode === 'c') result.stdout = count > 0 ? `${label ? label + ':' : ''}${count}\n` : ''
+  else if (options.mode === 'l' || options.mode === 'L') {
+    const named = (count > 0) === (options.mode === 'l')
+    return { stdout: named ? '<stdin>\n' : '', stderr: '', exitCode: named ? 0 : 1 }
+  } else {
+    const printed = read.before ? search(read.before, null) : { stdout: '', stderr: '', exitCode: 1 }
+    if (unsupportedNote(printed)) return relabel(printed, [], { stdin: true })
+    result.stdout = relabel(printed, [], { stdin: true }).stdout + (count > 0 ? read.closing : '')
+  }
+  return result
 }
 
 // grep -c reports every file it opened; ripgrep lists only the ones that matched.
 function countOnly(result, options) {
   if (options.mode !== 'c') return result
   const kept = result.stdout.split('\n').filter((line) => line !== '' && line !== '0' && !line.endsWith(':0'))
-  return { ...result, stdout: kept.length ? kept.join('\n') + '\n' : '' }
+  return rewritten(result, { stdout: kept.length ? kept.join('\n') + '\n' : '' })
+}
+
+// ripgrep's status for a count or a --files-without-match is whether it
+// printed anything, where grep's is whether it selected a line anywhere; an
+// error is an error either way. A binary file a --files-without-match stopped
+// in counts as one it answered for, printed or not.
+function listed(result, options, binaries) {
+  if ((options.mode !== 'c' && options.mode !== 'L') || result.exitCode === 2 || options.quiet) return result
+  return rewritten(result, { exitCode: result.stdout === '' && !(options.mode === 'L' && binaries) ? 1 : 0 })
+}
+
+// A result with some of its streams replaced, keeping the unsupported note an
+// object spread would drop.
+function rewritten(result, changes) {
+  const out = { ...result, ...changes }
+  const note = unsupportedNote(result)
+  return note ? markUnsupported(out, note.kind, note.command, note.detail, note.message) : out
 }
 
 // ripgrep prints the operating system's error number beside the text.
@@ -239,12 +343,12 @@ const ERRNO = new Map([['No such file or directory', 2], ['Not a directory', 20]
 const osError = (text) => text.replaceAll(/^(rg: .*: )([A-Z][a-z].*)$/gmu,
   (line, head, reason) => (ERRNO.has(reason) ? `${head}${reason} (os error ${ERRNO.get(reason)})` : line))
 
-const PATTERN_ERROR = /^rg: (?:invalid pattern[^\n]*|trailing backslash)$/mu
-
-// grep names the operand it was given; rg prints the path it walked to.
-function relabel(result, operands, patterns) {
+// grep names the operand it was given; rg prints the path it walked to, and
+// calls standard input `<stdin>`.
+function relabel(result, operands, targets) {
   const strip = (text) => (operands.length ? text : text.replaceAll(/^\.\//gmu, ''))
-  const out = { ...result, stdout: strip(result.stdout), stderr: osError(strip(result.stderr).replaceAll(/^grep: /gmu, 'rg: ')) }
+  const stdinLabel = (text) => (targets.stdin || operands.includes('-') ? text.replaceAll(/^\(standard input\)(?=[:-]|$)/gmu, '<stdin>') : text)
+  const out = rewritten(result, { stdout: stdinLabel(strip(result.stdout)), stderr: osError(strip(result.stderr).replaceAll(/^grep: /gmu, 'rg: ')) })
   const note = unsupportedNote(result)
   // grep blames the locale, because its own answer depends on one. ripgrep has
   // no locale to blame: it matches Unicode the same way everywhere, which is
@@ -255,10 +359,6 @@ function relabel(result, operands, patterns) {
       'rg: Unicode-aware matching on non-ASCII input is not supported', 2)
   }
   if (note) return unsupported(note.kind, 'rg', note.detail, out.stderr.trimEnd() || note.message, result.exitCode)
-  if (PATTERN_ERROR.test(out.stderr)) {
-    return unsupported('feature', 'rg', 'regex parse error',
-      `rg: regex parse error in ${JSON.stringify(patterns.join(' '))}; the reason ripgrep gives is not reproduced here`, 2)
-  }
   return out
 }
 

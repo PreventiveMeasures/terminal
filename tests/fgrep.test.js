@@ -67,7 +67,7 @@ describe('fgrep errors and unsupported diagnostics', () => {
       const result = await createTerminal(FILES).run(`fgrep -${dialect} a input`)
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 2)
-      assert.match(result.stderr, /mutually exclusive/u)
+      assert.equal(result.stderr, 'grep: conflicting matchers specified\n')
       assert.deepEqual(result.unsupported, [])
     })
   }

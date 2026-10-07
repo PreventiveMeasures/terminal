@@ -93,8 +93,19 @@ bytes spell; and, beside a character glibc reads past U+10FFFF or a surrogate
 spelt in UTF-8, a pattern GNU's two matchers would answer differently. `rg`
 passes over a file of bytes that spell no text where a plain literal is
 nowhere in it and refuses it by name where one could be, and does the same
-for such bytes piped into it; an `rg` walk passes over what ripgrep itself
-calls binary: a file holding a NUL, which it never reads past.
+for such bytes piped into it. A NUL is what ripgrep calls binary, and it reads
+as ripgrep does: in 64 KiB fills after a first one of three bytes, so a walked
+file holding one is searched up to the fill that brings it, what it selected
+there is printed, and `PATH: WARNING: stopped searching binary file after
+match (found "\0" byte around offset N)` follows; a count says nothing of the
+file, and `--files-without-match` neither lists it nor exits 1 over it.
+Standard input holding a NUL is read to its end with each NUL a line end, a
+count counting every line, and closes with `binary file matches (found "\0"
+byte around offset N)`. Refused: context around, or `-h` lines from, a binary
+file read in part; a named binary file; and, beside a line over 64 KiB long,
+a search that prints from a binary file whose NUL is past its first 64 KiB,
+since the buffer ripgrep grew for that line is kept for the files its thread
+searches next, and which those are turns on thread order.
 
 The terminal's own stdin and stdout are a terminal's: nothing can be typed
 into it, and it shows text. A command reads the terminal where nothing was
@@ -189,19 +200,24 @@ is what `-P` asks for and what `du` does without being asked; `-D` and `-H`
 measure what an operand points at, and `-L`, which would measure what every
 link in a walk points at, reports an unsupported diagnostic where it meets one.
 
-`rg` covers the search itself: recursion, `-n -N -i -s -w -v -F -a -l -c -e -q
--H -I -A -B -C -u`, and skipping hidden entries unless `--hidden`. Options are
-last-one-wins and `-u` escalates, as in ripgrep. Its regex is checked against
-ripgrep's own engine, so backreferences and look-around are refused rather than
-answered. `.gitignore` in a repository, `.ignore` and `.rgignore` change which
-files are searched -- from any directory above the starting point as well as
-below it -- so a tree carrying one is refused unless `--no-ignore`;
-binary files are left out of a walk but a named one is refused, and `-t`, `-g`,
-`--files` and the other output modes report an unsupported diagnostic. A
-pattern spelling out a newline, and a file starting with a byte-order mark, are
-refused rather than answered differently from ripgrep. Literal matching crosses
-scripts, but Unicode-aware matching does not: `-i`, `-w`, `.` and `\w` over a
-tree holding any non-ASCII file report an unsupported diagnostic.
+`rg` covers the search itself: recursion, `-n -N -i -s -w -x -v -F -a -l -c -e
+-q -H -I -A -B -C -u`, and skipping hidden entries unless `--hidden`. Options
+are last-one-wins and `-u` escalates, as in ripgrep, and standard input is
+named `<stdin>`. A pattern is read as Rust's regex syntax, joined to the others
+as ripgrep shows them, `(?:p1)|(?:p2)`: one Rust rejects gets ripgrep's own
+`regex parse error` report, carets and all — a backreference, look-around, an
+unclosed class or group, a stray repetition, a range out of order, an escape
+Rust does not know, a newline spelt out — and what Rust reads but this does
+not follow is refused: nested classes and class set operations, inline flags,
+`\p`, a repetition of an assertion or of a repetition, and counts over 1000.
+A count or a `--files-without-match` exits 0 where it printed anything, as
+ripgrep's do. `.gitignore` in a repository, `.ignore` and `.rgignore` change
+which files are searched -- from any directory above the starting point as
+well as below it -- so a tree carrying one is refused unless `--no-ignore`;
+`-t`, `-g`, `--files` and the other output modes report an unsupported
+diagnostic, as does a file starting with a byte-order mark. Literal matching
+crosses scripts, but Unicode-aware matching does not: `-i`, `-w`, `.` and `\w`
+over a tree holding any non-ASCII file report an unsupported diagnostic.
 
 A walk stops at a symbolic link rather than crossing it, which is where `find`,
 `rg` and `grep -r` all stop: `find` reports the link as the entry it is, and
@@ -230,6 +246,27 @@ folding over the Cyrillic Extended-C letters, which GNU's two matchers read
 differently; and `-w` with a pattern that can match nothing, over a character
 past ASCII that is no word character, inside which GNU, reading bytes, finds
 an empty match.
+
+`grep` checks a pattern as GNU grep 3.11 does, with glibc's regex and then
+its dfa, and says what they say: each pattern line glibc rejects is reported in
+glibc's words (`grep: Unmatched [, [^, [:, [., or [=`, `Invalid content of
+\{\}`, `Trailing backslash`), after `FILE:LINE: ` for a line read by `-f`; the
+dfa's own errors and warnings follow (`character class syntax is
+[[:space:]], not [:space:]`, `warning: * at start of expression`). A
+backslash inside a bracket is a member of it, and a BRE `\{` with nothing
+before it is a `{`. `-P` reports in PCRE2's words, takes one pattern, and
+reads `\x` with no digits as NUL. The options die where GNU's do and as
+GNU's do — `invalid context length argument`, `invalid max count`,
+`conflicting matchers specified`, an option missing its argument, the
+two-line usage — `-m` below zero is no limit, the long spellings and `-y`
+are accepted, and `-h`/`-H` and `-l`/`-L` go to the last given, either of
+the latter outranking `-c`. `--include` and `--exclude` match a named file by
+its whole name or any part of it after a `/`, and a walked one by its base
+name; `--exclude-dir` drops trailing slashes and also passes over a named
+directory, never the `.` a bare `-r` starts from. Where the two matchers read
+a stray operator apart — a repetition right after an anchor, an ERE interval
+with nothing before it, a BRE `$` before a bare `)` or `|` mid-pattern — which of them answers
+depends on the search, and the pattern is refused.
 
 The locale is C.UTF-8 and nothing else: `$LANG` answers it, and a `LANG`,
 `LC_ALL` or `LC_CTYPE` set to any other value, or a `LANG` unset, is refused,

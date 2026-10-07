@@ -359,17 +359,12 @@ describe('createTerminal — text commands', () => {
     assert.equal(upper.stderr, lower.stderr)
   })
 
-  it('grep usage line documents PATTERN and [PATH...] (covers -r dirs and -e form)', async () => {
+  it('grep with no pattern prints GNU grep\'s usage lines', async () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('grep')
-    assert.notEqual(r.exitCode, 0)
-    // PATTERN is required (or supplied via -e); both forms must be
-    // mentioned. `[PATH...]` (not `[FILE...]`) so the docs cover
-    // recursive directory traversal under -r.
-    assert.match(r.stderr, /PATTERN/u)
-    assert.match(r.stderr, /-e PATTERN/u)
-    assert.match(r.stderr, /\[PATH\.\.\.\]/u)
-    assert.doesNotMatch(r.stderr, /\[FILE\.\.\.\]/u)
+    assert.equal(r.exitCode, 2)
+    assert.equal(r.stdout, '')
+    assert.equal(r.stderr, "Usage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n")
   })
 
   it('grep -F matches a literal pattern with regex metacharacters', async () => {
@@ -442,8 +437,8 @@ describe('createTerminal — text commands', () => {
     const t = createTerminal({ 'src/x.js': 'hi\n' })
     for (const cmd of ['grep -EF foo src/x.js', 'grep -EG foo src/x.js', 'grep -FG foo src/x.js']) {
       const r = await t.run(cmd)
-      assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
-      assert.match(r.stderr, /mutually exclusive/u)
+      assert.equal(r.exitCode, 2, `${cmd}: expected exit 2`)
+      assert.equal(r.stderr, 'grep: conflicting matchers specified\n')
     }
   })
 
@@ -503,13 +498,13 @@ describe('createTerminal — text commands', () => {
     assert.equal((await t.run("grep '\\\\' src/x.js")).stdout, 'a\\b\n')
   })
 
-  it('backslash sequences inside character classes pass through are diagnosed', async () => {
-    const t = createTerminal({ 'f.txt': 'abc123\n', 'src/x.js': 'abc\n', 'uni.txt': 'αβγ\n' })
-    for (const command of ["grep '[\\d]' src/x.js", "grep '[\\\\]' src/x.js", "grep '[\\]]' src/x.js"]) {
-      const r = await t.run(command)
-      assert.notEqual(r.exitCode, 0)
-      assert.equal(r.unsupported[0].detail, 'regex escape')
-    }
+  it('a backslash inside a GNU character class is a member of it', async () => {
+    // POSIX brackets have no escapes: `[\d]` is `\` or `d`, and `[\]]` is
+    // the class `[\]` followed by a `]`.
+    const t = createTerminal({ 'src/x.js': 'abc\nd\\\nx]\n\\]\n' })
+    assert.equal((await t.run("grep '[\\d]' src/x.js")).stdout, 'd\\\n\\]\n')
+    assert.equal((await t.run("grep -c '[\\\\]' src/x.js")).stdout, '2\n')
+    assert.equal((await t.run("grep '[\\]]' src/x.js")).stdout, '\\]\n')
   })
 
   it('grep BRE: degenerate `\\(\\)` empty group and `\\|` empty alternation compile', async () => {
@@ -565,17 +560,14 @@ describe('createTerminal — text commands', () => {
     assert.equal((await t.run("grep -E '(' src/x.js")).exitCode, 2)
   })
 
-  it('grep: error label reflects the RegExp flags in effect', async () => {
-    // The label tells users which RegExp flags were actually in effect
-    // when the compile failed. `-i` is spelt into a GNU pattern from the
-    // locale's tables, so no flag carries it there; a PCRE pattern keeps it.
+  it('grep reports a bad pattern in the words of the engine GNU grep uses', async () => {
     const t = createTerminal({ 'src/x.js': 'hi\n' })
     const r = await t.run("grep -iE '(' src/x.js")
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /\/su\)/u)
+    assert.equal(r.exitCode, 2)
+    assert.equal(r.stderr, 'grep: Unmatched ( or \\(\n')
     const p = await t.run("grep -iP '(' src/x.js")
-    assert.notEqual(p.exitCode, 0)
-    assert.match(p.stderr, /\/isu\)/u)
+    assert.equal(p.exitCode, 2)
+    assert.equal(p.stderr, 'grep: missing closing parenthesis\n')
   })
 
   it('grep BRE: `^` is literal mid-pattern, anchor at start (matches ugrep)', async () => {
@@ -694,7 +686,7 @@ describe('createTerminal — text commands', () => {
     const t = createTerminal({ 'f.txt': 'foo\n' })
     const r = await t.run("grep f.txt -e")
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /-e requires an argument/u)
+    assert.equal(r.stderr, "grep: option requires an argument -- 'e'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n")
   })
 
   it('grep `-e` composes with -i / -E / -F', async () => {
@@ -740,9 +732,9 @@ describe('createTerminal — text commands', () => {
     // surfaced as "unknown option: -e" from parseArgs.
     const t = createTerminal({ 'file': 'foo\nbar\n' })
     const r = await t.run('grep -A -- -e foo file')
-    assert.notEqual(r.exitCode, 0)
-    // Error should name -A (the bad value), NOT complain about -e.
-    assert.match(r.stderr, /-A/u)
+    assert.equal(r.exitCode, 2)
+    // The error is -A's bad value, as GNU grep words it, not about -e.
+    assert.equal(r.stderr, 'grep: --: invalid context length argument\n')
     assert.doesNotMatch(r.stderr, /unknown option: -e/u)
   })
 
@@ -843,13 +835,10 @@ describe('createTerminal — text commands', () => {
     }
   })
 
-  it('identity escapes inside `[...]` are literal are diagnosed', async () => {
-    const t = createTerminal({ 'f.txt': 'abc123\n', 'src/x.js': 'abc\n', 'uni.txt': 'αβγ\n' })
-    for (const command of ["grep '[\\_]' f.txt", "grep '[\\a]' f.txt"]) {
-      const r = await t.run(command)
-      assert.notEqual(r.exitCode, 0)
-      assert.equal(r.unsupported[0].detail, 'regex escape')
-    }
+  it('a backslash before a letter inside `[...]` is two members', async () => {
+    const t = createTerminal({ 'f.txt': 'abc123\n' })
+    assert.deepEqual(await t.run("grep '[\\_]' f.txt"), { stdout: '', stderr: '', exitCode: 1, cwd: '/', notes: [], unsupported: [] })
+    assert.equal((await t.run("grep '[\\a]' f.txt")).stdout, 'abc123\n')
   })
 
   it('grep -r preserves an absolute starting path in the displayed name', async () => {
@@ -894,8 +883,8 @@ describe('createTerminal — text commands', () => {
     // be silently dropped. The error message should name -C.
     const t = createTerminal(SOURCES)
     const r = await t.run('grep -C garbage -A 1 -B 1 TODO src/foo.js')
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /-C/u)
+    assert.equal(r.exitCode, 2)
+    assert.equal(r.stderr, 'grep: garbage: invalid context length argument\n')
   })
 
   it('grep -A/-B inserts `--` between non-adjacent context groups in one file', async () => {
@@ -1025,21 +1014,21 @@ describe('createTerminal — text commands', () => {
     assert.equal((await t.run('echo hello | grep -L nope')).stdout, '(standard input)\n')
   })
 
-  it('grep rejects mutually exclusive flag combinations', async () => {
+  it('grep settles competing output flags as GNU grep does', async () => {
     const t = createTerminal(SOURCES)
-    // parseArgs stores flags in a Set, so a user-typed ordering
-    // can't pick a winner the way "last one wins" would. We
-    // surface the conflict instead of silently preferring one.
+    // -h/-H and -l/-L: the last one wins; -l or -L outranks -c.
     const cases = [
-      ['grep -hH foo src/foo.js', /-h and -H/u],
-      ['grep -lL foo src/foo.js', /-l \/ -L/u],
-      ['grep -lc foo src/foo.js', /-l \/ -c/u],
-      ['grep -Lc foo src/foo.js', /-L \/ -c/u],
+      ['grep -hH TODO src/foo.js', 'src/foo.js:// TODO: fix\n'],
+      ['grep -Hh TODO src/foo.js', '// TODO: fix\n'],
+      ['grep -lL TODO src/foo.js', ''],
+      ['grep -Ll TODO src/foo.js', 'src/foo.js\n'],
+      ['grep -lc TODO src/foo.js', 'src/foo.js\n'],
+      ['grep -cl TODO src/foo.js', 'src/foo.js\n'],
+      ['grep -Lc TODO src/foo.js', ''],
     ]
-    for (const [cmd, re] of cases) {
+    for (const [cmd, stdout] of cases) {
       const r = await t.run(cmd)
-      assert.notEqual(r.exitCode, 0, `${cmd}: expected non-zero exit`)
-      assert.match(r.stderr, re, `${cmd}: stderr didn't mention the conflict`)
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode], [stdout, '', 0], cmd)
     }
   })
 
@@ -1883,15 +1872,14 @@ describe('createTerminal — errors', () => {
     assert.match(r.stderr, /empty pipeline/u)
   })
 
-  it('grep invalid pattern names the dialect in the error', async () => {
+  it('grep invalid pattern is reported as GNU grep reports it', async () => {
     // With the default BRE dialect, a bare `(` is literal, so the
     // user's original "Function(" case no longer errors — covered
-    // in the BRE-default describe block below. But asking for ERE
-    // explicitly preserves the ECMAScript-style error path.
+    // in the BRE-default describe block below. ERE's `(` opens a group.
     const t = createTerminal(SOURCES)
     const r = await t.run('grep -E "Function(" src/foo.js')
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /ERE|ECMAScript/u)
+    assert.equal(r.exitCode, 2)
+    assert.equal(r.stderr, 'grep: Unmatched ( or \\(\n')
   })
 })
 

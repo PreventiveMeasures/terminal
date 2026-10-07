@@ -2,71 +2,71 @@
 
 import { basename, lookup, relativeTo, resolve, walkTree } from '../fs.js'
 import { lookupWithNote, omissionNote } from '../notes.js'
-import { parseArgs } from '../args.js'
-import { consumeStdin, countNewlines, decodeUtf8Marked, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, readTextOrBytes, splitLines, usage } from '../util.js'
+import { consumeStdin, countNewlines, decodeUtf8Marked, encodeUtf8Loose, err, readFilesFor, readInputs, readTextOrBytes, splitLines } from '../util.js'
 import { UnsupportedError, markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { AwkError } from '../awk/common.js'
 import { cannotHoldMatch, compilePatterns, inputGap } from './grep-pattern.js'
 import { compileGlob } from '../glob.js'
 import { anyMatch, countMatches, grepRun, grepSummary, isFailure, matchersFor, noMatch } from './grep-output.js'
-import { grepPatterns } from './grep-pattern-files.js'
-
-const FLAGS = '[-i] [-a|-I] [-s] [-v] [-n] [-r|-R] [-w] [-x] [-o] [-E|-F|-G|-P] [-l] [-L] [-c] [-q] [-m N] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
-const USAGE = `grep ${FLAGS} PATTERN [PATH...]\n   or: grep ${FLAGS} [-e PATTERN] [-f FILE] ... [PATH...]`
-
-// -r and -R coincide over a tree holding no links; where one does, -R is the
-// spelling that would follow it, and refuses instead.
-const SHORT_FLAGS = ['i', 'v', 'n', 'r', 'R', 'l', 'L', 'c', 'w', 'x', 'h', 'H', 'o', 'E', 'F', 'G', 'P', 'q', 'I', 'a', 's']
-const VALUE_SHORTS = ['A', 'B', 'C', 'm']
-
-const ARGS = { short: SHORT_FLAGS, long: ['text', 'no-messages'], valueShort: VALUE_SHORTS, repeatable: ['e', 'f', 'file', 'include', 'exclude', 'exclude-dir'] }
+import { GREP_USAGE, grepPatterns } from './grep-pattern-files.js'
+import { argumentError, colourGap, optionDeath, parseCounts, parseGrepArgs } from './grep-options.js'
 
 // Whether this search was asked for its status alone. Answered by the same
 // parse the run uses, so a pattern that merely looks like a flag — `-e -q`,
 // or anything after `--` — is read as the operand it is.
 export function quietSearch(tokens) {
-  try { return parseArgs(tokens, ARGS).flags.has('q') } catch { return false }
+  try { return parseGrepArgs(tokens).flags.has('q') } catch { return false }
 }
 
 export function grep(stdin, tokens, ctx) {
   // Repeatable patterns and filename filters retain their own argument values.
   let parsed
-  try { parsed = parseArgs(tokens, ARGS) }
+  try { parsed = parseGrepArgs(tokens) }
   // Preserve diagnostic metadata when converting argument errors to grep status 2.
-  catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
-  const { flags, values } = parsed
-  const source = grepPatterns(parsed, stdin, ctx)
-  if (!source) return usage(USAGE, 2)
+  catch (e) { return argumentError(tokens, e, stdin, ctx) ?? unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
+  const { flags, values, order } = parsed
+  const colour = colourGap(order, tokens)
+  if (colour) return colour
+  const source = grepPatterns(parsed, stdin, ctx, optionDeath())
+  if (!source) return err(GREP_USAGE, 2)
   if (source.error) return source.error
   const { patterns, rest } = source
   stdin = source.stdin
-  const conflict = checkConflicts(flags)
-  if (conflict) return conflict
-  let re
-  try { re = compilePatterns(patterns, flags, ctx.locale) } catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
-  if (re.error) return re.error
   const counts = parseCounts(values)
-  if (counts.error) return counts.error
+  // -q outranks -l and -L, and the later of those two outranks the other
+  // and -c.
+  const mode = flags.has('q') ? null : order.findLast((o) => o.name === 'l' || o.name === 'L')?.name ?? (flags.has('c') ? 'c' : null)
   // -L still lists readable files at -m0; other modes never open input. Nor
-  // do they for a search that can select no line, which GNU does not run.
-  if ((counts.max === 0 || selectsNothing(patterns, flags)) && (!flags.has('L') || flags.has('q'))) return noMatch()
-  if (counts.max !== 0 && ctx.stdinFile && (flags.has('q') || flags.has('l') || flags.has('L') || values.has('m')) && (rest.length === 0 || rest.includes('-'))) return unsupported('feature', 'grep', 'partial stdin reads', 'grep: early termination on shared file input is not supported', 2)
+  // do they for a search that can select no line, which GNU does not run —
+  // and decides before it looks at a pattern at all.
+  if ((counts.max === 0 || selectsNothing(patterns, flags)) && mode !== 'L') return noMatch()
+  let re
+  try { re = compilePatterns(patterns, flags, ctx.locale, source.origins) } catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
+  if (re.error) return re.error
+  if (counts.max !== 0 && ctx.stdinFile && (flags.has('q') || mode === 'l' || mode === 'L' || counts.max !== undefined) && (rest.length === 0 || rest.includes('-'))) return unsupported('feature', 'grep', 'partial stdin reads', 'grep: early termination on shared file input is not supported', 2)
   const recursive = flags.has('r') || flags.has('R')
   const filters = compileFilters(parsed, ctx)
-  const binaryMode = parsed.order.findLast((o) => ['a', 'I', 'text'].includes(o.name))?.name
-  filters.binaryFiles = binaryMode === 'a' || binaryMode === 'text' ? 'text' : binaryMode === 'I' ? 'without-match' : 'binary'
-  filters.silent = flags.has('s') || flags.has('no-messages')
+  const binaryMode = order.findLast((o) => o.name === 'a' || o.name === 'I')?.name
+  filters.binaryFiles = binaryMode === 'a' ? 'text' : binaryMode === 'I' ? 'without-match' : 'binary'
+  filters.silent = flags.has('s')
   filters.follow = flags.has('R')
-  try { return filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) }
+  try { return warned(filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts, mode, order), re.warnings) }
   finally { filterNotes(filters, ctx.notes) }
 }
 
-function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
+// What the dfa said of the patterns comes before anything the search says.
+function warned(result, warnings) {
+  if (!warnings || unsupportedNote(result)) return result
+  result.stderr = warnings + result.stderr
+  result.events?.unshift({ fd: 2, text: warnings })
+  return result
+}
+
+function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts, mode, order) {
   if (flags.has('q')) return grepQuiet(stdin, rest, ctx, recursive, filters, re.res, flags.has('v'))
   const r = grepInputs(recursive, stdin, rest, ctx, filters)
   if (counts.max === 0) consumeStdin(ctx, stdin)
   const invert = flags.has('v')
-  const mode = ['l', 'L', 'c'].find((flag) => flags.has(flag))
   // Filename filters apply to named and recursively discovered files, but not stdin.
   let items = r.items
   if (filters.name.length > 0) items = items.filter((item) => isFailure(item) || includedInput(item, filters))
@@ -86,7 +86,7 @@ function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
     })
     if (gap && items.every(isFailure)) return gap
   }
-  const showName = pickShowName(flags, rest.length)
+  const showName = pickShowName(order, rest.length)
   const opts = { showName, invert, showLine: flags.has('n'), only: flags.has('o'), binaryFiles: filters.binaryFiles, ...counts }
   let result
   try {
@@ -101,7 +101,8 @@ function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
     const left = { ...result, stderr: result.stderr + gap.stderr, exitCode: 2, events: [...result.events, { fd: 2, text: gap.stderr }] }
     return markUnsupported(left, note.kind, note.command, note.detail, note.message)
   }
-  return r.failed ? { ...result, exitCode: 2 } : result
+  if (r.failed) result.exitCode = 2
+  return result
 }
 
 // Quiet searches stop at the first selected line. Earlier read errors
@@ -212,23 +213,6 @@ function filterNotes(filters, notes) {
   omissionNote(notes, { command: 'grep', action: 'excluded', noun: ['entry', 'entries'], paths: filters.excluded, context: ' by --include/--exclude/--exclude-dir rules' })
 }
 
-// Unsupported output/name combinations must be diagnosed; conflicting dialects
-// are invalid syntax. -o is only a presentation modifier.
-function checkConflicts(flags) {
-  if (flags.has('h') && flags.has('H')) {
-    return unsupported('option', 'grep', '-h -H', 'grep: combining -h and -H is not supported')
-  }
-  const modes = ['l', 'L', 'c'].filter((f) => flags.has(f))
-  if (modes.length > 1) {
-    return unsupported('option', 'grep', 'combined output modes', `grep: ${modes.map((f) => `-${f}`).join(' / ')} are mutually exclusive`)
-  }
-  const dialects = ['E', 'F', 'G', 'P'].filter((f) => flags.has(f))
-  if (dialects.length > 1) {
-    return err(`grep: ${dialects.map((f) => `-${f}`).join(' / ')} are mutually exclusive`, 2)
-  }
-  return null
-}
-
 // No pattern at all matches no line, which GNU reads as `-v ''`; and an
 // empty pattern matches every line, so `-v` with nothing else selects none —
 // unless -x or -w ask more of a line than that it is there.
@@ -237,28 +221,11 @@ function selectsNothing(patterns, flags) {
   return flags.has('v') && !flags.has('x') && !flags.has('w') && patterns.every((pattern) => pattern === '')
 }
 
-function parseCounts(values) {
-  const counts = { A: 0, B: 0, m: undefined }
-  // Validate C before explicit A/B overrides; m has grep's distinct error status.
-  for (const flag of ['C', 'A', 'B', 'm']) {
-    if (!values.has(flag)) continue
-    const parsed = parseNonNegativeInt(values.get(flag), 'grep: -' + flag)
-    if (parsed.error) {
-      if (flag === 'm') parsed.error.exitCode = 2
-      return parsed
-    }
-    if (flag === 'C') counts.A = counts.B = parsed.value
-    else counts[flag] = parsed.value
-  }
-  // An explicit zero context still separates nonadjacent match groups.
-  return { after: counts.A, before: counts.B, max: counts.m, hasContext: ['A', 'B', 'C'].some((flag) => values.has(flag)) }
-}
-
-function pickShowName(flags, nFiles) {
-  // -h / -H override the default. Multiple operands force names;
-  // otherwise each file decides from whether it was found recursively.
-  if (flags.has('h')) return false
-  if (flags.has('H')) return true
+function pickShowName(order, nFiles) {
+  // The later of -h and -H overrides the default. Multiple operands force
+  // names; otherwise each file decides from whether it was found recursively.
+  const named = order.findLast((o) => o.name === 'h' || o.name === 'H')?.name
+  if (named) return named === 'H'
   return nFiles > 1 ? true : undefined
 }
 
@@ -285,7 +252,7 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
     // Filename filters apply after collecting both explicit and discovered files.
     if (ctx.fs.isFile(abs)) { items.push({ name: p, ...searchable(ctx, abs) }); continue }
     if (error) { fail(`grep: ${p}: ${error}\n`); continue }
-    if (excludedStartDir(p, filters.dir)) { filters.excluded.add(abs); continue }
+    if (excludedStartDir(p, filters.dir, rest.length === 0)) { filters.excluded.add(abs); continue }
     const descend = (path) => {
       if (path === abs || filters.dir.length === 0 || !someMatch(filters.dir, basename(path))) return true
       filters.excluded.add(path)
@@ -337,37 +304,52 @@ function searchable(ctx, path) {
 }
 
 // Name filters retain option order so the last matching include/exclude wins.
+// GNU strips the trailing slashes off an --exclude-dir pattern as it reads it.
 function compileFilters(parsed, ctx) {
   const name = parsed.order
     .filter((o) => o.name === 'include' || o.name === 'exclude')
     .map((o) => ({ include: o.name === 'include', re: compileGlob(o.value) }))
-  const dir = (parsed.values.get('exclude-dir') ?? []).map((g) => compileGlob(g))
+  const dir = (parsed.values.get('exclude-dir') ?? []).map((g) => compileGlob(g.replace(/(?<=.)\/+$/u, '')))
   return { name, dir, binary: new Set(), excluded: new Set(), cwd: ctx.cwd, stdinPath: ctx.stdinHandle?.path }
 }
 
-function someMatch(res, name) { return res.some((re) => re.test(name)) }
+function someMatch(res, name, test = anchored) { return res.some((re) => test(re, name)) }
+
+// A name a walk found is matched by its last component; a name given on the
+// command line is matched as typed, and also from just past each `/` in it,
+// so `--exclude='d/*'` and `--exclude='*/a.txt'` both reach `d/a.txt` — and
+// with `*` taking a `/` as it takes any other character.
+const anchored = (re, name) => re.test(name)
+function unanchored(re, name) {
+  if (re.test(name)) return true
+  for (let at = name.indexOf('/'); at >= 0; at = name.indexOf('/', at + 1)) {
+    if (name[at + 1] !== '/' && re.test(name.slice(at + 1))) return true
+  }
+  return false
+}
 
 function includedInput(input, filters) {
-  if (input.name === null || includedByName(basename(input.name), filters.name)) return true
+  if (input.name === null) return true
+  if (input.recursive ? includedByName(basename(input.name), filters.name) : includedByName(input.name, filters.name, unanchored)) return true
   filters.excluded.add(resolve(filters.cwd, input.name))
   return false
 }
 
 // The last matching filter wins. If none matches, the first filter determines
 // whether unmatched names are included by default.
-function includedByName(name, nameFilters) {
+function includedByName(name, nameFilters, test = anchored) {
   if (nameFilters.length === 0) return true
   let last = null
-  for (const f of nameFilters) if (f.re.test(name)) last = f
+  for (const f of nameFilters) if (test(f.re, name)) last = f
   return last ? last.include : !nameFilters[0].include
 }
 
-// GNU also prunes a NAMED start directory by its own trailing component,
-// matched as typed — `--exclude-dir=foo` drops a `foo` operand but not a
-// `foo/` one (the trailing slash defeats the base-name match).
-function excludedStartDir(operand, dirRes) {
-  if (dirRes.length === 0 || operand.endsWith('/')) return false
-  return someMatch(dirRes, operand.slice(operand.lastIndexOf('/') + 1))
+// GNU also prunes a start directory named on the command line, matched as
+// typed (unanchored, above) — `--exclude-dir=foo` drops a `foo` or `d/foo`
+// operand but not a `foo/` one, which no pattern without a `/` reaches. The
+// `.` a search walks when it was named nothing is never pruned.
+function excludedStartDir(operand, dirRes, implicit) {
+  return !implicit && dirRes.length > 0 && someMatch(dirRes, operand, unanchored)
 }
 
 function displayName(userPath, absRoot, absFile) {
