@@ -415,14 +415,14 @@ describe('shell syntax — redirects', () => {
   it('a write into a closed stdout fails as each real command fails; a closed stderr is silent', async () => {
     assert.equal(await out('echo hi >&- || echo fallback'), 'fallback\n')
     const e = await term().run('echo hi >&-')
-    assert.deepEqual([e.stdout, e.stderr, e.exitCode], ['', 'echo: write error: Bad file descriptor\n', 1])
+    assert.deepEqual([e.stdout, e.stderr, e.exitCode], ['', 'terminal: echo: write error: Bad file descriptor\n', 1])
     assert.equal((await term().run('cat a.txt >&-')).exitCode, 1)
     assert.equal((await term().run('ls >&-')).exitCode, 2)
     assert.equal((await term().run('grep x a.txt >&-')).exitCode, 2)
     assert.equal((await term().run('echo hi | cat >&-')).exitCode, 1)
     assert.equal((await term().run('for i in 1 2; do echo $i; done >&-')).exitCode, 1)
     const group = await term().run('{ echo a; echo b; } >&-')
-    assert.deepEqual([group.stderr, group.exitCode], ['echo: write error: Bad file descriptor\n'.repeat(2), 1])
+    assert.deepEqual([group.stderr, group.exitCode], ['terminal: echo: write error: Bad file descriptor\n'.repeat(2), 1])
     assert.equal((await term().run('{ echo a >&2; } 2>&-')).exitCode, 1)
     // Nothing written, or written elsewhere: no error.
     for (const line of ['true >&-', 'echo -n "" >&-', 'echo hi >&- >/dev/null', 'cd src >&-', 'cat a.txt 2>&-']) {

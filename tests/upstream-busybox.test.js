@@ -148,7 +148,7 @@ describe('upstream BusyBox audit — printf', () => {
     const r = await createTerminal().run("printf '%d\\n' 4 57tail 8")
     assert.equal(r.stdout, '4\n57\n8\n')
     assert.equal(r.exitCode, 1)
-    assert.equal(r.stderr, 'printf: 57tail: invalid number\n')
+    assert.equal(r.stderr, 'terminal: printf: 57tail: invalid number\n')
     assert.deepEqual(r.unsupported, [])
   })
 })

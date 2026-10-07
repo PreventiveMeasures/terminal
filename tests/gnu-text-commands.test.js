@@ -168,7 +168,7 @@ describe('the programs a path, xargs or find -exec runs', () => {
     assert.deepEqual(await said('echo x | xargs test 1 -eq'), ['', 'test: invalid integer ‘x’\n', 123])
     assert.deepEqual(await said('/usr/bin/test a b c d'), ['', '/usr/bin/test: extra argument ‘b’\n', 2])
     assert.deepEqual(await said('/usr/bin/test 99999999999999999999 -gt 1'), ['', '', 0])
-    assert.deepEqual(await said('test a b c d'), ['', 'test: too many arguments\n', 2])
+    assert.deepEqual(await said('test a b c d'), ['', 'terminal: test: too many arguments\n', 2])
   })
 
   it('true, false and pwd take their arguments as coreutils does', async () => {
@@ -181,21 +181,21 @@ describe('the programs a path, xargs or find -exec runs', () => {
 
 describe("bash's printf builtin", () => {
   it('names a number it cannot read as bash does', async () => {
-    assert.deepEqual(await said("printf '%d\\n' 3x"), ['3\n', 'printf: 3x: invalid number\n', 1])
-    assert.deepEqual(await said("printf '%d\\n' 08"), ['0\n', 'printf: 08: invalid octal number\n', 1])
-    assert.deepEqual(await said("printf '%d\\n' 99999999999999999999"), ['9223372036854775807\n', 'printf: warning: 99999999999999999999: Numerical result out of range\n', 0])
+    assert.deepEqual(await said("printf '%d\\n' 3x"), ['3\n', 'terminal: printf: 3x: invalid number\n', 1])
+    assert.deepEqual(await said("printf '%d\\n' 08"), ['0\n', 'terminal: printf: 08: invalid octal number\n', 1])
+    assert.deepEqual(await said("printf '%d\\n' 99999999999999999999"), ['9223372036854775807\n', 'terminal: printf: warning: 99999999999999999999: Numerical result out of range\n', 0])
     assert.deepEqual(await said("printf '%d\\n' \"'\""), ['0\n', '', 0])
   })
 
   it('warns of an escape short of digits and carries on', async () => {
-    assert.deepEqual(await said("printf '\\x41\\x'"), ['A\\x', 'printf: missing hex digit for \\x\n', 0])
-    assert.deepEqual(await said("printf '%b' 'a\\u'"), ['a\\u', 'printf: missing unicode digit for \\u\n', 0])
+    assert.deepEqual(await said("printf '\\x41\\x'"), ['A\\x', 'terminal: printf: missing hex digit for \\x\n', 0])
+    assert.deepEqual(await said("printf '%b' 'a\\u'"), ['a\\u', 'terminal: printf: missing unicode digit for \\u\n', 0])
   })
 
   it('words a format and an option it cannot read as bash does', async () => {
-    assert.deepEqual(await said("printf 'a%yb' 1"), ['a', "printf: `y': invalid format character\n", 1])
-    assert.deepEqual(await said("printf '%5.'"), ['', "printf: `%5.': missing format character\n", 1])
-    assert.deepEqual(await said('printf -x'), ['', 'printf: -x: invalid option\nprintf: usage: printf [-v var] format [arguments]\n', 2])
+    assert.deepEqual(await said("printf 'a%yb' 1"), ['a', "terminal: printf: `y': invalid format character\n", 1])
+    assert.deepEqual(await said("printf '%5.'"), ['', "terminal: printf: `%5.': missing format character\n", 1])
+    assert.deepEqual(await said('printf -x'), ['', 'terminal: printf: -x: invalid option\nprintf: usage: printf [-v var] format [arguments]\n', 2])
     assert.deepEqual(await said('printf'), ['', 'printf: usage: printf [-v var] format [arguments]\n', 2])
   })
 })

@@ -458,19 +458,19 @@ describe('GNU conformance — printf reads its operands the way GNU does', () =>
   // range, and reads a quote with nothing after it as zero. Recorded from
   // bash 5.2.
   const BUILTIN = [
-    ["printf '%d' x", '0', 'printf: x: invalid number\n', 1],
-    ["printf '%d' 3.7", '3', 'printf: 3.7: invalid number\n', 1],
+    ["printf '%d' x", '0', 'terminal: printf: x: invalid number\n', 1],
+    ["printf '%d' 3.7", '3', 'terminal: printf: 3.7: invalid number\n', 1],
     ["printf '%d' ''", '0', '', 0],
-    ["printf '%d' '   '", '0', 'printf:    : invalid number\n', 1],
-    ["printf '%d' 08", '0', 'printf: 08: invalid octal number\n', 1],
-    ["printf '%d' 0xg", '0', 'printf: 0xg: invalid hex number\n', 1],
-    ["printf '%d' 0b", '0', 'printf: 0b: invalid number\n', 1],
-    ["printf '%f' 0b1", '0.000000', 'printf: 0b1: invalid number\n', 1],
-    ["printf '%d' 99999999999999999999999", '9223372036854775807', 'printf: warning: 99999999999999999999999: Numerical result out of range\n', 0],
+    ["printf '%d' '   '", '0', 'terminal: printf:    : invalid number\n', 1],
+    ["printf '%d' 08", '0', 'terminal: printf: 08: invalid octal number\n', 1],
+    ["printf '%d' 0xg", '0', 'terminal: printf: 0xg: invalid hex number\n', 1],
+    ["printf '%d' 0b", '0', 'terminal: printf: 0b: invalid number\n', 1],
+    ["printf '%f' 0b1", '0.000000', 'terminal: printf: 0b1: invalid number\n', 1],
+    ["printf '%d' 99999999999999999999999", '9223372036854775807', 'terminal: printf: warning: 99999999999999999999999: Numerical result out of range\n', 0],
     ["printf '%d' \"'ab\"", '97', '', 0],
     ["printf '%d' \"'\"", '0', '', 0],
     ["printf '%d' '\"'", '0', '', 0],
-    ["printf '%d' \"a'b\"", '0', "printf: a'b: invalid number\n", 1],
+    ["printf '%d' \"a'b\"", '0', "terminal: printf: a'b: invalid number\n", 1],
   ]
   for (const [command, stdout, stderr, exitCode] of [...PROGRAM, ...BUILTIN]) {
     it(JSON.stringify(command), async () => {
@@ -504,7 +504,7 @@ describe('GNU conformance — printf reads its operands the way GNU does', () =>
       const r = await createTerminal({}).run(`/usr/bin/printf ${JSON.stringify(format)}`)
       assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout, stderr: said('/usr/bin/printf', stderr), exitCode })
       const b = await createTerminal({}).run(`printf ${JSON.stringify(format)}`)
-      assert.deepEqual({ stdout: b.stdout, stderr: b.stderr, exitCode: b.exitCode }, { stdout: bashStdout, stderr: said('printf', bashStderr), exitCode: bashExit })
+      assert.deepEqual({ stdout: b.stdout, stderr: b.stderr, exitCode: b.exitCode }, { stdout: bashStdout, stderr: said('terminal: printf', bashStderr), exitCode: bashExit })
     })
   }
 })

@@ -195,7 +195,7 @@ describe('printf ordinary failures preserve numeric prefix conversions', () => {
   ]) {
     it(`printf '${format}' is the error each printf gives`, async () => {
       const ran = await createTerminal(FILES).run(`printf '${format}' a b`)
-      assert.deepEqual([ran.stdout, ran.stderr, ran.exitCode, ran.unsupported], ['', `printf: ${bash}\n`, 1, []])
+      assert.deepEqual([ran.stdout, ran.stderr, ran.exitCode, ran.unsupported], ['', `terminal: printf: ${bash}\n`, 1, []])
       const program = await createTerminal(FILES).run(`/usr/bin/printf '${format}' a b`)
       assert.deepEqual([program.stdout, program.stderr, program.exitCode, program.unsupported], ['', `/usr/bin/printf: ${coreutils}\n`, 1, []])
     })

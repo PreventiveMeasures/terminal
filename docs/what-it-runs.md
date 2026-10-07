@@ -51,8 +51,12 @@ builtin, as it is under bash: `echo`, `printf`, `test` and `[`, `true`, `false`
 and `pwd` then answer as coreutils' do, which read escapes, report a number
 they cannot read and word their errors differently from the builtins, and
 `--help` or `--version` alone, which the programs answer and this does not
-carry, is refused. A GNU tool run by its path names itself by that path in
-what it says, as it does there. The command lines themselves are read as
+carry, is refused. The builtins sign what they say as bash signs its own
+messages, with this shell's name, `terminal: `, where bash's is `bash: ` —
+`terminal: printf: x: invalid number`, `terminal: [: missing `]'` — but for
+a usage line, which bash prints bare; the programs sign nothing. A GNU tool
+run by its path names itself by that path in what it says, as it does
+there. The command lines themselves are read as
 GNU's tools read them: `tail +N` and `tail -N` where at most one operand
 follows, `head -5c`, `seq` and `tr` taking options only before their
 operands, a missing option argument or a flag handed one in getopt's words

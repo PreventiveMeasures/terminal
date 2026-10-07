@@ -37,6 +37,17 @@ export function unsupportedFrom(e, command, message, code) {
   return unsupported(found.kind, command, found.detail, message, code)
 }
 
+// The name the shell signs its own messages with, where bash signs `bash: `.
+// It differs from bash's on purpose, so that neither is taken for the other.
+export const SHELL_NAME = 'terminal'
+
+// A message the shell itself prints, signed once as an interactive bash
+// signs its own: the name and nothing else, no `line N:`, which only a
+// script's messages carry — and nothing again for a line break the message
+// carries in a name it quotes. What a command prints is that command's, and
+// bash adds nothing to it.
+export const shellMessage = (message) => `${SHELL_NAME}: ${message}`
+
 export class UnsupportedError extends Error {
   constructor(kind, detail, message) {
     super(message)

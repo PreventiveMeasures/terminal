@@ -67,7 +67,7 @@ describe('printf missing and empty numeric operands', () => {
       stdout: '0 0.000000', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
     assert.deepEqual(await createTerminal({}).run("printf '%d' '   '"), {
-      stdout: '0', stderr: 'printf:    : invalid number\n', exitCode: 1, cwd: '/', notes: [], unsupported: [],
+      stdout: '0', stderr: 'terminal: printf:    : invalid number\n', exitCode: 1, cwd: '/', notes: [], unsupported: [],
     })
   })
 })
