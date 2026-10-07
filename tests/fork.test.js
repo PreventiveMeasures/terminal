@@ -30,12 +30,12 @@ describe('fork — what a child takes from its parent', () => {
   it('starts where the parent stands as the parent spells it, `//` included', async () => {
     // Bash keeps exactly two leading slashes in what `pwd` says, and a cd
     // relative to them keeps them too; a cwd given to the fork spells its own.
-    const terminal = createTerminal(SOURCES, OPTIONS)
-    await terminal.run('cd //')
-    for (const child of [terminal.fork(), terminal.fork({ inherit: false })]) {
+    const t = terminal()
+    await t.run('cd //')
+    for (const child of [t.fork(), t.fork({ inherit: false })]) {
       assert.equal((await child.run('pwd; cd repo; pwd')).stdout, '//\n//repo\n')
     }
-    assert.equal((await terminal.fork({ cwd: '/repo' }).run('pwd')).stdout, '/repo\n')
+    assert.equal((await t.fork({ cwd: '/repo' }).run('pwd')).stdout, '/repo\n')
   })
 
   it('copies the variables the parent has set', async () => {
