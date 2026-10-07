@@ -81,7 +81,7 @@ describe('run().unsupported — what counts as a gap', () => {
   })
 
   it('kind `option`: an option a command parses and then explicitly rejects', async () => {
-    assert.deepEqual(await gaps('tr -d -s a'), [{
+    assert.deepEqual(await gaps('tr -d -s a b'), [{
       kind: 'option', command: 'tr', detail: '-d -s',
       message: 'tr: -d combined with -s is not supported',
     }])

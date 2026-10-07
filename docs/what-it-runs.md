@@ -45,6 +45,23 @@ The only names it does not complete are the shell's own — `:`, `export`,
 something a terminal hands out, and a wired command given `hidden: true`,
 which is what that flag is for.
 
+A command named by a path — `/bin/echo`, `/usr/bin/printf`, `/usr/bin/[` — or
+run by `xargs` or `find -exec` is the program of that name rather than bash's
+builtin, as it is under bash: `echo`, `printf`, `test` and `[`, `true`, `false`
+and `pwd` then answer as coreutils' do, which read escapes, report a number
+they cannot read and word their errors differently from the builtins, and
+`--help` or `--version` alone, which the programs answer and this does not
+carry, is refused. A GNU tool run by its path names itself by that path in
+what it says, as it does there. The command lines themselves are read as
+GNU's tools read them: `tail +N` and `tail -N` where at most one operand
+follows, `head -5c`, `seq` and `tr` taking options only before their
+operands, a missing option argument or a flag handed one in getopt's words
+followed by the tool's own pointer at `--help`, and file names and other
+operands quoted the way coreutils quotes them in C.UTF-8 — `cat: '*.log': No
+such file or directory`, `head: invalid number of lines: ‘1x’`. `xargs`
+builds command lines of at most 128 KiB, GNU's default, and starts another
+where the next argument would not fit.
+
 A file may be bytes rather than text: a source entry that is a `Uint8Array` is
 the file's own bytes, for what no JS string can spell — an image, a compiled
 object, an archive — and `{ format: 'base64', data }` is the same file spelt

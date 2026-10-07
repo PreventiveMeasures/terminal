@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { SED_USAGE } from '../src/commands/sed-common.js'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
@@ -74,15 +75,17 @@ describe('sed script files preserve source order and script boundaries', () => {
   it('does not combine incomplete commands across script sources', async () => {
     await ordinaryError("sed -f scripts/broken -e '/A/' input", 1, /unterminated/u)
   })
-  for (const option of ['-f', '--file']) {
-    it(`missing ${option} argument is an ordinary option error`, async () => {
-      await ordinaryError('sed ' + option, 1, /requires an argument/u)
-    })
+  // getopt's complaint, then sed's whole usage text, status 1 — as GNU sed 4.9.
+  async function optionError(command, complaint) {
+    const actual = await createTerminal(FILES).run(command)
+    assert.deepEqual({ stdout: actual.stdout, stderr: actual.stderr, exitCode: actual.exitCode, unsupported: actual.unsupported },
+      { stdout: '', stderr: `sed: ${complaint}\n${SED_USAGE}`, exitCode: 1, unsupported: [] })
   }
-  for (const option of ['--null-data=value', '--separate=value', '--quiet=value']) {
-    it(`rejects an argument supplied to ${option}`, async () => {
-      await ordinaryError(`sed ${option} -f scripts/replace input`, 1, /doesn't allow an argument/u)
-    })
+  for (const [option, complaint] of [['-f', "option requires an argument -- 'f'"], ['--file', "option '--file' requires an argument"]]) {
+    it(`answers a missing ${option} argument as GNU does`, () => optionError('sed ' + option, complaint))
+  }
+  for (const option of ['--null-data', '--separate', '--quiet']) {
+    it(`answers an argument supplied to ${option} as GNU does`, () => optionError(`sed ${option}=value -f scripts/replace input`, `option '${option}' doesn't allow an argument`))
   }
   it('attributes unsupported script contents to sed rather than -f', async () => {
     const terminal = createTerminal(FILES)

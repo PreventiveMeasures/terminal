@@ -51,8 +51,8 @@ describe('tr reads the classes the locale names', () => {
     assert.equal(await out("tr '[:print:]' p"), 'pppppp\n')
     assert.equal(await out("tr '[:cntrl:]' C", 'a\tb\n'), 'aCbC')
     // `word` is GNU's own class for its regexes, and no class tr will take.
-    await fails("tr '[:word:]' y", "tr: invalid character class 'word'\n")
-    await fails("tr '[:foo:]' y", "tr: invalid character class 'foo'\n")
+    await fails("tr '[:word:]' y", 'tr: invalid character class ‘word’\n')
+    await fails("tr '[:foo:]' y", 'tr: invalid character class ‘foo’\n')
     await fails("tr '[::]' x", "tr: missing character class name '[::]'\n")
   })
 

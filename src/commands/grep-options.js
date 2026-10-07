@@ -1,6 +1,6 @@
 // grep's command line, read as GNU reads it: the spellings it takes for each
 // option, and the options it dies at, in the order it meets them.
-import { parseArgs } from '../args.js'
+import { OptionError, parseArgs } from '../args.js'
 import { err } from '../util.js'
 import { unsupported } from '../unsupported.js'
 import { GREP_USAGE, grepPatterns } from './grep-pattern-files.js'
@@ -74,23 +74,20 @@ function gnuInteger(text) {
 // as GNU reads that one first. A bundle missing its value is read up to its
 // last letter.
 export function argumentError(tokens, e, stdin, ctx) {
-  const missing = /^(--?)(.+) requires an argument$/u.exec(e.message)
-  const extra = /^option --(.+) doesn't allow an argument$/u.exec(e.message)
-  if (!missing && !extra) return null
+  if (!(e instanceof OptionError)) return null
   let before
-  if (missing) {
+  if (e.missing) {
     const last = tokens.at(-1)
-    before = [...tokens.slice(0, -1), ...(missing[1] === '-' && last.length > 2 ? [last.slice(0, -1)] : [])]
-  } else before = tokens.slice(0, Math.max(0, tokens.findIndex((token) => token.startsWith(`--${extra[1]}=`))))
+    before = [...tokens.slice(0, -1), ...(!e.option.startsWith('--') && last.length > 2 ? [last.slice(0, -1)] : [])]
+  } else before = tokens.slice(0, Math.max(0, tokens.findIndex((token) => token.startsWith(`${e.option}=`))))
   let parsed
   try { parsed = parseGrepArgs(before) } catch {
     return unsupported('option', 'grep', 'malformed command line', `grep: ${e.message}`, 2)
   }
   const earlier = grepPatterns(parsed, stdin, ctx, optionDeath())
   if (earlier?.error) return earlier.error
-  const complaint = extra ? `option '--${extra[1]}' doesn't allow an argument`
-    : missing[1] === '--' ? `option '--${missing[2]}' requires an argument` : `option requires an argument -- '${missing[2]}'`
-  return err(`grep: ${complaint}\n${GREP_USAGE}`, 2)
+  // getopt's own complaint, which OptionError words as GNU's getopt does.
+  return err(`grep: ${e.message}\n${GREP_USAGE}`, 2)
 }
 
 // `--color=never` and its two other spellings change nothing here. Anything

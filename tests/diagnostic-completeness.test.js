@@ -9,9 +9,11 @@ const FILES = { f: 'a 1\nb 2\na 1\n', u: 'é😀\n', 'src/a.js': 'const a = 1\n'
 const run = (command) => createTerminal(FILES).run(command)
 const identity = (result) => result.unsupported.map(({ kind, command, detail }) => ({ kind, command, detail }))
 
-// These builtins interpret option-like tokens as data, counts, or expressions.
-// Every other registered command must diagnose unavailable options.
-const NO_OPTIONS = new Set(['echo', 'true', 'false', ':', 'exit', 'break', 'continue', 'test', '['])
+// These builtins interpret option-like tokens as data, counts, or expressions;
+// bash's printf calls one an invalid option, as bash does, and coreutils'
+// prints it as a format. Every other registered command must diagnose
+// unavailable options.
+const NO_OPTIONS = new Set(['echo', 'printf', 'true', 'false', ':', 'exit', 'break', 'continue', 'test', '['])
 const registered = { ...DEFAULT_REGISTRY.commands, ...DEFAULT_REGISTRY.hidden }
 
 describe('diagnostic completeness — command dispatch', () => {

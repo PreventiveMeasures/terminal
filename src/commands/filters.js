@@ -6,7 +6,7 @@
 import { parseArgs } from '../args.js'
 import { INT64_MAX, INT64_MIN, UINT64_MAX } from '../numeric.js'
 import { POSIX_RANGES } from '../charclass.js'
-import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, joinLines, ok, okWith, readInputs, splitLines, usage } from '../util.js'
+import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, joinLines, ok, okWith, quoteLocale, readInputs, splitLines, usageError } from '../util.js'
 import { unsupported } from '../unsupported.js'
 
 // Unnumbered lines still reserve the number column and separator.
@@ -15,20 +15,22 @@ const NL_SEP = '\t'
 const NL_BLANK = ' '.repeat(NL_WIDTH + NL_SEP.length)
 
 export function nl(stdin, tokens, ctx) {
-  const { values, positional, order } = parseArgs(tokens, { valueShort: ['b', 'v'], valueLong: ['starting-line-number'] })
-  const style = values.get('b') ?? 't'
-  if (!['a', 't', 'n'].includes(style)) {
-    const message = `nl: -b: only \`a\`, \`t\` and \`n\` are supported (got \`${style}\`)`
-    // pREGEX is valid but unimplemented; other unknown styles are ordinary errors.
-    if (style.startsWith('p')) return unsupported('option', 'nl', '-b p', message)
-    return err(message)
-  }
-  let n = 1n
+  const { positional, order } = parseArgs(tokens, { valueShort: ['b', 'v'], valueLong: ['starting-line-number'] })
+  // GNU reads each option as it comes, and says of a number it cannot read
+  // what it would have been, as quote() names it.
+  let n = 1n, style = 't'
   for (const { name, value } of order) {
-    if (name !== 'v' && name !== 'starting-line-number') continue
-    if (!/^[ \t\n\r\f\v]*[+-]?\d+$/u.test(value)) return err(`nl: invalid starting line number: ${value}`)
-    n = BigInt(value)
-    if (n < INT64_MIN || n > INT64_MAX) return err(`nl: invalid starting line number: ${value}`)
+    if (name === 'b') {
+      // pREGEX is valid but unimplemented; other unknown styles are ordinary errors.
+      if (value.startsWith('p')) return unsupported('option', 'nl', '-b p', `nl: -b: only \`a\`, \`t\` and \`n\` are supported (got \`${value}\`)`)
+      if (!['a', 't', 'n'].includes(value)) return usageError('nl', `invalid body numbering style: ${quoteLocale(value, ctx)}`)
+      style = value
+      continue
+    }
+    const invalid = (why = '') => err(`nl: invalid starting line number: ${quoteLocale(value, ctx)}${why}`)
+    if (!/^[ \t\n\r\f\v]*[+-]?\d+$/u.test(value)) return invalid()
+    n = BigInt(value.trim())
+    if (n < INT64_MIN || n > INT64_MAX) return invalid(': Value too large for defined data type')
   }
   const r = readInputs('nl', positional, stdin, ctx)
   if (r.inputs.some(({ content }) => /(?:^|\n)(?:\\:){1,3}(?:\n|$)/u.test(content))) return unsupported('feature', 'nl', 'logical pages', 'nl: logical page delimiters are not supported')
@@ -48,17 +50,29 @@ export function nl(stdin, tokens, ctx) {
 }
 
 // cut emits selected positions in input order, with overlapping ranges deduplicated.
+// What it cannot do with its command line it says in the order GNU's reads
+// it: a second list or a delimiter of more than one byte where the option
+// stands, then no list at all, then a delimiter or -s beside -c.
 export function cut(stdin, tokens, ctx) {
-  const { flags, values, positional } = parseArgs(tokens, { short: ['s'], valueShort: ['d', 'f', 'c'] })
-  const hasF = values.has('f')
-  const hasC = values.has('c')
-  if (hasF === hasC) return usage('cut -f LIST [-d DELIM] [-s] [file...]  |  cut -c LIST [file...]')
-  if (hasC && values.has('d')) return err('cut: -d is only valid with -f')
-  if (hasC && flags.has('s')) return err('cut: -s is only valid with -f')
-  const list = parseCutList(hasF ? values.get('f') : values.get('c'), hasF ? 'field' : 'position')
+  const { flags, order, positional } = parseArgs(tokens, { short: ['s'], valueShort: ['d', 'f', 'c'] })
+  let delim = '\t', delimited = false, kind = null, spec = null
+  for (const { name, value } of order) {
+    if (name === 'f' || name === 'c') {
+      if (spec !== null) return usageError('cut', 'only one list may be specified')
+      spec = value
+      kind = name === 'f' ? 'field' : 'position'
+    } else if (name === 'd') {
+      if (encodeUtf8Loose(value).length > 1) return usageError('cut', 'the delimiter must be a single character')
+      delim = value === '' ? '\0' : value
+      delimited = true
+    }
+  }
+  if (spec === null) return usageError('cut', 'you must specify a list of bytes, characters, or fields')
+  const hasF = kind === 'field'
+  if (!hasF && delimited) return usageError('cut', 'an input delimiter may be specified only when operating on fields')
+  if (!hasF && flags.has('s')) return usageError('cut', 'suppressing non-delimited lines makes sense\n\tonly when operating on fields')
+  const list = parseCutList(spec, kind, ctx)
   if (list.error) return list.error
-  const delim = values.get('d') === '' ? '\0' : values.get('d') ?? '\t'
-  if (hasF && encodeUtf8Loose(delim).length !== 1) return err('cut: -d delimiter must be a single byte')
   const r = readInputs('cut', positional, stdin, ctx)
   const out = []
   for (const { content } of r.inputs) {
@@ -82,48 +96,64 @@ function cutBytes(line, ranges) {
 
 // GNU names a bad list by what the list is of, and by what it could not read
 // in it: a number below one, a decreasing range, a range with more than two
-// ends, a number it could not parse — named from the first character it could
-// not read — or one too large to hold. Recorded from coreutils 9.4.
+// ends or with none, what it could not read from the first character it
+// could not read to the end of the list, or a number too large to hold — the
+// first such number, whole. Recorded from coreutils 9.4.
 const CUT_NAMES = {
   field: {
     zero: 'fields are numbered from 1',
     range: 'invalid field range',
-    value: (text) => `invalid field value '${text}'`,
-    large: (digits) => `field number '${digits}' is too large`,
+    value: (text) => `invalid field value ${text}`,
+    large: (digits) => `field number ${digits} is too large`,
   },
   position: {
     zero: 'byte/character positions are numbered from 1',
     range: 'invalid byte or character range',
-    value: (text) => `invalid byte/character position '${text}'`,
-    large: (digits) => `byte/character offset '${digits}' is too large`,
+    value: (text) => `invalid byte/character position ${text}`,
+    large: (digits) => `byte/character offset ${digits} is too large`,
   },
 }
 
-const CUT_ITEM = /^(\d*)(-?)(\d*)/u
-
-function parseCutList(spec, kind) {
+// set_fields, read a character at a time: `,` and blanks part the items, and
+// the end of the list is one more parting.
+function parseCutList(spec, kind, ctx) {
   const names = CUT_NAMES[kind]
-  const fail = (message) => ({ error: err(`cut: ${message}`) })
+  const fail = (message) => ({ error: usageError('cut', message) })
   const ranges = []
-  for (const part of spec.split(/[, \t]/u)) {
-    if (part === '') return fail(names.zero)
-    const [read, from, dash, to] = CUT_ITEM.exec(part)
-    const rest = part.slice(read.length)
-    if (rest !== '') return fail(rest.startsWith('-') ? names.range : names.value(rest))
-    for (const digits of [from, to]) {
-      if (digits !== '' && BigInt(digits) > UINT64_MAX) return fail(names.large(digits))
-    }
-    if (from === '' && to === '' && dash === '') return fail(names.value(part))
-    const start = from === '' ? 1 : Number(from)
-    const end = dash === '' ? start : to === '' ? Infinity : Number(to)
-    if (start < 1) return fail(names.zero)
-    if (end < start) return fail('invalid decreasing range')
-    ranges.push([start, end])
+  let dash = false, initial = 1n, lhs = false, rhs = false, start = -1, value = 0n
+  for (let at = 0; ; at++) {
+    const c = spec[at]
+    if (c === '-') {
+      start = -1
+      if (dash) return fail(names.range)
+      dash = true
+      if (lhs && value === 0n) return fail(names.zero)
+      initial = lhs ? value : 1n
+      value = 0n
+    } else if (c === undefined || c === ',' || c === ' ' || c === '\t') {
+      start = -1
+      if (dash) {
+        if (!lhs && !rhs) return fail('invalid range with no endpoint: -')
+        if (rhs && value < initial) return fail('invalid decreasing range')
+        ranges.push([initial, rhs ? value : null])
+      } else if (value === 0n) return fail(names.zero)
+      else ranges.push([value, value])
+      if (c === undefined) break
+      dash = lhs = rhs = false
+      value = 0n
+    } else if (c >= '0' && c <= '9') {
+      if (start < 0) start = at
+      if (dash) rhs = true
+      else lhs = true
+      value = value * 10n + BigInt(c)
+      if (value >= UINT64_MAX) return fail(names.large(quoteLocale(/^\d*/u.exec(spec.slice(start))[0], ctx)))
+    } else return fail(names.value(quoteLocale(spec.slice(at), ctx)))
   }
   // Normalize once so every record can use ordered, nonoverlapping slices.
-  ranges.sort((a, b) => a[0] - b[0])
+  const numbered = ranges.map(([from, to]) => [Number(from), to === null ? Infinity : Number(to)])
+  numbered.sort((a, b) => a[0] - b[0])
   const merged = []
-  for (const range of ranges) {
+  for (const range of numbered) {
     const previous = merged.at(-1)
     if (previous && range[0] <= previous[1] + 1) previous[1] = Math.max(previous[1], range[1])
     else merged.push(range)
@@ -140,21 +170,22 @@ function cutFields(line, delim, ranges) {
   return pickByPositions(fields, ranges).join(delim)
 }
 
+// tr reads its options only before its first operand, as GNU's does.
 export function tr(stdin, tokens, ctx) {
-  const { flags, positional } = parseArgs(tokens, { short: ['c', 'd', 's'] })
+  const { flags, positional } = parseArgs(tokens, { short: ['c', 'd', 's'], stopAtFirstPositional: true })
   const del = flags.has('d')
   const squeeze = flags.has('s')
   const complement = flags.has('c')
+  const counted = trOperandCount(positional, del, squeeze, ctx)
+  if (counted) return counted
   if (del && squeeze) return unsupported('option', 'tr', '-d -s', 'tr: -d combined with -s is not supported')
   if (squeeze && !del && positional.length === 2) return unsupported('feature', 'tr', 'translate and squeeze', 'tr: combined translation and squeezing is not supported')
-  const want = (del || squeeze) ? 1 : 2
-  if (positional.length !== want) return usage('tr [-c] SET1 SET2  |  tr [-c] -d SET  |  tr [-c] -s SET')
   if (/\P{ASCII}/u.test(stdin + positional.join(''))) return unsupported('feature', 'tr', 'non-ASCII bytes', 'tr: translation of non-ASCII bytes is not supported')
   if (positional.some((s) => /\[[.=]/u.test(s))) return unsupported('feature', 'tr', 'set expressions', 'tr: equivalence classes and collating symbols are not supported')
   if (positional.some((s) => /\[[^\]]*\*/u.test(s))) return unsupported('feature', 'tr', 'repeat expressions', 'tr: repetition expressions in a set are not supported')
   if (positional.some((s) => /\\[0-7]{2}|\\[1-7abfrv]/u.test(s))) return unsupported('feature', 'tr', 'set escapes', 'tr: these set escape sequences are not supported')
   if (positional.some((s) => /(?:^|[^\\])(?:\\\\)*\\$/u.test(s))) return unsupported('feature', 'tr', 'trailing backslash', 'tr: an unescaped trailing backslash in a set is not supported')
-  const set1 = expandTrSet(positional[0])
+  const set1 = expandTrSet(positional[0], ctx)
   if (set1.error) return set1.error
   const members = new Set(set1.chars)
   // `-c` inverts membership rather than materialising the complement,
@@ -162,7 +193,7 @@ export function tr(stdin, tokens, ctx) {
   const selected = (ch) => complement !== members.has(ch)
   if (del) { consumeStdin(ctx); return ok([...stdin].filter((c) => !selected(c)).join('')) }
   if (squeeze) { consumeStdin(ctx); return ok(squeezeChars(stdin, selected)) }
-  const set2 = expandTrSet(positional[1])
+  const set2 = expandTrSet(positional[1], ctx)
   if (set2.error) return set2.error
   const misuse = classMisuse(set1, set2, complement)
   if (misuse) return misuse
@@ -176,6 +207,24 @@ export function tr(stdin, tokens, ctx) {
   const pad = set2.chars.at(-1)
   for (let i = 0; i < from.length; i++) map.set(from[i], set2.chars[i] ?? pad)
   return ok([...stdin].map((c) => map.get(c) ?? c).join(''))
+}
+
+// How many strings tr takes: two to translate or to delete and squeeze, one
+// to delete, and one or two to squeeze. Too few or too many is GNU's error,
+// with the line saying why where a count alone would not.
+function trOperandCount(positional, del, squeeze, ctx) {
+  const least = del === squeeze ? 2 : 1
+  const most = del && !squeeze ? 1 : 2
+  if (positional.length === 0) return usageError('tr', 'missing operand')
+  if (positional.length < least) {
+    const why = squeeze ? 'Two strings must be given when both deleting and squeezing repeats.' : 'Two strings must be given when translating.'
+    return usageError('tr', `missing operand after ${quoteLocale(positional.at(-1), ctx)}\n${why}`)
+  }
+  if (positional.length > most) {
+    const why = positional.length === 2 ? '\nOnly one string may be given when deleting without squeezing repeats.' : ''
+    return usageError('tr', `extra operand ${quoteLocale(positional[most], ctx)}${why}`)
+  }
+  return null
 }
 
 // The classes tr knows, which are the locale's own — the same table the regex
@@ -218,7 +267,7 @@ function classMisuse(set1, set2, complement) {
   return null
 }
 
-function expandTrSet(spec) {
+function expandTrSet(spec, ctx) {
   const chars = []
   const classes = []
   let i = 0
@@ -234,7 +283,7 @@ function expandTrSet(spec) {
     if (klass) {
       if (klass.name === '') return { error: err(`tr: missing character class name '${klass.text}'`) }
       const members = CLASSES[klass.name]
-      if (members === undefined) return { error: err(`tr: invalid character class '${klass.name}'`) }
+      if (members === undefined) return { error: err(`tr: invalid character class ${quoteLocale(klass.name, ctx)}`) }
       classes.push({ name: klass.name, start: chars.length, end: chars.length + members.length })
       chars.push(...members)
       i = klass.next

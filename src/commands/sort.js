@@ -1,13 +1,13 @@
 // sort uses the whole line as a final tiebreak unless -u suppresses it.
 
 import { parseArgs } from '../args.js'
-import { encodeUtf8Loose, err, joinLines, okWith, readInputs, splitLines } from '../util.js'
+import { encodeUtf8Loose, err, joinLines, okWith, quoteLocale, readInputs, splitLines } from '../util.js'
 import { unsupported, unsupportedFrom } from '../unsupported.js'
 import { compareNames as cmpStrings } from '../fs.js'
 import { missingPathNote } from '../notes.js'
 
 export function sort(stdin, tokens, ctx) {
-  const { flags, values, positional } = parseArgs(tokens, {
+  const { flags, values, positional, order } = parseArgs(tokens, {
     short: ['n', 'r', 'u', 'f', 'b', 'z'],
     valueShort: ['t', 'o'],
     valueLong: ['output'],
@@ -17,10 +17,10 @@ export function sort(stdin, tokens, ctx) {
   // rather than the last one winning.
   const targets = [...values.get('o') ?? [], ...values.get('output') ?? []]
   if (targets.length > 1) return err('sort: multiple output files specified', 2)
-  const sep = values.get('t')
-  if (sep !== undefined && encodeUtf8Loose(sep).length !== 1) return err(`sort: multi-character tab '${sep}'`, 2)
+  const sep = readTab(order, ctx)
+  if (sep?.error) return sep.error
   const globals = { n: flags.has('n'), f: flags.has('f'), b: flags.has('b'), r: flags.has('r') }
-  const keys = parseKeySpecs(values.get('k') ?? [], globals)
+  const keys = parseKeySpecs(values.get('k') ?? [], globals, ctx)
   if (keys.error) return keys.error
   const r = readInputs('sort', positional, stdin, ctx, { stopOnError: true })
   // A read error aborts the complete sort with no partial output.
@@ -56,6 +56,22 @@ function written(name, text, ctx, r) {
   return okWith('', r)
 }
 
+// Each -t is one byte, `\\0` spelling NUL, and a second one must name the
+// same byte. Recorded from coreutils 9.4.
+function readTab(order, ctx) {
+  let tab
+  for (const { name, value } of order) {
+    if (name !== 't') continue
+    if (value === '') return { error: err('sort: empty tab', 2) }
+    const bytes = encodeUtf8Loose(value)
+    if (bytes.length > 1 && value !== '\\0') return { error: err(`sort: multi-character tab ${quoteLocale(value, ctx)}`, 2) }
+    const next = value === '\\0' ? '\0' : value
+    if (tab !== undefined && tab !== next) return { error: err('sort: incompatible tabs', 2) }
+    tab = next
+  }
+  return tab
+}
+
 // Keys extend to end of line unless an end field is given. Any per-key modifier
 // suppresses inherited global modifiers; character offsets remain unsupported.
 const KEY_MODS = 'nrfb'
@@ -68,17 +84,17 @@ const KEY_COUNT = /^[ \t]*\+?(\d+)/u
 // GNU names the first thing wrong with a key, and says it two ways: a number
 // it could not read where one belongs, and anything else about the spec as a
 // whole. Both exit 2, as every sort diagnostic does. Recorded from coreutils 9.4.
-const keyCount = (what, rest) => err(`sort: ${what}: invalid count at start of '${rest}'`, 2)
-const keyField = (what, spec) => err(`sort: ${what}: invalid field specification '${spec}'`, 2)
+const keyCount = (what, rest, ctx) => err(`sort: ${what}: invalid count at start of ${quoteLocale(rest, ctx)}`, 2)
+const keyField = (what, spec, ctx) => err(`sort: ${what}: invalid field specification ${quoteLocale(spec, ctx)}`, 2)
 
 // START[,END], each of them FIELD[.OFFSET][MODIFIERS]. The zero checks come
 // before the leftover one, so `0q` is a field number rather than a stray `q`.
-function readKeySpec(spec) {
+function readKeySpec(spec, ctx) {
   let at = 0
   let fault = null
   const count = (what) => {
     const m = KEY_COUNT.exec(spec.slice(at))
-    if (m === null) { fault = keyCount(what, spec.slice(at)); return null }
+    if (m === null) { fault = keyCount(what, spec.slice(at), ctx); return null }
     at += m[0].length
     return Number(m[1])
   }
@@ -103,16 +119,16 @@ function readKeySpec(spec) {
     to = position("invalid number after ','")
     if (to === null) return { error: fault }
   }
-  if (from.field === 0 || to?.field === 0) return { error: keyField('field number is zero', spec) }
-  if (from.offset === 0) return { error: keyField('character offset is zero', spec) }
-  if (at !== spec.length) return { error: keyField('stray character in field spec', spec) }
+  if (from.field === 0 || to?.field === 0) return { error: keyField('field number is zero', spec, ctx) }
+  if (from.offset === 0) return { error: keyField('character offset is zero', spec, ctx) }
+  if (at !== spec.length) return { error: keyField('stray character in field spec', spec, ctx) }
   return { from, to }
 }
 
-function parseKeySpecs(raw, globals) {
+function parseKeySpecs(raw, globals, ctx) {
   const specs = []
   for (const spec of raw) {
-    const read = readKeySpec(spec)
+    const read = readKeySpec(spec, ctx)
     if (read.error) return { error: read.error }
     const { from, to } = read
     const mods = from.mods + (to?.mods ?? '')
@@ -120,7 +136,7 @@ function parseKeySpecs(raw, globals) {
       if (KEY_MODS.includes(c)) continue
       // A letter GNU knows is a key this cannot sort by; any other is the
       // stray character GNU calls it.
-      if (!GNU_KEY_MODS.includes(c)) return { error: keyField('stray character in field spec', spec) }
+      if (!GNU_KEY_MODS.includes(c)) return { error: keyField('stray character in field spec', spec, ctx) }
       return { error: unsupported('option', 'sort', `-k${spec}`, `sort: unknown key option \`${c}\` in ${spec}`, 2) }
     }
     // An end offset of zero ends the key at the end of its field, which is
@@ -161,16 +177,19 @@ function fieldBounds(line, sep) {
     }
     return bounds
   }
-  // Trailing blanks form another field: "ann 007 " has three fields.
+  // Trailing blanks form another field: "ann 007 " has three fields. A blank
+  // is a space, a tab or a newline, which only -z leaves inside a record.
   let i = 0
   do {
     const start = i
-    while (i < line.length && /[ \t]/u.test(line[i])) i++
-    while (i < line.length && !/[ \t]/u.test(line[i])) i++
+    while (i < line.length && BLANK.test(line[i])) i++
+    while (i < line.length && !BLANK.test(line[i])) i++
     bounds.push([start, i])
   } while (i < line.length)
   return bounds
 }
+
+const BLANK = /[ \t\n]/u
 
 function keyOf(line, spec, bounds) {
   if (spec.start > bounds.length) return ''
@@ -178,7 +197,7 @@ function keyOf(line, spec, bounds) {
   // No end field means "to end of line"; an end past the last field
   // means the same rather than an error.
   const to = spec.end === undefined || spec.end > bounds.length ? line.length : bounds[spec.end - 1][1]
-  if (spec.b) while (from < to && /[ \t]/u.test(line[from])) from++
+  if (spec.b) while (from < to && BLANK.test(line[from])) from++
   return line.slice(from, Math.max(from, to))
 }
 
@@ -228,7 +247,7 @@ function sortByKeys(lines, specs, sep, unique, globalReverse) {
 // Preserve decimal precision without converting to JS numbers. A leading + is
 // not numeric, and exponent suffixes do not affect the parsed numeric prefix.
 function numericKey(line) {
-  const m = /^[ \t]*(-?)(?:(\d+)(?:\.(\d*))?|\.(\d+))/u.exec(line)
+  const m = /^[ \t\n]*(-?)(?:(\d+)(?:\.(\d*))?|\.(\d+))/u.exec(line)
   const integer = (m?.[2] ?? '').replace(/^0+/u, '') || '0'
   const fraction = (m?.[3] ?? m?.[4] ?? '').replace(/0+$/u, '')
   return { integer, fraction, negative: m?.[1] === '-' && (integer !== '0' || fraction !== '') }

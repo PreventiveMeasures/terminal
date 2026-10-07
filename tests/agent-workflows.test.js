@@ -165,7 +165,7 @@ describe('agent workflows — deduplication and ordering', () => {
 })
 
 describe('agent workflows — silent option and metadata gaps', () => {
-  for (const command of ['grep -2 x g', 'cat -2 g', 'head -n1 -2 g', 'tail -n1 -2 g',
+  for (const command of ['grep -2 x g', 'cat -2 g',
     `awk 'BEGIN { PROCINFO["sorted_in"]="@ind_num_asc"; a[2]=2; a[1]=1; for (k in a) print k }'`,
     `awk 'BEGIN { print PROCINFO["pid"] }'`, `awk 'BEGIN { print length(PROCINFO) }'`,
     `awk 'BEGIN { for (k in PROCINFO) print k }'`, `awk 'BEGIN { print ENVIRON["HOME"] }'`,

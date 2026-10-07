@@ -130,13 +130,17 @@ describe('upstream BusyBox audit — printf', () => {
     ['multiple flags combine', "printf '%0 d' 7", null, ' 7'],
   ])
 
-  // A character constant is one character; GNU says what it passed over, and
-  // says it as a warning, so the run still succeeds.
+  // A character constant is one character. coreutils says what it passed
+  // over, and says it as a warning, so the run still succeeds; bash's builtin
+  // passes over it without a word.
   it('warns about the characters after a quoted integer operand', async () => {
-    assert.deepEqual(await createTerminal(FILES).run(`printf '%d\\n' "'Stail"`), {
+    assert.deepEqual(await createTerminal(FILES).run(`/usr/bin/printf '%d\\n' "'Stail"`), {
       stdout: '83\n',
-      stderr: 'printf: warning: tail: character(s) following character constant have been ignored\n',
+      stderr: '/usr/bin/printf: warning: tail: character(s) following character constant have been ignored\n',
       exitCode: 0, cwd: '/', notes: [], unsupported: [],
+    })
+    assert.deepEqual(await createTerminal(FILES).run(`printf '%d\\n' "'Stail"`), {
+      stdout: '83\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
     })
   })
 
@@ -144,7 +148,7 @@ describe('upstream BusyBox audit — printf', () => {
     const r = await createTerminal().run("printf '%d\\n' 4 57tail 8")
     assert.equal(r.stdout, '4\n57\n8\n')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /57tail.*not completely converted/u)
+    assert.equal(r.stderr, 'printf: 57tail: invalid number\n')
     assert.deepEqual(r.unsupported, [])
   })
 })

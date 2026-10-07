@@ -422,7 +422,7 @@ describe('createTerminal — opts.commands: registry integration', () => {
     assert.equal((await plain.run('md5sum a.txt')).exitCode, 127)
     assert.match((await plain.run('md5sum a.txt')).stderr, /command not found/u)
     assert.deepEqual(plain.complete('md5'), [])
-    assert.equal((await plain.run('which md5sum')).stdout, 'md5sum not found\n')
+    assert.equal((await plain.run('which md5sum')).exitCode, 1)
     // …and the shared default registry is not mutated by either.
     assert.equal((await createTerminal(SOURCES).run('md5sum')).exitCode, 127)
   })

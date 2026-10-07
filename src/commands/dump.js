@@ -20,6 +20,8 @@ export function hexdump(stdin, tokens, ctx) {
   if (positional.includes('-')) return unsupported('feature', 'hexdump', 'hyphen input operand', 'hexdump: a hyphen input operand is not supported; omit operands to read stdin')
   const sl = dumpInput('hexdump', positional, stdin, ctx, { skip: values.get('s'), len: values.get('n'), skipFlag: '-s', lenFlag: '-n' })
   if (sl.error) return sl.error
+  // With nothing opened there is nothing to dump, and util-linux says so.
+  if (!sl.opened) return err(sl.r.stderr + 'hexdump: all input file arguments failed')
   return okWith(dump(sl.bytes, sl.start, flags.has('v'), flags.has('C') ? HEXDUMP_C : HEXDUMP), sl.r)
 }
 
@@ -31,6 +33,8 @@ export function od(stdin, tokens, ctx) {
   }
   const sl = dumpInput('od', positional, stdin, ctx, { skip: values.get('j'), len: values.get('N'), skipFlag: '-j', lenFlag: '-N', skipPastEofErrors: true })
   if (sl.error) return sl.error
+  // With nothing opened od prints not even the end offset.
+  if (!sl.opened) return { stdout: '', stderr: sl.r.stderr, exitCode: 1 }
   return okWith(dump(sl.bytes, sl.start, flags.has('v'), OD), sl.r)
 }
 
@@ -41,6 +45,8 @@ export function xxd(stdin, tokens, ctx) {
   if (positional.length === 2 && positional[1] !== '-') return unsupported('feature', 'xxd', 'output file', 'xxd: output files are not supported (filesystem is read-only)')
   const sl = dumpInput('xxd', positional.slice(0, 1), stdin, ctx, { skip: values.get('s'), len: values.get('l'), skipFlag: '-s', lenFlag: '-l' })
   if (sl.error) return sl.error
+  // An input it cannot open xxd exits 2 for, as it does for a directory.
+  if (!sl.opened) return { stdout: '', stderr: sl.r.stderr, exitCode: 2 }
   return okWith(dump(sl.bytes, sl.start, false, XXD), sl.r)
 }
 

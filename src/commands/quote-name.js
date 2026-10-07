@@ -1,6 +1,6 @@
-import { encodeUtf8, encodeUtf8Loose } from '../util.js'
+import { encodeUtf8, encodeUtf8Loose } from '../bytes.js'
 import { UnsupportedError } from '../unsupported.js'
-import { byteLocale } from '../locale.js'
+import { byteLocale, classTables } from '../locale.js'
 
 const QUOTE_ESCAPES = new Map([['\0', '0'], ['\u0007', 'a'], ['\b', 'b'], ['\f', 'f'], ['\n', 'n'], ['\r', 'r'], ['\t', 't'], ['\v', 'v']])
 
@@ -41,6 +41,42 @@ const SHELL_SAFE = /^[#%+,\-./0-9@A-Z\]_a-z{}~]+$/u
 export function quoteShell(name, ctx) {
   if (SHELL_SAFE.test(name) && !'#~'.includes(name[0])) return name
   return quoteName(name, ctx)
+}
+
+const SAFE_CHAR = /^[#%+,\-./0-9@A-Z\]_a-z{}~]$/u
+
+// GNU quotef: the shell-escape style with `:` quoted too, since the name
+// stands before one — which is how coreutils names a file in most of what it
+// says about one. A name of nothing but what a shell takes as it is, printed
+// characters past ASCII among them, goes bare; anything else is quoted as
+// quoteName quotes it. A lone brace is a word a shell reads, and so is
+// quoted where one inside a name is not.
+export function quoteFile(name, ctx) {
+  const tables = byteLocale(ctx) ? null : classTables(ctx.locale)
+  const bare = name !== '' && name !== '{' && name !== '}' && !'#~'.includes(name[0])
+    && [...name].every((char) => SAFE_CHAR.test(char) || (tables !== null && char.codePointAt(0) > 127 && tables.has('print', char.codePointAt(0))))
+  return bare ? name : quoteName(name, ctx)
+}
+
+// gnulib's quote(), which coreutils names most other operands with: the
+// locale's quotation marks — the curly ones in a UTF-8 locale, `'` in C —
+// around the text, with a backslash, the closing mark and what would not
+// print spelt as C escapes, and in a byte locale every byte past ASCII too.
+const LOCALE_ESCAPES = new Map([['\u0007', 'a'], ['\b', 'b'], ['\f', 'f'], ['\n', 'n'], ['\r', 'r'], ['\t', 't'], ['\v', 'v']])
+
+export function quoteLocale(text, ctx) {
+  const bytes = byteLocale(ctx)
+  const tables = bytes ? null : classTables(ctx.locale)
+  const [open, close] = bytes ? ["'", "'"] : ['‘', '’']
+  let out = ''
+  for (const char of text) {
+    const code = char.codePointAt(0)
+    if (char === '\\' || char === close) out += '\\' + char
+    else if (LOCALE_ESCAPES.has(char)) out += '\\' + LOCALE_ESCAPES.get(char)
+    else if (code < 128 ? code >= 32 && code < 127 : tables?.has('print', code)) out += char
+    else for (const byte of encodeUtf8Loose(char)) out += '\\' + byte.toString(8).padStart(3, '0')
+  }
+  return open + out + close
 }
 
 // GNU quotearg's C style, which diff's headers name files in: a name with

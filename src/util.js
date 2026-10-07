@@ -5,14 +5,17 @@ import { lookup, textOfFile } from './fs.js'
 import { UINT64_MAX } from './numeric.js'
 import { err } from './result.js'
 import { lookupWithNote } from './notes.js'
+import { quoteFile, quoteLocale, quoteName } from './commands/quote-name.js'
 
 // Commands reach the byte codec and the result shape through here, where the
 // rest of their shared helpers already live.
 export { MARKER, MARKER_RANGE, encodeUtf8, encodeUtf8Loose, encodeUtf8Marked, decodeUtf8, decodeUtf8Loose, decodeUtf8Marked, decodeUtf8Maybe, isMarker, joinBytes, utf8CodePoints } from './bytes.js'
-export { textOfFile } from './fs.js'
+export { resolve, textOfFile } from './fs.js'
 export { err, ok, usage } from './result.js'
 export { discardedNotes, missingPathNote } from './notes.js'
 export { byteLocale, classTables } from './locale.js'
+export { OptionError, optionFailure } from './args.js'
+export { quoteFile, quoteLocale, quoteName } from './commands/quote-name.js'
 
 // Empty input has no lines; a trailing newline terminates the preceding line.
 export function splitLines(s, delimiter = '\n') {
@@ -136,31 +139,43 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
     entries.push(entry)
     // Each failure keeps its own words too, for a command that writes them
     // where that operand came rather than all together.
-    if (error) stderr += entry.failure = readFailure(cmd, name, error, entry.kind === 'dir')
+    if (error) stderr += entry.failure = readFailure(cmd, name, error, entry.kind === 'dir', ctx)
     if (entry.kind !== 'file' && (options.stopOnError || (entry.kind === 'dir' && options.stopOnDir))) break
   }
   return { inputs: entries.filter((e) => e.kind === 'file'), entries, stderr, failed: stderr !== '' }
 }
 
 // GNU words a failed read per command, and several word a directory
-// differently from a path they could not open at all. `%s` is the operand as
-// typed and `%r` the reason the filesystem gave; a command not named here
-// says `<command>: <operand>: <reason>`, which is what most of them say.
-// Recorded from coreutils 9.4 and GNU sed 4.9.
+// differently from a path they could not open at all. `%r` is the reason the
+// filesystem gave, and the operand is `%s` as typed — grep, sed and the tools
+// outside coreutils name it bare — `%q` as quoteaf quotes it, always, and
+// `%f` as quotef does, only where it needs it, which is how most of coreutils
+// names a file. A command not named here says `<command>: <operand>: <reason>`
+// with the operand as typed; a third shape is what one says of an operand
+// with nothing in it. Recorded from coreutils 9.4, GNU sed 4.9, util-linux's
+// hexdump, xxd and perl's shasum.
+const QUOTEF = ['%f: %r', '%f: Is a directory']
 const READ_FAILURES = {
-  head: ["cannot open '%s' for reading: %r", "error reading '%s': Is a directory"],
-  tail: ["cannot open '%s' for reading: %r", "error reading '%s': Is a directory"],
-  sort: ['cannot read: %s: %r', 'read failed: %s: Is a directory'],
+  __proto__: null,
+  head: ['cannot open %q for reading: %r', 'error reading %q: Is a directory'],
+  tail: ['cannot open %q for reading: %r', 'error reading %q: Is a directory'],
+  sort: ['cannot read: %f: %r', 'read failed: %f: Is a directory'],
   sed: ["can't read %s: %r", 'read error on %s: Is a directory'],
-  tac: ["failed to open '%s' for reading: %r", '%s: read error: Invalid argument'],
-  base32: [null, 'read error: Is a directory'],
-  base64: [null, 'read error: Is a directory'],
-  uniq: [null, "error reading '%s': Is a directory"],
+  tac: ['failed to open %q for reading: %r', '%f: read error: Invalid argument'],
+  base32: ['%f: %r', 'read error: Is a directory'],
+  base64: ['%f: %r', 'read error: Is a directory'],
+  uniq: ['%f: %r', 'error reading %q: Is a directory'],
+  wc: [...QUOTEF, 'invalid zero-length file name'],
+  xxd: [null, 'Is a directory'],
+  cat: QUOTEF, nl: QUOTEF, cut: QUOTEF, od: QUOTEF,
+  sha1sum: QUOTEF, sha256sum: QUOTEF, sha384sum: QUOTEF, sha512sum: QUOTEF,
 }
 
-export function readFailure(cmd, name, why, directory = false) {
-  const shape = READ_FAILURES[cmd]?.[directory ? 1 : 0]
-  const text = shape ? shape.replace(/%[sr]/gu, (mark) => (mark === '%s' ? name : why)) : `${name}: ${why}`
+export function readFailure(cmd, name, why, directory = false, ctx) {
+  const shapes = READ_FAILURES[cmd]
+  const shape = (name === '' && shapes?.[2]) || shapes?.[directory ? 1 : 0]
+  const marks = { '%s': () => name, '%q': () => quoteName(name, ctx), '%f': () => quoteFile(name, ctx), '%r': () => why }
+  const text = shape ? shape.replace(/%[sqfr]/gu, (mark) => marks[mark]()) : `${name}: ${why}`
   return `${cmd}: ${text}\n`
 }
 
@@ -234,18 +249,26 @@ export function parseNonNegativeInt(str, label, shown = str, { max = Infinity, d
 }
 
 // Retain the sign for head/tail: '-5' means omit the last five lines to head,
-// while '+5' means start at line five to tail. Preserve the operand in errors.
-export function parseSignedCount(str, label) {
-  if (typeof str !== 'string') return { error: err(`${label}: invalid count: ${str}`) }
+// while '+5' means start at line five to tail. The count is read as GNU's
+// xstrtoumax reads it — blanks and a `+` before the digits, and a multiplier
+// after them, `m` among them and `B`, `iB` or `D` after one, or the
+// multiplier alone for one of it — once the `-` is off it, and a count it
+// cannot read is named by what it counts, as quote() names it.
+export function parseSignedCount(str, cmd, unit, ctx) {
   const sign = str[0] === '+' || str[0] === '-' ? str[0] : ''
   const part = sign === '-' ? str.slice(1) : str
-  const m = /^[ \t\n\r\v\f]*\+?(\d+)(b|[kKMGTPEZYRQ](?:i?B)?)?$/u.exec(part)
-  const bare = !sign && /^(?:b|[kKMGTPEZYRQ](?:i?B)?)$/u.test(part)
-  if (!m && !bare) return { error: err(`${label}: invalid count: ${str}`) }
-  const suffix = m?.[2] ?? (bare ? part : '')
-  const count = scaledCount(BigInt(m?.[1] ?? '1'), suffix, label, str)
-  return count.error ? count : { ...count, sign }
+  const invalid = (why = '') => ({ error: err(`${cmd}: invalid number of ${unit === 'c' ? 'bytes' : 'lines'}: ${quoteLocale(part, ctx)}${why}`) })
+  const m = /^(?:[ \t\n\r\v\f]*\+?(\d+))?(?:(b|[kKmMGTPEZYRQ])(iB|B|D)?)?$/u.exec(part)
+  if (m === null || (m[1] === undefined && m[2] === undefined)) return invalid()
+  const [, digits = '1', letter, second] = m
+  const suffix = letter === undefined || letter === 'b' ? letter ?? '' : letter + (second === 'iB' ? 'iB' : second ? 'B' : '')
+  const count = scaledCount(BigInt(digits), suffix, cmd, str)
+  return count.error ? invalid(': Value too large for defined data type') : { ...count, sign }
 }
+
+// coreutils' answer to a command line it can read but not act on: the
+// diagnostic, then the line pointing at --help, and status 1.
+export const usageError = (cmd, message, code = 1) => err(`${cmd}: ${message}\nTry '${cmd} --help' for more information.`, code)
 
 // Shared GNU byte-count suffixes and unsigned 64-bit range checking.
 export function scaledCount(digits, suffix, label, shown) {
