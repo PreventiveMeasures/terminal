@@ -109,7 +109,7 @@ async function dispatch(name, tokens, stdin, ctx, external = false) {
   const run = () => {
     if ((external || name !== resolved) && reg.shellOnly(resolved)) return unsupported('command', name, name, `${name}: shell builtin cannot be invoked as an external command`, 127)
     const cmd = reg.commands[resolved]
-    return cmd ? cmd(stdin, tokens, ctx) : unknownCommand(name, reg)
+    return cmd ? cmd(stdin, tokens, ctx) : unknownCommand(name, reg, external, ctx)
   }
   const route = (r) => routeExternalOutput(record(ctx, commandWriteError(name, r, ctx), resolved), ctx)
   try {

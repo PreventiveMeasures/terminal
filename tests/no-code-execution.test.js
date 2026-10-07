@@ -299,11 +299,12 @@ describe('no JS execution — runtime', () => {
       assert.equal(r.unsupported[0].kind, 'feature', line)
     }
     // Backticks reach the same virtual registry as `$( )`, so a host command
-    // named in either form is reported missing rather than run.
+    // named in either form is reported missing rather than run — a path as
+    // bash misses one, with nothing there.
     for (const line of ["echo $(node -e 'process.exit(1)')", 'x=$(sh -c id)', 'echo "$(/bin/sh -c id)"',
       'echo `id`', "echo `node -e 'process.exit(1)'`", 'x=`sh -c id`', 'echo "`/bin/sh -c id`"']) {
       const r = await t.run(line)
-      assert.match(r.stderr, /command not found/u, line)
+      assert.match(r.stderr, /command not found|\/bin\/sh: No such file or directory/u, line)
       assert.equal(r.unsupported[0].kind, 'command', line)
     }
     // `$NAME` / `${NAME}` are variable references, and the only bindings
@@ -324,7 +325,7 @@ describe('no JS execution — runtime', () => {
     for (const line of ['node -e 1', 'sh -c id', '/bin/sh -c id', '/usr/bin/env node']) {
       const r = await t.run(line)
       assert.equal(r.exitCode, 127, line)
-      assert.match(r.stderr, /command not found/u, line)
+      assert.match(r.stderr, line.startsWith('/') ? /^terminal: \/usr\/bin\/env: No such file or directory|^terminal: \/bin\/sh: No such file or directory/u : /^terminal: \w+: command not found/u, line)
       assert.equal(r.stdout, '', line)
     }
   })
@@ -427,8 +428,8 @@ describe('no JS execution — runtime', () => {
     assert.match((await t.run('echo a | xargs node -e')).stderr, /node: command not found/u)
     // A loop value in command position is word-split like bash splits
     // it: `sh` is a command name that does not exist, `-c id` its args.
-    assert.match((await t.run('for c in "sh -c id"; do $c; done')).stderr, /^sh: command not found/u)
-    assert.match((await t.run('for c in "sh -c id"; do "$c"; done')).stderr, /^sh -c id: command not found/u)
+    assert.match((await t.run('for c in "sh -c id"; do $c; done')).stderr, /^terminal: sh: command not found/u)
+    assert.match((await t.run('for c in "sh -c id"; do "$c"; done')).stderr, /^terminal: sh -c id: command not found/u)
     // And a registered one still works, so this is failing closed
     // rather than -exec being broken outright.
     assert.equal((await t.run("find . -name 'a.js' -exec echo found {} ';'")).stdout, 'found ./a.js\n')

@@ -16,7 +16,7 @@ function terminal(excerpt) {
 describe('numbered source excerpt from reported command', () => {
   it('rejects the pasted unterminated quote before executing the semicolon list', async () => {
     const result = await terminal().run(pipeline + '; echo "---"; ' + direct)
-    assert.deepEqual(result, { ...expected(''), stderr: "unexpected EOF while looking for matching `''\n", exitCode: 2 })
+    assert.deepEqual(result, { ...expected(''), stderr: "terminal: unexpected EOF while looking for matching `''\n", exitCode: 2 })
   })
 
   it('runs both completed commands with the expected source line numbers', async () => {

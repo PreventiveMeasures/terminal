@@ -1849,11 +1849,11 @@ describe('createTerminal — errors', () => {
 
   it('prefixed names that do not resolve to a known command still error', async () => {
     const t = createTerminal(SOURCES)
-    // The bare name isn't registered, so the prefix isn't stripped
-    // and the not-found error reflects what was typed.
+    // The bare name isn't registered, so the prefix isn't stripped, and the
+    // path misses as bash misses one: nothing is there.
     const r = await t.run('/bin/frobnicate')
     assert.equal(r.exitCode, 127)
-    assert.match(r.stderr, /\/bin\/frobnicate: command not found/u)
+    assert.match(r.stderr, /^terminal: \/bin\/frobnicate: No such file or directory/u)
   })
 
   it('Object.prototype names are not dispatchable as commands', async () => {
@@ -1873,14 +1873,14 @@ describe('createTerminal — errors', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('echo "hi')
     assert.notEqual(r.exitCode, 0)
-    assert.equal(r.stderr, "unexpected EOF while looking for matching `\"'\n")
+    assert.equal(r.stderr, "terminal: unexpected EOF while looking for matching `\"'\n")
   })
 
   it('empty pipeline stage errors', async () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('cat |')
     assert.notEqual(r.exitCode, 0)
-    assert.equal(r.stderr, 'syntax error: unexpected end of file\n')
+    assert.equal(r.stderr, 'terminal: syntax error: unexpected end of file\n')
   })
 
   it('grep invalid pattern names the dialect in the error', async () => {
@@ -2266,7 +2266,7 @@ describe('createTerminal — /dev/null redirects', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('cat foo 2>')
     assert.notEqual(r.exitCode, 0)
-    assert.equal(r.stderr, "syntax error near unexpected token `newline'\n")
+    assert.equal(r.stderr, "terminal: syntax error near unexpected token `newline'\n")
   })
 
   it('redirect attaches to its own stage in a pipeline', async () => {
@@ -2340,7 +2340,7 @@ describe('createTerminal — `2>&1` fd-to-fd redirects', () => {
     // A malformed duplication must not split into `2>` and a background `&`.
     const t = createTerminal(SOURCES)
     for (const [cmd, re] of [
-      ['echo hi 2>&', /^syntax error near unexpected token `newline'$/mu], // missing fd
+      ['echo hi 2>&', /^terminal: syntax error near unexpected token `newline'$/mu], // missing fd
       ['echo hi 2>&1foo', /2>&/u], // valid fd but no token boundary after
     ]) {
       const r = await t.run(cmd)
@@ -2442,14 +2442,14 @@ describe('createTerminal — `;` sequential separator', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('; echo hi')
     assert.notEqual(r.exitCode, 0)
-    assert.equal(r.stderr, "syntax error near unexpected token `;'\n")
+    assert.equal(r.stderr, "terminal: syntax error near unexpected token `;'\n")
   })
 
   it('consecutive `;;` errors', async () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('echo a ;; echo b')
     assert.equal(r.exitCode, 2)
-    assert.equal(r.stderr, "syntax error near unexpected token `;;'\n")
+    assert.equal(r.stderr, "terminal: syntax error near unexpected token `;;'\n")
   })
 
   it('a quoted `;` stays a literal argv token', async () => {
@@ -2555,7 +2555,7 @@ describe('createTerminal — newline command separator', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('echo a &&\n')
     assert.notEqual(r.exitCode, 0)
-    assert.equal(r.stderr, 'syntax error: unexpected end of file\n')
+    assert.equal(r.stderr, 'terminal: syntax error: unexpected end of file\n')
   })
 })
 
@@ -2809,17 +2809,17 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('()')
     assert.notEqual(r.exitCode, 0)
-    assert.equal(r.stderr, "syntax error near unexpected token `)'\n")
+    assert.equal(r.stderr, "terminal: syntax error near unexpected token `)'\n")
   })
 
   it('unmatched `(` and `)` error with bash\'s messages', async () => {
     const t = createTerminal(SOURCES)
     const open = await t.run('(echo a')
     assert.notEqual(open.exitCode, 0)
-    assert.equal(open.stderr, 'syntax error: unexpected end of file\n')
+    assert.equal(open.stderr, 'terminal: syntax error: unexpected end of file\n')
     const close = await t.run('echo a)')
     assert.notEqual(close.exitCode, 0)
-    assert.equal(close.stderr, "syntax error near unexpected token `)'\n")
+    assert.equal(close.stderr, "terminal: syntax error near unexpected token `)'\n")
   })
 
   it('`(` mid-stage errors instead of producing an argv+group hybrid', async () => {
@@ -2829,7 +2829,7 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('echo a (echo b)')
     assert.notEqual(r.exitCode, 0)
-    assert.equal(r.stderr, "syntax error near unexpected token `('\n")
+    assert.equal(r.stderr, "terminal: syntax error near unexpected token `('\n")
   })
 
   it('a stray word after `)` errors', async () => {
@@ -2838,7 +2838,7 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('(echo a) hi')
     assert.notEqual(r.exitCode, 0)
-    assert.equal(r.stderr, "syntax error near unexpected token `hi'\n")
+    assert.equal(r.stderr, "terminal: syntax error near unexpected token `hi'\n")
   })
 
   it('a redirect between two groups errors instead of producing a hybrid', async () => {
@@ -2850,7 +2850,7 @@ describe('createTerminal — `(...)` subshell grouping', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('(echo a) 2>&1 (echo b)')
     assert.notEqual(r.exitCode, 0)
-    assert.equal(r.stderr, "syntax error near unexpected token `('\n")
+    assert.equal(r.stderr, "terminal: syntax error near unexpected token `('\n")
   })
 })
 
@@ -2893,7 +2893,7 @@ describe('createTerminal — `for` loops', () => {
     assert.equal((await t.run('for f in a; do echo $f; done;')).stdout, 'a\n')
     assert.equal((await t.run('for f in a; do; echo $f; done')).exitCode, 2)
     assert.equal((await t.run('for f\nin a b\ndo\necho $f\ndone')).stdout, 'a\nb\n')
-    assert.equal((await t.run('for f in a;; do echo $f; done')).stderr, "syntax error near unexpected token `;;'\n")
+    assert.equal((await t.run('for f in a;; do echo $f; done')).stderr, "terminal: syntax error near unexpected token `;;'\n")
   })
 
   it('`$f` expands bare and inside double quotes, stays literal in single quotes', async () => {
@@ -3042,13 +3042,13 @@ describe('createTerminal — `for` loops', () => {
     // is the stray one — the same error bash reports.
     const quoted = await t.run('"for" f in a; do echo; done')
     assert.equal(quoted.exitCode, 2)
-    assert.equal(quoted.stderr, "syntax error near unexpected token `do'\n")
+    assert.equal(quoted.stderr, "terminal: syntax error near unexpected token `do'\n")
   })
 
   it('every malformed loop is a parse error — nothing runs', async () => {
     const t = createTerminal(SOURCES)
-    const near = (token) => `syntax error near unexpected token \`${token}'\n`
-    const end = 'syntax error: unexpected end of file\n'
+    const near = (token) => `terminal: syntax error near unexpected token \`${token}'\n`
+    const end = 'terminal: syntax error: unexpected end of file\n'
     const cases = [
       ['for', near('newline')],
       ['for f', /positional parameters/u, 1],
@@ -3089,7 +3089,7 @@ describe('createTerminal — `for` loops', () => {
     for (const [line, name] of [['for x-y in a; do echo; done; echo $?', 'x-y'], ['for "f" in a; do echo; done; echo $?', '"f"'], ['for 1x in a; do echo hi; done; echo $?', '1x']]) {
       const r = await t.run(line)
       assert.equal(r.stdout, '1\n', line)
-      assert.equal(r.stderr, `\`${name}': not a valid identifier\n`, line)
+      assert.equal(r.stderr, `terminal: \`${name}': not a valid identifier\n`, line)
       assert.equal(r.exitCode, 0, line)
     }
     assert.equal((await t.run('for 1x in a; do :; done 2>/dev/null; echo $?')).stdout, '1\n')
@@ -3108,7 +3108,7 @@ describe('createTerminal — `for` loops', () => {
       const r = await t.run(line)
       assert.equal(r.exitCode, 2, line)
       assert.equal(r.stdout, '', line)
-      assert.equal(r.stderr, `syntax error near unexpected token \`${closer}'\n`, line)
+      assert.equal(r.stderr, `terminal: syntax error near unexpected token \`${closer}'\n`, line)
     }
     // A trailing `;` before the closer stays a no-op.
     assert.equal((await t.run('for f in a; do echo x; done')).stdout, 'x\n')
@@ -3147,7 +3147,7 @@ describe('createTerminal — `for` loops', () => {
     assert.equal((await t.run('for x in ""; do echo "[$x]"; done')).stdout, '[]\n')
     const quoted = await t.run('for c in ""; do "$c"; done')
     assert.equal(quoted.exitCode, 127)
-    assert.match(quoted.stderr, /^: command not found/u)
+    assert.match(quoted.stderr, /^terminal: : command not found/u)
     // An empty word in a list is dropped the same way, so an inner
     // loop over an empty outer value runs zero times.
     assert.equal((await t.run('for a in ""; do for b in $a; do echo never; done; echo end; done')).stdout, 'end\n')
@@ -3158,7 +3158,7 @@ describe('createTerminal — `for` loops', () => {
     assert.equal((await t.run('for f in a do; do echo [$f]; done')).stdout, '[a]\n[do]\n')
     const missing = await t.run('for f in a do echo $f; done')
     assert.equal(missing.exitCode, 2)
-    assert.equal(missing.stderr, "syntax error near unexpected token `done'\n")
+    assert.equal(missing.stderr, "terminal: syntax error near unexpected token `done'\n")
   })
 
   it('a backslash before `$` quotes it; an escaped backslash does not', async () => {

@@ -7,10 +7,11 @@ import { err } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
 import { evaluateConditional } from './conditional.js'
+import { shellMessage } from '../unsupported.js'
 
 // A name a definition or a loop cannot take fails the command when it runs,
 // in bash's words, and the line goes on.
-const notIdentifier = (name, ctx) => routeOutput(err(`\`${name}': not a valid identifier`, 1), { fds: ctx.outputFds }, ctx)
+const notIdentifier = (name, ctx) => routeOutput(err(shellMessage(`\`${name}': not a valid identifier`), 1), { fds: ctx.outputFds }, ctx)
 
 export function runBlock(stage, ctx, stdin, runSteps) {
   // A definition runs nothing and leaves the body where a call can reach it.

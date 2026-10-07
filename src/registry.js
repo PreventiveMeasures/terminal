@@ -6,8 +6,8 @@ import { NAV_COMMANDS } from './commands/nav.js'
 import { cat } from './commands/cat.js'
 import { sed } from './commands/sed.js'
 import { bracket, test } from './commands/test.js'
-import { markUnsupported, unsupported, unsupportedNote } from './unsupported.js'
-import { SHELL_BUILTINS, SHELL_GAPS } from './shell/builtins.js'
+import { markUnsupported, shellMessage, unsupported, unsupportedNote } from './unsupported.js'
+import { SHELL_BUILTINS, SHELL_GAPS, commandPathFailure } from './shell/builtins.js'
 import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './commands/text.js'
 import { quietSearch } from './commands/grep.js'
 
@@ -141,8 +141,15 @@ export const defaultRegistry = (network) => {
 // the whole of what it says: how the terminal was built is the caller's
 // business and nothing a line running inside it can act on, so a command that
 // is not there reads exactly as it did before it was written.
-export function unknownCommand(name, reg) {
+// The shell says why it could not run a name as bash says it, signed as bash
+// signs it: `command not found` for a bare name, and for a path what is (or is
+// not) there, since a path is run rather than looked for — and nothing here
+// is executable. A name `find -exec` or `xargs` runs is theirs to fail, and no
+// shell is there.
+export function unknownCommand(name, reg, external = false, ctx = null) {
   const gap = SHELL_GAPS.get(name)
   if (gap !== undefined) return unsupported('feature', name, name, `${name}: ${gap}`, 127)
-  return unsupported('command', name, name, `${name}: command not found. Available: ${reg.known}`, 127)
+  const [why, code] = name.includes('/') && ctx ? commandPathFailure(name, ctx) : ['command not found', 127]
+  const missing = `${name}: ${why}`
+  return unsupported('command', name, name, `${external ? missing : shellMessage(missing)}. Available: ${reg.known}`, code)
 }

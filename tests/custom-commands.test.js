@@ -395,7 +395,7 @@ describe('createTerminal — opts.commands: registry integration', () => {
   it('appears in the "Available: …" hint, after the builtins', async () => {
     const hint = (await withSha().run('frobnicate')).stderr
     assert.equal(hint.trimEnd().endsWith(', md5sum'), true, hint)
-    assert.match(hint, /^frobnicate: command not found\. Available: ls, cd, cat/u)
+    assert.match(hint, /^terminal: frobnicate: command not found\. Available: ls, cd, cat/u)
   })
 
   it('`hidden: true` keeps it dispatchable but out of completion and the hint', async () => {

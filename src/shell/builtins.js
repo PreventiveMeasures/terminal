@@ -3,10 +3,11 @@
 
 import { err, ok } from '../util.js'
 import { ONLY_C_UTF8 } from '../locale.js'
-import { unsupported } from '../unsupported.js'
+import { shellMessage, unsupported } from '../unsupported.js'
 import { NAME_RE } from './lex.js'
 import { boundValue, variableSet } from './variables.js'
 import { INT64_MAX, INT64_MIN } from '../numeric.js'
+import { lookup } from '../fs.js'
 
 // Bash accepts signed 64-bit control counts. Exit status wraps modulo 256;
 // malformed exit numbers take precedence over excess-argument errors.
@@ -30,9 +31,9 @@ function exit(_stdin, tokens, ctx) {
   if (args.length === 0) return halt({ ...ok(), exitCode: ctx.lastExit })
   const { arg, n } = controlNumber(args[0])
   if (n === null) {
-    return halt(err(`exit: ${arg}: numeric argument required`, 2))
+    return halt(err(shellMessage(`exit: ${arg}: numeric argument required`), 2))
   }
-  if (args.length > 1) return halt(err('exit: too many arguments'))
+  if (args.length > 1) return halt(err(shellMessage('exit: too many arguments')))
   return halt({ ...ok(), exitCode: Number(((n % 256n) + 256n) % 256n) })
 }
 
@@ -43,12 +44,12 @@ function exit(_stdin, tokens, ctx) {
 function loopControl(name) {
   return (_stdin, tokens, ctx) => {
     if (tokens[0] === '--help') return help(name)
-    if (ctx.loopDepth === 0) return err(`${name}: only meaningful in a \`for', \`while', or \`until' loop`, 0)
+    if (ctx.loopDepth === 0) return err(shellMessage(`${name}: only meaningful in a \`for', \`while', or \`until' loop`), 0)
     const args = tokens[0] === '--' ? tokens.slice(1) : tokens
-    if (args.length > 1) return halt(err(`${name}: too many arguments`))
+    if (args.length > 1) return halt(err(shellMessage(`${name}: too many arguments`)))
     const { arg, n } = controlNumber(args[0] ?? '1')
-    if (n === null) return halt(err(`${name}: ${arg}: numeric argument required`, 128))
-    if (n <= 0) return { ...err(`${name}: ${arg}: loop count out of range`), control: { type: 'break', levels: ctx.loopDepth } }
+    if (n === null) return halt(err(shellMessage(`${name}: ${arg}: numeric argument required`), 128))
+    if (n <= 0) return { ...err(shellMessage(`${name}: ${arg}: loop count out of range`)), control: { type: 'break', levels: ctx.loopDepth } }
     return { ...ok(), control: { type: name, levels: Number(n > BigInt(ctx.loopDepth) ? BigInt(ctx.loopDepth) : n) } }
   }
 }
@@ -67,7 +68,7 @@ function exportCmd(_stdin, tokens, ctx) {
     const name = eq === -1 ? t : t.slice(0, append ? eq - 1 : eq)
     if (!terminated && t.startsWith('-')) return unsupported('option', 'export', t, `export: option \`${t}\` is not supported`)
     // Bash names the whole operand, value and all.
-    if (!NAME_RE.test(name)) { stderr += `export: \`${t}': not a valid identifier\n`; continue }
+    if (!NAME_RE.test(name)) { stderr += shellMessage(`export: \`${t}': not a valid identifier\n`); continue }
     if (eq !== -1) ctx.vars.set(name, (append ? boundValue(name, ctx) : '') + t.slice(eq + 1))
     else if (ctx.vars.has(name)) ctx.vars.set(name, ctx.vars.get(name))
   }
@@ -114,6 +115,15 @@ const refusedSet = () => unsupported('feature', 'set', 'set', 'set: `set` is sup
 
 export const SHELL_BUILTINS = {
   exit, break: loopControl('break'), continue: loopControl('continue'), export: exportCmd, set: setOptions, unset,
+}
+
+// Why the shell could not run a path, as bash says it: a path is run rather
+// than looked for, so the answer is what is there — nothing, a directory, or
+// a file, none of which is executable here.
+export function commandPathFailure(name, ctx) {
+  const { path, error } = lookup(ctx.cwd, name, ctx.fs)
+  if (error) return [error, 127]
+  return ctx.fs.isDir(path) ? ['Is a directory', 126] : ['Permission denied', 126]
 }
 
 // Diagnose unavailable shell machinery after checking registered overrides.

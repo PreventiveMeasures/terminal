@@ -26,13 +26,19 @@ the line being the token `newline`; `syntax error: unexpected end of file`
 where a block or a `|` is still open; ``unexpected EOF while looking for
 matching `"'`` where a quote or a substitution is. `bash -c` would add a second
 line echoing the source, which a typed line does not get, and nothing of the
-line runs either way. The shell's own diagnostics leave off the `bash: ` in
-front of them, as every diagnostic here does — `cd: nope: No such file or
-directory`, `x: parameter not set`, `$f: ambiguous redirect` — and a
-here-document the input ends inside is `here-document at line N`, counted in
-the line handed to `run()`. Only a refusal says `error: `. `${x?}` ends the
-line with status 127, which is what `bash -c` reports for a shell that it
-ended, and 1 where a subshell or a substitution catches it.
+line runs either way. Where bash signs a message of its own `bash: `, the
+shell signs it `terminal: ` — a name of its own, so that neither is taken
+for the other — and, as an interactive bash does, with no `line N:`: a
+syntax error, `terminal: cd: nope: No such file or directory`, `terminal: x:
+parameter not set`, `terminal: $f: ambiguous redirect`, `terminal: frobnicate:
+command not found`, and `terminal: warning: here-document at line N delimited
+by end-of-file`, counted in the line handed to `run()`. What a command prints
+is that command's own, and bash adds nothing to it: `cat: x: No such file or
+directory`. `printf`, `test` and `[`, `echo` and `pwd` answer as the GNU
+programs of those names do, unsigned, until they have forms of their own as
+bash's builtins. Only a refusal says `error: `. `${x?}` ends the line with
+status 127, which is what `bash -c` reports for a shell that it ended, and 1
+where a subshell or a substitution catches it.
 
 `< dir` opens, as a directory does for reading, and what fails is the read: a
 command that never reads its stdin runs as anywhere else, and one whose only

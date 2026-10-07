@@ -571,7 +571,7 @@ describe('what a link cannot change', () => {
     // The name a link leads to answers for its own parent: where that is not
     // there, the write fails as the kernel fails it rather than leaving bytes
     // under a directory nothing can reach.
-    await check(await made(), 'echo x > orphan', '', { stderr: 'orphan: No such file or directory\n', exitCode: 1, cwd: '/repo' })
+    await check(await made(), 'echo x > orphan', '', { stderr: 'terminal: orphan: No such file or directory\n', exitCode: 1, cwd: '/repo' })
     await check(await made(), 'touch orphan', '', { stderr: "touch: cannot touch 'orphan': No such file or directory\n", exitCode: 1, cwd: '/repo' })
     // `cp` has a rule of its own for a destination leading nowhere, which it
     // gives whatever the name is missing.

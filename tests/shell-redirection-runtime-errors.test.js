@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
 
 const terminal = () => createTerminal({}, { mount: '/src', writable: '/tmp/' })
-const badFd = '3: Bad file descriptor\n'
+const badFd = 'terminal: 3: Bad file descriptor\n'
 
 // Bash performs descriptor duplication in do_redirections while executing the
 // selected command, after expanding its arguments and earlier redirects.

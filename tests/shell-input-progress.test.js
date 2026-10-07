@@ -60,7 +60,7 @@ describe('incremental parsing retains compound-command progress', () => {
   it('retains a loop header the input ends in the middle of', async () => {
     const result = await createTerminal({}).run('echo before\nfor value in one & echo bad\n')
     assert.equal(result.stdout, 'before\n')
-    assert.equal(result.stderr, "syntax error near unexpected token `&'\n")
+    assert.equal(result.stderr, "terminal: syntax error near unexpected token `&'\n")
     assert.notEqual(result.exitCode, 0)
     assert.deepEqual(result.unsupported, [])
     assert.deepEqual(result.notes, [])

@@ -238,7 +238,7 @@ describe('assignment recognition retains empty quotes before the equals sign', (
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 127)
       assert.equal(result.cwd, options.cwd)
-      assert.match(result.stderr, /^LONG=value: command not found\./u)
+      assert.match(result.stderr, /^terminal: LONG=value: command not found\./u)
       assert.deepEqual(result.unsupported, [{ kind: 'command', command: 'LONG=value', detail: 'LONG=value', message: result.stderr.trimEnd() }])
       await check(t, 'printf "%s" "$LONG"', 'original')
     })

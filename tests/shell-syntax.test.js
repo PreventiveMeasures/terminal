@@ -393,7 +393,7 @@ describe('shell syntax — redirects', () => {
     assert.equal(await out('wc -l < a.txt'), '2\n')
     assert.equal(await out('echo piped | cat < b.txt'), 'B\n')
     const missing = await term().run('cat < nope; echo rc=$?')
-    assert.equal(missing.stderr, 'nope: No such file or directory\n')
+    assert.equal(missing.stderr, 'terminal: nope: No such file or directory\n')
     assert.equal(missing.stdout, 'rc=1\n')
     assert.equal((await term().run('cat < src')).stderr, 'cat: -: Is a directory\n')
     assert.equal(await out('cat < /dev/null | wc -c'), '0\n')
@@ -442,7 +442,7 @@ describe('shell syntax — redirects', () => {
     assert.equal(await out('cat nope 2>&-; echo $?'), '1\n')
     // Duplicating a closed descriptor is bash's own error.
     const dup = await term().run('echo hi >&- 2>&1')
-    assert.deepEqual([dup.stderr, dup.exitCode], ['1: Bad file descriptor\n', 1])
+    assert.deepEqual([dup.stderr, dup.exitCode], ['terminal: 1: Bad file descriptor\n', 1])
   })
 
   it('an assignment-only command still binds when its redirect fails, as bash binds it', async () => {
@@ -450,7 +450,7 @@ describe('shell syntax — redirects', () => {
     assert.equal(await out('x=old; x=new <missing; echo "$x [$?]"', t), 'new [1]\n')
     assert.equal(await out('x=old; e=; x=new $e <missing; echo $x', t), 'new\n')
     assert.equal(await out('x=old; x=new y=$x <<< hi <missing; echo $x $y', t), 'new new\n')
-    assert.match((await term().run('x=new <missing')).stderr, /^missing: No such file or directory/u)
+    assert.match((await term().run('x=new <missing')).stderr, /^terminal: missing: No such file or directory/u)
     // Not through a subshell or a group, and not a command's own prefix.
     assert.equal(await out('x=old; x=new <missing | cat; echo $x', t), 'old\n')
     assert.equal(await out('x=old; { x=new; } <missing; echo $x', t), 'old\n')
@@ -526,9 +526,9 @@ describe('shell syntax — compound commands', () => {
     assert.match(bad.stderr, /numeric argument required/u)
     // The first argument is checked before the count of them, as bash checks; `--` is skipped.
     const first = await term().run('exit nope 1')
-    assert.deepEqual([first.stderr, first.exitCode], ['exit: nope: numeric argument required\n', 2])
+    assert.deepEqual([first.stderr, first.exitCode], ['terminal: exit: nope: numeric argument required\n', 2])
     const many = await term().run('exit 1 nope')
-    assert.deepEqual([many.stderr, many.exitCode], ['exit: too many arguments\n', 1])
+    assert.deepEqual([many.stderr, many.exitCode], ['terminal: exit: too many arguments\n', 1])
     for (const [line, code] of [['exit -- 3', 3], ['exit --', 0], ['exit -x', 2], ['exit -- -1 2', 1]]) {
       assert.equal((await term().run(line)).exitCode, code, line)
     }
@@ -542,11 +542,11 @@ describe('shell syntax — compound commands', () => {
     assert.equal(await out('for f in a b; do (break); echo $f; done'), 'a\nb\n')
     const outside = await term().run('break; echo next')
     assert.equal(outside.stdout, 'next\n')
-    assert.equal(outside.stderr, "break: only meaningful in a `for', `while', or `until' loop\n")
+    assert.equal(outside.stderr, "terminal: break: only meaningful in a `for', `while', or `until' loop\n")
     // Bash checks for a loop before it reads an operand at all.
     for (const line of ['break x; echo $?', 'continue 0; echo $?', 'break 1 2; echo $?']) {
       const r = await term().run(line)
-      assert.deepEqual([r.stdout, r.stderr], ['0\n', `${line.split(' ')[0]}: only meaningful in a \`for', \`while', or \`until' loop\n`], line)
+      assert.deepEqual([r.stdout, r.stderr], ['0\n', `terminal: ${line.split(' ')[0]}: only meaningful in a \`for', \`while', or \`until' loop\n`], line)
     }
     assert.deepEqual(await gaps('for f in a; do break 2; done'), [])
   })
@@ -576,8 +576,8 @@ describe('shell syntax — compound commands', () => {
     assert.equal(await out('{ echo a; echo b; } | cat'), 'a\nb\n')
     assert.equal(await out('{ cd src; }; pwd'), '/src\n')
     assert.equal(await out('(cd src); pwd'), '/\n')
-    assert.equal((await term().run('{ echo a }')).stderr, 'syntax error: unexpected end of file\n')
-    assert.equal((await term().run('}')).stderr, "syntax error near unexpected token `}'\n")
+    assert.equal((await term().run('{ echo a }')).stderr, 'terminal: syntax error: unexpected end of file\n')
+    assert.equal((await term().run('}')).stderr, "terminal: syntax error near unexpected token `}'\n")
   })
 
   it('a block may open on a line of its own: newlines after `{` and `do`, but no `;`', async () => {
@@ -701,9 +701,9 @@ describe('shell syntax — subshell boundaries and redirect operands', () => {
     assert.equal(await out('cat < b.tx*', t), 'B\n')
     assert.equal(await out('f=b.txt; cat < $f', t), 'B\n')
     const glob = await t.run('cat < *.txt')
-    assert.deepEqual([glob.stdout, glob.stderr, glob.exitCode], ['', '*.txt: ambiguous redirect\n', 1])
-    assert.equal((await t.run('f="a.txt b.txt"; cat < $f')).stderr, '$f: ambiguous redirect\n')
-    assert.equal((await t.run('cat < {a,b}.txt')).stderr, '{a,b}.txt: ambiguous redirect\n')
+    assert.deepEqual([glob.stdout, glob.stderr, glob.exitCode], ['', 'terminal: *.txt: ambiguous redirect\n', 1])
+    assert.equal((await t.run('f="a.txt b.txt"; cat < $f')).stderr, 'terminal: $f: ambiguous redirect\n')
+    assert.equal((await t.run('cat < {a,b}.txt')).stderr, 'terminal: {a,b}.txt: ambiguous redirect\n')
     assert.match((await t.run('cat < nomatch*.txt')).stderr, /nomatch\*\.txt: No such file or directory/u)
     // A here-string is expanded but never split or globbed.
     assert.equal(await out('f="a b"; cat <<< $f', t), 'a b\n')
@@ -821,8 +821,8 @@ describe('shell syntax — command conventions', () => {
     assert.equal(await out('cd src; cd; pwd', t), '/\n')
     assert.equal(await out('cd src; cd -; pwd', t), '/\n/\n')
     assert.equal(await out('cd src; cd ..; cd -; pwd', t), '/src\n/src\n')
-    assert.match((await term().run('cd a.txt')).stderr, /^cd: a.txt: Not a directory/u)
-    assert.match((await term().run('cd nope')).stderr, /^cd: nope: No such file or directory/u)
+    assert.match((await term().run('cd a.txt')).stderr, /^terminal: cd: a.txt: Not a directory/u)
+    assert.match((await term().run('cd nope')).stderr, /^terminal: cd: nope: No such file or directory/u)
     assert.match((await term().run('cd a b')).stderr, /too many arguments/u)
     assert.match((await term().run('cd -')).stderr, /OLDPWD not set/u)
   })
@@ -837,20 +837,22 @@ describe('shell syntax — command conventions', () => {
     assert.equal(await out('cd /; OLDPWD=; cd -; pwd', t), '\n/\n')
     assert.equal(await out('cd src; cd nope; echo $OLDPWD'), '/\n')
     const unsetVar = await term().run('cd src; unset OLDPWD; cd -')
-    assert.match(unsetVar.stderr, /^cd: OLDPWD not set/u)
+    assert.match(unsetVar.stderr, /^terminal: cd: OLDPWD not set/u)
     assert.equal(unsetVar.exitCode, 1)
-    assert.match((await term().run('OLDPWD=/nope; cd -')).stderr, /^cd: \/nope: No such file or directory/u)
+    assert.match((await term().run('OLDPWD=/nope; cd -')).stderr, /^terminal: cd: \/nope: No such file or directory/u)
     // An assigned PWD is refreshed by the next change, as bash refreshes it.
     assert.equal(await out('PWD=/zzz; pwd; echo $PWD; cd src; echo $PWD'), '/\n/zzz\n/src\n')
   })
 })
 
 // A line bash cannot read is reported in bash's words, as an interactive shell
-// reports a typed line: one line, its own name dropped as from every
-// diagnostic here, and no echo of the source — which only a script's error
-// adds, and a backtick's, whose body bash reads as one. Status 2, nothing run,
-// nothing on the feed. Each was recorded from an interactive bash 5.2.21.
+// reports a typed line: one line, signed `terminal: ` where bash signs
+// `bash: `, and no echo of the source — which only a script's error adds, and
+// a backtick's, whose body bash reads as one. Status 2, nothing run, nothing
+// on the feed. Each was recorded from an interactive bash 5.2.21.
 describe('syntax errors in bash\'s own words', () => {
+  // Every line the shell prints is signed, as bash signs each of its own.
+  const signed = (text) => text.replace(/^(?=[^\n])/gmu, 'terminal: ')
   const near = (token) => `syntax error near unexpected token \`${token}'\n`
   for (const [line, stderr, stdout = ''] of [
     ['echo a; ; echo b', near(';')],
@@ -881,7 +883,7 @@ describe('syntax errors in bash\'s own words', () => {
     ['[[ -f "abc ]]', "unexpected EOF while looking for matching `\"'\nunexpected argument to conditional unary operator\n"],
   ]) {
     it(line, async () => {
-      assert.deepEqual(await createTerminal({}).run(line), { stdout, stderr, exitCode: 2, cwd: '/', notes: [], unsupported: [] })
+      assert.deepEqual(await createTerminal({}).run(line), { stdout, stderr: signed(stderr), exitCode: 2, cwd: '/', notes: [], unsupported: [] })
     })
   }
 
@@ -893,7 +895,7 @@ describe('syntax errors in bash\'s own words', () => {
     ['echo `echo "a`; echo $?', "command substitution: line 1: unexpected EOF while looking for matching `\"'\n"],
   ]) {
     it(line, async () => {
-      assert.deepEqual(await createTerminal({}).run(line), { stdout: '\n0\n', stderr, exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+      assert.deepEqual(await createTerminal({}).run(line), { stdout: '\n0\n', stderr: signed(stderr), exitCode: 0, cwd: '/', notes: [], unsupported: [] })
     })
   }
 
@@ -909,14 +911,14 @@ describe('syntax errors in bash\'s own words', () => {
   it('refuses an unterminated substitution holding a `(` after a word', async () => {
     const r = await createTerminal({}).run('echo $(echo (); echo $?')
     assert.equal(r.unsupported[0]?.detail, 'command substitution')
-    assert.equal((await createTerminal({}).run('echo $( (echo a')).stderr, "unexpected EOF while looking for matching `)'\n")
+    assert.equal((await createTerminal({}).run('echo $( (echo a')).stderr, "terminal: unexpected EOF while looking for matching `)'\n")
   })
 
   // A name bash will not take for a function fails the definition when it
   // runs, and the line goes on.
   it('refuses a quoted function name when the definition runs', async () => {
     const r = await createTerminal({}).run("'f'() { echo q; }; echo $?")
-    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['1\n', "`'f'': not a valid identifier\n", 0])
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['1\n', "terminal: `'f'': not a valid identifier\n", 0])
   })
 })
 
@@ -926,7 +928,7 @@ describe('shell syntax — builtins and expansions as bash 5.2 answers them', ()
   it('`unset` falls back to the function of a name no variable has', async () => {
     const gone = await term().run('f() { echo a; }; unset f; f')
     assert.deepEqual([gone.stdout, gone.exitCode], ['', 127])
-    assert.match(gone.stderr, /^f: command not found/u)
+    assert.match(gone.stderr, /^terminal: f: command not found/u)
     assert.equal(await out('f() { echo a; }; f=1; unset f; f; echo "[$f]"'), 'a\n[]\n')
     assert.equal(await out('f() { echo a; }; unset -v f; f'), 'a\n')
     assert.equal((await term().run('f() { echo a; }; unset -f f; f')).exitCode, 127)
@@ -934,7 +936,7 @@ describe('shell syntax — builtins and expansions as bash 5.2 answers them', ()
 
   it('`export` names the whole operand it will not take', async () => {
     const r = await term().run('export 1x=2 a-b=c =x x=1; echo "$? $x"')
-    assert.equal(r.stderr, "export: `1x=2': not a valid identifier\nexport: `a-b=c': not a valid identifier\nexport: `=x': not a valid identifier\n")
+    assert.equal(r.stderr, "terminal: export: `1x=2': not a valid identifier\nterminal: export: `a-b=c': not a valid identifier\nterminal: export: `=x': not a valid identifier\n")
     assert.equal(r.stdout, '1 1\n')
   })
 

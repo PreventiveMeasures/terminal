@@ -2,7 +2,7 @@ import { expandRedirect, expandScalar, expandWords } from './expand.js'
 import { refusedWrite } from './parse.js'
 import { BindingMap } from './bindings.js'
 import { gateBlame, gateTracker, missingPathNote } from '../notes.js'
-import { UnsupportedError, diagnostic, unsupported, unsupportedNote } from '../unsupported.js'
+import { UnsupportedError, diagnostic, shellMessage, unsupported, unsupportedNote } from '../unsupported.js'
 import { decodeUtf8Maybe, encodeUtf8, err, joinBytes, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
@@ -46,7 +46,7 @@ export async function runSteps(steps, ctx, stream, condition = false) {
   // there; only a chain run for its effects has anything to report.
   let blame = null, gate = null
   for (const [index, step] of steps.entries()) {
-    if (step.warnings) appendOutput(result, routeOutput({ ...emptyOutput(step.warnings), exitCode: result.exitCode, ignored: result.ignored }, { fds: ctx.outputFds }, ctx))
+    if (step.warnings) appendOutput(result, routeOutput({ ...emptyOutput(shellMessage(step.warnings)), exitCode: result.exitCode, ignored: result.ignored }, { fds: ctx.outputFds }, ctx))
     if (step.gate === 'and' && result.exitCode !== 0) { (gate ??= gateTracker()).skip(condition ? null : blame, result.exitCode); continue }
     if (step.gate === 'or' && result.exitCode === 0) continue
     gate?.flush(ctx.notes)
@@ -251,19 +251,19 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
     // oxlint-disable no-await-in-loop -- a redirect is applied after the one to its left.
     for (const r of stage.redirs) {
       if (r.op === 'dup') {
-        if (fds[r.toFd] === undefined || fds[r.toFd] === 'closed') return done(err(`${r.toFd}: Bad file descriptor`))
+        if (fds[r.toFd] === undefined || fds[r.toFd] === 'closed') return done(err(shellMessage(`${r.toFd}: Bad file descriptor`)))
         fds[r.fd] = fds[r.toFd]
       } else if (r.op === 'close') fds[r.fd] = 'closed'
       else if (r.op === 'to') {
         const t = r.target === undefined ? await expand(() => expandRedirect(r.word, ctx)) : { value: r.target }
-        if (t.error) return done(err(t.error))
+        if (t.error) return done(err(shellMessage(t.error)))
         const dest = t.value === '/dev/null' ? 'null' : t.value === '/dev/stdout' ? fds[1] : t.value === '/dev/stderr' ? fds[2] : ctx.writable ? ctx.fs.openWritable(ctx.cwd, t.value, r.append) : null
         if (dest === null) {
           const e = refusedWrite(r.label, t.value, ctx.writable)
           ctx.unsupported.add(unsupportedNote(e))
           return done(err(`error: ${e.message}`))
         }
-        if (dest === 'closed') return done(err(`${t.value}: No such file or directory`))
+        if (dest === 'closed') return done(err(shellMessage(`${t.value}: No such file or directory`)))
         fds[r.fd] = dest
         if (r.both) fds[2] = dest
       } else if (r.op === 'text') { input = r.expand ? await expand(() => expandScalar(heredocWord(r.body), ctx)) : r.body; file = false; directory = false; inherited = false; piped = null; terminal = false }
@@ -271,7 +271,7 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
       else if (r.op === 'herestring') { input = await expand(() => expandScalar(r.word, ctx)) + '\n'; file = false; directory = false; inherited = false; piped = null; terminal = false }
       else {
         const t = await expand(() => expandRedirect(r.word, ctx))
-        const read = t.error ? { error: err(t.error) } : readInput(t.value, ctx, file ? origin : input)
+        const read = t.error ? { error: err(shellMessage(t.error)) } : readInput(t.value, ctx, file ? origin : input)
         if (read.error) return done(read.error)
         input = read.content
         // `/dev/stdin` is the stream already there, and keeps what it carried.

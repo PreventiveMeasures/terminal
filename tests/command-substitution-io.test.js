@@ -12,7 +12,7 @@ const FILES = {
   nulEnd: 'before\n\0\n',
 }
 const READ_ERROR = 'cat: missing: No such file or directory\n'
-const NUL_WARNING = 'warning: command substitution: ignored null byte in input\n'
+const NUL_WARNING = 'terminal: warning: command substitution: ignored null byte in input\n'
 
 async function check(command, stdout, exitCode = 0, stderr = '', notes = []) {
   assert.deepEqual(await createTerminal(FILES).run(command), { stdout, stderr, exitCode, cwd: '/', notes, unsupported: [] }, command)
@@ -32,11 +32,11 @@ describe('command substitution — Bash file shorthand', () => {
   for (const [command, stdout] of cases) it(command, () => check(command, stdout))
 
   it('reports missing or directory input without marking it unsupported', async () => {
-    await check('x=$(<missing)', '', 1, 'missing: No such file or directory\n')
+    await check('x=$(<missing)', '', 1, 'terminal: missing: No such file or directory\n')
     // Bash reads the file itself and nothing fails a directory but the read,
     // which it says nothing about.
     await check('x=$(<dir); echo "$? [$x]"', '0 []\n')
-    await check('echo "$(<missing)"', '\n', 0, 'missing: No such file or directory\n')
+    await check('echo "$(<missing)"', '\n', 0, 'terminal: missing: No such file or directory\n')
   })
 })
 

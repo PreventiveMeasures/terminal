@@ -1,4 +1,4 @@
-import { UnsupportedError, unsupportedNote } from '../unsupported.js'
+import { UnsupportedError, shellMessage, unsupportedNote } from '../unsupported.js'
 import { expansionStderr } from './output.js'
 import { isolated, withState } from './state.js'
 import { err } from '../util.js'
@@ -38,7 +38,7 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
         // form keeps failing. Heredoc bodies are parsed during expansion,
         // where Bash's recovery depends on builtin versus external scopes.
         const said = backtick ? backtickError(command, e) : null
-        if (said) return err(said, 2)
+        if (said) return err(shellMessage(said), 2)
         throw new UnsupportedError('feature', 'command substitution syntax', `runtime command substitution syntax errors are not supported: ${e.message}`)
       }
       ctx.unsupported.add(note)
@@ -60,7 +60,7 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
     value = value.replaceAll('\0', '')
     const count = length - value.length
     ctx.notes.add(`command substitution: discarded ${count} NUL ${count === 1 ? 'byte' : 'bytes'}.`)
-    errors += 'warning: command substitution: ignored null byte in input\n'
+    errors += shellMessage('warning: command substitution: ignored null byte in input\n')
   }
   expansionStderr(ctx, errors)
   let end = value.length

@@ -59,15 +59,16 @@ describe('a terminal has no network unless it asked for one', () => {
     // terminal was built is nothing a line running inside it can act on, so
     // nothing tells it.
     const other = await t.run('frobnicate https://example.test/')
-    assert.match(r.stderr, /^curl: command not found\. Available: /u)
+    assert.match(r.stderr, /^terminal: curl: command not found\. Available: /u)
     assert.equal(r.stderr.replace('curl', 'frobnicate'), other.stderr)
     assert.doesNotMatch(r.stderr, /network|createTerminal|fetch/u)
     // It is not in the list of names either, so nothing offers what is not there.
     assert.deepEqual(t.complete('cur'), [])
-    // A bin-prefixed spelling is a name like any other, and misses like one.
+    // A bin-prefixed spelling is a path like any other, and misses as bash
+    // misses one: nothing is there.
     const bin = await t.run('/usr/bin/curl https://example.test/')
     assert.equal(bin.exitCode, 127)
-    assert.match(bin.stderr, /^\/usr\/bin\/curl: command not found\. Available: /u)
+    assert.match(bin.stderr, /^terminal: \/usr\/bin\/curl: No such file or directory\. Available: /u)
   })
 
   it('offers the name, and the list of names, once it has one', async () => {

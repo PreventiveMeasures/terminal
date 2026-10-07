@@ -138,7 +138,7 @@ describe('parse() hands back the line as the parser read it', () => {
   it('keeps a redirect target that brace expansion would multiply', async () => {
     assert.deepEqual(list('ls > {a,b}')[0].redirects, [{ fd: 1, op: '>', target: { type: 'brace', source: '{a,b}' } }])
     assert.deepEqual(list('ls > {1..1}')[0].redirects, [{ fd: 1, op: '>', target: '1' }])
-    assert.equal((await terminal().run('ls > {a,b}')).stderr.trim(), '{a,b}: ambiguous redirect')
+    assert.equal((await terminal().run('ls > {a,b}')).stderr.trim(), 'terminal: {a,b}: ambiguous redirect')
   })
 
   it("carries a loop's variable, the words after `in` and the list it runs", () => {
@@ -936,7 +936,7 @@ describe('parse() reports a syntax error as run() would, and runs nothing', () =
     it(`reports ${JSON.stringify(error)} for ${JSON.stringify(line)}`, async () => {
       assert.deepEqual(verdict(line), { ok: false, incomplete: false, error })
       assert.deepEqual(list(line), [])
-      assert.equal((await terminal().run(line)).stderr, `${error}\n`)
+      assert.equal((await terminal().run(line)).stderr, `terminal: ${error}\n`)
     })
   }
 
@@ -945,7 +945,7 @@ describe('parse() reports a syntax error as run() would, and runs nothing', () =
   it('reads `for 1 in a` as a loop that fails when it runs', async () => {
     assert.equal(parse('for 1 in a; do :; done').ok, true)
     const r = await terminal().run('for 1 in a; do :; done; echo $?')
-    assert.equal(r.stderr, "`1': not a valid identifier\n")
+    assert.equal(r.stderr, "terminal: `1': not a valid identifier\n")
     assert.equal(r.stdout, '1\n')
   })
 })

@@ -587,8 +587,10 @@ describe('GNU conformance — a conditional bash rejects too', () => {
   // bash rejects the same line. Bash exits 2 on all of these; nothing here
   // is missing, and nothing reaches the feed. Recorded from an interactive
   // bash 5.2.21: what its conditional reader expected, then the token its
-  // grammar names — read back from the line, so `]]` and not a newline.
+  // grammar names — read back from the line, so `]]` and not a newline —
+  // each line signed `terminal: ` where bash signs `bash: `.
   const near = (token) => `syntax error near \`${token}'\n`
+  const signed = (text) => text.replace(/^(?=[^\n])/gmu, 'terminal: ')
   const MALFORMED = [
     ['[[ ]]', near(']]')],
     ['[[ -f ]]', "unexpected argument `]]' to conditional unary operator\n" + near(']]')],
@@ -609,7 +611,7 @@ describe('GNU conformance — a conditional bash rejects too', () => {
   for (const [command, stderr] of MALFORMED) {
     it(JSON.stringify(command), async () => {
       assert.deepEqual(await createTerminal({}).run(command), {
-        stdout: '', stderr, exitCode: 2, cwd: '/', notes: [], unsupported: [],
+        stdout: '', stderr: signed(stderr), exitCode: 2, cwd: '/', notes: [], unsupported: [],
       })
     })
   }

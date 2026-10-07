@@ -81,7 +81,7 @@ describe('unmatched pathname glob notes', () => {
     assert.equal(called, false)
     assert.equal(result.stdout, '')
     assert.equal(result.exitCode, 1)
-    assert.equal(result.stderr, '/absent: No such file or directory\n')
+    assert.equal(result.stderr, 'terminal: /absent: No such file or directory\n')
     assert.deepEqual(result.notes, [unmatched('*.missing')])
     assert.deepEqual(result.unsupported, [])
   })

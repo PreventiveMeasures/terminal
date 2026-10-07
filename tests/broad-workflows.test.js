@@ -36,7 +36,7 @@ describe('broad audit — ordered shell output and control flow', () => {
   it('preserves explicit unsets across runs and temporary scopes', async () => {
     const t = createTerminal(FILES)
     await t.run('unset HOME PWD x')
-    assert.equal((await t.run('cd')).stderr, 'cd: HOME not set\n')
+    assert.equal((await t.run('cd')).stderr, 'terminal: cd: HOME not set\n')
     assert.deepEqual((await t.run('echo "$HOME$PWD$x"')).unsupported, [])
     assert.equal((await t.run('cd dir; echo $PWD')).stdout, '/dir\n')
     await check('x=old; x=tmp unset x; echo $x', 'old\n')
