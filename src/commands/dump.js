@@ -31,7 +31,8 @@ export function od(stdin, tokens, ctx) {
   }
   const sl = dumpInput('od', positional, stdin, ctx, { skip: values.get('j'), len: values.get('N'), skipFlag: '-j', lenFlag: '-N', skipPastEofErrors: true })
   if (sl.error) return sl.error
-  return okWith(dump(sl.bytes, sl.start, flags.has('v'), OD), sl.r)
+  // Where nothing opened there is no offset to end on.
+  return okWith(sl.opened ? dump(sl.bytes, sl.start, flags.has('v'), OD) : '', sl.r)
 }
 
 // xxd emits raw byte pairs without repeat folding or an end-offset row.
@@ -41,6 +42,8 @@ export function xxd(stdin, tokens, ctx) {
   if (positional.length === 2 && positional[1] !== '-') return unsupported('feature', 'xxd', 'output file', 'xxd: output files are not supported (filesystem is read-only)')
   const sl = dumpInput('xxd', positional.slice(0, 1), stdin, ctx, { skip: values.get('s'), len: values.get('l'), skipFlag: '-s', lenFlag: '-l' })
   if (sl.error) return sl.error
+  // A file xxd cannot open ends it with its own status.
+  if (sl.r.failed) return err(sl.r.stderr, 2)
   return okWith(dump(sl.bytes, sl.start, false, XXD), sl.r)
 }
 

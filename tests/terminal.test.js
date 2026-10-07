@@ -4718,8 +4718,25 @@ describe('createTerminal — hexdump', () => {
 
   it('rejects a non-numeric -n / -s count', async () => {
     const t = createTerminal({ 'hello.txt': 'hello\n' })
-    assert.match((await t.run('hexdump -n abc hello.txt')).stderr, /invalid count/u)
-    assert.match((await t.run('hexdump -s x hello.txt')).stderr, /invalid count/u)
+    assert.equal((await t.run('hexdump -n abc hello.txt')).stderr, "hexdump: failed to parse length: 'abc': Invalid argument\n")
+    assert.equal((await t.run('hexdump -s x hello.txt')).stderr, "hexdump: failed to parse offset: 'x': Invalid argument\n")
+    assert.equal((await t.run('hexdump -n -1 hello.txt')).stderr, "hexdump: failed to parse length: '-1': Invalid argument\n")
+    assert.equal((await t.run('hexdump -n 1x hello.txt')).stderr, "hexdump: failed to parse length: '1x': Invalid argument\n")
+    // A count util-linux reads is read here too: hex, octal and a power.
+    assert.equal((await t.run('hexdump -n 0x2 hello.txt')).stdout, '0000000 6568'.padEnd(47) + '\n0000002\n')
+    assert.equal((await t.run('hexdump -n 04 hello.txt')).stdout, '0000000 6568 6c6c'.padEnd(47) + '\n0000004\n')
+    assert.equal((await t.run('hexdump -s 1k hello.txt')).stdout, '0000006\n')
+  })
+
+  it('says every operand failed where none opened, as util-linux does', async () => {
+    const t = createTerminal({ 'hello.txt': 'hello\n' })
+    const failed = (stderr) => ({ stdout: '', stderr, exitCode: 1, cwd: '/', notes: [], unsupported: [] })
+    assert.deepEqual(await t.run('hexdump missing'), failed('hexdump: missing: No such file or directory\nhexdump: all input file arguments failed\n'))
+    // With a skip to make, what it then finds is stdin, closed.
+    assert.deepEqual(await t.run('hexdump -s 2 missing'), failed('hexdump: missing: No such file or directory\nhexdump: stdin: Bad file descriptor\n'))
+    // Asked for nothing, it opens nothing.
+    assert.deepEqual(await t.run('hexdump -n 0 missing'), { ...failed(''), exitCode: 0 })
+    assert.equal((await t.run('echo abc | hexdump -s 1')).stderr, 'hexdump: stdin: Illegal seek\n')
   })
 
   it('is a surfaced command: which resolves it and completion offers it', async () => {
@@ -4762,6 +4779,26 @@ describe('createTerminal — od (hidden hexdump variant)', () => {
   it('always prints the trailing offset line — even for empty input', async () => {
     const t = createTerminal({})
     assert.equal((await t.run('true | od')).stdout, '0000000\n')
+  })
+
+  it('prints no offset where no input opened at all', async () => {
+    const t = createTerminal({ 'hello.txt': 'hello\n' })
+    assert.deepEqual(await t.run('od missing'), { stdout: '', stderr: 'od: missing: No such file or directory\n', exitCode: 1, cwd: '/', notes: [], unsupported: [] })
+    // Satisfied by the first input that opens, it opens no more.
+    assert.deepEqual(await t.run('od -N 0 hello.txt missing'), { stdout: '0000000\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+  })
+
+  it('names what it cannot read in a count as coreutils does', async () => {
+    const t = createTerminal({ 'hello.txt': 'hello\n' })
+    const said = async (line) => (await t.run(line)).stderr
+    assert.equal(await said('od -N abc hello.txt'), "od: invalid -N argument 'abc'\n")
+    assert.equal(await said('od -j -1 hello.txt'), "od: invalid -j argument '-1'\n")
+    assert.equal(await said('od -N 4x hello.txt'), "od: invalid suffix in -N argument '4x'\n")
+    assert.equal(await said('od -N 1t hello.txt'), "od: invalid suffix in -N argument '1t'\n")
+    assert.equal(await said('od -N 99999999999999999999 hello.txt'), "od: -N argument '99999999999999999999' too large\n")
+    // A suffix alone is one of itself; D and B after one count in thousands.
+    assert.equal((await t.run('od -N k hello.txt')).stdout, '0000000 062550 066154 005157\n0000006\n')
+    assert.equal((await t.run('od -N 1KD hello.txt')).stdout, '0000000 062550 066154 005157\n0000006\n')
   })
 
   it('-j strictly past EOF errors (unlike hexdump/xxd, which clamp)', async () => {
@@ -4817,6 +4854,12 @@ describe('createTerminal — xxd (hidden hexdump variant)', () => {
   it('empty input produces no output', async () => {
     const t = createTerminal({})
     assert.equal((await t.run('true | xxd')).stdout, '')
+  })
+
+  it('ends with status 2 on what it cannot open, and names no directory', async () => {
+    const t = createTerminal({ 'dir/x': '' })
+    assert.deepEqual(await t.run('xxd missing'), { stdout: '', stderr: 'xxd: missing: No such file or directory\n', exitCode: 2, cwd: '/', notes: [], unsupported: [] })
+    assert.deepEqual(await t.run('xxd dir'), { stdout: '', stderr: 'xxd: Is a directory\n', exitCode: 2, cwd: '/', notes: [], unsupported: [] })
   })
 })
 
