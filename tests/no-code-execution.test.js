@@ -205,15 +205,15 @@ describe('no JS execution — source', () => {
     }
   })
 
-  it('limits runtime dependencies to the byte codecs, the diff library and the archive formats', () => {
+  it('limits runtime dependencies to the byte codecs, the diff library, the archive formats and the filesystem', () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8'))
     const dependencies = Object.keys(pkg.dependencies ?? {}).sort()
-    assert.deepEqual(dependencies, ['@exodus/bytes', '@preventive/archive', '@preventive/diff'])
+    assert.deepEqual(dependencies, ['@exodus/bytes', '@preventive/archive', '@preventive/diff', '@preventive/vfs'])
     // And none brings in anything that is not already one of them, so the
-    // whole runtime is this package, those three, and node: builtins —
+    // whole runtime is this package, those four, and node: builtins —
     // nothing arrives unnoticed underneath a dependency that was itself a
     // deliberate act. The archive formats lean on the same byte codecs this
-    // package does, and on nothing else.
+    // package does, and on nothing else; the filesystem leans on nothing.
     for (const name of dependencies) {
       const dep = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'node_modules', name, 'package.json'), 'utf8'))
       for (const inner of Object.keys(dep.dependencies ?? {})) assert.ok(dependencies.includes(inner), `${name} brings in ${inner}`)

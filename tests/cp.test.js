@@ -6,7 +6,7 @@ import { createTerminal } from '@preventive/terminal'
 // warnings, and protecting targets already copied during this invocation.
 // https://www.gnu.org/software/coreutils/manual/html_node/cp-invocation.html
 // https://github.com/coreutils/coreutils/blob/v9.11/src/copy.c
-const SOURCES = { a: 'alpha\n', b: 'beta\0😀', empty: '', 'dir/leaf': 'leaf', 'one/shared': 'first', 'two/shared': 'second', '-f': 'literal', bad: '\uD800' }
+const SOURCES = { a: 'alpha\n', b: 'beta\0😀', empty: '', 'dir/leaf': 'leaf', 'one/shared': 'first', 'two/shared': 'second', '-f': 'literal' }
 const terminal = (options = {}) => createTerminal(SOURCES, { mount: '/repo', cwd: '/repo', writable: '/tmp/', ...options })
 const expected = (stdout = '', stderr = '', exitCode = 0) => ({ stdout, stderr, exitCode, cwd: '/repo', notes: [], unsupported: [] })
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
@@ -75,7 +75,7 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
       const t = terminal()
       await check(t, `printf old >/tmp/out; cp ${flag} -v a /tmp/out`)
       await check(t, 'cat /tmp/out', 'old')
-      await check(t, `cp ${flag} bad /tmp/out`)
+      await check(t, `cp ${flag} b /tmp/out`)
       await check(t, `cp ${flag} a a`)
     })
   }
@@ -231,7 +231,7 @@ describe('cp reports ordinary path, operand, and read-only failures', () => {
     const t = terminal({ writable: false })
     await check(t, 'cp a /repo/new', '', "cp: cannot create regular file '/repo/new': Read-only file system\n", 1)
     await check(t, 'cp -n a b')
-    assert.deepEqual(SOURCES, { a: 'alpha\n', b: 'beta\0😀', empty: '', 'dir/leaf': 'leaf', 'one/shared': 'first', 'two/shared': 'second', '-f': 'literal', bad: '\uD800' })
+    assert.deepEqual(SOURCES, { a: 'alpha\n', b: 'beta\0😀', empty: '', 'dir/leaf': 'leaf', 'one/shared': 'first', 'two/shared': 'second', '-f': 'literal' })
   })
 })
 
@@ -269,13 +269,4 @@ describe('cp unsupported features and write guards retain diagnostics', () => {
     await check(t, 'cat /tmp/args', '/tmp/args\n')
   })
 
-  it('preserves earlier output when a later source has no byte representation', async () => {
-    const t = terminal()
-    const r = await t.run('cp -v a bad /tmp')
-    assert.equal(r.stdout, "'a' -> '/tmp/a'\n'bad' -> '/tmp/bad'\n")
-    assert.equal(r.exitCode, 1)
-    assert.deepEqual(r.unsupported.map(({ detail }) => detail), ['unpaired surrogate'])
-    await check(t, 'cat /tmp/a', 'alpha\n')
-    await check(t, 'test -e /tmp/bad', '', '', 1)
-  })
 })

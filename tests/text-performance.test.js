@@ -30,19 +30,22 @@ describe('text processing preserves record and byte semantics', () => {
   })
 
   it('wc keeps byte-based column widths when counting characters and lines', async () => {
-    const input = '😀é\n\uD800\n'
+    // A surrogate half spelled in UTF-8's shape is three bytes and no
+    // character, as GNU wc 9.4 counts it.
+    const input = Uint8Array.of(0xf0, 0x9f, 0x98, 0x80, 0xc3, 0xa9, 0x0a, 0xed, 0xa0, 0x80, 0x0a)
     await check('wc -l input', input, '2 input\n')
-    await check('wc -m input', input, '5 input\n')
+    await check('wc -m input', input, '4 input\n')
     await check('wc -c input', input, '11 input\n')
-    await check('wc -lm input input', input, ' 2  5 input\n 2  5 input\n 4 10 total\n')
+    await check('wc -lm input input', input, ' 2  4 input\n 2  4 input\n 4  8 total\n')
     await check('wc -lc input input', input, ' 2 11 input\n 2 11 input\n 4 22 total\n')
   })
 
   it('uniq compares UTF-8 replacement bytes and folds only ASCII', async () => {
-    const input = 'A\uD800\nA\uFFFD\nA\uDFFF\na\uFFFD\n'
-    await check('uniq -c input', input, '      3 A\uD800\n      1 a\uFFFD\n')
-    await check('uniq -ic input', input, '      4 A\uD800\n')
-    await check('uniq -s1 input', input, 'A\uD800\n')
+    // No file holds a lone surrogate, which has no bytes; the command line can.
+    const piped = (command) => `echo -n 'A\uD800\nA\uFFFD\nA\uDFFF\na\uFFFD\n' | ${command}`
+    await check(piped('uniq -c'), '', '      3 A\uD800\n      1 a\uFFFD\n')
+    await check(piped('uniq -ic'), '', '      4 A\uD800\n')
+    await check(piped('uniq -s1'), '', 'A\uD800\n')
     await check('uniq -i input', 'K\nK\nk\n', 'K\nK\nk\n')
   })
 })

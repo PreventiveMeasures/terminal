@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { createFs } from '../src/fs.js'
+import { createFs } from '../src/filesystem.js'
 import { classTables, isByteLocale } from '../src/locale.js'
 import { tree } from '../src/commands/tree.js'
 import { TEXT_COMMANDS } from '../src/commands/text.js'

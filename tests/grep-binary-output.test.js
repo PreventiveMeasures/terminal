@@ -175,16 +175,14 @@ describe('grep over a file that is not text', () => {
     }
   })
 
-  it('writes the name in front of a line of bytes as text, whatever it holds', async () => {
-    // A name holding an unpaired surrogate is refused where it is written as
-    // bytes, as it is beside a file of text, rather than spelt as a byte.
-    const name = 'n\uDCFF'
-    const t = createTerminal({ [name]: bytes('foo', [0xe9], '\nfoo\n'), text: 'foo\n' })
-    const asText = await t.run('grep -H foo n* | base64')
-    assert.deepEqual([asText.stdout, asText.unsupported.map((u) => u.detail)], ['', ['unpaired surrogate']])
-    const asBytes = await t.run('grep -aH foo n* | base64')
-    assert.deepEqual([asBytes.stdout, asBytes.stderr, asBytes.unsupported.map((u) => u.detail)], ['', 'grep: unpaired UTF-16 surrogates cannot be encoded as UTF-8\n', ['unpaired surrogate']])
-    // An ordinary name in front of such a line is the name's own UTF-8.
+  it('writes the name in front of a line of bytes as the UTF-8 it is', async () => {
+    // A name is text with an encoding: one holding an unpaired surrogate,
+    // which no UTF-8 spells, is refused when the tree is made, so no line of
+    // bytes is ever written behind one.
+    assert.throws(() => createTerminal({ 'n\uDCFF': bytes('foo', [0xe9], '\nfoo\n') }), /Invalid or incomplete multibyte or wide character/u)
     await check('grep -aH foo mid | base64', 'bWlkOmZvbzEKbWlkOmNhZukgZm9vMgptaWQ6Zm9vMwo=\n')
+    // As GNU grep 3.11 writes it in C.UTF-8.
+    const t = createTerminal({ 'né': bytes('foo', [0xe9], '\nfoo\n') })
+    assert.equal((await t.run('grep -aH foo né | base64')).stdout, 'bsOpOmZvb+kKbsOpOmZvbwo=\n')
   })
 })

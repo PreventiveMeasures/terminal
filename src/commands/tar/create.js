@@ -151,7 +151,6 @@ function addPath(path, orig, safe, walk) {
   const { fs } = state.ctx
   const dir = fs.isDir(path)
   const link = !dir && fs.isLink?.(path) === true
-  if (dir && fs.isFile(path)) return state.refuse('feature', 'ambiguous file type', `${quoteColon(orig, state.ctx)}: a path that is both a file and a directory cannot be archived`)
   if (walk.target.kind === 'file' && walk.target.path === path) return state.warn(`${quoteColon(orig, state.ctx)}: archive cannot contain itself; not dumped`)
   if (safe.name !== '.' && safe.name.split('/').some((part) => part === '.' || part === '')) {
     return state.refuse('feature', 'dot-segment names', `${quoteColon(orig, state.ctx)}: member names with \`.' or empty segments are not supported`)
