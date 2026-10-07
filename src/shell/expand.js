@@ -90,6 +90,8 @@ function tilde(w, ctx, assignmentValue = false) {
     if (marks.has(i)) {
       // A root home makes `~/x` `/x`, not `//x`.
       const h = home === '/' && v[i + 1] === '/' ? '' : home
+      // An empty home is still a word, as a quoted empty one is: `HOME=; echo ~`.
+      if (home === '') empty.push(value.length)
       value += h
       mask += '1'.repeat(h.length)
       continue

@@ -249,6 +249,17 @@ describe('shell syntax — brace and pathname expansion', () => {
     assert.equal(await out('echo {+1..3} {01..+3} {+01..3} {-01..+3} {1..3..+0}'), '1 2 3 01 02 03 1 2 3 -01 000 001 002 003 1 2 3\n')
   })
 
+  // A letter sequence through `[ \ ] ^ _ `` hands bash characters it reads as
+  // the rest of the word: the backslash quotes what follows it, or leaves an
+  // empty word, and a backtick nothing closes stays text where the word ends.
+  it('letter sequences across the punctuation between Z and a', async () => {
+    assert.equal(await out('echo {Z..a}'), 'Z [  ] ^ _ ` a\n')
+    assert.equal(await out('echo {a..Z..5}x'), 'ax x\n')
+    assert.equal(await out("printf '<%s>' x{Z..a}; echo"), '<xZ><x[><x><x]><x^><x_><x`><xa>\n')
+    const r = await createTerminal({}).run('echo {Z..a}x')
+    assert.equal(r.unsupported[0]?.detail, 'brace expansion')
+  })
+
   it('a quoted fragment protects only its own characters', async () => {
     assert.equal(await out('for d in src; do echo "$d"/*.js; done'), 'src/foo.js\n')
     assert.equal(await out('echo "src/"*.ts'), 'src/bar.ts\n')
@@ -531,7 +542,12 @@ describe('shell syntax — compound commands', () => {
     assert.equal(await out('for f in a b; do (break); echo $f; done'), 'a\nb\n')
     const outside = await term().run('break; echo next')
     assert.equal(outside.stdout, 'next\n')
-    assert.match(outside.stderr, /only meaningful in a `for`, `while` or `until` loop/u)
+    assert.equal(outside.stderr, "break: only meaningful in a `for', `while', or `until' loop\n")
+    // Bash checks for a loop before it reads an operand at all.
+    for (const line of ['break x; echo $?', 'continue 0; echo $?', 'break 1 2; echo $?']) {
+      const r = await term().run(line)
+      assert.deepEqual([r.stdout, r.stderr], ['0\n', `${line.split(' ')[0]}: only meaningful in a \`for', \`while', or \`until' loop\n`], line)
+    }
     assert.deepEqual(await gaps('for f in a; do break 2; done'), [])
   })
 
@@ -901,5 +917,45 @@ describe('syntax errors in bash\'s own words', () => {
   it('refuses a quoted function name when the definition runs', async () => {
     const r = await createTerminal({}).run("'f'() { echo q; }; echo $?")
     assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['1\n', "`'f'': not a valid identifier\n", 0])
+  })
+})
+
+// Builtins and expansions where bash's answer is its own, each recorded from
+// bash 5.2.21.
+describe('shell syntax — builtins and expansions as bash 5.2 answers them', () => {
+  it('`unset` falls back to the function of a name no variable has', async () => {
+    const gone = await term().run('f() { echo a; }; unset f; f')
+    assert.deepEqual([gone.stdout, gone.exitCode], ['', 127])
+    assert.match(gone.stderr, /^f: command not found/u)
+    assert.equal(await out('f() { echo a; }; f=1; unset f; f; echo "[$f]"'), 'a\n[]\n')
+    assert.equal(await out('f() { echo a; }; unset -v f; f'), 'a\n')
+    assert.equal((await term().run('f() { echo a; }; unset -f f; f')).exitCode, 127)
+  })
+
+  it('`export` names the whole operand it will not take', async () => {
+    const r = await term().run('export 1x=2 a-b=c =x x=1; echo "$? $x"')
+    assert.equal(r.stderr, "export: `1x=2': not a valid identifier\nexport: `a-b=c': not a valid identifier\nexport: `=x': not a valid identifier\n")
+    assert.equal(r.stdout, '1 1\n')
+  })
+
+  it('refuses `--help` to the builtins, whose help text this shell does not carry', async () => {
+    for (const name of ['exit', 'break', 'continue']) assert.deepEqual(await gaps(`${name} --help`), ['option:--help'])
+  })
+
+  it('an empty HOME is still a word', async () => {
+    assert.equal(await out("HOME=; printf '[%s]' ~ ~/x x; echo"), '[][/x][x]\n')
+  })
+
+  it('`cd //` keeps exactly two leading slashes', async () => {
+    const t = createTerminal({}, { mount: '/repo', writable: '/tmp/' })
+    assert.equal(await out('cd //; pwd; echo $PWD; cd tmp; pwd; cd ..; pwd', t), '//\n//\n//tmp\n//\n')
+    assert.equal(await out('cd ///tmp; pwd; cd //tmp/..; pwd; cd /; pwd', t), '/tmp\n//\n/\n')
+  })
+
+  // Bash 5.2 sizes a `${x/…}` pattern with no `*` before matching it, and a
+  // set opening on `]` after `!` or `^` sizes wrongly: it matches nothing.
+  it('keeps bash 5.2 matching nothing with `[!]…]` in a fixed-size replacement', async () => {
+    assert.equal(await out('x=a]b; echo ${x/[!]]/X} ${x//[^]]/X} ${x/#[!]]/X} ${x/a[!]]/X}'), 'a]b a]b a]b a]b\n')
+    assert.equal(await out('x=abc; echo ${x/[!]]*/X} ${x/*[!]]/X} ${x/[!\\]]/X} ${x#[!]]}'), 'X X Xbc bc\n')
   })
 })

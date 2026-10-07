@@ -41,7 +41,7 @@ export function expandBraces(word, limit = SEQ_LIMIT) {
     const suffix = slice(word, end + 1)
     const out = []
     for (const alt of alternatives) {
-      out.push(...expandBraces(concat(prefix, alt, suffix), limit))
+      out.push(...expandBraces(alt.generated ? generatedWord(prefix, alt, suffix) : concat(prefix, alt, suffix), limit))
       // A sequence says how many words it is before making them; a list of
       // alternatives only says it by multiplying, so count as they arrive.
       if (out.length > limit) throw new UnsupportedError('feature', 'brace expansion limit', `brace expansion \`${word.value}\` would produce more than ${limit} words`)
@@ -49,6 +49,22 @@ export function expandBraces(word, limit = SEQ_LIMIT) {
     return out
   }
   return [word]
+}
+
+// A letter sequence through `[ \ ] ^ _ `` hands bash characters it then reads
+// as it reads the rest of the word: a backslash quotes the character after it
+// and is gone — leaving an empty word where nothing follows — and a backtick
+// opens a substitution nothing closes, which bash takes for itself only where
+// the word ends there. What follows either otherwise is source text this word
+// no longer holds, and is refused.
+function generatedWord(prefix, alt, suffix) {
+  const c = alt.value
+  if (c !== '\\' && c !== '`') return concat(prefix, alt, suffix)
+  const plain = suffix.value === '' && !suffix.empty?.length
+  if (c === '`' && plain) return concat(prefix, { value: '`', mask: '1' }, suffix)
+  if (c === '\\' && plain) return concat(prefix, { value: '', mask: '', empty: [0] }, suffix)
+  if (c === '\\' && maskAt(suffix, 0) === '0' && suffix.value[0] !== '{' && !suffix.empty?.includes(0)) return concat(prefix, { value: suffix.value[0], mask: '1' }, slice(suffix, 1))
+  throw new UnsupportedError('feature', 'brace expansion', `a letter sequence through ${c === '`' ? 'a backtick' : 'a backslash'} followed by more of the word is not supported`)
 }
 
 // Whether brace expansion has anything to do with this word: a balanced,
@@ -113,7 +129,7 @@ function sequence(body) {
   for (let k = 0n; k < count; k++) {
     const n = from + dir * k * step
     const text = num ? pad(n, width) : String.fromCodePoint(Number(n))
-    out.push({ value: text, mask: null })
+    out.push({ value: text, mask: null, ...(num ? {} : { generated: true }) })
   }
   return out
 }

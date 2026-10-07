@@ -55,8 +55,9 @@ describe('diagnostic completeness — command dispatch', () => {
       assert.deepEqual(r.unsupported, [])
       assert.equal(r.stdout, name === 'echo' ? '--audit-missing-option\n' : '')
     }
-    for (const name of ['exit', 'break', 'continue']) {
-      const r = await run(name + ' --audit-missing-option')
+    // A loop control outside a loop only says so, before it reads anything.
+    for (const name of ['exit', 'for i in 1; do break', 'for i in 1; do continue']) {
+      const r = await run(name + ' --audit-missing-option' + (name === 'exit' ? '' : '; done'))
       assert.deepEqual(r.unsupported, [])
       assert.notEqual(r.exitCode, 0)
     }

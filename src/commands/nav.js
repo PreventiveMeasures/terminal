@@ -11,9 +11,13 @@ import { unsupported } from '../unsupported.js'
 import { hiddenEntryNotes, lookupWithNote } from '../notes.js'
 import { FS_TOOLS } from './fs-tools.js'
 
+// The working directory as bash names it, which a `cd //` began with two
+// slashes: POSIX leaves a leading `//` to the system, and bash keeps it.
+const logicalCwd = (ctx) => (ctx.doubleSlash ? '/' : '') + ctx.cwd
+
 function pwd(_stdin, tokens, ctx) {
   parseArgs(tokens)
-  return ok(ctx.cwd + '\n')
+  return ok(logicalCwd(ctx) + '\n')
 }
 
 // A successful cd updates PWD and OLDPWD; cd - also prints the destination.
@@ -40,9 +44,13 @@ function cd(_stdin, tokens, ctx) {
   if (abs !== resolve(ctx.cwd, target)) {
     return unsupported('feature', 'cd', 'symbolic link cwd', `cd: ${target}: a working directory reached through a symbolic link is not supported (it leads to ${abs})`)
   }
-  ctx.vars.set('OLDPWD', ctx.cwd)
-  ctx.vars.set('PWD', abs)
+  // A path naming exactly two slashes first keeps them, and a relative one
+  // keeps whatever the directory it starts from had.
+  const doubleSlash = target.startsWith('/') ? /^\/\/(?!\/)/u.test(target) : Boolean(ctx.doubleSlash)
+  ctx.vars.set('OLDPWD', logicalCwd(ctx))
   ctx.cwd = abs
+  ctx.doubleSlash = doubleSlash
+  ctx.vars.set('PWD', logicalCwd(ctx))
   return ok(printed)
 }
 
