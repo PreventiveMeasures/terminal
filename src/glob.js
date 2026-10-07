@@ -22,7 +22,7 @@ export function compileGlob(pattern, opts = {}) {
 
 function compilePattern(pattern, opts) {
   let re = '^'
-  let nonAsciiRange = false
+  let classes = false, nonAsciiRange = false
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i]
     if (c === '\\' && i + 1 < pattern.length) {
@@ -43,10 +43,11 @@ function compilePattern(pattern, opts) {
       if (bracket) {
         re += bracket.source; i = bracket.end
         nonAsciiRange ||= bracket.nonAsciiRange
+        classes ||= bracket.classes
       } else re += '\\['
     } else re += literal(c, opts.ignoreCase)
   }
-  return checkedGlob(new RegExp(re + '(?![\\s\\S])', 'us'), pattern, opts, nonAsciiRange)
+  return checkedGlob(new RegExp(re + '(?![\\s\\S])', 'us'), pattern, opts, nonAsciiRange, classes)
 }
 
 function literal(c, ignoreCase) {
@@ -70,13 +71,16 @@ function foldedBracket(body, classes, negated) {
   return `[${negated ? '^' : ''}${members}]`
 }
 
-// Bracket ranges, question marks and case folding depend on the locale for
-// multibyte names. Literal UTF-8 names and ordinary star patterns are exact.
-function checkedGlob(re, pattern, opts, nonAsciiRange) {
-  const localeSensitive = /[?[]/u.test(pattern)
+// C.UTF-8 matches a character where it matches anything — `?`, a set, a
+// negated set — and so does this, a code point at a time. What it does not
+// share is a POSIX class, which glibc's C.UTF-8 fills with the whole of
+// Unicode where these classes hold ASCII, nor a range with a non-ASCII end,
+// nor case folding: those depend on the locale for multibyte names. Literal
+// UTF-8 names, sets and star patterns are exact.
+function checkedGlob(re, pattern, opts, nonAsciiRange, classes) {
   const nonAsciiPattern = NON_ASCII.test(pattern)
   return { test(name) {
-    if (nonAsciiRange || (opts.ignoreCase && nonAsciiPattern) || ((localeSensitive || opts.ignoreCase) && NON_ASCII.test(name))) {
+    if (nonAsciiRange || (opts.ignoreCase && nonAsciiPattern) || ((classes || opts.ignoreCase) && NON_ASCII.test(name))) {
       throw new UnsupportedError('feature', 'non-ASCII glob matching', 'locale-dependent glob matching of non-ASCII names is not supported')
     }
     return re.test(name)
@@ -96,7 +100,7 @@ function readBracket(pattern, start, opts) {
   let rangeAt = false
   let openRange = false
   let nonAsciiRange = false
-  let voided = false
+  let named = false, voided = false
   let atom = '', atomStart = 0, rangeChar = '', rangeStart = 0
   if (pattern[i] === ']') { body += '\\]'; i++; rangeAt = true; atom = ']' }
   for (; i < pattern.length && pattern[i] !== ']'; i++) {
@@ -109,6 +113,7 @@ function readBracket(pattern, start, opts) {
           throw new UnsupportedError('feature', 'glob character class', 'unknown POSIX classes in command filename patterns are not supported')
         }
         if (openRange) voided = true
+        named = true
         if (ignoreCase) classes += cls.body
         else body += cls.body
         i = cls.end - 1
@@ -138,7 +143,7 @@ function readBracket(pattern, start, opts) {
   }
   if (i >= pattern.length) return null
   if (voided) return { voided: true, end: i }
-  return { source: ignoreCase ? foldedBracket(body, classes, negated) : `[${negated ? '^' : ''}${body}]`, end: i, nonAsciiRange }
+  return { source: ignoreCase ? foldedBracket(body, classes, negated) : `[${negated ? '^' : ''}${body}]`, end: i, nonAsciiRange, classes: named }
 }
 
 function readGlobClass(pattern, start) {

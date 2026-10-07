@@ -56,7 +56,7 @@ describe('unmatched pathname glob notes', () => {
   })
 
   it('does not invent literal fallback when matching fails with a diagnostic', async () => {
-    const result = await createTerminal({ 'café': '' }).run("printf '%s' ?*")
+    const result = await createTerminal({ 'café': '' }).run("printf '%s' [[:alpha:]]*")
     assert.notEqual(result.exitCode, 0)
     assert.deepEqual(result.notes, [])
     assert.equal(result.unsupported[0]?.detail, 'non-ASCII glob matching')
@@ -65,7 +65,7 @@ describe('unmatched pathname glob notes', () => {
   it('describes an earlier literal fallback accurately when a later glob prevents dispatch', async () => {
     let called = false
     const terminal = createTerminal({ 'café': '' }, { commands: { inspect: () => { called = true; return '' } } })
-    const result = await terminal.run('{ inspect *.missing ?*; } 2>/dev/null | true')
+    const result = await terminal.run('{ inspect *.missing [[:alpha:]]*; } 2>/dev/null | true')
     assert.equal(called, false)
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, '')

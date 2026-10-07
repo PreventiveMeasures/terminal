@@ -41,6 +41,27 @@ input it is fails as the GNU tool does — `cat: -: Is a directory`, `wc:
 A reader each tool words differently again, such as one handed `-` beside
 another file, is refused.
 
+The stages of a pipeline run here one after the other, where bash runs them
+side by side, and that is the same answer wherever no file passes between
+them. Where one stage writes a file another stage of the same pipeline reads —
+`grep x f | cat > f`, `cat f | cat >> f`, a stage's stderr landing in a file
+the next stage reads — bash's answer is whatever the scheduler let through
+first, so the line is refused rather than given one of its outcomes. `sort`
+is the exception that proves it: it writes only once it has read everything,
+so `cat f | sort -o f` is answered.
+
+A glob matches the way bash's does in C.UTF-8 — in pathname expansion, in
+`[[ … == … ]]`, in `${x#…}` and `${x/…}`, and in `find -name` — a character at
+a time: `?`, a set and a negated set each take one character, accented or not.
+A POSIX class such as `[[:alpha:]]` tested against a name past ASCII is
+refused, since glibc's C.UTF-8 fills the classes with all of Unicode. `${x/…}`
+keeps bash 5.2's own reading of a set that opens on `]` after its `!` or `^`:
+with no `*` in the pattern, `${x/[!]]/X}` matches nothing at all, as bash
+sizes that set wrongly before it matches it.
+
+`cd //` keeps the two slashes, as bash does — `pwd` and `$PWD` say `//`, and
+`//tmp` after a `cd tmp` there — while three or more read as one.
+
 `ls` `cd` `cat` `grep` `rg` `egrep` `fgrep` `sed` `awk` `find` `head` `tail` `wc`
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
 `printf` `test` `cp` `rm` `mkdir` `touch` `ln` `diff` `patch` `du` `stat` `realpath`

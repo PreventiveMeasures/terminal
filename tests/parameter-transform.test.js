@@ -173,7 +173,7 @@ describe('unsupported scalar transform cases always reach diagnostics', () => {
     'x=abc; printf "%s" "${x:"1"}"', 'x=abc; printf "%s" "${x:1/0}"; echo unexpected',
     'x=abc; printf "%s" "${x:1:9223372036854775807}"',
     'x=abc; p="@(a|b)"; printf "%s" "${x/$p/X}"',
-    'x=café; printf "%s" "${x//?/X}"', 'x=abc; printf "%s" "${x/[[.a.]]/X}"',
+    'x=café; printf "%s" "${x//[[:alpha:]]/X}"', 'x=abc; printf "%s" "${x/[[.a.]]/X}"',
     'x=abc; printf "%s" "${x/[a-é]/X}"',
   ]) {
     it(source, async () => {

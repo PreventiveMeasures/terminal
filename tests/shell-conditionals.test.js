@@ -178,7 +178,7 @@ describe('[[ unsupported and malformed input always reaches diagnostics', () => 
     '[[ -s plain.txt ]]', '[[ -L plain.txt ]]', '[[ plain.txt -nt empty.txt ]]',
     '[[ -v array[0] ]]', '[[ -v 0 ]]', '[[ -v BASH_REMATCH ]]',
     '[[ -e /dev/stdin ]]', '[[ a =~ a ]]', '[[ a == @(a|b) ]]',
-    'pattern="@(a|b)"; [[ a == $pattern ]]', '[[ é == ? ]]',
+    'pattern="@(a|b)"; [[ a == $pattern ]]', '[[ é == [[:alpha:]] ]]',
     '[[ -n "$PATH" ]]', '[[ 08 -eq 8 ]]', '[[ -e <(printf input) ]]',
   ]) {
     it(command, async () => {
