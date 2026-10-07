@@ -85,6 +85,9 @@ export function fileTest(operator, operand, ctx) {
     isFile: (path) => path === '/dev/null' || isStream(path) || ctx.fs.isFile(path),
     isLink: (path) => ctx.fs.isLink?.(path) === true,
     readLink: (path) => ctx.fs.readLink?.(path),
+    // A directory a kept mode closes to search is one no lookup passes
+    // through, this one's included (writable.js).
+    searchGuard: () => ctx.fs.searchGuard?.() ?? null,
   }
   // `-h` and `-L` ask about the name itself; every other test asks about what
   // it leads to, so a link to nothing is not there for any of them.

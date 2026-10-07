@@ -184,6 +184,10 @@ function vfsFs(vfs) {
     // Which inode a name holds. They are numbered as they are made, so a
     // later number is a later entry.
     inode: (p) => stat(p)?.ino,
+    // How many names lead to an entry, as stat(2) counts them on ext4: a
+    // directory's own, its `.`, and the `..` of each directory in it; one
+    // for anything else. It is the entry's to say, without reading it.
+    linkCount: (p) => { const t = type(p); return t === undefined ? undefined : t === 'directory' ? 2 + fs.listDir(p).dirs.length : 1 },
     // Informational comparisons must not throw, so two files are compared as
     // the bytes they hold rather than as the text they may not spell.
     sameFileContents: (a, b) => sameBytes(bytes(a), bytes(b)),

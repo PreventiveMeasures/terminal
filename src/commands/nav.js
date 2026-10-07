@@ -31,6 +31,10 @@ function cd(_stdin, tokens, ctx) {
   const { path: abs, error } = lookupWithNote(ctx, 'cd', target)
   if (error) return err(`cd: ${target}: ${error}`)
   if (!ctx.fs.isDir(abs)) return err(`cd: ${target}: Not a directory`)
+  // chdir(2) searches the directory it changes into, which a mode it keeps
+  // may deny (writable.js).
+  const denied = ctx.fs.searchGuard?.()?.(abs, 'changing into a directory') ?? null
+  if (denied !== null) throw denied
   // Bash keeps the name it was given in PWD, links and all, and collapses a
   // later `..` in it rather than in the path it leads to — the logical
   // directory `cd -L` means and `pwd` prints. Nothing here holds a working

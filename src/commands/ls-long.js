@@ -53,7 +53,7 @@ export function longFormat(ctx, human) {
         const units = allocated(bytes, kind) / 512
         const shown = kind === 'link' ? `${name} -> ${target}` : name
         const time = stamp(own?.mtime === undefined ? ctx.createdAt : own.mtime * 1000)
-        return { name: shown, mode, units, links: String(dir ? 2 + ctx.fs.listDir(abs).dirs.length : 1), size: size(bytes), time }
+        return { name: shown, mode, units, links: String(dir ? ctx.fs.linkCount?.(abs) ?? 2 + ctx.fs.listDir(abs).dirs.length : 1), size: size(bytes), time }
       }
       const rows = entries.map(rowOf)
       const measured = [...rows, ...others.map(rowOf)]

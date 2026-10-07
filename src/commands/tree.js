@@ -6,7 +6,7 @@
 // the lines are made of change.
 import { compareNames, joinPath, lookup } from '../fs.js'
 import { err } from '../util.js'
-import { unsupported } from '../unsupported.js'
+import { unsupported, unsupportedNote } from '../unsupported.js'
 import { byteLocale } from '../locale.js'
 import { hiddenEntryNotes, lookupWithNote, omissionNote } from '../notes.js'
 
@@ -128,11 +128,21 @@ function walk(fs, root, out, flags, limit, count, omitted, hidden, branches) {
     if (frame.depth + 1 >= limit) {
       // The depth limit omits this directory's contents whole, and its own note
       // says so; nothing here was passed over merely for being hidden.
-      if (itemsFor(fs, dir, flags).length) omitted.add(dir)
+      if (holdsItems(fs, dir, flags)) omitted.add(dir)
       continue
     }
     const items = itemsFor(fs, dir, flags, hidden)
     stack.push({ dir, prefix: frame.prefix + (last ? branches.past : branches.through), items, i: 0, depth: frame.depth + 1 })
+  }
+}
+
+// Whether a directory past the depth limit holds anything, for the note's
+// sake alone: tree never reads it, so one a kept mode closes (writable.js) is
+// left out of the note rather than refusing the listing over it.
+function holdsItems(fs, dir, flags) {
+  try { return itemsFor(fs, dir, flags).length > 0 } catch (e) {
+    if (!unsupportedNote(e)) throw e
+    return false
   }
 }
 
@@ -141,6 +151,10 @@ function walk(fs, root, out, flags, limit, count, omitted, hidden, branches) {
 // a different reason, and are not this note's to claim.
 function itemsFor(fs, dir, flags, hidden = null) {
   const { dirs, files, links } = fs.listDir(dir)
+  // tree lstats every name it reads, which a mode keeping the directory from
+  // being searched denies (writable.js) where reading the names was not.
+  const denied = dirs.length + files.length + links.length === 0 ? null : fs.searchGuard?.()?.(dir) ?? null
+  if (denied !== null) throw denied
   // A link is named beside what it points at and crossed no more than the walk
   // below it is — but what it leads to is what it counts as, and what decides
   // whether `-d` lists it: a link to a directory is one of the directories.

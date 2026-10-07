@@ -7,7 +7,7 @@ import { relativeTo, walkTree } from '../fs.js'
 import { BLOCK } from './du-options.js'
 import { encodeUtf8 } from '../util.js'
 import { parseFindArgs } from './find-parse.js'
-import { markUnsupported, unsupported } from '../unsupported.js'
+import { markUnsupported, unsupported, unsupportedNote } from '../unsupported.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { lookupWithNote, omissionNote } from '../notes.js'
 import { quoteLocale } from './mkdir.js'
@@ -74,12 +74,11 @@ export async function find(stdin, tokens, ctx) {
           await evaluate(tree, { kind: entry.kind, path: display, abs: entry.path, prune: pruned }, ctx, result)
         }
         if (entry.kind !== 'dir' || entry.depth !== maxDepth || pruned.has(entry.path) || !ctx.fs.isDir(entry.path)) continue
-        const { dirs, files, links } = ctx.fs.listDir(entry.path)
         // Named the way the walk that stopped there would have printed it: a
         // caller reading the note is reading it beside `find`'s own output, and
         // an absolute path is not a name they wrote. Two starts reaching one
         // directory report it twice, under each spelling, as find prints it twice.
-        if (dirs.length || files.length || links.length) omitted.add(display)
+        if (holdsAnything(ctx, entry.path)) omitted.add(display)
       }
     }
     // Do not dispatch empty batches. Any failed batch makes find exit 1.
@@ -168,6 +167,19 @@ async function runExec(cmd, args, ctx, result) {
   const r = await ctx.dispatch(cmd, args, '')
   collectOutput(result, r)
   return r.exitCode === 0
+}
+
+// Whether a directory the walk stopped at holds anything, for the note's
+// sake alone: find never reads it, so one a kept mode closes (writable.js)
+// is left out of the note rather than refusing the run over it.
+function holdsAnything(ctx, dir) {
+  try {
+    const { dirs, files, links } = ctx.fs.listDir(dir)
+    return dirs.length + files.length + links.length > 0
+  } catch (e) {
+    if (!unsupportedNote(e)) throw e
+    return false
+  }
 }
 
 function collectOutput(result, next) {

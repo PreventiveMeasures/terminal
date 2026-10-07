@@ -146,6 +146,7 @@
     "src/complete.js",
     "src/compression.js",
     "src/custom.js",
+    "src/descriptor.js",
     "src/filesystem.js",
     "src/fs.js",
     "src/glob.js",

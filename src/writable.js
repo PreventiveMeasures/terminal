@@ -1,5 +1,6 @@
 import { VfsError } from '@preventive/vfs'
-import { dirname, lookup, pathTooLong, sameBytes, slashedTarget, walkPath, writeTarget } from './fs.js'
+import { checkNewName, checkTarget, dirname, lookup, pathError, sameBytes, slashedTarget, walkFiles, writeTarget } from './fs.js'
+import { cellBytes, writeHandle } from './descriptor.js'
 import { decodeUtf8, encodeUtf8 } from './util.js'
 import { UnsupportedError } from './unsupported.js'
 
@@ -33,16 +34,41 @@ export const MADE_MODE = 0o777 & ~UMASK
 
 // What a mode an entry keeps denies its owner, who is the one user here:
 // reading a file without its read bit, writing one without its write bit,
-// and making or taking away a name in a directory without its write and
-// search bits. GNU is told "Permission denied" there, which each command
-// says in words of its own, so such an access is refused rather than made.
-const NAMES = 0o300, READ = 0o400, WRITE = 0o200
+// making or taking away a name in a directory without its write and search
+// bits, listing a directory without its read bit, and looking up any name in
+// one — on the way to anything under it — without its search bit. GNU is
+// told "Permission denied" there, which each command says in words of its
+// own, so such an access is refused rather than made.
+const NAMES = 0o300, READ = 0o400, SEARCH = 0o100, WRITE = 0o200
+const refusal = (path, doing) => new UnsupportedError('feature', 'permission denied', `${path}: ${doing} where its mode denies it is not supported (GNU says Permission denied)`)
 function permitted(overlay, path, bits, doing) {
   const mode = overlay.metadataOf(path)?.mode
   if (mode === undefined || (mode & bits) === bits) return
-  throw new UnsupportedError('feature', 'permission denied', `${path}: ${doing} where its mode denies it is not supported (GNU says Permission denied)`)
+  throw refusal(path, doing)
 }
 const naming = (overlay, path) => permitted(overlay, dirname(path), NAMES, 'changing the names in a directory')
+
+// Every directory above a name is searched to reach it, the outermost first,
+// which is the one the kernel stops at. Only a directory that keeps a mode
+// can deny it, and until one keeps a mode denying search or reading, as an
+// archive's entry may, nothing is asked of any.
+function reach(overlay, path) {
+  if (overlay.closed.size === 0 || !inOverlay(path)) return
+  const above = []
+  for (let dir = dirname(path); inOverlay(dir); dir = dirname(dir)) above.push(dir)
+  for (let i = above.length - 1; i >= 0; i--) {
+    const denied = overlay.searchRefusal(above[i])
+    if (denied !== null) throw denied
+  }
+}
+
+// A directory is listed by reading it, once it is reached.
+function listable(overlay, path) {
+  reach(overlay, path)
+  if (overlay.closed.size === 0 || !inOverlay(path)) return
+  const mode = overlay.closed.get(overlay.inodeOf(path))
+  if (mode !== undefined && (mode & READ) === 0) throw refusal(path, 'listing a directory')
+}
 
 // Writes land in the tree the sources are in, and only under /tmp: every
 // method here answers `false` or `null` for a name outside it, which is the
@@ -52,8 +78,14 @@ export function writableFs(base) {
   base.writableAt('/tmp')
   const overlay = overlayOf(base)
   const observe = (path) => {
+    reach(overlay, path)
     permitted(overlay, path, READ, 'reading a file')
     overlay.observer?.read(overlay.identity(path) ?? path)
+  }
+  // What stat(2) or readlink(2) answers of a name, once it is reached.
+  const reached = (answer) => (path) => {
+    reach(overlay, path)
+    return answer(path)
   }
   const fs = {
     ...base,
@@ -72,6 +104,15 @@ export function writableFs(base) {
     },
     readFile: (path) => { observe(path); return base.readFile(path) },
     readBytes: (path) => { observe(path); return base.readBytes(path) },
+    exactBytes: (path) => { observe(path); return base.exactBytes(path) },
+    sameFileContents: (a, b) => { reach(overlay, a); reach(overlay, b); return base.sameFileContents(a, b) },
+    ...Object.fromEntries(['readLink', 'fileSize', 'isEmptyFile', 'linkCount'].map((name) => [name, reached(base[name])])),
+    listDir: (path) => { listable(overlay, path); return base.listDir(path) },
+    walkFiles: (root) => walkFiles(fs, root),
+    // What a walk asks of each directory it looks a name up in: nothing,
+    // where no directory keeps a mode denying search, and otherwise why one
+    // is refused, if it is — `doing` says what searching it is for.
+    searchGuard: () => (overlay.closed.size === 0 ? null : overlay.searchRefusal),
     openWritable: (cwd, path, append = false) => openFile(fs, overlay, cwd, path, append),
     makeWritableDir: (cwd, path) => addDirectory(fs, overlay, cwd, path),
     makeWritableLink: (cwd, path, target) => addLink(fs, overlay, cwd, path, target),
@@ -84,7 +125,7 @@ export function writableFs(base) {
     // entry here has (ls-long.js). A path is absolute, and a link is itself
     // rather than what it leads to.
     keepMetadata: (path, kept) => overlay.keep(path, kept),
-    metadataOf: (path) => overlay.metadataOf(path),
+    metadataOf: reached(overlay.metadataOf),
   }
   return fs
 }
@@ -105,6 +146,9 @@ function overlayOf(base) {
   // directory dates the directory, and now is the moment every entry here is
   // dated to: a time kept is dropped where either happens, and a mode stays.
   const kept = new Map()
+  // The directories among them whose mode denies search or reading, by
+  // inode as well: what every access to a name under one asks about.
+  const closed = new Map()
   const dated = (ino) => {
     const own = kept.get(ino)
     if (own?.mtime === undefined) return
@@ -120,6 +164,8 @@ function overlayOf(base) {
   const overlay = {
     base,
     vfs,
+    closed,
+    inodeOf,
     observer: undefined,
     // Every name the sources declared was made before /tmp was.
     newest: vfs.lstat('/tmp').ino,
@@ -131,17 +177,29 @@ function overlayOf(base) {
       return cell
     },
     keep: (path, { mode, mtime }) => {
-      const ino = vfs.lstat(path).ino
+      const { ino, type } = vfs.lstat(path)
       const own = { ...kept.get(ino) }
       if (mode !== undefined) own.mode = mode
       if (mtime !== undefined) own.mtime = mtime
       kept.set(ino, own)
+      if (mode === undefined || type !== 'directory') return
+      if ((mode & (READ | SEARCH)) === (READ | SEARCH)) closed.delete(ino)
+      else closed.set(ino, mode)
     },
     metadataOf: (path) => (inOverlay(path) ? kept.get(inodeOf(path)) ?? null : null),
+    // Why looking a name up in `dir` is refused, or null where it is not.
+    searchRefusal: (dir, doing = 'looking up a name in a directory') => {
+      const mode = inOverlay(dir) ? closed.get(inodeOf(dir)) : undefined
+      return mode === undefined || (mode & SEARCH) !== 0 ? null : refusal(dir, doing)
+    },
     written: dated,
     // A name made or taken away at `path`, which is absolute and resolved.
     named: (path) => dated(inodeOf(dirname(path))),
-    forget: (path) => kept.delete(inodeOf(path)),
+    forget: (path) => {
+      const ino = inodeOf(path)
+      kept.delete(ino)
+      closed.delete(ino)
+    },
     // A file about to lose its name keeps its bytes in the cell a descriptor
     // may hold, once `release` says the name has gone.
     leaving: (path) => {
@@ -170,10 +228,6 @@ function overlayOf(base) {
 
 // What the Vfs says of a code, without the path its messages put in front.
 const strerror = (code) => new VfsError(code, '').message.slice(2)
-
-// The bytes a cell's file holds: the tree's while a name leads to them, and
-// its own once none does.
-const cellBytes = (vfs, cell) => cell.detached ?? vfs.readFile(cell.path)
 
 function openFile(fs, overlay, cwd, path, append) {
   const absolute = writeTarget(fs, cwd, path)
@@ -324,98 +378,12 @@ function dropDirectory(fs, overlay, cwd, path) {
   if (found.error) throw pathError(path, found.error)
   if (!inOverlay(found.path) || !fs.isDir(found.path)) throw new Error(`${path}: Not a directory`)
   if (found.path === '/tmp') throw pathError(path, 'Permission denied')
-  const { dirs, files, links } = fs.listDir(found.path)
+  // Whether it is empty is rmdir(2)'s to find, which reads nothing of it.
+  const { dirs, files, links } = overlay.base.listDir(found.path)
   if (dirs.length || files.length || links.length) throw new Error(`${path}: Directory not empty`)
   naming(overlay, found.path)
   overlay.forget(found.path)
   overlay.change(path, () => overlay.vfs.rmdir(found.path), found.path)
   overlay.named(found.path)
   return true
-}
-
-// What a name can be written as, asked of the walk rather than of the spelling:
-// components are checked where they are, so `file/../new` and `missing/../new`
-// cannot make a sibling by lexical normalization alone, and the name a link
-// leads to answers for its own parent — a link into a directory that is not
-// there names a file nothing can make, where the spelling's parent is fine.
-function checkTarget(fs, cwd, path) {
-  // A trailing slash asks for a directory, which open(2) neither makes nor
-  // writes: once the way to the last name is walked, that is EISDIR whatever
-  // the last name is, or is not, and without looking it up.
-  if (path.endsWith('/') && !pathTooLong(path)) {
-    const bare = path.replace(/\/+$/u, '')
-    const cut = bare.lastIndexOf('/') + 1
-    const parent = cut === 0 ? null : lookup(cwd, bare.slice(0, cut), fs)
-    throw pathError(path, parent?.error ?? 'Is a directory')
-  }
-  const found = walkPath(cwd, path, fs)
-  if (found.error === null) {
-    if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
-    return
-  }
-  // Only the last name may be missing, and only where it is a name a file can
-  // take: a NUL names nothing.
-  if (found.rest.length > 0 || path.includes('\0')) throw pathError(path, found.error)
-  if (!fs.isDir(dirname(found.path))) throw pathError(path, 'No such file or directory')
-}
-
-// What a name about to be made must be, as symlink(2) checks one: not there,
-// under a directory that is, and — a trailing slash asking for a directory —
-// not a name that could only be a file. A link already there is a name taken,
-// wherever it leads, so the final component is never followed.
-function checkNewName(fs, cwd, path) {
-  if (path === '' || path.includes('\0')) throw pathError(path, 'No such file or directory')
-  const found = walkPath(cwd, path, fs, { follow: false })
-  if (found.error === null) throw pathError(path, 'File exists')
-  if (found.rest.length > 0 || path.endsWith('/')) throw pathError(path, found.error)
-  if (!fs.isDir(dirname(found.path))) throw pathError(path, 'Not a directory')
-}
-
-function pathError(path, fsError) {
-  return Object.assign(new Error(`${path}: ${fsError}`), { path, fsError })
-}
-
-// A descriptor's writes: at its offset, or at the end for one opened to
-// append. A write at the end is an append, which the tree does in amortized
-// linear time, so commands writing one record at a time stay linear; one
-// anywhere else rewrites the file with those bytes in place, since bytes the
-// tree has handed out are never written into. A file past its last name is
-// the cell's to grow the same way.
-function writeHandle(vfs, path, cell, append, check) {
-  let offset = 0
-  const store = (bytes) => {
-    const current = cellBytes(vfs, cell)
-    const start = append ? current.length : offset
-    if (cell.detached !== undefined) cell.detached = written(current, start, bytes)
-    else if (start === current.length) vfs.appendFile(cell.path, bytes)
-    else vfs.writeFile(cell.path, written(current, start, bytes))
-    offset = start + bytes.length
-  }
-  return {
-    path,
-    identity: cell,
-    get position() { return append ? cellBytes(vfs, cell).length : offset },
-    write(text) {
-      if (text === '') return
-      check()
-      store(encodeUtf8(text))
-    },
-    writeBytes(bytes) {
-      if (bytes.length === 0) return
-      check()
-      store(bytes)
-    },
-  }
-}
-
-// `bytes` written into `current` at `start`: past its end into room a
-// previous write left, and anywhere else into a copy, so what a reader was
-// handed before is never changed under it. A gap before `start` is zeros.
-function written(current, start, bytes) {
-  const length = Math.max(current.length, start + bytes.length)
-  const room = start === current.length && current.byteOffset + length <= current.buffer.byteLength
-  const next = room ? new Uint8Array(current.buffer, current.byteOffset, length) : new Uint8Array(Math.max(length, current.length * 2)).subarray(0, length)
-  if (!room) next.set(current)
-  next.set(bytes, start)
-  return next
 }

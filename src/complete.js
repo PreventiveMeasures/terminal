@@ -3,6 +3,7 @@
 import { lookup } from './fs.js'
 import { homeOf } from './shell/expand.js'
 import { tokenize } from './shell/tokenize.js'
+import { unsupportedNote } from './unsupported.js'
 
 export function complete(line, ctx, reg) {
   const scanned = completionContext(line)
@@ -118,7 +119,17 @@ function quoteSuffix(suffix, quote) {
   return suffix.replace(/[\s\\'"`$&|;()<>*?[\]{}!#~]/gu, (c) => c === '\n' ? "'\n'" : '\\' + c)
 }
 
+// A directory a kept mode closes (writable.js) offers nothing to complete:
+// completion runs nothing, so there is no run to refuse, and bash's own
+// reads nothing from a directory it cannot open.
 function completePath(word, ctx, dirsOnly = false) {
+  try { return pathsFor(word, ctx, dirsOnly) } catch (e) {
+    if (!unsupportedNote(e)) throw e
+    return []
+  }
+}
+
+function pathsFor(word, ctx, dirsOnly) {
   const value = word.value
   const home = value.startsWith('~') && (word.mask?.[0] ?? '0') === '0'
     && !word.empty?.some((i) => i <= 1) && (value.length === 1 || (word.mask?.[1] ?? '0') === '0')

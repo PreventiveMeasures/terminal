@@ -1,4 +1,5 @@
 import { compareNames, lookup, resolve } from './fs.js'
+import { unsupportedNote } from './unsupported.js'
 
 // Use only for lookups whose failure is reported, not existence probes.
 export function lookupWithNote(ctx, command, path, options) {
@@ -26,13 +27,25 @@ export function missingPathNote(ctx, command, path, error) {
   const alternatives = new Set()
   for (const root of new Set(['/', ctx.mount ?? '/', ctx.home ?? '/'])) {
     if (root === from) continue
-    const found = lookup(root, wanted, ctx.fs)
-    if (!found.error) alternatives.add(found.path)
+    const found = elsewhere(ctx, root, wanted)
+    if (found !== null) alternatives.add(found)
   }
   if (!alternatives.size) return
   const cwd = absolute ? '' : ` from cwd ${JSON.stringify(ctx.cwd)}`
   const missed = `${absolute ? 'absolute' : 'relative'} path ${JSON.stringify(path)} was not found${cwd}`
   ctx.notes?.add(`${command}: ${missed}. ${existingPaths(ctx, alternatives)}`)
+}
+
+// Where a name leads from another root, if anywhere. A note never raises, so
+// a way a kept mode closes (writable.js) is one that leads nowhere.
+function elsewhere(ctx, root, wanted) {
+  try {
+    const found = lookup(root, wanted, ctx.fs)
+    return found.error ? null : found.path
+  } catch (e) {
+    if (!unsupportedNote(e)) throw e
+    return null
+  }
 }
 
 // Name every root that answered: one dropped for brevity would be a path the

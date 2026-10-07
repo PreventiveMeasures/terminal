@@ -101,6 +101,11 @@ export function walkPath(cwd, path, fs, { follow = true, lenient = false } = {})
   const followFinal = follow || path.endsWith('/')
   let budget = LINK_LIMIT
   let at = '/'
+  // A name is looked up in a directory by searching it, which a mode the
+  // directory keeps may deny (writable.js): the lookup is refused there,
+  // lenient or not, since nothing past it can be answered for. Where no such
+  // mode is kept there is nothing to ask of any directory.
+  const search = fs.searchGuard?.() ?? null
   // The filesystem answers for a directory by its name alone, never through a
   // link, so where the spelling up to its last name is a plain run of names
   // that is a directory, walking it would cross nothing but directories and
@@ -108,7 +113,7 @@ export function walkPath(cwd, path, fs, { follow = true, lenient = false } = {})
   // directory above would cost a deep tree its depth at every name in it.
   const plain = rest.findIndex((part) => part === '.' || part === '..')
   const skip = Math.min(plain < 0 ? rest.length : plain, rest.length - 1)
-  if (skip > 1) {
+  if (skip > 1 && search === null) {
     const prefix = '/' + rest.slice(0, skip).join('/')
     if (fs.isDir(prefix)) { at = prefix; rest.splice(0, skip) }
   }
@@ -125,6 +130,8 @@ export function walkPath(cwd, path, fs, { follow = true, lenient = false } = {})
       else if (part !== '.') at = joinPath(at, part)
       continue
     }
+    const denied = search === null ? null : search(at)
+    if (denied !== null) throw denied
     if (part === '..') { at = dirname(at); continue }
     if (!lenient && part !== '.' && nameTooLong(part)) return { path: at, error: TOO_LONG, rest: [part, ...rest] }
     if (part !== '.') at = joinPath(at, part)
@@ -197,6 +204,50 @@ export function slashedTarget(cwd, name, fs) {
     at = lookup(from, target, fs, { follow: false })
   }
   return null
+}
+
+// What a name can be written as, asked of the walk rather than of the spelling:
+// components are checked where they are, so `file/../new` and `missing/../new`
+// cannot make a sibling by lexical normalization alone, and the name a link
+// leads to answers for its own parent — a link into a directory that is not
+// there names a file nothing can make, where the spelling's parent is fine.
+export function checkTarget(fs, cwd, path) {
+  // A trailing slash asks for a directory, which open(2) neither makes nor
+  // writes: once the way to the last name is walked, that is EISDIR whatever
+  // the last name is, or is not, and without looking it up.
+  if (path.endsWith('/') && !pathTooLong(path)) {
+    const bare = path.replace(/\/+$/u, '')
+    const cut = bare.lastIndexOf('/') + 1
+    const parent = cut === 0 ? null : lookup(cwd, bare.slice(0, cut), fs)
+    throw pathError(path, parent?.error ?? 'Is a directory')
+  }
+  const found = walkPath(cwd, path, fs)
+  if (found.error === null) {
+    if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
+    return
+  }
+  // Only the last name may be missing, and only where it is a name a file can
+  // take: a NUL names nothing.
+  if (found.rest.length > 0 || path.includes('\0')) throw pathError(path, found.error)
+  if (!fs.isDir(dirname(found.path))) throw pathError(path, 'No such file or directory')
+}
+
+// What a name about to be made must be, as symlink(2) checks one: not there,
+// under a directory that is, and — a trailing slash asking for a directory —
+// not a name that could only be a file. A link already there is a name taken,
+// wherever it leads, so the final component is never followed.
+export function checkNewName(fs, cwd, path) {
+  if (path === '' || path.includes('\0')) throw pathError(path, 'No such file or directory')
+  const found = walkPath(cwd, path, fs, { follow: false })
+  if (found.error === null) throw pathError(path, 'File exists')
+  if (found.rest.length > 0 || path.endsWith('/')) throw pathError(path, found.error)
+  if (!fs.isDir(dirname(found.path))) throw pathError(path, 'Not a directory')
+}
+
+// An error that says which name it is about and what the filesystem said of
+// it, apart, for a command to put in its own words.
+export function pathError(path, fsError) {
+  return Object.assign(new Error(`${path}: ${fsError}`), { path, fsError })
 }
 
 export function dirname(path) {
@@ -273,6 +324,11 @@ export function* walkTree(fs, root, maxDepth = Number.POSITIVE_INFINITY, shouldD
       continue
     }
     const { dirs, files, links = [] } = fs.listDir(entry.path)
+    // A directory in it is one the walk stats to go into, as fts does each
+    // one it reads, which a mode keeping this one from being searched denies
+    // (writable.js) where reading the names in it was not.
+    const denied = dirs.length === 0 ? null : fs.searchGuard?.()?.(entry.path) ?? null
+    if (denied !== null) throw denied
     // Every list is sorted. Push the three merged, in reverse order, so the
     // children are visited in name order whatever their kinds.
     let dirIndex = dirs.length - 1
