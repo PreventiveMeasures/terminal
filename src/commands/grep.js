@@ -81,7 +81,8 @@ function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
     items = items.flatMap((item) => {
       if (item.failure !== undefined) return [item]
       const inp = textInput(item, filters, re.res, invert, ctx)
-      const found = inputGap([inp], re.res, ctx.locale, !mode && flags.has('o')) ?? (mode ? null : lateBinary(inp, re.res, invert, counts.after))
+      const found = inputGap([inp], re.res, ctx.locale, !mode && flags.has('o'))
+        ?? (mode ? null : lateBinary(inp, re.res, invert, counts.after) ?? contextAcrossReads(inp, counts, flags, filters, ctx))
       gap ??= found
       return found ? [] : [inp]
     })
@@ -181,6 +182,17 @@ function lateBinary(input, res, invert, after) {
   const selects = (some) => countMatches({ ...input, nul: false, content: joinLines(some) }, res, invert, 1) > 0
   if (!selects(lines.slice(input.readLines)) && !(after > 0 && selects(lines.slice(Math.max(0, input.readLines - after), input.readLines)))) return null
   return unsupported('feature', 'grep', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported', 2)
+}
+
+// GNU searches a file a read at a time, and a line it holds back leaves the
+// last line it printed behind where a read ends. Where the next read begins
+// then decides the group separators and the context that follow, and how
+// much each read past the first takes is not modelled; within that first
+// read, or with no context asked for, nothing depends on it.
+function contextAcrossReads(input, counts, flags, filters, ctx) {
+  if (!input.marked || input.nul || !counts.hasContext || flags.has('o') || filters.binaryFiles === 'text') return null
+  if (input.bytes.length <= firstRead(input, ctx)) return null
+  return unsupported('feature', 'grep', 'binary context across reads', 'grep: context around lines held back past the first read is not supported', 2)
 }
 
 // `-I` passes over a binary file: the name is kept for the note that says so,

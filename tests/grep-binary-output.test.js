@@ -34,6 +34,9 @@ const FILES = {
   late: bytes('foo\n', 'x'.repeat(100000), '\n\0foo\n'),
   pipe: bytes('foo\n', 'x'.repeat(70000), '\n\0foo\n'),
   straddle: bytes('foo\n', 'x'.repeat(98310), '\nfoo here\n\0foo\n'),
+  // A last line no newline ends, and a file of such lines past the first read.
+  tail: bytes('foo1\nfoo2 caf', [0xe9], '\nfoo3'),
+  big: bytes(...Array.from({ length: 12000 }, (_, i) => (i % 7 === 3 ? ['caf', [0xe9], ` ${i}\n`] : [`line ${i}\n`])).flat()),
 }
 
 async function check(command, stdout, stderr = '', exitCode = 0) {
@@ -130,6 +133,19 @@ describe('grep over a file that is not text', () => {
     await check('grep -c foo late', '2\n')
     await check('grep foo pipe', '', 'grep: pipe: binary file matches\n')
     await check('cat pipe | grep foo', 'foo\n', 'grep: (standard input): binary file matches\n')
+  })
+
+  it('searches a last line no newline ends on its own, after the rest', async () => {
+    // GNU forgets where it last printed before that line unless the context
+    // it keeps for it begins there, so a held-back line before it shows as a
+    // group separator with -A and as nothing with -C.
+    await check('grep -vA1 zzz tail', 'foo1\n--\nfoo3\n', 'grep: tail: binary file matches\n')
+    await check('grep -vC1 zzz tail', 'foo1\nfoo3\n', 'grep: tail: binary file matches\n')
+  })
+
+  it('refuses context around held-back lines past the first read, which later reads decide', async () => {
+    await refuses('grep -A1 line big', 'binary context across reads', 'grep: context around lines held back past the first read is not supported')
+    await check('grep -c caf big', '1714\n')
   })
 
   it('refuses where what GNU prints depends on how much it reads at a time', async () => {

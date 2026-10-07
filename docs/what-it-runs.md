@@ -71,28 +71,29 @@ unsupported diagnostic rather than mangling it — `head`, `sed`, `awk` and the
 rest, whether the bytes came from a file, a redirection or a pipe, and
 `diff -a`.
 
-`grep` searches a file that is not text as GNU grep does. A NUL in GNU's
-first read — 96 KiB of a file, 64 KiB of a pipe — makes the file binary:
-records end at each NUL as at a newline, nothing of the file is printed, and a
-selection says `grep: FILE: binary file matches` on stderr, in its place among
-the rest of the output; `-c`, `-l`, `-L` and `-q` count and list the file as
-any other. A byte that spells no character makes only the lines holding one
-binary. Every line is still searched, and no `.`, set or literal takes such a
-byte for a character, while a word edge beside it reads it as the Latin-1
-character of that value, as glibc's regex does. A line holding one is held
-back wherever it would be printed, selected or as context, and the file is
-said to match once the search is done with it. `-I` passes over a file with a
-NUL in that first read and holds such lines back without saying so; `-a`
-prints them as the bytes they are, which a pipe or a file takes. What is
-refused: a NUL found past that first read, where what GNU prints before it
-depends on how it reads the rest; `-P`, whose PCRE reads bytes that are not
-UTF-8 by its own rules; a pattern holding an unpaired surrogate, which no
-bytes spell; and, beside a character glibc reads past U+10FFFF or a
-surrogate spelt in UTF-8, a pattern GNU's two matchers would answer
-differently. `rg` passes over a file of bytes that spell no text where a plain
-literal is nowhere in it and refuses it by name where one could be, and an
-`rg` walk passes over what ripgrep itself calls binary: a file holding a NUL,
-which it never reads past.
+`grep` searches a file that is not text as GNU grep does. A NUL in GNU's first
+read — 96 KiB of a file, 64 KiB of a pipe — makes the file binary: records end
+at each NUL as at a newline, nothing of the file is printed, and a selection
+says `grep: FILE: binary file matches` on stderr, in its place among the rest
+of the output; `-c`, `-l`, `-L` and `-q` count and list the file as any other.
+A byte that spells no character makes only the lines holding one binary. Every
+line is still searched, and no `.`, set or literal takes such a byte for a
+character, while a word edge beside it reads it as the Latin-1 character of
+that value, as glibc's regex does. A line holding one is held back wherever it
+would be printed, selected or as context, and the file is said to match once
+the search is done with it. `-I` passes over a file with a NUL in that first
+read and holds such lines back without saying so; `-a` prints them as the
+bytes they are, which a pipe or a file takes. What is refused: a NUL found
+past that first read, where what GNU prints before it depends on how it reads
+the rest, and for the same reason context (`-A`, `-B`, `-C`) around held-back
+lines in a file larger than that read; `-P`, whose PCRE reads bytes that are
+not UTF-8 by its own rules; a pattern holding an unpaired surrogate, which no
+bytes spell; and, beside a character glibc reads past U+10FFFF or a surrogate
+spelt in UTF-8, a pattern GNU's two matchers would answer differently. `rg`
+passes over a file of bytes that spell no text where a plain literal is
+nowhere in it and refuses it by name where one could be, and an `rg` walk
+passes over what ripgrep itself calls binary: a file holding a NUL, which it
+never reads past.
 
 The terminal's own stdin and stdout are a terminal's: nothing can be typed
 into it, and it shows text. A command reads the terminal where nothing was

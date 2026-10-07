@@ -88,48 +88,72 @@ export function grepRun(items, res, opts) {
   return written(run.write.events, run.selected)
 }
 
-// GNU's grepbuf: find each selected line — a block of them under -v — and
-// hand it to prtext. A NUL makes the file binary from where GNU finds it —
-// the top, where its first read held it — and from there nothing is printed
-// and the first selection is the last.
+// GNU's grep: the lines a read ends are searched, and then, once the file is
+// done, a last line no newline ends, on its own — with the lines before it
+// kept for leading context, and where it last printed forgotten unless those
+// lines begin there. A file is one read here: past GNU's first, a file whose
+// lines can be held back is refused where that would show (contextAcrossReads).
 function grepFile(input, res, opts, run) {
+  const content = contentOf(input)
   const f = {
-    input, opts, run, lines: splitLines(contentOf(input)), res, tests: matchersFor(input, res),
-    out: [], lastout: null, pending: 0, outleft: opts.max ?? Infinity, quiet: false, quietSelected: 0, heldBack: false,
+    input, opts, run, lines: splitLines(content), res, tests: matchersFor(input, res), bufbeg: 0,
+    out: [], lastout: null, pending: 0, outleft: opts.max ?? Infinity, quiet: false, quietSelected: 0, heldBack: false, done: false,
   }
-  // Where the file turns binary, if it does: the NUL's line or the top.
-  const binaryLine = input.nul ? input.binaryLine : Infinity
-  let selected = 0
-  for (let p = 0; p < f.lines.length;) {
-    let b = p
-    while (b < f.lines.length && !anyMatch(f.tests, f.lines[b])) b++
-    if (b === f.lines.length && !opts.invert) break
-    if (!opts.invert || p < b) {
-      // A run of -v lines that crosses into the binary part is two: GNU
-      // prints what its first read held before it reads the rest.
-      if (opts.invert && p < binaryLine && b > binaryLine) {
-        selected += prtext(f, p, binaryLine)
-        if (f.outleft === 0) break
-        p = binaryLine
-      }
-      // Context still owed when the NUL is found was printed as the read
-      // before it ended (lateBinary keeps it within that read).
-      if (!f.quiet && (opts.invert ? p : b) >= binaryLine) {
-        if (f.pending > 0) prpending(f, binaryLine)
-        f.quiet = true
-      }
-      selected += opts.invert ? prtext(f, p, b) : prtext(f, b, b + 1)
-      if (f.outleft === 0 || f.quiet) break
-    }
-    p = b + 1
+  const end = f.lines.length
+  const ended = end > 0 && !content.endsWith('\n') ? end - 1 : end
+  let selected = grepbuf(f, 0, ended)
+  if (f.pending > 0) prpending(f, ended)
+  if (ended < end && !(f.outleft === 0 && f.pending === 0) && !f.done) {
+    let beg = ended
+    for (let i = 0; i < opts.before && beg > 0 && beg !== f.lastout; i++) beg--
+    if (beg !== f.lastout) f.lastout = null
+    f.bufbeg = beg
+    if (f.outleft > 0) selected += grepbuf(f, ended, end)
+    if (f.pending > 0) prpending(f, end)
   }
-  if (f.pending > 0) prpending(f, f.lines.length)
   run.write.lines(f.out, input.marked)
   if (selected > 0) run.selected = true
   // `-I` holds the same lines back and says nothing; `-a` holds none back.
   if (opts.binaryFiles === 'binary' && (f.heldBack || f.quietSelected > 0)) {
     run.write.err(`grep: ${input.name ?? '(standard input)'}: binary file matches\n`)
   }
+}
+
+// GNU's grepbuf: find each selected line from `from` up to `to` — a block of
+// them under -v — and hand it to prtext. A NUL makes the file binary from
+// where GNU finds it — the top, where its first read held it — and from there
+// nothing is printed and the first selection is the last.
+function grepbuf(f, from, to) {
+  const { invert } = f.opts
+  const binaryLine = f.input.nul ? f.input.binaryLine : Infinity
+  let selected = 0
+  for (let p = from; p < to;) {
+    let b = p
+    while (b < to && !anyMatch(f.tests, f.lines[b])) b++
+    if (b === to && !invert) break
+    if (!invert || p < b) {
+      // A run of -v lines that crosses into the binary part is two: GNU
+      // prints what its first read held before it reads the rest.
+      if (invert && p < binaryLine && b > binaryLine) {
+        selected += prtext(f, p, binaryLine)
+        if (f.outleft === 0) break
+        p = binaryLine
+      }
+      // Context still owed when the NUL is found was printed as the read
+      // before it ended (lateBinary keeps it within that read).
+      if (!f.quiet && (invert ? p : b) >= binaryLine) {
+        if (f.pending > 0) prpending(f, binaryLine)
+        f.quiet = true
+      }
+      selected += invert ? prtext(f, p, b) : prtext(f, b, b + 1)
+      if (f.outleft === 0 || f.quiet) {
+        f.done = f.quiet
+        break
+      }
+    }
+    p = b + 1
+  }
+  return selected
 }
 
 // The lines from `beg` up to `lim`, with the leading context GNU reaches back
@@ -141,7 +165,7 @@ function prtext(f, beg, lim) {
   if (!f.quiet && f.pending > 0) prpending(f, beg)
   let p = beg
   if (!f.quiet) {
-    const bp = f.lastout ?? 0
+    const bp = f.lastout ?? f.bufbeg
     for (let i = 0; i < before; i++) if (p > bp) p--
     if (hasContext && f.run.used && p !== f.lastout) f.out.push(f.input.marked ? ['--', ''] : '--')
     for (; p < beg; p++) prline(f, p, false)
@@ -165,7 +189,7 @@ function prtext(f, beg, lim) {
 // of the file when none has been yet, and a line held back is not printed: it
 // is tried again for every line of context still owed.
 function prpending(f, lim) {
-  f.lastout ??= 0
+  f.lastout ??= f.bufbeg
   for (; f.pending > 0 && f.lastout < lim; f.pending--) prline(f, f.lastout, false)
 }
 
