@@ -6,7 +6,7 @@ import { NAME_RE } from './tokenize.js'
 import { sliceWord } from './word.js'
 import { syntaxLabel } from './lex.js'
 import { UnsupportedError } from '../unsupported.js'
-import { IncompleteInput, tokenAt, unexpectedEnd, unexpectedToken } from './parse-input.js'
+import { IncompleteInput, tokenAt, unexpectedAt, unexpectedEnd, unexpectedToken } from './parse-input.js'
 
 const BRANCH_ENDS = ['elif', 'else', 'fi']
 
@@ -38,7 +38,7 @@ export function parseFor(p, buildSteps) {
   p.loop = 'for'
   const nameTok = tokenAt(p)
   if (nameTok?.kind === 'paren_open') throw new UnsupportedError('feature', 'for ((', 'arithmetic `for ((…))` loops are not supported; use `for NAME in WORD...`')
-  if (nameTok === undefined || nameTok.kind !== 'word') throw nameTok === undefined && p.closer ? unexpectedToken(p.closer) : unexpectedToken(syntaxLabel(nameTok))
+  if (nameTok === undefined || nameTok.kind !== 'word') throw unexpectedAt(p, nameTok)
   const name = nameTok.value
   p.i++
   const separator = tokenAt(p)

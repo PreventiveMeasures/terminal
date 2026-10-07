@@ -9,7 +9,7 @@ import { syntaxLabel, tokenLabel } from './lex.js'
 import { parseConditional, parseFor, parseFunction, parseWhile, skipNewlines } from './parse-blocks.js'
 import { UnsupportedError } from '../unsupported.js'
 import { advanceAliases } from './aliases.js'
-import { IncompleteInput, readAll, readLine, readUnits, tokenAt, unexpectedEnd, unexpectedToken } from './parse-input.js'
+import { IncompleteInput, readAll, readLine, readUnits, tokenAt, unexpectedAt, unexpectedEnd, unexpectedToken } from './parse-input.js'
 
 export const parseLine = (line, writable = false, hasCommand = () => false, options = {}) => readLine(line, writable, hasCommand, options, parseTokens)
 export const parseUnits = (line, writable = false, hasCommand = () => false) => readUnits(line, writable, hasCommand, parseTokens)
@@ -150,9 +150,12 @@ function buildSteps(p, end) {
   }
   // A block still open, or a `|`, `&&` or `||` still waiting for its command,
   // is input that ends where the grammar wants more.
-  if (end !== null || (!isBlock(stage) && !isCommand(stage) && !ENDS_LIST.has(raw.at(-1)?.kind) && !bareBang(steps.at(-1), stage))) throw unexpectedEnd(p)
+  if (end !== null) throw unexpectedEnd(p)
   if (ENDS_LIST.has(raw.at(-1)?.kind)) steps.pop()
-  else if (!bareBang(steps.at(-1), stage)) appendStage(steps.at(-1), stage)
+  else if (!bareBang(steps.at(-1), stage)) {
+    if (!isBlock(stage) && !isCommand(stage)) throw unexpectedEnd(p)
+    steps.at(-1).stages.push(stage)
+  }
   return steps
 }
 
@@ -222,8 +225,7 @@ function finishBlock(p, steps, stage) {
   const lastStep = steps.at(-1)
   const closer = p.raw[p.i - 1]
   const emptyTail = commandPosition(stage) && stage.redirs.length === 0 && lastStep.stages.length === 0
-  if (emptyTail && (steps.length === 1 || lastStep.bang)) throw unexpectedToken(syntaxLabel(closer))
-  if (emptyTail && lastStep.gate === 'seq') steps.pop()
+  if (emptyTail && lastStep.gate === 'seq' && !lastStep.bang) steps.pop()
   else appendStage(lastStep, stage, closer)
   return steps
 }
@@ -239,7 +241,7 @@ function parseRedirect(p) {
   if (p.syntaxOnly) {
     if (!['dup', 'close'].includes(op.op)) {
       const target = tokenAt(p, p.i++)
-      if (!target || target.kind !== 'word') throw missingTarget(p, target)
+      if (!target || target.kind !== 'word') throw unexpectedAt(p, target)
     }
     return op
   }
@@ -256,7 +258,7 @@ function parseRedirect(p) {
     return { fd: op.fd, op: 'close' }
   }
   const target = tokenAt(p, p.i++)
-  if (!target || target.kind !== 'word') throw missingTarget(p, target)
+  if (!target || target.kind !== 'word') throw unexpectedAt(p, target)
   if (op.op === 'heredoc' || op.op === 'herestring' || op.op === 'read') {
     // Bash opens `2<<END` or `2<f` on that descriptor, for reading; a
     // command's write into it then fails. Only fd 0 is modeled.
@@ -272,10 +274,6 @@ function parseRedirect(p) {
   if (!p.writable && !DEVICES.has(word.value)) throw refusedWrite(label, word.value, p.writable)
   return { fd: op.fd, op: 'to', target: word.value, both, append, label }
 }
-
-// A redirect wants a word next, and the grammar stops at whatever stands
-// there instead — the end of the line, or of a `$( … )`, included.
-const missingTarget = (p, target) => unexpectedToken(target === undefined && p.closer ? p.closer : syntaxLabel(target))
 
 // A target that is not yet its final text: a `$` or a backtick that quoting
 // has not disarmed — a reference, or commands whose output the name is — a

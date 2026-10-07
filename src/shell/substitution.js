@@ -4,7 +4,18 @@ export const MAX_SUBSTITUTION_DEPTH = 64
 
 // What bash says when the input ends inside a quote or a substitution: the
 // character it was still looking for.
-export const unmatched = (closer) => new Error(`unexpected EOF while looking for matching \`${closer}'`)
+export const unmatched = (closer) => Object.assign(new Error(`unexpected EOF while looking for matching \`${closer}'`), { kind: 'unmatched' })
+
+// Bash's own words for input it cannot read, as distinct from a refusal. A
+// `kind` says which of its forms an error is, for a reader that reports one
+// form differently: `near` for a token the grammar stopped at, `end` for the
+// end of the input.
+export const syntaxError = (message, kind) => Object.assign(new Error(message), { grammar: true, kind })
+export const unexpectedToken = (label) => syntaxError(`syntax error near unexpected token \`${label}'`, 'near')
+
+// A grammar error inside `$( … )` stops the enclosing reader too, which adds
+// a plain `syntax error` of its own for each level it is nested in.
+export const nestedSyntaxError = (error) => (error?.grammar ? syntaxError(`${error.message}\nsyntax error`) : error)
 
 // Backticks quote differently from `$( )`: a backslash escapes only `$`, a
 // backslash, a newline and a backtick, and every other backslash reaches the
@@ -145,13 +156,8 @@ function dollar(st) {
   st.i += text.length
 }
 
-// A grammar error in a substitution nested in this one stops this one's
-// reader too, which says `syntax error` of its own.
 function nestedExpansion(st, i) {
-  try { return st.helpers.readExpansion(st.line, i, st.depth + st.parens + 1, st.quote === '"') } catch (error) {
-    if (!error.grammar) throw error
-    throw Object.assign(new Error(`${error.message}\nsyntax error`), { grammar: true })
-  }
+  try { return st.helpers.readExpansion(st.line, i, st.depth + st.parens + 1, st.quote === '"') } catch (error) { throw nestedSyntaxError(error) }
 }
 
 // Backticks remain unavailable at execution, but their quoted parentheses
@@ -193,7 +199,7 @@ function newline(st) {
   finishWord(st)
   // A `<<` with no word after it, which the reader of the enclosing line
   // reports as its own syntax error too.
-  if (st.heredocs.some((h) => h.delim === null)) throw Object.assign(new Error("syntax error near unexpected token `newline'\nsyntax error"), { grammar: true })
+  if (st.heredocs.some((h) => h.delim === null)) throw nestedSyntaxError(unexpectedToken('newline'))
   if (st.heredocs.length) {
     st.i = st.helpers.readHeredocBodies(st.line, st.i, st.heredocs)
     st.heredocs = []

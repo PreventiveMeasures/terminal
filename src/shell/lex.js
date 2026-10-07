@@ -3,7 +3,7 @@
 
 import { decodeUtf8, encodeUtf8Loose } from '../bytes.js'
 import { UnsupportedError } from '../unsupported.js'
-import { readCommandSubstitution, unmatched } from './substitution.js'
+import { readCommandSubstitution, unexpectedToken, unmatched } from './substitution.js'
 import { isUnicodeScalar } from '../unicode.js'
 import { readArithmeticExpansion, readBracedExpansion } from './expansion-scan.js'
 import { readConditional } from './conditional-lex.js'
@@ -219,9 +219,9 @@ function readDup(line, ampAt, fd, label) {
   // the next operator, stands.
   let next = targetAt
   while (line[next] === ' ' || line[next] === '\t') next = skipContinuations(line, next + 1)
-  if (line[next] === undefined || line[next] === '\n') throw Object.assign(new Error("syntax error near unexpected token `newline'"), { grammar: true })
+  if (line[next] === undefined || line[next] === '\n') throw unexpectedToken('newline')
   const op = /[|&;()<>]/u.test(line[next]) ? readOperator(line, next, false) : null
-  if (op) throw Object.assign(new Error(`syntax error near unexpected token \`${tokenLabel(op.token)}'`), { grammar: true })
+  if (op) throw unexpectedToken(tokenLabel(op.token))
   throw new UnsupportedError('feature', 'redirect target', `redirect \`${label}\` requires a file descriptor number (or \`-\`) followed by a token boundary`)
 }
 
@@ -232,9 +232,7 @@ function readDup(line, ampAt, fd, label) {
 export function readHeredocBodies(line, newlineAt, pending) {
   let i = newlineAt + 1
   for (const h of pending) {
-    // Bash names the line its reader had reached when the body began, which
-    // is the line ahead of it; the end of a typed line is a newline too.
-    const at = countNewlines(line.slice(0, Math.min(i, line.length))) + (i > line.length ? 1 : 0)
+    const begin = i
     const lines = []
     let terminated = false
     while (i < line.length) {
@@ -254,7 +252,10 @@ export function readHeredocBodies(line, newlineAt, pending) {
       if (end === -1) break
     }
     h.body = lines.length === 0 ? '' : lines.join('\n') + '\n'
-    if (!terminated) h.warning = `warning: here-document at line ${at} delimited by end-of-file (wanted \`${h.delim}')\n`
+    // Bash names the line its reader had reached when the body began, which
+    // is the line ahead of it; the end of a typed line is a newline too.
+    // Counted only for the warning, so a line of many bodies stays linear.
+    if (!terminated) h.warning = `warning: here-document at line ${countNewlines(line.slice(0, Math.min(begin, line.length))) + (begin > line.length ? 1 : 0)} delimited by end-of-file (wanted \`${h.delim}')\n`
   }
   return i - 1
 }

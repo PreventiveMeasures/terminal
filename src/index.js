@@ -10,7 +10,7 @@ import { forkSettings, mountSources } from './mount.js'
 import { parseUnits } from './shell/parse.js'
 import { createRegistry, defaultRegistry, unknownCommand } from './registry.js'
 import { networkOption } from './net.js'
-import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
+import { createUnsupportedFeed, diagnostic, unsupported, unsupportedNote } from './unsupported.js'
 import { discardedNotes, err, missingPathNote, reason } from './util.js'
 import { complete } from './complete.js'
 import { commandSubstitution } from './shell/capture.js'
@@ -74,7 +74,7 @@ function context({ fs, io, mount, writable, registry, createdAt, lock }, session
   }
   // find -exec and xargs dispatch externally in isolated shell state. What
   // xargs runs reads /dev/null, as GNU's does, where find's reads find's own.
-  ctx.dispatch = (name, tokens, stdin, { devNull = false } = {}) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinBytes: ctx.stdinBytes, stdinFile: false, stdinPiped: false, stdinTerminal: ctx.stdinTerminal && !devNull, stdinOrigin: null, stdinHandle: null },
+  ctx.dispatch = (name, tokens, stdin, { devNull = false } = {}) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinBytes: ctx.stdinBytes, stdinFile: false, stdinDirectory: false, stdinPiped: false, stdinTerminal: ctx.stdinTerminal && !devNull, stdinOrigin: null, stdinHandle: null },
     () => isolated(ctx, () => dispatch(name, tokens, stdin, ctx, true)))
   ctx.flushOutput = (result) => routeExternalOutput(result, ctx)
   ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)
@@ -173,9 +173,7 @@ function safeRun(line, ctx) {
       const note = unsupportedNote(e)
       if (note) feed.add(note)
       ctx.lastExit = e.exitCode ?? (note ? 1 : 2)
-      // A refusal says that it is one; a line bash cannot read either says
-      // what bash says of it.
-      result.stderr += note ? `error: ${e.message}\n` : `${e.message}\n`
+      result.stderr += `${diagnostic(e, e.message)}\n`
       result.exitCode = ctx.lastExit
     }
     return finish(result, ctx, feed)

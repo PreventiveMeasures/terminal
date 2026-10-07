@@ -28,6 +28,11 @@ export function quietSearch(tokens) {
   try { return parseArgs(tokens, ARGS).flags.has('q') } catch { return false }
 }
 
+// Whether this search was asked to keep its read errors to itself.
+export function silentSearch(tokens) {
+  try { const { flags } = parseArgs(tokens, ARGS); return flags.has('s') || flags.has('no-messages') } catch { return false }
+}
+
 export function grep(stdin, tokens, ctx) {
   // Repeatable patterns and filename filters retain their own argument values.
   let parsed

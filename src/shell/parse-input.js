@@ -1,11 +1,13 @@
 import { createTokenizer, tokenize } from './tokenize.js'
 import { advanceAliases } from './aliases.js'
+import { syntaxLabel } from './lex.js'
+import { nestedSyntaxError, syntaxError, unexpectedToken } from './substitution.js'
+
+export { unexpectedToken }
 
 export class IncompleteInput extends Error {
   constructor(error) { super(error.message); this.finalError = error }
 }
-
-export const incomplete = (message) => new IncompleteInput(new Error(message))
 
 // Bash's own words for input it cannot read, as an interactive shell prints
 // them: one line — the shell's name dropped, as from every diagnostic here,
@@ -14,8 +16,10 @@ export const incomplete = (message) => new IncompleteInput(new Error(message))
 // `newline`; input that ends where the grammar wants more is the end of the
 // file, which more input could still have supplied. Inside `$( … )` the
 // closing parenthesis is where that input ends.
-export const unexpectedToken = (label) => Object.assign(new Error(`syntax error near unexpected token \`${label}'`), { grammar: true })
-export const unexpectedEnd = (p) => (p?.closer ? unexpectedToken(p.closer) : new IncompleteInput(Object.assign(new Error('syntax error: unexpected end of file'), { grammar: true })))
+export const unexpectedEnd = (p) => (p?.closer ? unexpectedToken(p.closer) : new IncompleteInput(syntaxError('syntax error: unexpected end of file', 'end')))
+// Where a word was wanted: the token standing there, or — with nothing left
+// of a `$( … )` — its closing parenthesis.
+export const unexpectedAt = (p, token) => unexpectedToken(token === undefined && p.closer ? p.closer : syntaxLabel(token))
 
 export function tokenAt(p, index = p.i) {
   while (index >= p.raw.length && !p.done) {
@@ -35,18 +39,13 @@ export function tokenAt(p, index = p.i) {
   return p.raw[index]
 }
 
-// A grammar error inside `$( … )` stops the enclosing reader too, which adds
-// a plain `syntax error` of its own for each level it is nested in.
 function validationOptions(hasCommand, options, parseTokens) {
   const validation = options.validation ?? new Map()
   return { validateSubstitution(command) {
     if (validation.has(command)) return
     try {
       readLine(command, true, hasCommand, { validation, syntaxOnly: true, closer: ')' }, parseTokens)
-    } catch (error) {
-      if (!error.grammar) throw error
-      throw Object.assign(new Error(`${error.message}\nsyntax error`), { grammar: true })
-    }
+    } catch (error) { throw nestedSyntaxError(error) }
     validation.set(command, true)
   } }
 }

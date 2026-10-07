@@ -37,6 +37,10 @@ export function unsupportedFrom(e, command, message, code) {
   return unsupported(found.kind, command, found.detail, message, code)
 }
 
+// How the shell prints an error that reached it: a refusal says that it is
+// one, and anything else — what bash itself would say — is said in its words.
+export const diagnostic = (e, message) => (unsupportedNote(e) ? `error: ${message}` : message)
+
 export class UnsupportedError extends Error {
   constructor(kind, detail, message) {
     super(message)

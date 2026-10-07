@@ -85,7 +85,7 @@ function resolveCommand(name, has) {
 // asked for with -q says the same thing with a flag. Bin-prefixed spellings
 // resolve first, so `/bin/false` is exempt for the reason `false` is.
 const STATUS_ONLY = new Set(['test', '[', 'true', 'false'])
-const SEARCHES = new Set(['grep', 'egrep', 'fgrep'])
+export const SEARCHES = new Set(['grep', 'egrep', 'fgrep'])
 function chainRole(argv, has) {
   const resolved = resolveCommand(argv[0], has)
   if (STATUS_ONLY.has(resolved)) return 'status'

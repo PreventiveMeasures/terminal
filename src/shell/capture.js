@@ -9,12 +9,12 @@ import { MAX_SUBSTITUTION_DEPTH } from './substitution.js'
 // the body it is, and one the grammar found shows the line it found it on.
 // The end of the input is the line past the last, and a line's own number is
 // only known here for a body of one line.
-function backtickError(command, message) {
+function backtickError(command, { kind, message }) {
   if (command.includes('\n')) return null
   const where = (line) => `command substitution: line ${line}: `
-  if (message === 'syntax error: unexpected end of file') return where(2) + message
-  if (message.startsWith('unexpected EOF while looking for matching') && !message.includes('\n')) return where(1) + message
-  if (!message.split('\n').at(-1).startsWith('syntax error near ')) return null
+  if (kind === 'end') return where(2) + message
+  if (kind === 'unmatched') return where(1) + message
+  if (kind !== 'near') return null
   return [...message.split('\n'), `\`${command}'`].map((line) => where(1) + line).join('\n')
 }
 
@@ -37,7 +37,7 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
         // unit instead, where the error takes the line down with it, so that
         // form keeps failing. Heredoc bodies are parsed during expansion,
         // where Bash's recovery depends on builtin versus external scopes.
-        const said = backtick ? backtickError(command, e.message) : null
+        const said = backtick ? backtickError(command, e) : null
         if (said) return err(said, 2)
         throw new UnsupportedError('feature', 'command substitution syntax', `runtime command substitution syntax errors are not supported: ${e.message}`)
       }

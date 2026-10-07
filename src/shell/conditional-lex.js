@@ -1,5 +1,5 @@
 import { UnsupportedError } from '../unsupported.js'
-import { doubleQuotedBacktick, readBacktickSubstitution } from './substitution.js'
+import { doubleQuotedBacktick, readBacktickSubstitution, syntaxError, unmatched } from './substitution.js'
 
 const UNARY = /^-[abcdefghknoprstuvwxzGLNORS]$/u
 const BINARY = new Set(['=', '==', '!=', '=~', '<', '>', '-eq', '-ne', '-lt', '-le', '-gt', '-ge', '-nt', '-ot', '-ef'])
@@ -53,8 +53,7 @@ function parseTerm(p) {
     if (token.kind === 'end') syntax(p)
     if (token.kind !== 'word') syntax(p, `unexpected token \`${tokenText(token)}' in conditional command`)
     if (!token.quoted && UNARY.test(token.value)) {
-      advanceOperand(p, 'unary')
-      const word = operand(p, 'unary')
+      const word = readOperand(p, 'unary')
       advance(p, true)
       return { kind: 'unary', op: token.value, word }
     }
@@ -64,8 +63,7 @@ function parseTerm(p) {
     const binary = operator.kind === 'word' ? !operator.quoted && BINARY.has(operator.value) : operator.kind === '<' || operator.kind === '>'
     if (!binary) syntax(p, operator.kind === 'word' ? 'conditional binary operator expected' : `unexpected token \`${tokenText(operator)}', conditional binary operator expected`)
     if (operator.value === '=~') throw new UnsupportedError('feature', '[[ =~', 'regular expression comparisons in [[ are not supported')
-    advanceOperand(p, 'binary')
-    const right = operand(p, 'binary')
+    const right = readOperand(p, 'binary')
     advance(p, true)
     return { kind: 'binary', op: operator.value, left: token, right }
   } finally { p.depth-- }
@@ -79,7 +77,7 @@ const bare = (token, value) => token.kind === 'word' && !token.quoted && token.v
 // token before where that reader stopped, read back from the line itself.
 function syntax(p, message) {
   const near = `syntax error near \`${nearText(p.line, p.i)}'`
-  throw Object.assign(new Error(message ? `${message}\n${near}` : near), { grammar: true })
+  throw syntaxError(message ? `${message}\n${near}` : near, 'near')
 }
 
 // The token as bash's conditional reader names it.
@@ -101,16 +99,13 @@ function nearText(line, at) {
   return last ? t.slice(i, last) : t[i]
 }
 
-// An operand whose quote the input never closes: bash says so, and then that
-// its operator went without an argument.
-function advanceOperand(p, kind) {
+// The word after an operator. One whose quote the input never closes: bash
+// says so, and then that its operator went without an argument.
+function readOperand(p, kind) {
   try { advance(p) } catch (error) {
     if (!error.quoteEof) throw error
-    throw Object.assign(new Error(`unexpected EOF while looking for matching \`${error.quoteEof}'\nunexpected argument to conditional ${kind} operator`), { grammar: true })
+    throw syntaxError(`${unmatched(error.quoteEof).message}\nunexpected argument to conditional ${kind} operator`)
   }
-}
-
-function operand(p, kind) {
   if (p.token.kind !== 'word') syntax(p, `unexpected argument \`${tokenText(p.token)}' to conditional ${kind} operator`)
   return p.token
 }
@@ -141,7 +136,7 @@ function nextToken(p) {
     return bare(word, ']]') ? { kind: 'end' } : word
   }
   if (!p.ended) { p.ended = true; return { kind: 'newline' } }
-  throw Object.assign(new Error("unexpected EOF while looking for `]]'\nsyntax error: unexpected end of file"), { grammar: true })
+  throw syntaxError("unexpected EOF while looking for `]]'\nsyntax error: unexpected end of file")
 }
 
 function readWord(p) {

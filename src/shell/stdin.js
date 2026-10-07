@@ -11,7 +11,9 @@ import { readBacktickSubstitution, readExpansion } from './lex.js'
 import { lookupWithNote } from '../notes.js'
 import { unsupported, unsupportedNote } from '../unsupported.js'
 import { err, readTextOrBytes } from '../util.js'
-import { eventsOf, textOf } from './output.js'
+import { eventsOf, sameDestination, textOf } from './output.js'
+import { silentSearch } from '../commands/grep.js'
+import { SEARCHES } from '../registry.js'
 
 // Unquoted heredocs use double-quote expansion rules without quote removal.
 // Only backslashes before $, backslash, or backtick escape a character.
@@ -113,14 +115,14 @@ export async function readDirectoryInput(ctx, argv, invoke) {
   const { result: r, read } = await ctx.io.watchStdin(invoke)
   if (!read) return r
   const reader = READERS[name]
-  const silenced = (name === 'grep' || name === 'egrep' || name === 'fgrep') && operands.some((a) => a === '--no-messages' || /^-[^-]*s/u.test(a))
+  const silenced = SEARCHES.has(name) && silentSearch(operands)
   if (!reader || silenced || r.stderr !== '' || operands.some((a) => STDIN_NAMES.has(a))) return refuse(ctx, argv[0])
   const [message, exitCode, order] = reader
   // Output a file took is already there, which is the right place for it
   // unless it is a sum, or a count sharing that file with the message ahead
   // of it.
-  const [out, diagnostics] = [ctx.outputFds[1], ctx.outputFds[2]]
-  if (out?.path && (order === 'drop' || (order === 'after' && (out === diagnostics || out.identity && out.identity === diagnostics?.identity)))) return refuse(ctx, argv[0])
+  const { 1: out, 2: diagnostics } = ctx.outputFds
+  if (out?.path && (order === 'drop' || (order === 'after' && sameDestination(out, diagnostics)))) return refuse(ctx, argv[0])
   const failure = { fd: 2, text: `${message}\n` }
   const printed = order === 'drop' ? [] : eventsOf(r).filter((e) => e.fd === 1)
   return {

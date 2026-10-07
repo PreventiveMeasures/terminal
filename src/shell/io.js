@@ -18,17 +18,23 @@ const raceMessage = 'a pipeline stage writing a file another stage of the same p
 // its write races only a stage after it.
 function pipelineTracker() {
   const pipelines = []
-  return {
-    touch(identity, kind, writer) {
-      const sorted = kind === 'write' && writer === 'sort'
-      for (const pipeline of pipelines) {
-        const others = (kind === 'read' ? pipeline.writes : pipeline.reads).get(identity)
-        if (others && [...others].some((stage) => stage !== pipeline.stage && !(sorted && stage < pipeline.stage))) throw new UnsupportedError('feature', 'pipeline file race', raceMessage)
-        const mine = kind === 'read' ? pipeline.reads : pipeline.writes
-        if (!mine.has(identity)) mine.set(identity, new Set())
-        mine.get(identity).add(pipeline.stage)
+  // Record this stage's access, after checking it against the other side's:
+  // a race unless `settled` says that stage is one this access cannot race.
+  const touch = (identity, mine, theirs, settled) => {
+    for (const pipeline of pipelines) {
+      for (const stage of pipeline[theirs].get(identity) ?? []) {
+        if (stage !== pipeline.stage && !settled?.(stage, pipeline.stage)) throw new UnsupportedError('feature', 'pipeline file race', raceMessage)
       }
-    },
+      if (!pipeline[mine].has(identity)) pipeline[mine].set(identity, new Set())
+      pipeline[mine].get(identity).add(pipeline.stage)
+    }
+  }
+  const before = (stage, current) => stage < current
+  return {
+    // Only a file in the overlay can be written, and its identity is the
+    // cell that holds it; a read of anything else races nothing.
+    read: (identity) => { if (typeof identity === 'object') touch(identity, 'reads', 'writes') },
+    write: (identity, writer) => touch(identity, 'writes', 'reads', writer === 'sort' ? before : undefined),
     // Run a pipeline's stages through fn, which says which stage it is in.
     async run(fn) {
       const pipeline = { stage: 0, reads: new Map(), writes: new Map() }
@@ -47,12 +53,12 @@ export function createIoGuard(fs) {
     // Stdin with no file behind it is read without an identity, and the
     // shell watching for that read is told of it.
     if (identity === undefined && stdinWatch) stdinWatch.read = true
-    if (identity !== undefined) pipelines.touch(identity, 'read')
+    if (identity !== undefined) pipelines.read(identity)
     if (active && !active.bufferReads) active.reads.push(identity)
   }
   const check = (identity) => {
     if (identity === undefined) return
-    pipelines.touch(identity, 'write', active?.name)
+    pipelines.write(identity, active?.name)
     for (let scope = active; scope; scope = scope.parent) {
       if (!scope.reads.includes(identity)) continue
       if (scope === active && output?.scope === scope) {

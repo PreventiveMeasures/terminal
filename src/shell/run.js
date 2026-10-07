@@ -2,7 +2,7 @@ import { expandRedirect, expandScalar, expandWords } from './expand.js'
 import { refusedWrite } from './parse.js'
 import { BindingMap } from './bindings.js'
 import { gateBlame, gateTracker, missingPathNote } from '../notes.js'
-import { UnsupportedError, unsupported, unsupportedNote } from '../unsupported.js'
+import { UnsupportedError, diagnostic, unsupported, unsupportedNote } from '../unsupported.js'
 import { decodeUtf8Maybe, encodeUtf8, err, joinBytes, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
@@ -309,7 +309,7 @@ function shellFailure(ctx, e) {
   missingPathNote(ctx, 'shell', e?.path, e?.fsError)
   const note = unsupportedNote(e)
   if (note) ctx.unsupported.add(note)
-  return { ...err(note ? `error: ${reason(e)}` : reason(e), e?.fatal && !ctx.subshell ? 127 : 1), ...(e?.halt ? { halt: true } : {}) }
+  return { ...err(diagnostic(e, reason(e)), e?.fatal && !ctx.subshell ? 127 : 1), ...(e?.halt ? { halt: true } : {}) }
 }
 
 async function shellResult(ctx, fn) {
