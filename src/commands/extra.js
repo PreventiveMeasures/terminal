@@ -55,13 +55,17 @@ function seq(_stdin, tokens, ctx) {
   const last = nums.at(-1)
   const separator = values.get('s') ?? '\n'
   const fast = positional.every((t) => /^\d+$/u.test(t)) && incr > 0n && incr <= FAST_STEP_LIMIT && !flags.has('w') && encodeUtf8Loose(separator).length === 1
-  if (!fast && [first, incr, last].some((n) => n > LONG_DOUBLE_EXACT || n < -LONG_DOUBLE_EXACT)) {
-    return unsupported('feature', 'seq', 'long double range', 'seq: integers past 2^64 outside its exact digit-by-digit form are not supported')
-  }
   const inRange = incr > 0 ? first <= last : first >= last
   const count = inRange ? ((last > first ? last - first : first - last) / (incr > 0n ? incr : -incr)) + 1n : 0
   if (count > MAX_SEQ_ELEMENTS) {
     return unsupported('feature', 'seq', 'sequence limit', `seq: range too large: ${count} elements exceeds limit of ${MAX_SEQ_ELEMENTS}`)
+  }
+  // A long double answers as these integers do while both ends, every value
+  // it prints and a step it adds more than once are ones it holds exactly.
+  const inexact = (n) => n > LONG_DOUBLE_EXACT || n < -LONG_DOUBLE_EXACT
+  const lastPrinted = first + (BigInt(count) - 1n) * incr
+  if (!fast && (inexact(first) || inexact(last) || (count > 0 && inexact(lastPrinted)) || (count > 1 && inexact(incr)))) {
+    return unsupported('feature', 'seq', 'long double range', 'seq: integers past 2^64 outside its exact digit-by-digit form are not supported')
   }
   // Every value lies between the endpoints; their original spellings bound
   // the padding width, including minus signs and leading zeroes.
