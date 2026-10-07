@@ -1,6 +1,7 @@
 import { VfsError } from '@preventive/vfs'
-import { dirname, lookup, pathTooLong, slashedTarget, walkPath, writeTarget } from './fs.js'
+import { dirname, lookup, pathTooLong, sameBytes, slashedTarget, walkPath, writeTarget } from './fs.js'
 import { decodeUtf8, encodeUtf8 } from './util.js'
+import { UnsupportedError } from './unsupported.js'
 
 // The overlay is mounted at /tmp, so what may be written is what falls inside
 // it. Commands ask before acting, where the answer decides more than whether a
@@ -20,6 +21,27 @@ export function writeRefusal(ctx, absolute) {
 
 const EMPTY = new Uint8Array()
 
+// The umask the tools that carry a mode over run under here: an archive's
+// entry is extracted, and a file holding such a mode copied, as GNU tar and
+// cp write them under the common default, 022. Everything else is made in
+// this tree's one mode (ls-long.js) — but for a directory one of those tools
+// makes on the way to a name, which has what the umask leaves of 0777.
+export const UMASK = 0o022
+export const MADE_MODE = 0o777 & ~UMASK
+
+// What a mode an entry keeps denies its owner, who is the one user here:
+// reading a file without its read bit, writing one without its write bit,
+// and making or taking away a name in a directory without its write and
+// search bits. GNU is told "Permission denied" there, which each command
+// says in words of its own, so such an access is refused rather than made.
+const NAMES = 0o300, READ = 0o400, WRITE = 0o200
+function permitted(overlay, path, bits, doing) {
+  const mode = overlay.metadataOf(path)?.mode
+  if (mode === undefined || (mode & bits) === bits) return
+  throw new UnsupportedError('feature', 'permission denied', `${path}: ${doing} where its mode denies it is not supported (GNU says Permission denied)`)
+}
+const naming = (overlay, path) => permitted(overlay, dirname(path), NAMES, 'changing the names in a directory')
+
 // Writes land in the tree the sources are in, and only under /tmp: every
 // method here answers `false` or `null` for a name outside it, which is the
 // read-only filesystem every other write meets.
@@ -27,7 +49,10 @@ export function writableFs(base) {
   base.vfs.mkdir('/tmp', { recursive: true })
   base.writableAt('/tmp')
   const overlay = overlayOf(base)
-  const observe = (path) => overlay.observer?.read(overlay.identity(path) ?? path)
+  const observe = (path) => {
+    permitted(overlay, path, READ, 'reading a file')
+    overlay.observer?.read(overlay.identity(path) ?? path)
+  }
   const fs = {
     ...base,
     observeIo: (value) => { overlay.observer = value },
@@ -35,7 +60,14 @@ export function writableFs(base) {
     // than: what tells a walk an entry was made after it began.
     newestInode: () => overlay.newest,
     fileIdentity: overlay.identity,
-    readIdentity: (cell) => { overlay.observer?.read(cell); return decodeUtf8(cellBytes(base.vfs, cell)) },
+    // The text a file holds — or, for one read as the bytes it is, those same
+    // bytes back while it still holds them, and what it holds once it does not.
+    readIdentity: (cell, held) => {
+      overlay.observer?.read(cell)
+      const bytes = cellBytes(base.vfs, cell)
+      if (held === undefined) return decodeUtf8(bytes)
+      return sameBytes(bytes, held) ? held : bytes
+    },
     readFile: (path) => { observe(path); return base.readFile(path) },
     readBytes: (path) => { observe(path); return base.readBytes(path) },
     openWritable: (cwd, path, append = false) => openFile(fs, overlay, cwd, path, append),
@@ -45,6 +77,12 @@ export function writableFs(base) {
     copyWritable: (cwd, source, target) => copyFile(fs, overlay, cwd, source, target),
     replaceWritable: (cwd, path, content, backup) => replaceFile(fs, overlay, cwd, path, content, backup),
     removeWritable: (cwd, path) => removeFile(fs, overlay, cwd, path),
+    // What an entry keeps of its own — a mode, a modification time, or both —
+    // where something gave it them, and null where it has the ones every
+    // entry here has (ls-long.js). A path is absolute, and a link is itself
+    // rather than what it leads to.
+    keepMetadata: (path, kept) => overlay.keep(path, kept),
+    metadataOf: (path) => overlay.metadataOf(path),
   }
   return fs
 }
@@ -60,6 +98,23 @@ export function writableFs(base) {
 function overlayOf(base) {
   const { vfs } = base
   const cells = new Map()
+  // What entries keep of their own, by inode, which no name change moves.
+  // Writing to a file dates it to now, as making or taking away a name in a
+  // directory dates the directory, and now is the moment every entry here is
+  // dated to: a time kept is dropped where either happens, and a mode stays.
+  const kept = new Map()
+  const dated = (ino) => {
+    const own = kept.get(ino)
+    if (own?.mtime === undefined) return
+    if (own.mode === undefined) kept.delete(ino)
+    else kept.set(ino, { mode: own.mode })
+  }
+  const inodeOf = (path) => {
+    try { return vfs.lstat(path).ino } catch (e) {
+      if (e instanceof VfsError) return
+      throw e
+    }
+  }
   const overlay = {
     base,
     vfs,
@@ -70,9 +125,21 @@ function overlayOf(base) {
       if (!inOverlay(String(path)) || !base.isFile(path)) return
       const { ino } = vfs.lstat(path)
       let cell = cells.get(ino)
-      if (cell === undefined) cells.set(ino, cell = { path: vfs.realpath(path), detached: undefined })
+      if (cell === undefined) cells.set(ino, cell = { path: vfs.realpath(path), detached: undefined, ino })
       return cell
     },
+    keep: (path, { mode, mtime }) => {
+      const ino = vfs.lstat(path).ino
+      const own = { ...kept.get(ino) }
+      if (mode !== undefined) own.mode = mode
+      if (mtime !== undefined) own.mtime = mtime
+      kept.set(ino, own)
+    },
+    metadataOf: (path) => (inOverlay(path) ? kept.get(inodeOf(path)) ?? null : null),
+    written: dated,
+    // A name made or taken away at `path`, which is absolute and resolved.
+    named: (path) => dated(inodeOf(dirname(path))),
+    forget: (path) => kept.delete(inodeOf(path)),
     // A file about to lose its name keeps its bytes in the cell a descriptor
     // may hold, once `release` says the name has gone.
     leaving: (path) => {
@@ -114,14 +181,21 @@ function openFile(fs, overlay, cwd, path, append) {
   if (slashed !== null) throw pathError(path, slashed)
   checkTarget(fs, cwd, path)
   let cell = overlay.identity(absolute)
+  if (cell === undefined) naming(overlay, absolute)
+  else permitted(overlay, absolute, WRITE, 'writing a file')
   if (cell === undefined) {
     overlay.change(path, () => overlay.vfs.writeFile(absolute, EMPTY), absolute)
+    overlay.named(absolute)
     cell = overlay.identity(absolute)
   } else if (!append) {
     overlay.observer?.write(cell)
     overlay.vfs.writeFile(absolute, EMPTY)
+    overlay.written(cell.ino)
   }
-  return writeHandle(overlay.vfs, absolute, cell, append, () => overlay.observer?.write(cell))
+  return writeHandle(overlay.vfs, absolute, cell, append, () => {
+    overlay.observer?.write(cell)
+    overlay.written(cell.ino)
+  })
 }
 
 // `cp -r` and `mkdir` make a directory here, each before what goes inside it.
@@ -136,7 +210,9 @@ function addDirectory(fs, overlay, cwd, path) {
   // checkTarget passes a name already taken by a file or a link, which is not
   // a name a directory can take.
   if (fs.isFile(absolute) || fs.isLink(absolute)) throw new Error(`${path}: File exists`)
+  naming(overlay, absolute)
   overlay.change(path, () => overlay.vfs.mkdir(absolute), absolute)
+  overlay.named(absolute)
   return true
 }
 
@@ -146,7 +222,9 @@ function addLink(fs, overlay, cwd, path, target) {
   const absolute = writeTarget(fs, cwd, path, false)
   if (!absolute.startsWith('/tmp/')) return false
   checkNewName(fs, cwd, path)
+  naming(overlay, absolute)
   overlay.change(path, () => overlay.vfs.symlink(target, absolute), absolute)
+  overlay.named(absolute)
   return true
 }
 
@@ -156,11 +234,18 @@ function copyFile(fs, overlay, cwd, source, target) {
   checkTarget(fs, cwd, target)
   const cell = overlay.identity(source)
   if (source === absolute || cell !== undefined && cell === overlay.identity(absolute)) throw new Error('source and destination are the same file')
+  permitted(overlay, source, READ, 'reading a file')
   overlay.observer?.read(cell ?? source)
+  const made = overlay.identity(absolute) === undefined
   // A copy carries bytes, which either side may hold without a string
   // equivalent. Copy them directly while keeping truncation and writes
   // observable.
   fs.openWritable(cwd, target).writeBytes(overlay.base.readBytes(source))
+  // A file made by the copy takes the mode of the one it copies, less the
+  // set-id and sticky bits and what the umask takes, as GNU cp makes one;
+  // a file already there keeps its own.
+  const mode = made ? overlay.metadataOf(source)?.mode : undefined
+  if (mode !== undefined) overlay.keep(absolute, { mode: mode & 0o777 & ~UMASK })
   return true
 }
 
@@ -175,8 +260,12 @@ function replaceFile(fs, overlay, cwd, path, content, backupPath) {
   checkTarget(fs, cwd, path)
   if (!fs.isFile(absolute) && !fs.isLink(absolute)) throw pathError(path, 'No such file or directory')
   if (backup !== null) checkTarget(fs, cwd, backupPath)
+  naming(overlay, absolute)
+  if (backup !== null) naming(overlay, backup)
   const bytes = encodeUtf8(content)
   const { vfs } = overlay
+  // The file written in its place takes its mode, as GNU gives it.
+  const mode = overlay.metadataOf(absolute)?.mode
   overlay.change(path, () => {
     // GNU renames the name aside for the backup and the new file over it, so
     // a link's backup is the link itself, and the name is a regular file
@@ -185,16 +274,21 @@ function replaceFile(fs, overlay, cwd, path, content, backupPath) {
     if (backup !== null && backup !== absolute) {
       const moved = overlay.leaving(absolute)
       const replaced = overlay.leaving(backup)
+      overlay.forget(backup)
       vfs.rename(absolute, backup)
       overlay.release(replaced)
       if (moved) moved.cell.path = backup
     } else {
       const left = overlay.leaving(absolute)
+      overlay.forget(absolute)
       vfs.unlink(absolute)
       overlay.release(left)
     }
     vfs.writeFile(absolute, bytes)
   }, absolute, ...backup === null ? [] : [backup])
+  if (mode !== undefined) overlay.keep(absolute, { mode })
+  overlay.named(absolute)
+  if (backup !== null) overlay.named(backup)
   return true
 }
 
@@ -206,10 +300,13 @@ function removeFile(fs, overlay, cwd, path) {
   if (found.error) throw pathError(path, found.error)
   if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
   if (!inOverlay(found.path)) return false
+  naming(overlay, found.path)
   // Open handles retain the unlinked file until their last writer ends.
   const left = overlay.leaving(found.path)
+  overlay.forget(found.path)
   overlay.change(path, () => overlay.vfs.unlink(found.path), found.path)
   overlay.release(left)
+  overlay.named(found.path)
   return true
 }
 
@@ -227,7 +324,10 @@ function dropDirectory(fs, overlay, cwd, path) {
   if (found.path === '/tmp') throw pathError(path, 'Permission denied')
   const { dirs, files, links } = fs.listDir(found.path)
   if (dirs.length || files.length || links.length) throw new Error(`${path}: Directory not empty`)
+  naming(overlay, found.path)
+  overlay.forget(found.path)
   overlay.change(path, () => overlay.vfs.rmdir(found.path), found.path)
+  overlay.named(found.path)
   return true
 }
 

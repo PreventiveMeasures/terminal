@@ -187,7 +187,18 @@ do backups and the interactive prompt.
 `ls -l` fills in what the filesystem does not keep with one deliberate model
 rather than a guess per entry: every entry is the session user's alone
 (`-rw-------` and `drwx------`) and is dated to the moment the terminal was
-created, a time its forks carry with them. Link counts, directory sizes and
+created, a time its forks carry with them. An entry extracted from an archive
+keeps the mode and the time it was stored with, as GNU tar and UnZip keep them
+under the common umask, 022, and is listed with them — marked `*` by `-F`
+where they make it executable — until a write dates it to now, as making or
+removing a name in a directory dates the directory; `cp` makes a file in the
+mode of one it copies, `gzip` carries both over to what it writes, and
+`tar -c` and `zip` store them. What such a mode keeps its owner from —
+reading a file, writing one, making or removing a name in a directory — GNU
+is told "Permission denied" of, in words each command has its own way of
+saying, so that is refused with an unsupported diagnostic; `rm` asks before
+it takes away a write-protected entry, as GNU asks where stdin is the
+terminal, and the terminal's empty stdin answers no. Link counts, directory sizes and
 the `total` line are what ext4 would report for the same tree, and `-h`
 rounds sizes as `du -h` does. A symbolic link — one a source entry declares,
 or one `ln -s` made — is the row the model has nothing to guess at:
@@ -294,9 +305,19 @@ takes a terminal, a link, and a name already taken or already named as
 compressed, and decompressing to stdout hands on unchanged what is not gzip
 data, as `zcat -f` of a plain file. Without it a link is refused, as GNU
 refuses one, and a name already taken is asked about where stdin is the
-terminal, which answers with its end. What another compressor made —
-compress, pack, a zip — GNU gzip also reads, and it is refused here, as is a
-compression level.
+terminal, which answers with its end. A name that is not there is tried, when
+decompressing, with `.gz`, `.z`, `-z` and `.Z` on the end, and a suffix is
+read in any case, `F.GZ` as much as `f.gz`. A member is read in GNU's order: a
+header asking for what gzip does not do — another method, encryption, flags
+it does not know, a header check that fails — is said and the next file read;
+the data is written as it is inflated, and then a check or a count that fails
+it, or an end that comes too soon, is said and the run stops there, as gzip
+exits there, taking away a file it was writing. A member records the name and
+the moment of the file it came from, and one of stdin the moment of the file
+stdin is, or none for a pipe; what is deflated inside it is the runtime's
+stream rather than GNU's own deflate, so it can come out a few bytes apart
+from GNU's. What another compressor made — compress, pack, a zip — GNU gzip
+also reads, and it is refused here, as is a compression level.
 
 `tar` lists (`-t`), extracts (`-x`) and creates (`-c`) archives as GNU tar
 1.35 does, with its listings, messages and statuses: the old-style `tar czf`
@@ -344,8 +365,12 @@ comes to the entry: macOS's `LIBARCHIVE.xattr.` records are warned of, while
 would complain of, and the records of multi-volume and incremental archives,
 are refused. Extraction writes into the writable `/tmp/` overlay alone, which
 holds no hard link and no device, so an entry that would make one is refused
-too. The overlay keeps no times either, so an entry dated before 1970 or after
-the run began, which GNU warns of once it has written it, is refused as well.
+too. What an entry says of its mode and time is kept as GNU keeps it for
+anyone but root: the mode less its set-id and sticky bits and the umask, 022,
+and the time — a directory's once nothing more is written into it — while a
+directory made on the way to an entry is `drwxr-xr-x` and dated to when it
+was made. An entry dated before 1970 or after the run began, which GNU warns
+of in words of its own once it has written it, is refused.
 
 `zip` makes a new archive as Info-ZIP Zip 3.0 does — `-r`, `-j`, `-D`, `-0`,
 `-y` and `-q`, its `adding:` lines, warnings, refusal of one name for two
@@ -356,22 +381,34 @@ stores a whole archive or deflates what deflate makes smaller, so a file by
 one of those names that deflate would make smaller, beside another file it
 makes smaller, is refused. That deflate is the runtime's rather than
 Info-ZIP's, so the share a file reports saved is this archive's, and can be a
-few points away from what Info-ZIP's would be: 56% for the numbers 1 to 400,
-a line each, where Info-ZIP saves 53%. Adding to an archive already there, a
-file operand `-`, which Info-ZIP reads from stdin, a compression level and the
-rest are refused. `unzip` answers as Debian's UnZip 6.00 does: `-l`, dated
-year first, `-t`, `-p`, and extraction with `-q`, `-o`, `-n` — which wins over
+few points away from what Info-ZIP's would be: 56% for the numbers 1 to 400, a
+line each, where Info-ZIP saves 53%. Its records are the package's too: they
+say the archive was made by Zip 2.0 rather than 3.0, mark no file as text, and
+carry a file's modification time alone, where Info-ZIP adds its access time
+and its owner's ids, which this terminal does not have — so an archive is a
+few bytes apart from Info-ZIP's even where nothing in it is deflated. Adding
+to an archive already there, a file operand `-`, which Info-ZIP reads from
+stdin, a compression level and the rest are refused. `unzip` answers as
+Debian's UnZip 6.00 does: its usage where it is given no archive, the
+archive's comment under its name where it is not quiet, `-l`, dated year
+first, `-t`, `-p`, and extraction with `-q`, `-o`, `-n` — which wins over
 `-o`, with UnZip's caution, where both are given — `-j`, `-d` and `-x`, the
-overwrite question included — UnZip asks it on stdin, and a stdin with
-nothing on it answers with its end, which UnZip takes as "None". A link is
-made last, its name held until then by a placeholder of its target, as UnZip
-holds it, so a later entry of that name, which `-j` can make, meets it as it
-would there. A name stored with a `.` segment, which Info-ZIP never writes
-and other tools do, is refused as tar's is, since UnZip lists it as stored. The
-package does not say how an entry was stored, nor whether its time is an exact
-one or a DOS time, so an extraction that is not quiet — which names each file
-`extracting` or `inflating` by how it was stored — `-c`, and `-v` or the
-second `-l` that UnZip reads as one, are refused, and `-l` answers where the
+overwrite question included — UnZip asks it on stdin, and a stdin with nothing
+on it answers with its end, which UnZip takes as "None". A link is made last,
+its name held until then by a placeholder of its target, as UnZip holds it, so
+a later entry of that name, which `-j` can make, meets it as it would there. A
+file keeps the mode it was stored with, less its set-id and sticky bits but
+with no umask taken from it, and its time — or, where a maker other than
+Unix recorded DOS attributes alone, the mode UnZip expands them into, less the
+umask; a directory UnZip made for an entry
+of its own takes the entry's once everything is written, and one made on the
+way, or for `-d`, is `drwxr-xr-x`, dated to when it was made, as a link is. A
+name stored with a `.` segment, which Info-ZIP never writes and other tools
+do, is refused as tar's is, since UnZip lists it as stored. The package does
+not say how an entry was stored, nor whether its time is an exact one or a DOS
+time, so an extraction that is not quiet — which names each file `extracting`
+or `inflating` by how it was stored — `-c`, and `-v` or the second `-l` that
+UnZip reads as one, are refused, and `-l` and an extraction answer where the
 two readings of every time agree, which they always do under `TZ=UTC`.
 
 `curl` is the one command that reaches outside, and the one no terminal has

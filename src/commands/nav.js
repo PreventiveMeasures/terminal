@@ -46,9 +46,10 @@ function cd(_stdin, tokens, ctx) {
   return ok(printed)
 }
 
-// What `-F` marks each kind with: nothing here is executable, a socket or a
-// pipe, so `/` and `@` are the whole of it.
+// What `-F` marks each kind with: nothing here is a socket or a pipe, and a
+// file is executable only where it keeps a mode that says so (writable.js).
 const MARKS = { dir: '/', link: '@', file: '' }
+const executable = (ctx, abs) => ((ctx.fs.metadataOf?.(abs)?.mode ?? 0) & 0o111) !== 0
 
 // Non-TTY ls: one name per line, lexical order, classification only with
 // -F. A long listing is the model in ls-long.js, since a path-to-content
@@ -62,7 +63,8 @@ function ls(_stdin, tokens, ctx) {
   const hidden = hiddenEntryNotes()
   const all = flags.has('a') || flags.has('A')
   const kindOf = (abs) => ctx.fs.isDir(abs) ? 'dir' : ctx.fs.isLink?.(abs) ? 'link' : 'file'
-  const indicator = (kind) => flags.has('F') ? MARKS[kind] : ''
+  const indicator = (kind, abs) => flags.has('F') ? (kind === 'file' && executable(ctx, abs) ? '*' : MARKS[kind]) : ''
+  const linked = (abs) => indicator(kindOf(abs), abs)
   // A file operand and a directory entry are the same row: what it was called,
   // what to print for it, where it is, what it is, and — for a link, which a
   // long listing names beside what it points at — the target it holds. Once a
@@ -72,8 +74,8 @@ function ls(_stdin, tokens, ctx) {
   // prints `d//`.
   const entry = (raw, abs, kind) => ({
     raw, abs, kind,
-    name: kind === 'link' && long ? raw : raw + indicator(kind),
-    target: kind === 'link' ? ctx.fs.readLink(abs) + indicator(kindOf(lookup(ctx.cwd, abs, ctx.fs).path ?? '')) : null,
+    name: kind === 'link' && long ? raw : raw + indicator(kind, abs),
+    target: kind === 'link' ? ctx.fs.readLink(abs) + linked(lookup(ctx.cwd, abs, ctx.fs).path ?? '') : null,
   })
   const render = (entries, listing, others) => long ? long.lines(entries, listing, others) : entries.map((e) => e.name)
   // `ls link` lists what a link names when the link leads to a directory, and

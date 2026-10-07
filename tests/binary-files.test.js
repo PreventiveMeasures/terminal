@@ -554,6 +554,15 @@ describe('a file of bytes and the writable overlay', () => {
     await check(t, 'cp img.png img.png', '', { stderr: "cp: 'img.png' and 'img.png' are the same file\n", exitCode: 1 })
   })
 
+  it('is redirected onto stdin from the overlay as from the mount', async () => {
+    const t = overlay()
+    await check(t, 'cp img.png /tmp/copy')
+    await check(t, 'wc -c < /tmp/copy', '19\n')
+    await check(t, 'sha1sum < img.png && sha1sum < /tmp/copy', '91c599c0358a9b4744bcb5f2800ba7c868dbcba5  -\n'.repeat(2))
+    // One that changes under the command reading it is refused as before.
+    await gap(t, 'wc -c < /tmp/copy > /tmp/copy', 'modified redirected input', 'error: reading an inherited input file after it changes is not supported\n')
+  })
+
   it('is text again in the overlay where its bytes spell text', async () => {
     const t = overlay()
     await check(t, 'cp bytes.txt /tmp/b && cat /tmp/b', 'spelled by bytes\n')

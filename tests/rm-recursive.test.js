@@ -112,8 +112,19 @@ describe('rm -r refuses the overlay root and the names that are not one', () => 
 
   it('names each entry of a read-only tree it cannot remove, and nothing above them', async () => {
     const t = await terminal()
-    await check(t, 'rm -r /repo/d', '', "rm: cannot remove '/repo/d/one': Read-only file system\nrm: cannot remove '/repo/d/sub/two': Read-only file system\n", 1)
+    const leaves = "rm: cannot remove '/repo/d/one': Read-only file system\nrm: cannot remove '/repo/d/sub/two': Read-only file system\n"
+    await check(t, 'rm -rf /repo/d', '', leaves, 1)
+    await check(t, 'rm -r /repo/d </dev/null', '', leaves, 1)
     await check(t, 'find /repo/d -type f', '/repo/d/one\n/repo/d/sub/two\n')
+  })
+
+  it('asks a terminal about the directory first, which a read-only mount answers for it', async () => {
+    // Without -f and with stdin a terminal, GNU asks access(2) whether it may
+    // write a directory before it goes in, and EROFS is the answer it reports.
+    const t = await terminal()
+    await check(t, 'rm -r /repo/d', '', "rm: cannot remove '/repo/d': Read-only file system\n", 1)
+    await check(t, 'rm /repo/d/one/', '', "rm: cannot remove '/repo/d/one/': Not a directory\n", 1)
+    await check(t, 'rm /repo/d/one/ </dev/null', '', "rm: cannot remove '/repo/d/one/': Read-only file system\n", 1)
   })
 
   it('still refuses a directory without -r', async () => {

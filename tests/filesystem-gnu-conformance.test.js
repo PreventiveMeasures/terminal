@@ -6,6 +6,8 @@ import { createTerminal } from '@preventive/terminal'
 // the same tree, bound read-only at /w with a fresh /tmp, as the session's
 // user: `/` is root's, so making or taking away a name in it is refused with
 // EACCES, and the mount with EROFS. The answer here is the one they gave.
+// Their stdin was /dev/null, so each line here reads it too: rm asks a
+// terminal before it removes anything, and a file it does not.
 const SOURCES = {
   'a.txt': 'hello\n',
   "it's": 'q\n',
@@ -182,7 +184,7 @@ const CASES = [
 describe('filesystem commands answer as GNU does', () => {
   for (const [command, stdout, stderr, exitCode] of CASES) {
     it(command, async () => {
-      const result = await createTerminal(SOURCES, { mount: '/w', writable: '/tmp/' }).run(command)
+      const result = await createTerminal(SOURCES, { mount: '/w', writable: '/tmp/' }).run(`{ ${command}\n} </dev/null`)
       assert.deepEqual([result.stdout, result.stderr, result.exitCode, result.unsupported], [stdout, stderr, exitCode, []])
     })
   }

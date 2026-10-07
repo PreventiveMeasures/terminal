@@ -5,7 +5,7 @@ import { appendOutput, emptyOutput } from '../shell/output.js'
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
 import { lookupWithNote, missingPathNote } from '../notes.js'
-import { inOverlay, writeRefusal } from '../writable.js'
+import { UMASK, inOverlay, writeRefusal } from '../writable.js'
 
 const SPECIAL_FILES = new Set(['/dev/null', '/dev/stdin', '/dev/stdout', '/dev/stderr'])
 
@@ -269,6 +269,11 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
     ctx.io.setReads([])
     copyFile(`${from}/${name}`, `${into}/${name}`, state, top)
   }
+  // A directory made by the copy takes the mode of the one it copies, less
+  // what the umask takes, as a file does (writable.js) — once what goes in
+  // it is in, as GNU sets it.
+  const mode = dest.path === null ? ctx.fs.metadataOf?.(absolute)?.mode : undefined
+  if (mode !== undefined) ctx.fs.keepMetadata(target, { mode: mode & 0o777 & ~UMASK })
 }
 
 function makeDirectory(source, destination, named, target, state) {

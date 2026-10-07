@@ -65,7 +65,7 @@ describe('broad audit — readers preserve shared input', () => {
   for (const cmd of ['head -n0', 'head -c0', 'tail -n0', 'tail -c0']) {
     it(`${cmd} leaves shared input untouched`, async () => await check(`{ ${cmd}; cat; } < f`, FILES.f))
   }
-  for (const cmd of ['od -N1', 'xxd -l1', 'hexdump -n1']) {
+  for (const cmd of ['od -N1', 'hexdump -n1']) {
     it(`${cmd} leaves unread bytes for cat`, async () => {
       const t = createTerminal(FILES)
       const first = await t.run(`${cmd} < f`)
@@ -73,6 +73,14 @@ describe('broad audit — readers preserve shared input', () => {
       assert.deepEqual([both.stdout, both.stderr, both.unsupported], [first.stdout + FILES.f.slice(1), '', []])
     })
   }
+  // xxd reads a file through stdio, a block at a time, and leaves the next
+  // reader after the block: of a file shorter than one, nothing.
+  it('xxd -l1 leaves cat what follows the block it read', async () => {
+    const t = createTerminal({ ...FILES, long: 'x'.repeat(5000) })
+    const both = await t.run('{ xxd -l1; cat; } < f')
+    assert.deepEqual([both.stdout, both.stderr, both.unsupported], [(await t.run('xxd -l1 < f')).stdout, '', []])
+    assert.equal((await t.run('{ xxd -l1 > /dev/null; cat; } < long')).stdout, 'x'.repeat(904))
+  })
   for (const cmd of ['tr a', 'xargs -n0', 'sort missing', 'od -Nbad']) {
     it(`${cmd} validates before consuming input`, async () => {
       const r = await createTerminal(FILES).run(`{ ${cmd}; cat; } < f`)
@@ -89,7 +97,7 @@ describe('broad audit — readers preserve shared input', () => {
   })
   it('distinguishes absolute xxd/hexdump seeks from relative od skips', async () => {
     const t = createTerminal(FILES)
-    for (const [cmd, rest] of [['xxd -s1 -l2', FILES.f.slice(3)], ['hexdump -s1 -n2', FILES.f.slice(3)]]) {
+    for (const [cmd, rest] of [['xxd -s1 -l2', ''], ['hexdump -s1 -n2', FILES.f.slice(3)]]) {
       const first = await t.run(`${cmd} f`)
       const both = await t.run(`{ head -c2; ${cmd}; cat; } < f`)
       assert.deepEqual([both.stdout, both.stderr, both.unsupported], ['01' + first.stdout + rest, '', []])
@@ -166,7 +174,7 @@ describe('broad audit — unsupported constructs remain visible to agents', () =
     ['xxd -s-2 f', '-s -2'],
     ['od f 10', 'legacy offset operand'],
     ['od -j1 dir f', 'skip across unreadable input'],
-    ['hexdump -s010 f', '-s 010'],
+    ['hexdump -s1.5k f', '-s 1.5k'],
     ['hexdump -s9007199254740992', 'large byte count'],
     ['hexdump -n1 -', 'hyphen input operand'],
     ["tr '\\' x </dev/null", 'trailing backslash'],

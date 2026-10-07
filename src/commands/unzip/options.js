@@ -15,13 +15,50 @@ const MODES = { __proto__: null, l: 'list', t: 'test', p: 'pipe', c: 'crt', v: '
 // A `-d` with nothing after it is UnZip's own error, wherever it stands.
 const NO_EXDIR = { usage: { text: 'error:  must specify directory to which to extract with -d option\n', status: 10 } }
 
+// What UnZip prints where it is given no archive: on stdout, and a success,
+// where it was given nothing at all; otherwise an error, on stderr — or on
+// stdout, where `-t` sends everything.
+const USAGE = [
+  'UnZip 6.00 of 20 April 2009, by Debian. Original by Info-ZIP.',
+  '',
+  'Usage: unzip [-Z] [-opts[modifiers]] file[.zip] [list] [-x xlist] [-d exdir]',
+  '  Default action is to extract files in list, except those in xlist, to exdir;',
+  '  file[.zip] may be a wildcard.  -Z => ZipInfo mode ("unzip -Z" for usage).',
+  '',
+  '  -p  extract files to pipe, no messages     -l  list files (short format)',
+  '  -f  freshen existing files, create none    -t  test compressed archive data',
+  '  -u  update files, create if necessary      -z  display archive comment only',
+  '  -v  list verbosely/show version info       -T  timestamp archive to latest',
+  '  -x  exclude files that follow (in xlist)   -d  extract files into exdir',
+  'modifiers:',
+  '  -n  never overwrite existing files         -q  quiet mode (-qq => quieter)',
+  '  -o  overwrite files WITHOUT prompting      -a  auto-convert any text files',
+  '  -j  junk paths (do not make directories)   -aa treat ALL files as text',
+  '  -U  use escapes for all non-ASCII Unicode  -UU ignore any Unicode fields',
+  '  -C  match filenames case-insensitively     -L  make (some) names lowercase',
+  '  -X  restore UID/GID info                   -V  retain VMS version numbers',
+  '  -K  keep setuid/setgid/tacky permissions   -M  pipe through "more" pager',
+  '  -O CHARSET  specify a character encoding for DOS, Windows and OS/2 archives',
+  '  -I CHARSET  specify a character encoding for UNIX and other archives',
+  '',
+  'See "unzip -hh" or unzip.txt for more help.  Examples:',
+  '  unzip data1 -x joe   => extract all files except joe from zipfile data1.zip',
+  '  unzip -p foo | more  => send contents of foo.zip via pipe into program more',
+  '  unzip -fo foo ReadMe => quietly replace existing ReadMe if archive file newer',
+].join('\n') + '\n'
+
 export function parseUnzip(tokens) {
   const opts = { modes: new Set(), lists: 0, quiet: 0, overwriteAll: false, overwriteNone: false, junk: false, exdir: null, archive: null, members: [], excludes: [] }
   let i = 0
-  for (; i < tokens.length && tokens[i].startsWith('-') && tokens[i].length > 1; i++) {
+  // A word of options may be `-` alone, which says nothing, and a `-` among
+  // the letters negates those after it, which is a reading this does not take.
+  let negated = false
+  for (; i < tokens.length && tokens[i].startsWith('-'); i++) {
     const word = tokens[i]
     for (let j = 1; j < word.length; j++) {
       const letter = word[j]
+      if (letter === '-') { negated = true; continue }
+      if (negated) throw new UnsupportedError('option', '--', 'negating an option with `-` is not supported')
       if (letter === 'd') {
         opts.exdir = j + 1 < word.length ? word.slice(j + 1) : tokens[++i]
         if (opts.exdir === undefined) return NO_EXDIR
@@ -37,7 +74,13 @@ export function parseUnzip(tokens) {
     }
   }
   if (opts.modes.size > 1) throw new UnsupportedError('option', 'modes', 'combining -c, -l, -p, -t and -v is not supported')
-  if (i >= tokens.length) throw new UnsupportedError('feature', 'usage', 'printing the usage summary is not supported')
+  if (i >= tokens.length) {
+    // -v, and a second -l, with no archive print what this UnZip was built
+    // with instead, which is not this one's to say.
+    if (opts.modes.has('verbose') || opts.lists > 1) throw new UnsupportedError('feature', 'version', 'printing the version summary is not supported')
+    if (tokens.length === 0) return { usage: { text: USAGE, status: 0, fd: 1 } }
+    return { usage: { text: USAGE, status: 10, fd: opts.modes.has('test') ? 1 : 2 } }
+  }
   opts.archive = tokens[i++]
   let excluding = false
   for (; i < tokens.length; i++) {

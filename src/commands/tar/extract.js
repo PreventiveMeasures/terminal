@@ -7,14 +7,15 @@
 // name is followed, as the kernel follows one, since only the last name is
 // ever unlinked.
 //
-// The overlay holds no permissions and no times — `ls -l` shows every entry
-// of this tree the one way — so what an entry says of those is not kept; it
-// holds no hard links and no devices either, and an entry that would make
-// one is a gap. So is a name outside /tmp, which is the read-only filesystem
-// every other write here meets.
+// What an entry says of its mode and time is kept as GNU keeps it extracting
+// as anyone but root (keepStat); a directory made on the way to a name has
+// the mode the umask leaves and the time it was made. The overlay holds no
+// hard links and no devices, and an entry that would make one is a gap. So
+// is a name outside /tmp, which is the read-only filesystem every other
+// write here meets.
 
 import { dirname, lookup, resolve } from '../../fs.js'
-import { inOverlay } from '../../writable.js'
+import { MADE_MODE, UMASK, inOverlay } from '../../writable.js'
 import { quoteColon, quoteLocale } from './names.js'
 
 const WRITTEN = new Set(['file', 'contiguous-file', 'directory', 'symlink'])
@@ -77,8 +78,31 @@ function makeParents(path, state) {
   }
   for (const dir of missing.toReversed()) {
     if (!inOverlay(dir) || !fs.makeWritableDir('/', dir)) return 'read-only'
+    fs.keepMetadata(dir, { mode: MADE_MODE })
   }
   return missing.length
+}
+
+// The mode an entry was stored with less the set-id and sticky bits and what
+// the umask takes — a link's is its own and none of these — and the time it
+// was stored with, as GNU tar sets them for anyone but root. A directory's
+// wait, as GNU's do (delay_set_stat), until nothing more is to be written
+// into it: until an entry outside it comes up, or the archive ends.
+export function keepStat(entry, path, mtime, delayed, fs) {
+  const kept = { mode: entry.type === 'symlink' ? undefined : entry.mode & 0o777 & ~UMASK, mtime: Math.floor(mtime) }
+  if (entry.type === 'directory') delayed.push({ path, kept })
+  else fs.keepMetadata(path, kept)
+}
+
+// apply_nonancestor_delayed_set_stat: the directories waiting, latest first,
+// up to the first that `path` is under — all of them where it is null.
+export function settle(delayed, path, fs) {
+  while (delayed.length > 0) {
+    const dir = delayed.at(-1)
+    if (path !== null && path.startsWith(dir.path + '/')) return
+    delayed.pop()
+    if (lookup('/', dir.path, fs, { follow: false }).path !== null && fs.isDir(dir.path)) fs.keepMetadata(dir.path, dir.kept)
+  }
 }
 
 function makeDirectory(path, named, state) {

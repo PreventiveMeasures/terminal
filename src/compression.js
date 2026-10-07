@@ -16,6 +16,7 @@
 // failure, and the members of a gzip stream, which no stream tells apart.
 
 import { CompressionError, decompress, supports } from '@preventive/archive/compression.js'
+import { crc32 } from '@exodus/bytes/crc.js'
 import { joinBytes } from './bytes.js'
 
 // The bytes the stream gave back, and what stopped it where it stopped: what
@@ -99,23 +100,95 @@ async function memberAt(bytes, at) {
   return null
 }
 
-// What came out whole, what stopped the stream, and what was left over after
-// the members it did read. An input the stream read to the end left nothing
-// over and nothing stopped it; one whose members do not account for it short
-// of the end is answered as it was before, with the bytes the stream managed
-// and what it ran into.
+// What GNU's gzip makes of a member's header, read in its own order: a method
+// it does not know, a member encrypted or carrying flags it does not know, and
+// a header whose own check fails are each its refusal as it comes to them, and
+// input that ends first is input it ran out of. Otherwise the header's length.
+const ENCRYPTED = 0x20, RESERVED = 0xc0
+const RAN_OUT = Object.freeze({ trouble: Object.freeze(['eof']) })
+function headerOf(bytes, at) {
+  const end = bytes.length
+  if (at + 3 > end) return RAN_OUT
+  if (bytes[at + 2] !== DEFLATE) return { trouble: ['method', bytes[at + 2]] }
+  if (at + 4 > end) return RAN_OUT
+  const flags = bytes[at + 3]
+  if ((flags & ENCRYPTED) !== 0) return { trouble: ['encrypted'] }
+  if ((flags & RESERVED) !== 0) return { trouble: ['flags', flags] }
+  const length = headerLength(bytes, at)
+  if (length < 0) return RAN_OUT
+  if ((flags & FHCRC) === 0) return { length }
+  // The check is the low half of the CRC-32 of every header byte before it.
+  const sum = at + length - 2
+  const computed = crc32(bytes.subarray(at, sum)) & 0xffff, stored = bytes[sum] + bytes[sum + 1] * 0x100
+  return stored === computed ? { length } : { trouble: ['checksum', stored, computed] }
+}
+
+// Where the deflate data from `from` ends, which no stream says: the shortest
+// run of the input it does not run out of, found by halving. The end found is
+// only answered with where the data up to it inflates cleanly, so a runtime
+// whose stream words running out otherwise finds none rather than a wrong one.
+const RUNS_OUT = 'unexpected end of file'
+async function dataEnd(bytes, from) {
+  let enough = bytes.length, short = from
+  while (enough - short > 1) {
+    const middle = Math.floor((short + enough) / 2)
+    // oxlint-disable-next-line no-await-in-loop -- each half is chosen by the answer before it.
+    const tried = await decompressBytes(bytes.subarray(from, middle), RAW)
+    if (tried.error === RUNS_OUT) short = middle
+    else enough = middle
+  }
+  const data = await decompressBytes(bytes.subarray(from, enough), RAW)
+  return data.error === null ? { bytes: data.bytes, end: enough } : null
+}
+
+// What GNU makes of a member the stream would not read whole. Its header is
+// read first, and what GNU refuses there is refused before a byte of the
+// member is written. Past it, GNU writes what it inflates as it goes, and only
+// then reads the eight bytes that close the member: data that ran out is
+// written as far as it went, and a check or a count that disagrees with what
+// was written is said once it has been. Data that is not deflate at all is
+// left to the word the stream had for it. A member whose eight bytes do agree
+// was whole after all, which a run of tries can miss, and is read on from.
+async function brokenMember(bytes, at) {
+  const header = headerOf(bytes, at)
+  if (header.trouble) return { bytes: null, trouble: { header: header.trouble } }
+  const from = at + header.length
+  const raw = await decompressBytes(bytes.subarray(from), RAW)
+  if (raw.error === RUNS_OUT) return { bytes: raw.bytes, trouble: { eof: true } }
+  const data = raw.error === null ? { bytes: raw.bytes, end: bytes.length } : await dataEnd(bytes, from)
+  if (data === null) return { bytes: null, trouble: null, error: raw.error }
+  if (data.end + TRAILER > bytes.length) return { bytes: data.bytes, trouble: { eof: true } }
+  const crc = crc32(data.bytes) !== heldAt(bytes, data.end)
+  const length = data.bytes.length % 0x100000000 !== heldAt(bytes, data.end + 4)
+  if (!crc && !length) return { bytes: data.bytes, trouble: null, end: data.end + TRAILER }
+  return { bytes: data.bytes, trouble: { crc, length } }
+}
+
+// What came out, what stopped the stream, what was left over after the
+// members it did read, and what GNU would make of the first of them that is
+// not whole. An input the stream read to the end left nothing over and
+// nothing stopped it. Otherwise the bytes are the members that were whole and
+// whatever of the next GNU writes before it reports it — `trouble` says what
+// it reports; bytes after the last member that begin none are `rest` alone,
+// which is gzip's to answer as trailing garbage or padding.
 export async function decompressMembers(bytes) {
   const read = await decompressBytes(bytes, GZIP)
-  if (read.error === null || !supports(RAW)) return { ...read, rest: null }
+  if (read.error === null || !supports(RAW)) return { ...read, rest: null, trouble: null }
   const parts = []
   let at = 0
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- one member after the last, as a stream carries them.
-    const member = await memberAt(bytes, at)
-    if (member === null) break
+    const member = await memberAt(bytes, at) ?? await brokenAt(bytes, at)
+    if (member === null || member.end === undefined) {
+      if (at === bytes.length) return { ...read, rest: null, trouble: null }
+      if (member?.bytes) parts.push(member.bytes)
+      return { bytes: joinBytes(parts), error: member?.error ?? read.error, rest: bytes.subarray(at), trouble: member?.trouble ?? null }
+    }
     parts.push(member.bytes)
     at = member.end
   }
-  if (at === 0 || at === bytes.length) return { ...read, rest: null }
-  return { bytes: joinBytes(parts), error: read.error, rest: bytes.subarray(at) }
 }
+
+// Only bytes that open a member are one to make anything of: what follows the
+// last of them otherwise is not a member at all.
+const brokenAt = (bytes, at) => bytes.length - at >= 2 && bytes[at] === 0x1f && bytes[at + 1] === 0x8b ? brokenMember(bytes, at) : null

@@ -58,7 +58,7 @@ function sums(cmd, bits) {
     const r = readInputs(cmd, positional, stdin, ctx, { read: 'bytes' })
     // One digest does not wait for the last: what they are of is already read.
     const digests = await Promise.all(r.inputs.map((input) => digest(algorithm, input.bytes)))
-    const line = format(algorithm, flags, mode)
+    const line = format(cmd, algorithm, flags, mode)
     return okWith(r.inputs.map((input, at) => line(digests[at], input.name ?? '-')).join(''), r)
   }
 }
@@ -92,14 +92,36 @@ function tagMode(cmd, flags, order) {
   return { mode }
 }
 
+// A name that would break the line it is on is written escaped, and the line
+// then starts with a backslash to say so — before the digest, or before the
+// label under `--tag`. coreutils escapes a backslash, a newline and a carriage
+// return; shasum only the first two, and writes a carriage return as it is.
+// Lines that end with NUL are not broken by any of them and escape nothing.
+const ESCAPES = { __proto__: null, '\\': '\\\\', '\n': '\\n', '\r': '\\r' }
+function escaping(cmd, end) {
+  if (end !== '\n') return (name) => ({ lead: '', name })
+  const problem = cmd === 'shasum' ? /[\\\n]/gu : /[\\\n\r]/gu
+  return (name) => {
+    const escaped = name.replace(problem, (c) => ESCAPES[c])
+    return { lead: escaped === name ? '' : '\\', name: escaped }
+  }
+}
+
 // Otherwise the mode is the space or the star between the two.
-function format(algorithm, flags, mode) {
+function format(cmd, algorithm, flags, mode) {
   const end = flags.has('z') || flags.has('zero') ? '\0' : '\n'
+  const escape = escaping(cmd, end)
   if (flags.has('tag')) {
     const label = algorithm.replace('-', '')
-    return (hash, name) => `${label} (${name}) = ${hash}${end}`
+    return (hash, file) => {
+      const { lead, name } = escape(file)
+      return `${lead}${label} (${name}) = ${hash}${end}`
+    }
   }
-  return (hash, name) => `${hash}${mode.binary ? ' *' : '  '}${name}${end}`
+  return (hash, file) => {
+    const { lead, name } = escape(file)
+    return `${lead}${hash}${mode.binary ? ' *' : '  '}${name}${end}`
+  }
 }
 
 // Only where the runtime can do the work, as with a compressor: a terminal

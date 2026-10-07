@@ -5,6 +5,7 @@
 import { parseArgs } from '../args.js'
 import { INT64_MAX } from '../numeric.js'
 import { decodeUtf8Loose, decodeUtf8Maybe, encodeUtf8, err, ok, readInputs } from '../util.js'
+import { quoteLocale } from './tar/names.js'
 
 const DEFAULT_WRAP = 76
 
@@ -16,11 +17,11 @@ export function baseCommand(name, { encode, decode }) {
     let wrap = DEFAULT_WRAP
     for (const { name: option, value } of order) {
       if (option !== 'w' && option !== 'wrap') continue
-      if (!/^[ \t\n\r\f\v]*[+-]?\d+$/u.test(value) || BigInt(value) < 0n) return err(`${name}: invalid wrap size: ${value}`)
+      if (!/^[ \t\n\r\f\v]*[+-]?\d+$/u.test(value) || BigInt(value) < 0n) return err(`${name}: invalid wrap size: ${quoteLocale(value, ctx)}`)
       const count = BigInt(value)
       wrap = count > INT64_MAX ? 0 : Number(count)
     }
-    if (positional.length > 1) return err(`${name}: extra operand: ${positional[1]}`)
+    if (positional.length > 1) return err(`${name}: extra operand ${quoteLocale(positional[1], ctx)}\nTry '${name} --help' for more information.`)
     // The file as it is held: this is what bytes look like as text, so a file
     // this terminal cannot spell as text has an encoding all the same, while
     // text a pipe carried is encoded from the text it is rather than read twice.

@@ -16,6 +16,7 @@ import { UnsupportedError } from '../../unsupported.js'
 import { byteLocale, classTables, encodeUtf8 } from '../../util.js'
 import { formatDate } from '../extra.js'
 import { storedName } from '../stored-names.js'
+import { MADE_MODE } from '../../writable.js'
 
 const C_ESCAPES = new Map([[7, 'a'], [8, 'b'], [12, 'f'], [10, 'n'], [13, 'r'], [9, 't'], [11, 'v']])
 const octal = (byte) => '\\' + byte.toString(8).padStart(3, '0')
@@ -42,7 +43,7 @@ const TYPES = {
 
 // pax_decode_mode: the nine permission letters, with set-id and sticky bits
 // shown in the execute places, lower case where the execute bit is also set.
-function modeString(type, mode) {
+export function modeString(type, mode) {
   const letters = [...'rwxrwxrwx'].map((letter, i) => ((mode & (0o400 >> i)) === 0 ? '-' : letter))
   const special = (bit, at, letter) => {
     if ((mode & bit) !== 0) letters[at] = letters[at] === 'x' ? letter : letter.toUpperCase()
@@ -58,8 +59,9 @@ const DEVICES = new Set(['character-device', 'block-device'])
 
 // One run's long lines: owners by name where the archive has names for
 // them, as GNU gives them unless --numeric-owner asks for the numbers, and
-// times in local time unless --utc or TZ says otherwise.
-export function longLines(ctx, { numericOwner = false, utc = false } = {}) {
+// times in local time unless --utc or TZ says otherwise. Reading an archive,
+// `strip` is how many components --strip-components takes off.
+export function longLines(ctx, { numericOwner = false, utc = false } = {}, strip = 0) {
   let ugswidth = 19
   let datewidth = 16
   const zone = utc || ctx.vars.has('TZ')
@@ -72,17 +74,34 @@ export function longLines(ctx, { numericOwner = false, utc = false } = {}) {
     const stamp = timeStamp(entry.mtime, zone)
     if (stamp.length > datewidth) datewidth = stamp.length
     const head = `${modeString(entry.type, entry.mode)} ${user}/${group} ${' '.repeat(ugswidth - pad)}${size} ${stamp.padEnd(datewidth)} `
-    return head + quoteEscape(storedName(entry), ctx) + linkSuffix(entry, ctx)
+    return head + quoteEscape(storedName(entry), ctx) + linkSuffix(entry, strip, ctx)
   }
-  // print_for_mkdir: a directory made for an entry, in this tree's mode, its
-  // words where the owners and the time stand in the lines around it.
-  line.mkdir = (name) => `${modeString('directory', 0o700)} ${'Creating directory:'.padStart(ugswidth + 1 + datewidth)} ${quoteEscape(name, ctx)}`
+  // print_for_mkdir: a directory made for an entry, in the mode it is made
+  // with, its words where the owners and the time stand in the lines around it.
+  line.mkdir = (name) => `${modeString('directory', MADE_MODE)} ${'Creating directory:'.padStart(ugswidth + 1 + datewidth)} ${quoteEscape(name, ctx)}`
   return line
 }
 
-function linkSuffix(entry, ctx) {
+function linkSuffix(entry, strip, ctx) {
   if (entry.type === 'symlink') return ` -> ${quoteEscape(entry.linkname, ctx)}`
-  if (entry.type === 'hardlink') return ` link to ${quoteEscape(entry.linkname, ctx)}`
+  if (entry.type === 'hardlink') return ` link to ${quoteEscape(strippedTarget(entry.linkname, strip), ctx)}`
+  return ''
+}
+
+// GNU strips a hard link's target as it strips a name, listing or not, where
+// the entry's own name is printed as stored — a symbolic link's target is
+// left alone. Its stripped_prefix_len: slashes in front are passed over, and
+// those after each component but the last one stripped; a target with no
+// more components than that is stripped to nothing at all.
+function strippedTarget(target, strip) {
+  if (strip === 0) return target
+  let at = 0, left = strip
+  while (target[at] === '/') at++
+  while (at < target.length) {
+    if (target[at++] !== '/') continue
+    if (--left === 0) return target.slice(at)
+    while (target[at] === '/') at++
+  }
   return ''
 }
 

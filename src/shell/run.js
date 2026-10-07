@@ -274,9 +274,11 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
     }
     // oxlint-enable no-await-in-loop
     if (file && handle) {
-      const current = ctx.io.bufferReads(() => ctx.fs.readIdentity(handle.identity))
-      if (current !== handle.content) {
-        if (inherited || input !== handle.content) throw new UnsupportedError('feature', 'modified redirected input', 'reading an inherited input file after it changes is not supported')
+      // A file of bytes no text spells is compared as the bytes it is, and
+      // one that changed is not read again.
+      const current = ctx.io.bufferReads(() => ctx.fs.readIdentity(handle.identity, handle.bytes))
+      if (current !== (handle.bytes ?? handle.content)) {
+        if (inherited || input !== handle.content || handle.bytes) throw new UnsupportedError('feature', 'modified redirected input', 'reading an inherited input file after it changes is not supported')
         // A later output redirect may truncate a newly opened input file.
         input = origin = current
         handle = { ...handle, content: current }
@@ -354,7 +356,7 @@ function readInput(path, ctx, stdin) {
     // pipe, so only a file no text spells travels as the bytes it is.
     const { text, bytes } = readTextOrBytes(ctx.fs, abs)
     const content = text ?? '', held = text === undefined ? bytes : undefined
-    return { content, bytes: held, handle: ctx.writable && abs.startsWith('/tmp/') ? { path: abs, content, identity: ctx.fs.fileIdentity(abs) } : null }
+    return { content, bytes: held, handle: ctx.writable && abs.startsWith('/tmp/') ? { path: abs, content, bytes: held, identity: ctx.fs.fileIdentity(abs) } : null }
   }
   return { error: err(`error: ${path}: Is a directory`) }
 }

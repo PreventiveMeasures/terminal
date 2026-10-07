@@ -1,6 +1,6 @@
 import { parseArgs } from '../args.js'
 import { compareNames, joinPath, lookup, nameTooLong, pathTooLong } from '../fs.js'
-import { err, ok, reason } from '../util.js'
+import { err, ok, reason, stdinIsTerminal } from '../util.js'
 import { unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
 import { missingPathNote } from '../notes.js'
@@ -12,7 +12,9 @@ export function rm(_stdin, tokens, ctx) {
   const verbose = flags.has('v') || flags.has('verbose')
   const recursive = flags.has('r') || flags.has('R') || flags.has('recursive')
   if (positional.length === 0) return force ? ok('') : err("rm: missing operand\nTry 'rm --help' for more information.")
-  const state = { ctx, force, verbose, recursive, events: [], stdout: '', stderr: '' }
+  // Where stdin is a terminal and -f was not given, GNU asks before it takes
+  // anything away (see asked, below).
+  const state = { ctx, force, verbose, recursive, asking: !force && stdinIsTerminal(ctx), events: [], stdout: '', stderr: '', failed: false }
   try {
     for (const name of positional) removeOperand(name, state)
   } catch (e) {
@@ -23,7 +25,7 @@ export function rm(_stdin, tokens, ctx) {
     result.stderr = state.stderr + result.stderr
     return result
   }
-  return { stdout: state.stdout, stderr: state.stderr, events: state.events, exitCode: state.stderr ? 1 : 0 }
+  return { stdout: state.stdout, stderr: state.stderr, events: state.events, exitCode: state.failed ? 1 : 0 }
 }
 
 const MISSING = 'No such file or directory'
@@ -36,14 +38,16 @@ function removeOperand(name, state) {
   const found = lookup(ctx.cwd, name, ctx.fs, { follow: false })
   if (found.error) {
     // What lstat could not find, GNU tries to unlink all the same, and says
-    // what that failed with; -f ignores a name that is not there and one
-    // under something that is not a directory, neither naming a file.
-    const error = unlinkError(ctx, name, found.error)
+    // what that failed with — unless it asked first, which it does with a
+    // terminal on stdin, and says what lstat failed with instead; -f ignores
+    // a name that is not there and one under something that is not a
+    // directory, neither naming a file.
+    const error = state.asking ? found.error : unlinkError(ctx, name, found.error)
     if (state.force && (error === MISSING || error === 'Not a directory')) return
     missingPathNote(ctx, 'rm', name, error)
     return report(state, `rm: cannot remove ${quoteName(name, ctx)}: ${error}\n`)
   }
-  if (!ctx.fs.isDir(found.path)) return removeEntry(name, ctx.cwd, name, state, false)
+  if (!ctx.fs.isDir(found.path)) return removeEntry(name, ctx.cwd, name, found.path, state, false)
   if (!state.recursive) return report(state, `rm: cannot remove ${quoteName(name, ctx)}: Is a directory\n`)
   // `rm -r .` would name the directory a caller is standing in by a name
   // that says nothing about which one it is, so GNU passes over it.
@@ -109,29 +113,34 @@ function crossedLink(ctx, name) {
 function removeTree(shown, from, name, absolute, state, crossed = false) {
   const { ctx } = state
   const { dirs, files, links = [] } = ctx.fs.listDir(absolute)
+  // GNU asks before it goes into a directory, and about an empty one where it
+  // would take it away.
+  if (dirs.length + files.length + links.length > 0 && !asked(shown, absolute, 'descend into', state)) return false
   const base = shown.replace(/\/+$/u, '')
   let emptied = true
   for (const child of [...dirs, ...files, ...links].sort(compareNames)) {
     const path = joinPath(absolute, child)
     const removed = ctx.fs.isDir(path)
       ? removeTree(`${base}/${child}`, absolute, child, path, state)
-      : removeEntry(`${base}/${child}`, absolute, child, state, false)
+      : removeEntry(`${base}/${child}`, absolute, child, path, state, false)
     emptied &&= removed
   }
   if (!emptied) return false
-  return removeEntry(shown, from, name, state, true, crossed)
+  return removeEntry(shown, from, name, absolute, state, true, crossed)
 }
 
-// Removes `name` from the directory `from`, reporting it as `shown`; whether
-// it is gone is the answer. Outside the overlay the directory it is in says
-// why not: a read-only mount, or the root filesystem's own. A directory
-// reached only through a link the operand spelled with a trailing slash is
-// not what that name is, and rmdir says so.
-function removeEntry(shown, from, name, state, directory, crossed = false) {
+// Removes `name` from the directory `from`, reporting it as `shown`, once
+// `path`, where it is, has been asked about; whether it is gone is the
+// answer. Outside the overlay the directory it is in says why not: a
+// read-only mount, or the root filesystem's own. A directory reached only
+// through a link the operand spelled with a trailing slash is not what that
+// name is, and rmdir says so.
+function removeEntry(shown, from, name, path, state, directory, crossed = false) {
   const { ctx } = state
   // The name is quoted only where it is printed, and before anything is
   // removed where it will be: a name `-v` cannot announce stays where it is.
   const quoted = state.verbose ? quoteName(shown, ctx) : null
+  if (!asked(shown, path, 'remove', state)) return false
   let error = null
   try {
     const { parent, last } = parentOf(ctx, from, name)
@@ -159,8 +168,45 @@ function removeEntry(shown, from, name, state, directory, crossed = false) {
   return true
 }
 
-function report(state, text, fd = 2) {
+function report(state, text, fd = 2, failed = fd === 2) {
   if (fd === 1) state.stdout += text
   else state.stderr += text
   state.events.push({ fd, text })
+  state.failed ||= failed
+}
+
+// GNU's prompt(), where stdin is a terminal and -f was not given: before it
+// goes into a directory or takes a name away, it asks whether its owner may
+// write it. A name the owner may not write it asks the user about — which a
+// terminal with nothing typed on it answers no, so the name is left where it
+// is, and that is no failure — and a name access(2) cannot answer for, which
+// a read-only mount answers with EROFS, is the failure to remove it, said
+// there and then: a directory is not gone into at all. A link is never asked
+// about. Whether to go on is the answer.
+function asked(shown, path, doing, state) {
+  if (!state.asking) return true
+  const { ctx } = state
+  const answer = writeProtected(ctx, path)
+  if (answer === false) return true
+  if (answer !== true) {
+    report(state, `rm: cannot remove ${quoteName(shown, ctx)}: ${answer}\n`)
+    return false
+  }
+  const what = doing === 'descend into' || ctx.fs.isDir(path) ? 'directory' : ctx.fs.fileSize(path) === 0 ? 'regular empty file' : 'regular file'
+  report(state, `rm: ${doing} write-protected ${what} ${quoteName(shown, ctx)}? `, 2, false)
+  return false
+}
+
+// GNU's write_protected_non_symlink: whether the owner may not write `path`
+// — true where a mode it keeps says so, or where it is the root
+// filesystem's, which is root's own (EACCES) — or why access(2) cannot say,
+// which is EROFS on the read-only mount.
+function writeProtected(ctx, path) {
+  if (ctx.fs.isLink?.(path)) return false
+  if (ctx.writable && inOverlay(path)) {
+    const mode = ctx.fs.metadataOf?.(path)?.mode
+    return mode !== undefined && (mode & 0o200) === 0
+  }
+  const refusal = writeRefusal(ctx, path)
+  return refusal === 'Permission denied' || refusal
 }

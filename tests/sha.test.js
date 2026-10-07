@@ -139,3 +139,33 @@ describe('the file mode is the last thing said about it, and --tag says binary',
     assert.deepEqual(await t.run('shasum --tag -b a.txt'), result(`SHA1 (a.txt) = ${DIGESTS[1]}\n`))
   })
 })
+
+// A name that would break its line is written escaped, and the line then
+// starts with a backslash to say so. Recorded from sha1sum 9.4 and shasum 6.04
+// over files with these names on disk.
+describe('a name that would break its line is escaped, and the line says so', () => {
+  const NAMES = { 'a\\b': 'x', 'n\nl': 'y', 'c\rr': 'z' }
+  const X1 = '11f6ad8ec52a2984abaafd7c3b516503785c2072'
+  const Y1 = '95cb0bfd2977c761298d9624e4b4d4c72a39974a'
+  const Z1 = '395df8f7c51f007019cb30201c49e884b46b92fa'
+  const named = () => createTerminal(NAMES, { mount: '/repo', writable: '/tmp/' })
+
+  it('escapes a backslash, a newline and a carriage return for coreutils', async () => {
+    const t = named()
+    assert.deepEqual(await t.run("sha1sum 'a\\b'"), result(`\\${X1}  a\\\\b\n`))
+    assert.deepEqual(await t.run('sha1sum n* c*'), result(`\\${Y1}  n\\nl\n\\${Z1}  c\\rr\n`))
+    assert.deepEqual(await t.run("sha1sum -b 'a\\b'"), result(`\\${X1} *a\\\\b\n`))
+    // Under `--tag` the backslash comes before the label.
+    assert.deepEqual(await t.run('sha1sum --tag n*'), result(`\\SHA1 (n\\nl) = ${Y1}\n`))
+    // Lines ended with NUL are not broken by any of them.
+    assert.deepEqual(await t.run('sha1sum -z n*'), result(`${Y1}  n\nl\0`))
+    assert.deepEqual(await t.run('sha1sum --tag -z c*'), result(`SHA1 (c\rr) = ${Z1}\0`))
+  })
+
+  it('escapes only a backslash and a newline for shasum', async () => {
+    const t = named()
+    assert.deepEqual(await t.run("shasum 'a\\b' n*"), result(`\\${X1}  a\\\\b\n\\${Y1}  n\\nl\n`))
+    assert.deepEqual(await t.run('shasum c*'), result(`${Z1}  c\rr\n`))
+    assert.deepEqual(await t.run('shasum --tag n* c*'), result(`\\SHA1 (n\\nl) = ${Y1}\nSHA1 (c\rr) = ${Z1}\n`))
+  })
+})
