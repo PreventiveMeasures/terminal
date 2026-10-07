@@ -130,7 +130,7 @@ async function expandedWord(w, ctx, assignment = false) {
     if (!ref) { append(w.value[i], m); continue }
     i += ref.raw.length - 1
     // oxlint-disable-next-line no-await-in-loop -- a word's expansions run left to right, each reading what the last left.
-    const r = await expansionValue(ref, ctx, m === '2', assignment)
+    const r = await expansionValue(ref, ctx, m === '2', assignment).catch((e) => { throw e.badSubstitution ? badSubstitution(w, ref) : e })
     if (r.literal) { append(ref.raw, m.repeat(ref.raw.length)); continue }
     if (r.omit) continue
     if (m === '2') {
@@ -152,6 +152,14 @@ async function expandedWord(w, ctx, assignment = false) {
 function substitutionRef(w, i, c, m, compound) {
   if (c === '`') return readBacktickSubstitution(w.value, i)
   return compound ? readExpansion(w.value, i, 0, m === '2') : scanRef(w.value, i, w.mask)
+}
+
+// Bash names the string it was expanding, quotes and all, which is the word
+// as written where the reference is the whole of it. Anything around it is
+// source this word no longer holds.
+function badSubstitution(w, ref) {
+  if (w.value !== ref.raw) return new UnsupportedError('feature', '${', `bad substitution inside a longer word is not supported: ${ref.raw}`)
+  return Object.assign(new Error(`${ref.raw.replaceAll('\\\n', '')}: bad substitution`), { exitCode: 1, halt: true })
 }
 
 async function expansionValue(ref, ctx, quoted, assignment) {

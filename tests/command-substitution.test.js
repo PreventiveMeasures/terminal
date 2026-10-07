@@ -162,3 +162,18 @@ describe('command substitution — redirects and diagnostics', () => {
     }
   })
 })
+
+// Inside double quotes a backtick body loses the backslash before `"` too, so
+// "`echo \"q\"`" runs `echo "q"`; outside them, and in a here-document, the
+// backslash reaches the inner command.
+describe('command substitution — backticks inside double quotes', () => {
+  const cases = [
+    ['echo "`echo \\"q\\"`"', 'q\n'],
+    ['x="`echo \\"a  b\\"`"; echo "$x"', 'a  b\n'],
+    ['echo "`echo \\\\\\"q\\\\\\"`"', '"q"\n'],
+    ['echo `echo \\"q\\"`', '"q"\n'],
+    ['cat <<EOF\n`echo \\"q\\"`\nEOF', '"q"\n'],
+    ['[[ "`echo \\"q\\"`" == q ]] && echo yes', 'yes\n'],
+  ]
+  for (const [command, stdout] of cases) it(command, () => check(command, stdout))
+})

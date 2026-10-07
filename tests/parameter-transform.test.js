@@ -13,7 +13,7 @@ describe('scalar substring bounds and arithmetic', () => {
     ['1', 'bcdef'], ['1:2', 'bc'], ['0', 'abcdef'], ['0:0', ''], ['0:99', 'abcdef'],
     ['6', ''], ['7', ''], [' -1', 'f'], [' -2:1', 'e'], [' -6', 'abcdef'], [' -7', ''],
     ['0:-1', 'abcde'], ['1:-1', 'bcde'], ['1:-5', ''], [' -3:-1', 'de'],
-    [':', ''], ['', 'abcdef'], ['1:', ''], [':2', 'ab'],
+    [':', ''], ['1:', ''], [':2', 'ab'],
     ['1+1:2*2', 'cdef'], ['1?2:4:2', 'cd'], ['0?2:4:2', 'ef'],
     ['(1?2:4):2', 'cd'], ['1?(0?1:3):4:2', 'de'],
     ['0x2:010', 'cdef'], ['2#10:2', 'cd'], ['~0', 'f'],
@@ -41,6 +41,29 @@ describe('scalar substring bounds and arithmetic', () => {
   ]) {
     it(source, async () => { await check(source, stdout, { 'a.txt': '', 'b.txt': '' }) })
   }
+
+  // `${x:}` names no offset at all, which bash 5.2 calls a bad substitution
+  // whatever x holds, naming the word it was expanding.
+  for (const [source, word] of [
+    ['x=abcdef; printf "%s" "${x:}"; echo unexpected', '${x:}'],
+    ['printf "%s" ${x:}; echo unexpected', '${x:}'],
+    ['x=abcdef; y=${x:}; echo unexpected', '${x:}'],
+    ['x=abcdef; printf "%s" ${y:-${x:}}; echo unexpected', '${x:}'],
+  ]) {
+    it(`reports ${source} as a bad substitution`, async () => {
+      const actual = await createTerminal({}).run(source)
+      assert.equal(actual.stdout, '')
+      assert.equal(actual.exitCode, 1)
+      assert.match(actual.stderr, new RegExp(`${word.replace(/[${}]/gu, '\\$&')}: bad substitution`, 'u'))
+      assert.deepEqual(actual.unsupported, [])
+    })
+  }
+
+  it('refuses a bad substitution inside a longer word, whose source is gone', async () => {
+    const actual = await createTerminal({}).run('x=abc; echo a${x:}b')
+    assert.equal(actual.exitCode, 1)
+    assert.equal(actual.unsupported[0]?.detail, '${')
+  })
 
   it('reports invalid negative lengths as ordinary errors and stops expansion', async () => {
     for (const expression of ['2:-5', '0:-7', '6:-1']) {

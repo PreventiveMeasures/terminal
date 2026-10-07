@@ -24,6 +24,21 @@ export function readBacktickSubstitution(line, start) {
   throw new Error('unterminated backtick substitution')
 }
 
+// Inside double quotes a backslash before `"` escapes it too, so
+// "`echo \"q\"`" runs `echo "q"`. Only the reader knows the quotes, and the
+// word keeps the source re-read at expansion, so the escape is taken out of
+// that source here: a `"` cannot end the substitution, and every other pair
+// stays for the re-read to unescape as it always does.
+export function doubleQuotedBacktick(raw) {
+  let out = ''
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] !== '\\') { out += raw[i]; continue }
+    out += raw[i + 1] === '"' ? '"' : raw.slice(i, i + 2)
+    i++
+  }
+  return out
+}
+
 const freshWord = () => ({ value: '', quoted: false, started: false })
 const depthGap = () => new UnsupportedError('feature', 'command substitution depth', `command substitution nesting above ${MAX_SUBSTITUTION_DEPTH} is not supported`)
 

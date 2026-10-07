@@ -1,13 +1,13 @@
 import { expandRedirect, expandScalar, expandWords } from './expand.js'
-import { readBacktickSubstitution, readExpansion } from './lex.js'
 import { refusedWrite } from './parse.js'
 import { BindingMap } from './bindings.js'
-import { gateBlame, gateTracker, lookupWithNote, missingPathNote } from '../notes.js'
+import { gateBlame, gateTracker, missingPathNote } from '../notes.js'
 import { UnsupportedError, unsupported, unsupportedNote } from '../unsupported.js'
-import { decodeUtf8Maybe, encodeUtf8, err, joinBytes, readTextOrBytes, reason } from '../util.js'
+import { decodeUtf8Maybe, encodeUtf8, err, joinBytes, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
 import { runBlock } from './blocks.js'
+import { heredocWord, readDirectoryInput, readInput } from './stdin.js'
 
 export { createIoGuard } from './io.js'
 export { commandWriteError } from './output.js'
@@ -100,7 +100,7 @@ async function runPipeline(stages, ctx, stream) {
     const fds = { ...ctx.outputFds }
     if (sink) fds[1] = sink
     const stageBytes = inputBytes, stageInput = input
-    const run = () => pipelineStage(stage, ctx, { stdin: stageInput, stdinBytes: stageBytes, stdinFile: first && ctx.stdinFile, fds, stdinPiped: first ? ctx.stdinPiped : true, stdinTerminal: first && ctx.stdinTerminal })
+    const run = () => pipelineStage(stage, ctx, { stdin: stageInput, stdinBytes: stageBytes, stdinFile: first && ctx.stdinFile, stdinDirectory: first && ctx.stdinDirectory, fds, stdinPiped: first ? ctx.stdinPiped : true, stdinTerminal: first && ctx.stdinTerminal })
     // Every stage of a real pipeline is its own process, and what `set -e`
     // ignored in there is as much its own business as the rest of its state.
     // oxlint-disable-next-line no-await-in-loop -- a stage reads what the one before it wrote, so it runs after it.
@@ -141,8 +141,8 @@ function pipeSink() {
 
 // Simple-command arguments expand before redirects. All expansion diagnostics
 // follow the descriptors active at their expansion site.
-function pipelineStage(stage, ctx, { stdin, stdinBytes, stdinFile, fds, stdinPiped, stdinTerminal }) {
-  const initial = { fds, stdin, stdinBytes, stdinFile, stdinPiped, stdinTerminal, stdinOrigin: stdinFile ? ctx.stdinOrigin : null, stdinHandle: stdinFile ? ctx.stdinHandle : null }
+function pipelineStage(stage, ctx, { stdin, stdinBytes, stdinFile, stdinDirectory, fds, stdinPiped, stdinTerminal }) {
+  const initial = { fds, stdin, stdinBytes, stdinFile, stdinDirectory, stdinPiped, stdinTerminal, stdinOrigin: stdinFile ? ctx.stdinOrigin : null, stdinHandle: stdinFile ? ctx.stdinHandle : null }
   return withState(ctx, { substitutionExit: null, expansionOutput: emptyOutput(), expansionFds: fds }, () => withStreams(initial, ctx, async () => {
     const simple = !stage.group && !stage.loop && !stage.conditional && !stage.test && !stage.define
     let expanded, expansionError
@@ -194,6 +194,8 @@ function pipelineStage(stage, ctx, { stdin, stdinBytes, stdinFile, fds, stdinPip
         // exits on it even where the body ended on a `!` it was ignoring.
         try { return await withState(ctx, { loopDepth: 0 }, async () => ({ ...await withTemporaries(expanded.temps, ctx, () => runSteps(body, ctx, { text: io.stdin, bytes: io.stdinBytes })), ignored: false })) } finally { ctx.calling.delete(name) }
       }
+      // `$(< dir)` reads nothing and says nothing: bash reads that file itself.
+      if (stage.slurp && ctx.stdinDirectory) return { stdout: '', stderr: '', exitCode: 0 }
       const r = await runStage(ctx, expanded)
       if (expanded.argv.length) blame = gateBlame(ctx.registry.chainRole(expanded.argv), expanded.argv[0])
       return r
@@ -217,6 +219,7 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
   let file = stdinFile
   let origin = file ? ctx.stdinOrigin : null
   let handle = file ? ctx.stdinHandle : null
+  let directory = ctx.stdinDirectory ?? false
   let inherited = true
   let parentLeft = stdin
   // Any input redirect but /dev/stdin, which is the stream already there,
@@ -228,7 +231,7 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
   // the list shares, and what it takes it takes out of both halves of it.
   let piped = ctx.stdinBytes
   let parentBytes = piped
-  const done = (error) => ({ error, fds, stdin: input, stdinBytes: piped, stdinFile: file, stdinPiped: redirected || ctx.stdinPiped, stdinTerminal: terminal, stdinOrigin: file ? origin : null, stdinHandle: file ? handle : null, inherited, parentLeft, parentBytes })
+  const done = (error) => ({ error, fds, stdin: input, stdinBytes: piped, stdinFile: file, stdinDirectory: directory, stdinPiped: redirected || ctx.stdinPiped, stdinTerminal: terminal, stdinOrigin: file ? origin : null, stdinHandle: file ? handle : null, inherited, parentLeft, parentBytes })
   const expand = async (fn) => {
     const value = await withState(ctx, { expansionFds: fds }, () => withStreams({ fds, stdin: input, stdinBytes: piped, stdinFile: file, stdinOrigin: origin, stdinHandle: handle }, ctx, fn))
     input = ctx.stdinLeft; piped = ctx.stdinBytes
@@ -256,9 +259,9 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
         if (dest === 'closed') return done(err(`error: ${t.value}: No such file or directory`))
         fds[r.fd] = dest
         if (r.both) fds[2] = dest
-      } else if (r.op === 'text') { input = r.expand ? await expand(() => expandScalar(heredocWord(r.body), ctx)) : r.body; file = false; inherited = false; piped = null; terminal = false }
+      } else if (r.op === 'text') { input = r.expand ? await expand(() => expandScalar(heredocWord(r.body), ctx)) : r.body; file = false; directory = false; inherited = false; piped = null; terminal = false }
       // A here-string is expanded but neither split nor globbed (bash).
-      else if (r.op === 'herestring') { input = await expand(() => expandScalar(r.word, ctx)) + '\n'; file = false; inherited = false; piped = null; terminal = false }
+      else if (r.op === 'herestring') { input = await expand(() => expandScalar(r.word, ctx)) + '\n'; file = false; directory = false; inherited = false; piped = null; terminal = false }
       else {
         const t = await expand(() => expandRedirect(r.word, ctx))
         const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, file ? origin : input)
@@ -269,7 +272,9 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
         // A pipe's /dev/stdin shares the current stream. A regular file
         // is reopened from its original start with an independent offset.
         if (t.value !== '/dev/stdin' || file) inherited = false
-        if (t.value !== '/dev/stdin') { file = t.value !== '/dev/null'; origin = file ? input : null; handle = read.handle; redirected = file; terminal = false }
+        // A directory is no file to read and no stream either: what reads it
+        // fails, which readDirectoryInput answers for.
+        if (t.value !== '/dev/stdin') { directory = read.directory ?? false; file = t.value !== '/dev/null' && !directory; origin = file ? input : null; handle = read.handle; redirected = file; terminal = false }
       }
     }
     // oxlint-enable no-await-in-loop
@@ -288,11 +293,14 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
 
 // Expansion errors belong to the failing stage: earlier output and later
 // pipeline stages survive, and redirections may silence only stderr.
+// An error that ends the shell itself is 127 where it ends the line's own
+// shell, as `bash -c` reports it; a subshell or a substitution catching it
+// exits 1 instead.
 function shellFailure(ctx, e) {
   missingPathNote(ctx, 'shell', e?.path, e?.fsError)
   const note = unsupportedNote(e)
   if (note) ctx.unsupported.add(note)
-  return { ...err(`error: ${reason(e)}`, 1), ...(e?.halt ? { halt: true } : {}) }
+  return { ...err(`error: ${reason(e)}`, e?.fatal && !ctx.subshell ? 127 : 1), ...(e?.halt ? { halt: true } : {}) }
 }
 
 async function shellResult(ctx, fn) {
@@ -303,60 +311,10 @@ async function shellResult(ctx, fn) {
 // shares is one input — the text left in it and the bytes left in it — so both
 // stay available to it, while the rest of the stream state is restored.
 function withStreams(io, ctx, fn) {
-  const state = { outputFds: io.fds, closed: { out: io.fds[1] === 'closed', err: io.fds[2] === 'closed' }, stdinFile: Boolean(io.stdinFile), stdinPiped: io.stdinPiped ?? ctx.stdinPiped, stdinTerminal: io.stdinTerminal ?? ctx.stdinTerminal, stdinOrigin: io.stdinOrigin, stdinHandle: io.stdinHandle }
+  const state = { outputFds: io.fds, closed: { out: io.fds[1] === 'closed', err: io.fds[2] === 'closed' }, stdinFile: Boolean(io.stdinFile), stdinDirectory: io.stdinDirectory ?? false, stdinPiped: io.stdinPiped ?? ctx.stdinPiped, stdinTerminal: io.stdinTerminal ?? ctx.stdinTerminal, stdinOrigin: io.stdinOrigin, stdinHandle: io.stdinHandle }
   ctx.stdinLeft = io.stdin
   ctx.stdinBytes = io.stdinBytes ?? null
   return withState(ctx, state, fn)
-}
-
-// Unquoted heredocs use double-quote expansion rules without quote removal.
-// Only backslashes before $, backslash, or backtick escape a character.
-function heredocWord(body) {
-  let value = ''
-  let mask = ''
-  for (let i = 0; i < body.length; i++) {
-    const c = body[i]
-    const n = body[i + 1]
-    if (c === '\\' && (n === '$' || n === '\\' || n === '`')) { value += n; mask += '1'; i++; continue }
-    if (c === '`') {
-      const backtick = readBacktickSubstitution(body, i)
-      value += backtick.raw
-      mask += '2' + '1'.repeat(backtick.raw.length - 1)
-      i += backtick.raw.length - 1
-      continue
-    }
-    if (c === '$') {
-      const ref = readExpansion(body, i, 0, true)
-      if (ref?.command !== undefined || ref?.parameter !== undefined || ref?.arithmetic !== undefined) {
-        value += ref.raw
-        mask += '2' + '1'.repeat(ref.raw.length - 1)
-        i += ref.raw.length - 1
-        continue
-      }
-    }
-    value += c
-    mask += '2'
-  }
-  return { value, mask }
-}
-
-// Resolve input before dispatch: failed reads prevent command execution.
-function readInput(path, ctx, stdin) {
-  if (path === '/dev/null') return { content: '' }
-  if (path === '/dev/stdin') return { content: stdin }
-  const { path: abs, error } = lookupWithNote(ctx, 'shell', path)
-  if (error) return { error: err(`error: ${path}: ${error}`) }
-  if (ctx.fs.isFile(abs)) {
-    // A file of bytes is those bytes on the way in, as it is on the way out:
-    // reading it as text here would refuse `wc -c < img.png` for spelling no
-    // text, where nothing was going to read it as text in the first place.
-    // Bytes that spell text are that text, exactly as they are through a
-    // pipe, so only a file no text spells travels as the bytes it is.
-    const { text, bytes } = readTextOrBytes(ctx.fs, abs)
-    const content = text ?? '', held = text === undefined ? bytes : undefined
-    return { content, bytes: held, handle: ctx.writable && abs.startsWith('/tmp/') ? { path: abs, content, identity: ctx.fs.fileIdentity(abs) } : null }
-  }
-  return { error: err(`error: ${path}: Is a directory`) }
 }
 
 // Expand argv before applying prefix assignments. A nameless assignment
@@ -366,7 +324,8 @@ function runStage(ctx, expanded) {
   if (argv.length === 0) {
     return { stdout: '', stderr: '', exitCode: ctx.substitutionExit ?? 0 }
   }
-  return withTemporaries(expanded.temps, ctx, () => ctx.invoke(argv[0], argv.slice(1), ctx.stdinLeft))
+  const invoke = () => ctx.invoke(argv[0], argv.slice(1), ctx.stdinLeft)
+  return withTemporaries(expanded.temps, ctx, () => (ctx.stdinDirectory ? readDirectoryInput(ctx, argv, invoke) : invoke()))
 }
 
 // Prefix values expand left to right. After dispatch, keep changes to other

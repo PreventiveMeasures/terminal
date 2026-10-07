@@ -7,7 +7,7 @@
 // quotes only $, backtick, quote, backslash and newline are escaped.
 // lex.js handles substitutions, operators, ANSI-C strings and here-documents.
 
-import { NAME_RE, decodeAnsiC, readBacktickSubstitution, readExpansion, readHeredocBodies, readOperator, readProcessSubstitution, skipContinuations } from './lex.js'
+import { NAME_RE, decodeAnsiC, doubleQuotedBacktick, readBacktickSubstitution, readExpansion, readHeredocBodies, readOperator, readProcessSubstitution, skipContinuations } from './lex.js'
 import { UnsupportedError } from '../unsupported.js'
 import { readConditional } from './conditional-lex.js'
 
@@ -243,7 +243,7 @@ function readBacktick(st) {
   const m = st.quote === '"' || st.fragmentQuoted ? '2' : '0'
   const { raw } = readBacktickSubstitution(st.line, st.i)
   put(st, '`', m)
-  put(st, raw.slice(1), '1', false)
+  put(st, (st.quote === '"' ? doubleQuotedBacktick(raw) : raw).slice(1), '1', false)
   st.i += raw.length
 }
 

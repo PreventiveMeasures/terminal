@@ -5,7 +5,7 @@
 import { expandWords } from './expand.js'
 import { err } from '../util.js'
 import { appendOutput, emptyOutput } from './output.js'
-import { isolated } from './state.js'
+import { isolated, withState } from './state.js'
 import { evaluateConditional } from './conditional.js'
 
 export function runBlock(stage, ctx, stdin, runSteps) {
@@ -111,7 +111,7 @@ async function runConditional(conditional, ctx, stdin, runSteps) {
 async function runGroup(stage, ctx, stdin, runSteps) {
   const stream = { text: stdin, bytes: ctx.stdinBytes }
   if (!stage.isolate) return runSteps(stage.group, ctx, stream)
-  const r = await isolated(ctx, () => runSteps(stage.group, ctx, stream))
+  const r = await isolated(ctx, () => withState(ctx, { subshell: true }, () => runSteps(stage.group, ctx, stream)))
   // A subshell is the one compound bash still exits on: what `set -e` ignored
   // in the child is nothing the parent reading its status can see.
   return { ...r, halt: false, control: undefined, ignored: false }

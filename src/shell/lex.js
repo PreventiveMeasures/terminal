@@ -62,7 +62,7 @@ export function readProcessSubstitution(line, i, options = {}) {
 }
 
 // A backtick outside single quotes opens the other command substitution.
-export { readBacktickSubstitution } from './substitution.js'
+export { doubleQuotedBacktick, readBacktickSubstitution } from './substitution.js'
 export const backtickGap = () => new UnsupportedError('feature', '`', 'command substitution (backticks) is not supported')
 
 

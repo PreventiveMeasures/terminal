@@ -89,7 +89,7 @@ describe('unmatched pathname glob notes', () => {
   it('does not claim a fallback if an earlier expansion phase fails', async () => {
     const result = await createTerminal({}).run('printf "%s" *.missing "${value:?required}"')
     assert.equal(result.stdout, '')
-    assert.equal(result.exitCode, 1)
+    assert.equal(result.exitCode, 127)
     assert.match(result.stderr, /required/u)
     assert.deepEqual(result.notes, [])
     assert.deepEqual(result.unsupported, [])

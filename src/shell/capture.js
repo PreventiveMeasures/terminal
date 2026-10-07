@@ -10,7 +10,7 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
   if (depth > MAX_SUBSTITUTION_DEPTH) throw new UnsupportedError('feature', 'command substitution nesting limit', `command substitution nesting beyond ${MAX_SUBSTITUTION_DEPTH} levels is not supported`)
   const stderr = ctx.expansionFds[2]
   const outputFds = { 1: 'out', 2: typeof stderr === 'object' || stderr === 'closed' ? stderr : 'err' }
-  const result = await withState(ctx, { substitutionDepth: depth, outputFds, errexitOff: true, closed: { out: false, err: stderr === 'closed' } }, () => isolated(ctx, () => {
+  const result = await withState(ctx, { substitutionDepth: depth, outputFds, errexitOff: true, subshell: true, closed: { out: false, err: stderr === 'closed' } }, () => isolated(ctx, () => {
     let steps
     try {
       steps = parseLine(command, ctx.writable, ctx.registry.has)
@@ -32,7 +32,10 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
     }
     const stage = steps.length === 1 && !steps[0].negate && steps[0].stages.length === 1 ? steps[0].stages[0] : null
     // Bash's $(<file) shorthand reads the file without a command name.
-    if (stage && !stage.group && !stage.loop && !stage.conditional && !stage.test && stage.words.length === 0 && stage.assigns.length === 0 && stage.redirs.length === 1 && stage.redirs[0].op === 'read') stage.words.push({ value: 'cat', mask: null })
+    if (stage && !stage.group && !stage.loop && !stage.conditional && !stage.test && stage.words.length === 0 && stage.assigns.length === 0 && stage.redirs.length === 1 && stage.redirs[0].op === 'read') {
+      stage.words.push({ value: 'cat', mask: null })
+      stage.slurp = true
+    }
     return runSteps(steps, ctx, { text: ctx.stdinLeft, bytes: ctx.stdinBytes })
   }))
   ctx.lastExit = ctx.substitutionExit = result.exitCode

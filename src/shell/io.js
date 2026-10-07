@@ -9,7 +9,13 @@ const PER_FILE = new Set(['wc', 'tac'])
 export function createIoGuard(fs) {
   let active = null
   let output = null
-  const read = (identity) => { if (active && !active.bufferReads) active.reads.push(identity) }
+  let stdinWatch = null
+  const read = (identity) => {
+    // Stdin with no file behind it is read without an identity, and the
+    // shell watching for that read is told of it.
+    if (identity === undefined && stdinWatch) stdinWatch.read = true
+    if (active && !active.bufferReads) active.reads.push(identity)
+  }
   const check = (identity) => {
     if (identity === undefined) return
     for (let scope = active; scope; scope = scope.parent) {
@@ -39,6 +45,12 @@ export function createIoGuard(fs) {
       try { return fn() } finally { scope.bufferReads = previous }
     },
     setReads(identities) { if (active) active.reads = identities },
+    // Whether what fn runs reads its stdin at all.
+    async watchStdin(fn) {
+      const previous = stdinWatch
+      const watch = stdinWatch = { read: false }
+      try { return { result: await fn(), read: watch.read } } finally { stdinWatch = previous }
+    },
     async run(name, fn) {
       const parent = active
       active = { name, reads: [], parent }

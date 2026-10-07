@@ -1,5 +1,5 @@
 import { UnsupportedError } from '../unsupported.js'
-import { readBacktickSubstitution } from './substitution.js'
+import { doubleQuotedBacktick, readBacktickSubstitution } from './substitution.js'
 
 const UNARY = /^-[abcdefghknoprstuvwxzGLNORS]$/u
 const BINARY = new Set(['=', '==', '!=', '=~', '<', '>', '-eq', '-ne', '-lt', '-le', '-gt', '-ge', '-nt', '-ot', '-ef'])
@@ -129,7 +129,7 @@ function readWord(p) {
     if (c === '`') {
       const backtick = readBacktickSubstitution(p.line, p.i)
       put(word, '`', quote ? '2' : '0')
-      put(word, backtick.raw.slice(1), '1')
+      put(word, (quote === '"' ? doubleQuotedBacktick(backtick.raw) : backtick.raw).slice(1), '1')
       p.i += backtick.raw.length
       continue
     }
