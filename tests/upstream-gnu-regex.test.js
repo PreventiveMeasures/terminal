@@ -28,7 +28,7 @@ function exclusion(v) {
 
 const PORTABLE = VECTORS.filter((v) => exclusion(v) === null)
 const GREP_GAPS = new Map([
-  ...[52, 53, 182, 183, 186, 244].map((line) => [line, 'GNU regex syntax']),
+  ...[182, 183].map((line) => [line, 'GNU regex syntax']),
   ...[264, 270, 274, 297].map((line) => [line, 'regex collating or equivalence class']),
   [159, 'conditional backreference'],
 ])
@@ -192,14 +192,21 @@ describe('GNU regex regressions exposed by the upstream audit', () => {
       assert.deepEqual(await createTerminal({ input }).run(command), result(stdout))
     })
   }
-  for (const pattern of [String.raw`(a)*\1`, String.raw`(a)?\1`, String.raw`(a)|b\1`, String.raw`((a)?b)+\2`, String.raw`^(a*)+\1$`, String.raw`^(a*){2}\1$`]) {
+  for (const pattern of [String.raw`(a)*\1`, String.raw`(a)?\1`, String.raw`((a)?b)+\2`, String.raw`^(a*)+\1$`, String.raw`^(a*){2}\1$`]) {
     it(`diagnoses conditional reference: ${pattern}`, async () => {
       checkGap(await createTerminal({ input: 'a\nb\n' }).run(`grep -E -e ${quote(pattern)} input`), 'conditional backreference')
     })
   }
-  for (const pattern of [String.raw`(a)\1]`, String.raw`a{z}(b)\1`, String.raw`(a)\1{`]) {
-    it(`diagnoses GNU syntax gaps beside valid references: ${pattern}`, async () => {
-      checkGap(await createTerminal({ input: 'aa]\nbb\naa{\n' }).run(`grep -E -e ${quote(pattern)} input`), 'GNU regex syntax')
+  // glibc closes a group's reference to the branch that opened it, so a
+  // reference in a later branch is a compile error, as GNU grep reports it.
+  it('rejects a reference to a group in another branch: (a)|b\\1', async () => {
+    const actual = await createTerminal({ input: 'a\nb\n' }).run(String.raw`grep -E -e '(a)|b\1' input`)
+    assert.deepEqual(actual, { ...result(''), stderr: 'grep: Invalid back reference\n', exitCode: 2 })
+  })
+  for (const [pattern, stdout] of [[String.raw`(a)\1]`, 'aa]\n'], [String.raw`a{z}(b)\1`, ''], [String.raw`(a)\1{`, 'aa{\n']]) {
+    it(`reads GNU's literal operators beside valid references: ${pattern}`, async () => {
+      const actual = await createTerminal({ input: 'aa]\nbb\naa{\n' }).run(`grep -E -e ${quote(pattern)} input`)
+      assert.deepEqual(actual, result(stdout, stdout ? 0 : 1))
     })
   }
   for (const [mode, pattern] of [['-E', 'a{,32768}'], ['', String.raw`a\{,32768\}`]]) {

@@ -45,8 +45,10 @@ export function checkInterval(min, max) {
 // POSIX leaves `[a-c-e]` undefined and GNU calls it an error; a `[:` that
 // never closes, or that names no known class, is an error rather than a
 // set of literal characters. Messages are GNU's, for callers that report
-// them verbatim. Escapes are consumed as single items, matching how the
-// BRE and ERE translators read a class.
+// them verbatim. A backslash in a bracket is a member like any other, as
+// POSIX has it and glibc reads it: `[a\]` is `a` or `\`, and the `]` after
+// the backslash closes it. (AWK, where a backslash does escape in a
+// bracket, reads its own regexps and never comes here.)
 // In a multibyte locale a range, a collating symbol or an equivalence class
 // with a character past ASCII in it is GNU's "Invalid collation character":
 // glibc's regex has no collation to place one by. A member on its own is fine.
@@ -78,10 +80,9 @@ export function validateBracket(pattern, start, multibyte = false) {
     // A `-` directly after a completed range has no reading: GNU rejects
     // it unless it is the last member, where it is an ordinary character.
     if (c === '-' && ranged && i + 1 < pattern.length && pattern[i + 1] !== ']') throw new Error('Invalid range end')
-    const width = c === '\\' && i + 1 < pattern.length ? 2 : 1
-    const after = pattern[i + width]
-    if (after === '-' && pattern[i + width + 1] !== undefined && pattern[i + width + 1] !== ']') {
-      const endAt = i + width + 1
+    const after = pattern[i + 1]
+    if (after === '-' && pattern[i + 2] !== undefined && pattern[i + 2] !== ']') {
+      const endAt = i + 2
       const opens = pattern[endAt] === '[' ? pattern[endAt + 1] : undefined
       // ...nor the far end of one: `[a-[:digit:]]`. A collating element
       // may close the range, and is consumed whole so the scan stays in
@@ -89,13 +90,13 @@ export function validateBracket(pattern, start, multibyte = false) {
       if (opens === ':' || opens === '=') throw new Error('Invalid range end')
       const close = opens === '.' ? pattern.indexOf('.]', endAt + 2) : -1
       if (opens === '.' && close === -1) throw new Error('Unmatched [, [^, [:, [., or [=')
-      const endpoint = opens === '.' ? endAt + 2 : endAt + (pattern[endAt] === '\\' ? 1 : 0)
-      if (multibyte && (pattern.codePointAt(i + width - 1) > 127 || pattern.codePointAt(endpoint) > 127)) throw new Error('Invalid collation character')
-      i = close === -1 ? endAt + (pattern[endAt] === '\\' ? 2 : 1) : close + 2
+      const endpoint = opens === '.' ? endAt + 2 : endAt
+      if (multibyte && (pattern.codePointAt(i) > 127 || pattern.codePointAt(endpoint) > 127)) throw new Error('Invalid collation character')
+      i = close === -1 ? endAt + 1 : close + 2
       ranged = true
       continue
     }
-    i += width
+    i += 1
     ranged = false
   }
   throw new Error('Unmatched [, [^, [:, [., or [=')

@@ -76,7 +76,7 @@ const COMMAND_GAPS = [
   ['find . -type f , -print', 'comma operator'],
   ['find . -type f,p', '-type f,p'],
   ['grep --e a f', '--e'],
-  [String.raw`grep -E 'a{z}' f`, 'GNU regex syntax'],
+  [String.raw`grep -E '^*' f`, 'GNU regex syntax'],
   [String.raw`grep -E '{1}' f`, 'GNU regex syntax'],
   [String.raw`awk 'BEGIN {print "\😀"}'`, 'non-ASCII string escape'],
   ['seq inf', 'non-integer operands'],

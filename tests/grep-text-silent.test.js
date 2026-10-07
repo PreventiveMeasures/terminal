@@ -101,11 +101,16 @@ describe('grep — suppress input read errors', () => {
   })
 
   it('does not suppress invalid-pattern or invalid-option-argument errors', async () => {
-    for (const command of ["grep -s '[' good", 'grep -s -m-1 hit good', 'grep --no-messages --text=yes hit good']) {
+    const usage = "Usage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n"
+    for (const [command, stderr] of [
+      ["grep -s '[' good", 'grep: Invalid regular expression\n'],
+      ['grep -s -m1x hit good', 'grep: invalid max count\n'],
+      ['grep --no-messages --text=yes hit good', "grep: option '--text' doesn't allow an argument\n" + usage],
+    ]) {
       const result = await createTerminal(FILES).run(command)
       assert.equal(result.stdout, '', command)
       assert.equal(result.exitCode, 2, command)
-      assert.match(result.stderr, /^grep: .+\n$/u, command)
+      assert.equal(result.stderr, stderr, command)
       assert.deepEqual(result.unsupported, [], command)
     }
   })

@@ -108,18 +108,52 @@ describe('rg refuses the filtering it does not implement', () => {
   })
 })
 
-describe('rg refuses what its own regex engine refuses', () => {
+describe('rg reports what its own regex engine rejects, in its own words', () => {
   // Rust's regex crate has no backtracking. PCRE would answer these, so passing
   // them through would report matches where ripgrep reports a parse error.
-  for (const [pattern, detail] of [
-    ['(a)\\1', 'backreference'], ['foo(?=b)', 'look-around'], ['foo(?!b)', 'look-around'],
-    ['(?<=a)b', 'look-around'], ['\\Qa.b\\E', '\\Q…\\E literal span'],
+  const hint = '\n\nConsider enabling PCRE2 with the --pcre2 flag, which can handle backreferences\nand look-around.'
+  for (const [pattern, carets, message] of [
+    [String.raw`(a)\1`, '          ^^', 'backreferences are not supported' + hint],
+    ['foo(?=b)', '          ^^^', 'look-around, including look-ahead and look-behind, is not supported' + hint],
+    ['foo(?!b)', '          ^^^', 'look-around, including look-ahead and look-behind, is not supported' + hint],
+    ['(?<=a)b', '       ^^^^', 'look-around, including look-ahead and look-behind, is not supported' + hint],
+    [String.raw`\Qa.b\E`, '       ^^', 'unrecognized escape sequence'],
+    [String.raw`foo\Z`, '          ^^', 'unrecognized escape sequence'],
+    ['[', '       ^', 'unclosed character class'],
+    ['[a', '       ^', 'unclosed character class'],
+    ['(', '    ^', 'unclosed group'],
+    ['a)', '         ^', 'unopened group'],
+    ['*a', '       ^', 'repetition operator missing expression'],
+    ['a{2,1}', '        ^^^^^', 'invalid repetition count range, the start must be <= the end'],
+    // The `?` that makes the range lazy is part of what Rust marks.
+    ['a{2,1}?', '        ^^^^^^', 'invalid repetition count range, the start must be <= the end'],
+    ['[z-a]', '        ^^^', 'invalid character class range, the start must be <= the end'],
   ]) {
     it(pattern, async () => {
-      const result = await run(`rg ${JSON.stringify(pattern)}`)
+      const result = await run(`rg '${pattern}'`)
       assert.equal(result.stdout, '')
       assert.equal(result.exitCode, 2)
-      assert.equal(result.unsupported[0].detail, detail)
+      assert.equal(result.stderr, `rg: regex parse error:\n    (?:${pattern})\n${carets}\nerror: ${message}\n`)
+      assert.deepEqual(result.unsupported, [])
+    })
+  }
+
+  it('reads patterns joined as ripgrep shows them', async () => {
+    const result = await run(String.raw`rg -e a -e 'foo\Z'`)
+    assert.equal(result.stderr, String.raw`rg: regex parse error:
+    (?:a)|(?:foo\Z)
+                ^^
+error: unrecognized escape sequence
+`)
+    // So a `(` and a `)` given apart close each other across the joint.
+    assert.equal((await run("rg -c -e '(' -e ')' a.txt")).stdout, '3\n')
+  })
+
+  for (const pattern of ['a**', '[a[b]]', '[a&&b]', '(?i)oak', 'x{99999}', String.raw`\pL`]) {
+    it(`refuses ${pattern}, which Rust reads otherwise than PCRE`, async () => {
+      const result = await run(`rg '${pattern}' a.txt`)
+      assert.equal(result.exitCode, 2)
+      assert.equal(result.unsupported[0].detail, 'Rust regex syntax')
     })
   }
 
@@ -253,15 +287,21 @@ describe('rg resolves context flags before running', () => {
 
 describe('rg refuses a pattern its engine rejects for line-based search', () => {
   const B = { 'a.txt': 'oak\n' }
-  for (const pattern of ['oak\\n', '\\n', '[\\n]', '\\x0A']) {
+  const newline = 'rg: the literal "\\n" is not allowed in a regex\n\nConsider enabling multiline mode with the --multiline flag (or -U for short).\nWhen multiline mode is enabled, new line characters can be matched.\n'
+  for (const pattern of ['oak\\n', '\\n', '\\x0A']) {
     it(JSON.stringify(pattern), async () => {
       // ripgrep errors here rather than never matching, so returning "no match"
       // would be an answer it never gives.
       const result = await run(`rg -- ${JSON.stringify(pattern)} a.txt`, B)
       assert.equal(result.exitCode, 2)
-      assert.equal(result.unsupported[0].detail, 'newline in a pattern')
+      assert.equal(result.stderr, newline)
+      assert.deepEqual(result.unsupported, [])
     })
   }
+
+  it('refuses a newline in a class, which ripgrep takes out of it', async () => {
+    assert.equal((await run('rg -- "[\\n]" a.txt', B)).unsupported[0].detail, 'Rust regex syntax')
+  })
 
   for (const pattern of ['\\r', '\\s', '\\t', 'oak']) {
     it(`${JSON.stringify(pattern)} is allowed`, async () => {
@@ -380,7 +420,7 @@ describe('rg refuses rather than quietly accepting a bad option value', () => {
 describe('every rg refusal reaches the diagnostic feed', () => {
   const B = { 'a.txt': 'oak\n' }
   // A refusal that only reached stderr would vanish under `2>/dev/null`.
-  for (const command of ['rg "[" a.txt', 'rg "(" a.txt', 'rg "a{2,1}" a.txt', String.raw`rg '\' a.txt`,
+  for (const command of ['rg "[a[b]]" a.txt', 'rg "a**" a.txt',
     'rg -e', 'rg -A', 'rg -A abc oak a.txt', 'rg -t js oak', 'rg --sort path oak', 'rg']) {
     it(command, async () => {
       const result = await run(command, B)
@@ -396,8 +436,7 @@ describe('every rg refusal reaches the diagnostic feed', () => {
   it('names the pattern rather than the engine underneath', async () => {
     // grep words this in terms of its own PCRE subset, which ripgrep never uses.
     const result = await run('rg "[" a.txt', B)
-    assert.match(result.stderr, /^rg: regex parse error in "\["/u)
-    assert.doesNotMatch(result.stderr, /PCRE/u)
+    assert.equal(result.stderr, 'rg: regex parse error:\n    (?:[)\n       ^\nerror: unclosed character class\n')
   })
 })
 
