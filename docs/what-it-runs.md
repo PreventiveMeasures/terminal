@@ -238,6 +238,36 @@ implemented. The other `LC_` categories also take `C` and `POSIX`, which
 read the same as C.UTF-8 in them. `createTerminal` takes `locale: 'C.UTF-8'`
 and nothing else.
 
+`awk` is gawk 5.2.1. It reads a program with gawk's own grammar, through
+parse tables built the way Bison builds gawk's and a lexer that reads as
+gawk's does, so a program gawk runs is read the same, and one gawk rejects is
+rejected at the token gawk stops at, with all gawk has printed by then: the
+line, a caret under the token and gawk's message — down to a program that
+opens with an empty line, or a `-f` file that ends inside a rule. Every
+message is gawk's, placed where gawk places it: `awk: cmd. line:3:` or the
+`-f` file's name, `(FILENAME=… FNR=…)` once input has been read, `fatal:`
+with exit 2, `error:` with exit 1, a `warning:` and the run goes on, and a
+command line gawk cannot read answered with gawk's usage and exit 1. `for (k
+in a)` walks an array in gawk's order, from the same three hash tables gawk
+keeps; `rand()` is gawk's random(3)-based generator, seed for seed, and
+`srand()` with no argument seeds from the clock as gawk does. Values are
+gawk's: a field past `NF` is unassigned, `$0 = 30` keeps a number, `NF = 2.7`
+keeps 2.7, a record is rebuilt with the `CONVFMT` in force when it is next
+read, the right side of an assignment is evaluated before its target, and `^`
+with an integer exponent multiplies as gawk's does. What is refused, by name:
+writing to a file other than `/dev/stdout`, `/dev/stderr` and `/dev/null`
+(a target only the run knows is refused when it is reached); everything that
+runs a process — `system()`, `cmd | getline`, `print | cmd`, `|&`; `@` and
+what it begins (indirect calls, typed regexes, `@include`); namespaces;
+arrays of arrays; `asort`, `asorti`, `patsplit`, `strftime`, `mktime`,
+`mkbool`, the gettext functions and `typeof()`'s second argument; `ENVIRON`
+and the parts of `PROCINFO` that describe a process; options other than
+`-f`, `-F` and `-v`; calls nested deeper than 100; a regex `RS` that can
+match the empty string before the end of its input, or one with a word
+boundary after a word character; an interval count above 1000; a NaN printed
+with its sign; and a backslash before a character outside ASCII in a string
+or a regex, whose warning gawk prints as a lone byte.
+
 `stat -c '%s %n' file` reports byte size and name; `%F` reports file type.
 `--printf` adds escape processing and controls line endings. Default `stat`
 output, directory byte sizes, and fields requiring ownership, permissions,

@@ -77,9 +77,9 @@ describe('awk runs whole programs', () => {
   })
 
   it('produces a report: getline lookups, captures, 2-D subscripts, gensub, switch, a hand-written sort', async () => {
-    // Counts that tie keep insertion order (the three 1-hit status codes
-    // below), which is this implementation's documented iteration order
-    // where gawk leaves it unspecified.
+    // Counts that tie keep the order `for (k in a)` walks them in (the three
+    // 1-hit status codes below), which is gawk's own: integer subscripts
+    // come out of its hash in the order gawk 5.2.1 gives, 500 before 503.
     assert.equal(await out('awk -v owners=owners.txt -f report.awk access.log'), [
       'SERVICE  ROUTE      CANONICAL                        HITS     BYTES    SHARE  OWNER',
       'api      users      /api/v2/users/{id}?full=1           3      1.9K    37.5%  platform-team',
@@ -88,7 +88,7 @@ describe('awk runs whole programs', () => {
       'api      search     /api/v2/search/{id}?full=1          1      300B    12.5%  platform-team',
       '',
       '8 requests, 1 unparsed; api: 2 5xx / 1 4xx / 3 ok  ',
-      'status codes: 200=5 404=1 503=1 500=1 ',
+      'status codes: 200=5 404=1 500=1 503=1 ',
       '',
     ].join('\n'))
   })

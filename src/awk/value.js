@@ -1,8 +1,8 @@
 // Values are numbers, literal/result strings, input-derived StrNum strings,
-// undefined (uninitialized), or Map arrays. StrNum compares numerically only
-// when its entire text is numeric: input 10 is greater than 9, but the string
-// constant "10" compares less than 9. Undefined acts as both 0 and ""; scalar
-// operations reject arrays.
+// undefined (untyped), the two unassigned values below, or arrays (./array.js).
+// StrNum compares numerically only when its entire text is numeric: input 10
+// is greater than 9, but the string constant "10" compares less than 9.
+// Undefined acts as both 0 and ""; scalar operations reject arrays.
 
 import { AwkError } from './common.js'
 import { compareNames } from '../fs.js'
@@ -12,6 +12,15 @@ import { formatNumeric, parseFormat } from './format.js'
 export class StrNum {
   constructor(s) { this.s = s; this.number = undefined; this.numeric = undefined }
 }
+
+// gawk's two unassigned values, which typeof() names "unassigned" where a
+// variable nothing has used yet is "untyped". An untyped variable read as a
+// scalar becomes UNASSIGNED, both 0 and "" as undefined is; a field past NF
+// is NULL_FIELD, which compares as the string "" — so `$2 == 0` is false on
+// a one-field line.
+export const UNASSIGNED = Object.freeze({ unassigned: 'number' })
+export const NULL_FIELD = Object.freeze({ unassigned: 'string' })
+const isUnassigned = (v) => v === UNASSIGNED || v === NULL_FIELD
 
 const BLANK = '[ \\t\\n\\r\\f\\v]*'
 const NUMBER = '[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?'
@@ -44,6 +53,7 @@ export function toNum(v) {
   if (v === undefined) return 0
   if (v instanceof StrNum) return v.number ??= parsePrefix(v.s)
   if (typeof v === 'string') return parsePrefix(v)
+  if (isUnassigned(v)) return 0
   throw arrayInScalar()
 }
 
@@ -66,7 +76,9 @@ export function numToStr(n, fmt) {
   return pieces.map((piece) => typeof piece === 'string' ? piece : formatNumeric(n, piece)).join('')
 }
 
-const fmtOf = (v) => (typeof v === 'string' ? v : v instanceof StrNum ? v.s : '%.6g')
+// A CONVFMT or OFMT that is not a string is used as the text it converts to
+// (a whole number converts without one): CONVFMT = 1 formats 0.5 as "1".
+const fmtOf = (v) => (typeof v === 'string' ? v : v instanceof StrNum ? v.s : typeof v === 'number' ? numToStr(v, '%.6g') : '%.6g')
 
 export const convfmt = (m) => fmtOf(m.globals.get('CONVFMT'))
 export const ofmt = (m) => fmtOf(m.globals.get('OFMT'))
@@ -75,7 +87,7 @@ export function toStr(v, m) {
   if (typeof v === 'string') return checkText(m, v)
   if (v instanceof StrNum) return checkText(m, v.s)
   if (typeof v === 'number') return numToStr(v, convfmt(m))
-  if (v === undefined) return ''
+  if (v === undefined || isUnassigned(v)) return ''
   throw arrayInScalar()
 }
 
@@ -86,12 +98,16 @@ export function checkText(m, text) {
   return text
 }
 
-export function foldCase(text, upper = false) {
-  return [...text].map((char) => {
-    const mapped = upper ? char.toUpperCase() : char.toLowerCase()
-    if ([...mapped].length !== 1) throw new AwkError('Unicode case expansion is not supported', null, 'Unicode case mapping')
-    return mapped
-  }).join('')
+// Case as gawk changes it, a character at a time through the locale's
+// towupper / towlower (./locale.js): `ß` has no upper case of its own and
+// stays, where JS would spell it `SS`.
+export function foldCase(text, tables, upper = false) {
+  let out = ''
+  for (const char of text) {
+    const code = char.codePointAt(0)
+    out += String.fromCodePoint(upper ? tables.up(code) : tables.low(code))
+  }
+  return out
 }
 
 // `print` converts numbers with OFMT rather than CONVFMT; otherwise the
@@ -101,7 +117,22 @@ export function toOutStr(v, m) {
 }
 
 const numericString = (v) => v.numeric ??= looksNumeric(v.s)
-const isNumericValue = (v) => typeof v === 'number' || v === undefined || (v instanceof StrNum && numericString(v))
+const isNumericValue = (v) => typeof v === 'number' || v === undefined || v === UNASSIGNED || (v instanceof StrNum && numericString(v))
+
+// Input text that a numeric use has already read as a number: gawk then
+// holds it as one, which matters only to what an array keeps of it.
+export const forcedNumeric = (v) => (v.number !== undefined || v.numeric !== undefined) && numericString(v)
+
+// A string that converts to a number of its own rather than to what its
+// text spells: gawk's `for (k in a)` key made from a number, "0.3" from
+// 0.1 + 0.2, is a string (typeof, comparisons) that k + 0 reads as
+// 0.30000000000000004 and a[k] finds by that number.
+export function numberedString(s, number) {
+  const v = new StrNum(s)
+  v.numeric = false
+  v.number = number
+  return v
+}
 
 // gawk's IGNORECASE: regex matching, string comparison and index()
 // ignore case while it is non-zero.
@@ -118,7 +149,7 @@ export function compare(a, b, m) {
   }
   let s = toStr(a, m)
   let t = toStr(b, m)
-  if (ignoreCase(m)) { s = foldCase(s); t = foldCase(t) }
+  if (ignoreCase(m)) { s = foldCase(s, m.tables); t = foldCase(t, m.tables) }
   return compareNames(s, t)
 }
 
@@ -129,7 +160,7 @@ export function truthy(v) {
   if (typeof v === 'number') return v !== 0 && !Number.isNaN(v)
   if (typeof v === 'string') return v !== ''
   if (v instanceof StrNum) return numericString(v) ? toNum(v) !== 0 : v.s !== ''
-  if (v === undefined) return false
+  if (v === undefined || isUnassigned(v)) return false
   throw arrayInScalar()
 }
 
@@ -139,9 +170,9 @@ export const subscriptKey = (v, m) => Number.isSafeInteger(v) ? String(v) : toSt
 
 // gawk's typeof(): the type of a cell as the program sees it.
 export function typeName(v) {
-  if (v instanceof Map) return 'array'
   if (v === undefined) return 'untyped'
   if (typeof v === 'number') return 'number'
+  if (typeof v === 'string') return 'string'
   if (v instanceof StrNum) return numericString(v) ? 'strnum' : 'string'
-  return 'string'
+  return isUnassigned(v) ? 'unassigned' : 'array'
 }
