@@ -214,6 +214,36 @@ describe('unzip extracts into the writable overlay', () => {
     assert.deepEqual(await t.run('unzip -qq /repo/pkg.zip pkg/README.md -d out'), result('', { stderr: replace('out/pkg/README.md'), exitCode: 1, cwd: '/tmp' }))
   })
 
+  it('keeps the mode and the time each entry was stored with, as UnZip does', async () => {
+    const t = await terminal()
+    // No umask is taken from an entry's own mode; a directory made for -d is
+    // what the umask, 022, leaves of 0777, dated to when it was made, and a
+    // link is dated to when it was made too.
+    assert.deepEqual(await t.run('cd /tmp && unzip -q /repo/pkg.zip -d out && ls -l out/pkg/README.md out/pkg/bin/run.sh && ls -ld out/pkg out/pkg/src'), result(
+      '-rw-r--r-- 1 user user  6 May  6  2024 out/pkg/README.md\n-rwxr-xr-x 1 user user 19 May  6  2024 out/pkg/bin/run.sh\n'
+      + 'drwxr-xr-x 5 user user 4096 May  6  2024 out/pkg\ndrwxr-xr-x 3 user user 4096 May  6  2024 out/pkg/src\n',
+      { cwd: '/tmp' },
+    ))
+    assert.deepEqual(await t.run('ls -ld out | cut -c 1-10'), result('drwxr-xr-x\n', { cwd: '/tmp' }))
+    // An archive made of them stores the times they keep.
+    assert.deepEqual(await t.run('cd out && zip -qr ../again.zip pkg/bin && unzip -l ../again.zip'), result(
+      `Archive:  ../again.zip\n${HEAD}        0  2024-05-06 07:08   pkg/bin/\n       19  2024-05-06 07:08   pkg/bin/run.sh\n---------                     -------\n       19                     2 files\n`,
+      { cwd: '/tmp/out' },
+    ))
+  })
+
+  it('refuses to date what it extracts where it cannot tell the reading of a time', async () => {
+    const previous = process.env.TZ
+    process.env.TZ = 'America/New_York'
+    try {
+      const t = createTerminal(SOURCES, { mount: '/repo', writable: '/tmp/' })
+      await gap(t, 'unzip -q pkg.zip -d /tmp/out', 'archive times', "unzip: whether an entry's time is exact or a DOS time is not known here, and outside UTC the two date what is extracted differently (TZ=UTC answers it)\n")
+    } finally {
+      if (previous === undefined) delete process.env.TZ
+      else process.env.TZ = previous
+    }
+  })
+
   it('holds the name of a link it makes last, as UnZip does', async () => {
     const t = await terminal()
     // The file meets the placeholder the link keeps its name with, and is

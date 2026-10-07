@@ -8,12 +8,19 @@
 // defers them: until then its name holds a placeholder, a file of its
 // target, which is what a later entry of that name meets.
 //
+// A file keeps the mode it was stored with, less the set-id and sticky bits
+// and with no umask taken from it, and the time it was stored with, as
+// UnZip sets them; a directory UnZip made for an entry of its own takes its
+// own once everything else is written, and one made on the way to a name,
+// or for `-d`, has what the umask leaves and the time it was made. A link
+// is the time it was made, as UnZip leaves it.
+//
 // The overlay is the one place a file can be written; a name anywhere else
 // is the read-only filesystem, and a gap.
 
 import { basename, dirname, lookup, resolve } from '../../fs.js'
 import { encodeUtf8, readBytesOf } from '../../util.js'
-import { inOverlay } from '../../writable.js'
+import { MADE_MODE, inOverlay } from '../../writable.js'
 
 // How UnZip names the file it is writing: under the `-d` directory as it was
 // typed, one trailing slash dropped, or as the archive names it.
@@ -22,13 +29,16 @@ const shownUnder = (exdir, name) => (exdir === null ? name : `${exdir.endsWith('
 export function extractMembers(entries, opts, run) {
   const base = extractionDirectory(opts.exdir, run)
   if (base === null) return false
-  const links = []
-  const done = extractEntries(entries, base, links, opts, run)
+  const dirs = [], links = []
+  const done = extractEntries(entries, base, { links, dirs }, opts, run)
   for (const link of links) finishLink(link, run)
+  for (const { path, entry } of dirs.toReversed()) run.ctx.fs.keepMetadata(path, stat(entry))
   return done
 }
 
-function extractEntries(entries, base, links, opts, run) {
+const stat = (entry) => ({ mode: entry.mode & 0o777, mtime: entry.mtime })
+
+function extractEntries(entries, base, { links, dirs }, opts, run) {
   const { ctx } = run
   for (const entry of entries) {
     const directory = entry.type === 'directory'
@@ -43,7 +53,9 @@ function extractEntries(entries, base, links, opts, run) {
       return false
     }
     if (directory) {
-      if (!makeDirectory(path, shown, run)) return false
+      const made = makeDirectory(path, shown, run)
+      if (!made) return false
+      if (made === 'made') dirs.push({ path, entry })
       continue
     }
     // Each file an extraction writes is named "extracting" or "inflating" by
@@ -62,6 +74,7 @@ function extractEntries(entries, base, links, opts, run) {
     const link = entry.type === 'symlink'
     handle.writeBytes(link ? encodeUtf8(entry.linkname) : entry.data)
     if (link) links.push({ path, shown, target: entry.linkname })
+    else ctx.fs.keepMetadata(path, stat(entry))
   }
   return true
 }
@@ -111,6 +124,7 @@ function extractionDirectory(exdir, run) {
     readOnly(exdir, run)
     return null
   }
+  ctx.fs.keepMetadata(path, { mode: MADE_MODE })
   return path
 }
 
@@ -124,19 +138,22 @@ function makeParents(path, ctx) {
     missing.push(at)
   }
   if (!ctx.fs.isDir(lookup('/', at, ctx.fs).path)) return 'Not a directory'
-  for (const dir of missing.toReversed()) if (!inOverlay(dir) || !ctx.fs.makeWritableDir('/', dir)) return 'read-only'
+  for (const dir of missing.toReversed()) {
+    if (!inOverlay(dir) || !ctx.fs.makeWritableDir('/', dir)) return 'read-only'
+    ctx.fs.keepMetadata(dir, { mode: MADE_MODE })
+  }
   return null
 }
 
 // A directory is "creating" where UnZip is not quiet, and only where it was
-// not there already.
+// not there already: 'made' where this made it.
 function makeDirectory(path, shown, run) {
   const { fs } = run.ctx
   const found = lookup('/', path, fs, { follow: false })
   if (found.path === null) {
     if (!fs.makeWritableDir('/', path)) return readOnly(shown, run)
     if (run.quiet === 0) run.say(1, `   creating: ${shown}\n`)
-    return true
+    return 'made'
   }
   if (fs.isDir(found.path)) return true
   run.refuse('feature', 'name taken', `${shown}: a directory entry over a file already there is not supported`)

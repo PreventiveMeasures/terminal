@@ -10,7 +10,8 @@
 //
 // The entries are this tree as `ls -l` describes it: files `-rw-------`,
 // directories `drwx------`, links `lrwxrwxrwx`, all dated to the moment the
-// terminal was made. Names are stored as Info-ZIP stores them, a leading `/`
+// terminal was made — and an entry that keeps a mode or a time of its own,
+// one extracted from an archive, with that. Names are stored as Info-ZIP stores them, a leading `/`
 // or `./` taken off; one it would store with a `.` or `..` in it, or twice
 // the slash, is one the package would not store as it stands, and is a gap,
 // as is adding to an archive that is already there.
@@ -179,8 +180,9 @@ function addPath(path, name, full, walk) {
   }
   const type = link ? 'symlink' : dir ? 'directory' : 'file'
   if (name !== '' && (!dir || !(opts.junk || opts.noDirectories))) {
+    const own = fs.metadataOf?.(path) ?? null
     walk.entries.push({
-      name, full: dir ? `${full}/` : full, type, mode: MODES[type], mtime: Math.floor(ctx.createdAt / 1000),
+      name, full: dir ? `${full}/` : full, type, mode: own?.mode ?? MODES[type], mtime: own?.mtime ?? Math.floor(ctx.createdAt / 1000),
       linkname: link ? fs.readLink(path) : '', data: type === 'file' ? readBytesOf(fs, path) : undefined,
     })
   }

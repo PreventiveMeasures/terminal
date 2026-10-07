@@ -76,7 +76,9 @@ export async function unzip(_stdin, tokens, ctx) {
   run.heading(found.name, false)
   if (opts.mode === 'test') test(chosen, found.name, run)
   else if (opts.mode === 'pipe') for (const entry of chosen.entries) run.bytes(entry.type === 'symlink' ? encodeUtf8(entry.linkname) : entry.data)
-  else if (!extractMembers(chosen.entries, opts, run)) return run.end(run.gap ? 1 : run.status)
+  else if (twoReadings(chosen.entries.filter((entry) => entry.type !== 'symlink'), ctx)) {
+    return run.refuse('feature', 'archive times', 'whether an entry\'s time is exact or a DOS time is not known here, and outside UTC the two date what is extracted differently (TZ=UTC answers it)')
+  } else if (!extractMembers(chosen.entries, opts, run)) return run.end(run.gap ? 1 : run.status)
   cautions(chosen, run)
   if (opts.mode === 'test') summary(chosen, found.name, run)
   return run.end(chosen.missed ? 11 : run.status)
@@ -145,6 +147,11 @@ function summary(chosen, name, run) {
   else if (chosen.all) run.say(1, `No errors detected in compressed data of ${name}.\n`)
   else run.say(1, `No errors detected in ${name} for the ${chosen.entries.length} file${chosen.entries.length === 1 ? '' : 's'} tested.\n`)
 }
+
+// UnZip dates what it extracts by an exact time where the archive has one
+// and by a DOS time read as local time otherwise, and the reader says only
+// what the time is: outside UTC, the two would date an entry differently.
+const twoReadings = (entries, ctx) => !ctx.vars.has('TZ') && entries.some((entry) => new Date(entry.mtime * 1000).getTimezoneOffset() !== 0)
 
 // -l: nothing is said of a pattern that matched nothing, and the status
 // says only whether anything was listed at all.

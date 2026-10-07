@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import { describe, it, mock } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
+import { pack } from '@preventive/archive/tar.js'
 
 const HIDDEN_NOTE = 'ls: omitted 1 hidden entry: "/.hidden". Hidden entries are included with -a.'
 const FILES = { 'README.md': 'hello world\n', 'src/app.js': 'x\n', 'src/lib/util.js': 'y\n', '.hidden': 'h\n', big: '0'.repeat(1500), empty: '' }
@@ -105,6 +107,47 @@ describe('ls -l lists what the filesystem does not keep as this terminal’s def
     }))
   })
 
+})
+
+// What an entry extracted from an archive keeps of its own — the mode it was
+// stored with, less what GNU tar takes off as anyone but root under umask
+// 022, and the time — is what its row says, until a write dates it to now.
+describe('ls -l lists an entry that keeps a mode and a time of its own with them', () => {
+  const STORED = Date.UTC(2024, 0, 2, 3, 4) / 1000
+  const owner = { uid: 1000, gid: 50, uname: 'dev', gname: 'staff' }
+  const ARCHIVE = pack([
+    { name: 'pkg/', type: 'directory', mode: 0o755, mtime: STORED, ...owner },
+    { name: 'pkg/run.sh', mode: 0o4755, mtime: STORED + 60, data: Buffer.from('echo\n'), ...owner },
+    { name: 'pkg/notes', mode: 0o666, mtime: STORED + 120, data: Buffer.from('n\n'), ...owner },
+    { name: 'pkg/link', type: 'symlink', mode: 0o777, mtime: STORED + 180, linkname: 'notes', ...owner },
+  ])
+  const extracted = async () => {
+    const t = await made({ 'pkg.tar': ARCHIVE }, { mount: '/repo', writable: '/tmp/' })
+    await run(t, 'cd /tmp && tar -xf /repo/pkg.tar')
+    return t
+  }
+
+  it('gives each extracted entry its mode and time', async () => {
+    const t = await extracted()
+    assert.deepEqual(await run(t, 'ls -la pkg'), expected(lines(
+      'total 16',
+      'drwxr-xr-x 2 user user 4096 Jan  2  2024 .',
+      'drwx------ 3 user user 4096 Sep 18 05:52 ..',
+      'lrwxrwxrwx 1 user user    5 Jan  2  2024 link -> notes',
+      '-rw-r--r-- 1 user user    2 Jan  2  2024 notes',
+      '-rwxr-xr-x 1 user user    5 Jan  2  2024 run.sh',
+    ), [], { cwd: '/tmp' }))
+    // -F marks what a mode makes executable, beside a link and after it.
+    assert.deepEqual(await run(t, 'ls -F pkg && ls -lF pkg/link'), expected('link@\nnotes\nrun.sh*\nlrwxrwxrwx 1 user user 5 Jan  2  2024 pkg/link -> notes\n', [], { cwd: '/tmp' }))
+  })
+
+  it('dates a file written to, and a directory a name is made in, to now', async () => {
+    const t = await extracted()
+    assert.deepEqual(await run(t, 'echo more >> pkg/notes && ls -l pkg/notes'), expected('-rw-r--r-- 1 user user 7 Sep 18 05:52 pkg/notes\n', [], { cwd: '/tmp' }))
+    assert.deepEqual(await run(t, 'touch pkg/new && ls -ld pkg'), expected('drwxr-xr-x 2 user user 4096 Sep 18 05:52 pkg\n', [], { cwd: '/tmp' }))
+    // A copy is a new file, made in the mode of what it copies.
+    assert.deepEqual(await run(t, 'cp pkg/run.sh copy && ls -l copy'), expected('-rwxr-xr-x 1 user user 5 Sep 18 05:52 copy\n', [], { cwd: '/tmp' }))
+  })
 })
 
 describe('ls -l ownership and time', () => {

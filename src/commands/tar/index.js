@@ -13,7 +13,7 @@
 
 import { storedName } from '../stored-names.js'
 import { createArchive } from './create.js'
-import { extractEntry, landing, strippedName } from './extract.js'
+import { extractEntry, keepStat, landing, settle, strippedName } from './extract.js'
 import { longLines, quoteEscape } from './list.js'
 import { enterDirectory, memberNames, quoteColon, reportMissing } from './names.js'
 import { parseTar } from './options.js'
@@ -49,6 +49,7 @@ async function readMembers(opts, state) {
   if (opts.toStdout) state.listTo = 2
   const line = opts.verbose > 1 ? longLines(ctx, opts, opts.strip) : null
   const places = new Map()
+  const delayed = []
   for (const [i, entry] of read.entries.entries()) {
     // What GNU says of an entry's header it says as it reads it, whatever
     // becomes of the entry.
@@ -63,9 +64,16 @@ async function readMembers(opts, state) {
     if (opts.verbose > 0) state.list(line ? line(entry) : quoteEscape(shown, ctx))
     if (extracting && opts.toStdout) {
       if (entry.type === 'file' || entry.type === 'contiguous-file') toStdout(entry.data, name, state)
-    } else if (extracting && extractEntry(entry, name, landing(dir, name), state, opts.keepOld, (count) => creating(name, count, line, state))) dated(read.mtimes[i], name, began, state)
+    } else if (extracting) {
+      const path = landing(dir, name)
+      settle(delayed, path, ctx.fs)
+      if (extractEntry(entry, name, path, state, opts.keepOld, (count) => creating(name, count, line, state)) && dated(read.mtimes[i], name, began, state)) {
+        keepStat(entry, path, read.mtimes[i], delayed, ctx.fs)
+      }
+    }
     if (state.stopped) return
   }
+  settle(delayed, null, ctx.fs)
   // gzip's status is waited for when the archive is closed, which GNU does
   // before it looks for what it did not find.
   if (read.child) return state.fatal(`Child returned status ${read.child}`)
@@ -89,10 +97,11 @@ function creating(name, count, line, state) {
 
 // GNU sets the time of each entry it writes, and warns of one before 1970 or
 // after the run began, the latter counted to the nanosecond from when it
-// began. The overlay keeps no times, so an entry dated either way is a gap.
+// began — words this does not have, so an entry dated either way is a gap.
 function dated(mtime, name, began, state) {
-  if (mtime >= 0 && mtime * 1000 <= began) return
+  if (mtime >= 0 && mtime * 1000 <= began) return true
   state.refuse('feature', 'archive times', `${quoteColon(name, state.ctx)}: extracting an entry dated before 1970 or in the future is not supported`)
+  return false
 }
 
 // Where the `-C` directories before an operand lead, entered the first time

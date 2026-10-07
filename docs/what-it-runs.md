@@ -170,7 +170,13 @@ do backups and the interactive prompt.
 `ls -l` fills in what the filesystem does not keep with one deliberate model
 rather than a guess per entry: every entry is the session user's alone
 (`-rw-------` and `drwx------`) and is dated to the moment the terminal was
-created, a time its forks carry with them. Link counts, directory sizes and
+created, a time its forks carry with them. An entry extracted from an archive
+keeps the mode and the time it was stored with, as GNU tar and UnZip keep them
+under the common umask, 022, and is listed with them — marked `*` by `-F`
+where they make it executable — until a write dates it to now, as making or
+removing a name in a directory dates the directory; `cp` makes a file in the
+mode of one it copies, `gzip` carries both over to what it writes, and
+`tar -c` and `zip` store them. Link counts, directory sizes and
 the `total` line are what ext4 would report for the same tree, and `-h`
 rounds sizes as `du -h` does. A symbolic link — one a source entry declares,
 or one `ln -s` made — is the row the model has nothing to guess at:
@@ -337,8 +343,12 @@ comes to the entry: macOS's `LIBARCHIVE.xattr.` records are warned of, while
 would complain of, and the records of multi-volume and incremental archives,
 are refused. Extraction writes into the writable `/tmp/` overlay alone, which
 holds no hard link and no device, so an entry that would make one is refused
-too. The overlay keeps no times either, so an entry dated before 1970 or after
-the run began, which GNU warns of once it has written it, is refused as well.
+too. What an entry says of its mode and time is kept as GNU keeps it for
+anyone but root: the mode less its set-id and sticky bits and the umask, 022,
+and the time — a directory's once nothing more is written into it — while a
+directory made on the way to an entry is `drwxr-xr-x` and dated to when it
+was made. An entry dated before 1970 or after the run began, which GNU warns
+of in words of its own once it has written it, is refused.
 
 `zip` makes a new archive as Info-ZIP Zip 3.0 does — `-r`, `-j`, `-D`, `-0`,
 `-y` and `-q`, its `adding:` lines, warnings, refusal of one name for two
@@ -359,13 +369,18 @@ overwrite question included — UnZip asks it on stdin, and a stdin with
 nothing on it answers with its end, which UnZip takes as "None". A link is
 made last, its name held until then by a placeholder of its target, as UnZip
 holds it, so a later entry of that name, which `-j` can make, meets it as it
-would there. A name stored with a `.` segment, which Info-ZIP never writes
+would there. A file keeps the mode it was stored with, less its set-id and
+sticky bits but with no umask taken from it, and its time; a directory UnZip
+made for an entry of its own takes the entry's once everything is written,
+and one made on the way, or for `-d`, is `drwxr-xr-x`, dated to when it was
+made, as a link is. A name stored with a `.` segment, which Info-ZIP never writes
 and other tools do, is refused as tar's is, since UnZip lists it as stored. The
 package does not say how an entry was stored, nor whether its time is an exact
 one or a DOS time, so an extraction that is not quiet — which names each file
 `extracting` or `inflating` by how it was stored — `-c`, and `-v` or the
-second `-l` that UnZip reads as one, are refused, and `-l` answers where the
-two readings of every time agree, which they always do under `TZ=UTC`.
+second `-l` that UnZip reads as one, are refused, and `-l` and an extraction
+answer where the two readings of every time agree, which they always do under
+`TZ=UTC`.
 
 `curl` is the one command that reaches outside, and the one no terminal has
 unless it was asked for: `createTerminal` takes `network: true`, and without

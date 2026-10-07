@@ -181,7 +181,7 @@ async function fromStdin(opts, state) {
   if (opts.decompressing) return decompress('stdin', piped ?? encodeUtf8(stdin), { ...opts, stdout: true }, state)
   // A member of stdin carries no name, there being none to take, and the
   // moment of the file stdin is where it is one — a pipe has none to give.
-  const modified = state.ctx.stdinFile ? moment(state.ctx) : 0
+  const modified = state.ctx.stdinFile ? moment(state.ctx, state.ctx.stdinHandle?.path) : 0
   return toStdout(headed(await compressBytes(piped ?? encodeUtf8(stdin), FORMAT), null, modified), state)
 }
 
@@ -234,13 +234,14 @@ async function compress(name, path, opts, state) {
   const { ctx } = state
   const suffix = suffixOf(name)
   if (!opts.stdout && !opts.force && suffix !== undefined) return note(state, `${name} already has ${name.slice(-suffix.length)} suffix -- unchanged`)
-  const member = headed(await compressBytes(readBytesOf(ctx.fs, path), FORMAT), name.slice(name.lastIndexOf('/') + 1), moment(ctx))
+  const member = headed(await compressBytes(readBytesOf(ctx.fs, path), FORMAT), name.slice(name.lastIndexOf('/') + 1), moment(ctx, path))
   return opts.stdout ? toStdout(member, state) : toFile(name + SUFFIX, member, name, opts, state)
 }
 
 // The tree has no clock of its own, so the moment it was made stands in — the
-// same one `ls -l` dates every file in it to.
-const moment = (ctx) => Math.floor(ctx.createdAt / 1000)
+// same one `ls -l` dates every file in it to — but for a file that keeps a
+// time of its own.
+const moment = (ctx, path) => ctx.fs.metadataOf?.(path ?? '')?.mtime ?? Math.floor(ctx.createdAt / 1000)
 
 // GNU records where a member came from: the name the file had, without the
 // directory it stood in, and the moment it carried — none and nought for a
@@ -363,6 +364,10 @@ function toFile(target, bytes, source, opts, state) {
     return true
   }
   handle.writeBytes(bytes)
+  // The file written takes the mode and the time of the one it came from,
+  // where that keeps either of its own (copy_stat).
+  const own = ctx.fs.metadataOf?.(lookup(ctx.cwd, source, ctx.fs).path ?? '')
+  if (own) ctx.fs.keepMetadata(handle.path, { mode: own.mode === undefined ? undefined : own.mode & 0o777, mtime: own.mtime })
   // What was compressed, or decompressed, is gone once it has been, unless
   // `-k` keeps it.
   if (!opts.keep) ctx.fs.removeWritable(ctx.cwd, source)

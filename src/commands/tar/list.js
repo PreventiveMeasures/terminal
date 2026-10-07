@@ -16,6 +16,7 @@ import { UnsupportedError } from '../../unsupported.js'
 import { byteLocale, classTables, encodeUtf8 } from '../../util.js'
 import { formatDate } from '../extra.js'
 import { storedName } from '../stored-names.js'
+import { MADE_MODE } from '../../writable.js'
 
 const C_ESCAPES = new Map([[7, 'a'], [8, 'b'], [12, 'f'], [10, 'n'], [13, 'r'], [9, 't'], [11, 'v']])
 const octal = (byte) => '\\' + byte.toString(8).padStart(3, '0')
@@ -42,7 +43,7 @@ const TYPES = {
 
 // pax_decode_mode: the nine permission letters, with set-id and sticky bits
 // shown in the execute places, lower case where the execute bit is also set.
-function modeString(type, mode) {
+export function modeString(type, mode) {
   const letters = [...'rwxrwxrwx'].map((letter, i) => ((mode & (0o400 >> i)) === 0 ? '-' : letter))
   const special = (bit, at, letter) => {
     if ((mode & bit) !== 0) letters[at] = letters[at] === 'x' ? letter : letter.toUpperCase()
@@ -75,9 +76,9 @@ export function longLines(ctx, { numericOwner = false, utc = false } = {}, strip
     const head = `${modeString(entry.type, entry.mode)} ${user}/${group} ${' '.repeat(ugswidth - pad)}${size} ${stamp.padEnd(datewidth)} `
     return head + quoteEscape(storedName(entry), ctx) + linkSuffix(entry, strip, ctx)
   }
-  // print_for_mkdir: a directory made for an entry, in this tree's mode, its
-  // words where the owners and the time stand in the lines around it.
-  line.mkdir = (name) => `${modeString('directory', 0o700)} ${'Creating directory:'.padStart(ugswidth + 1 + datewidth)} ${quoteEscape(name, ctx)}`
+  // print_for_mkdir: a directory made for an entry, in the mode it is made
+  // with, its words where the owners and the time stand in the lines around it.
+  line.mkdir = (name) => `${modeString('directory', MADE_MODE)} ${'Creating directory:'.padStart(ugswidth + 1 + datewidth)} ${quoteEscape(name, ctx)}`
   return line
 }
 
