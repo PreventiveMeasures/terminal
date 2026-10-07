@@ -145,6 +145,16 @@ function mergeRanges(items) {
   return out
 }
 
+// GNU's `\<`, `\>`, `\b` and `\B` as JS lookarounds over a set of word
+// characters given as a bracket body.
+export function wordEdges(body) {
+  const w = `[${body}]`
+  return {
+    '<': `(?<!${w})(?=${w})`, '>': `(?<=${w})(?!${w})`,
+    boundary: `(?:(?<!${w})(?=${w})|(?<=${w})(?!${w}))`, inside: `(?:(?<=${w})(?=${w})|(?<!${w})(?!${w}))`,
+  }
+}
+
 function classTable(name, multibyte, rangesOf, bodyOf, caseOf) {
   const bodies = new Map()
   const ranges = new Map()
@@ -170,12 +180,9 @@ function classTable(name, multibyte, rangesOf, bodyOf, caseOf) {
     assertions() {
       if (table.js) return table.js
       const s = table.body('space')
-      const w = `[${table.body('word')}]`
       table.js = {
-        __proto__: null,
-        '<': `(?<!${w})(?=${w})`, '>': `(?<=${w})(?!${w})`,
-        boundary: `(?:(?<!${w})(?=${w})|(?<=${w})(?!${w}))`, inside: `(?:(?<=${w})(?=${w})|(?<!${w})(?!${w}))`,
-        word: w, nonWord: `[^${table.body('word')}]`, space: `[${s}]`, nonSpace: `[^${s}]`,
+        __proto__: null, ...wordEdges(table.body('word')),
+        word: `[${table.body('word')}]`, nonWord: `[^${table.body('word')}]`, space: `[${s}]`, nonSpace: `[^${s}]`,
       }
       return table.js
     },

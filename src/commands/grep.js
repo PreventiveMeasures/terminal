@@ -3,12 +3,12 @@
 import { basename, lookup, relativeTo, resolve, walkTree } from '../fs.js'
 import { lookupWithNote, omissionNote } from '../notes.js'
 import { parseArgs } from '../args.js'
-import { consumeStdin, decodeUtf8Marked, encodeUtf8Loose, err, joinLines, parseNonNegativeInt, readFilesFor, readInputs, readTextOrBytes, splitLines, usage } from '../util.js'
+import { consumeStdin, countNewlines, decodeUtf8Marked, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, readTextOrBytes, splitLines, usage } from '../util.js'
 import { UnsupportedError, markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { AwkError } from '../awk/common.js'
 import { cannotHoldMatch, compilePatterns, inputGap } from './grep-pattern.js'
 import { compileGlob } from '../glob.js'
-import { countMatches, grepRun, grepSummary, noMatch } from './grep-output.js'
+import { anyMatch, countMatches, grepRun, grepSummary, isFailure, matchersFor, noMatch } from './grep-output.js'
 import { grepPatterns } from './grep-pattern-files.js'
 
 const FLAGS = '[-i] [-a|-I] [-s] [-v] [-n] [-r|-R] [-w] [-x] [-o] [-E|-F|-G|-P] [-l] [-L] [-c] [-q] [-m N] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
@@ -54,9 +54,7 @@ export function grep(stdin, tokens, ctx) {
   const recursive = flags.has('r') || flags.has('R')
   const filters = compileFilters(parsed, ctx)
   const binaryMode = parsed.order.findLast((o) => ['a', 'I', 'text'].includes(o.name))?.name
-  filters.ignoreBinary = binaryMode === 'I' && counts.max !== 0
-  filters.forceText = binaryMode === 'a' || binaryMode === 'text'
-  filters.binaryFiles = filters.forceText ? 'text' : binaryMode === 'I' ? 'without-match' : 'binary'
+  filters.binaryFiles = binaryMode === 'a' || binaryMode === 'text' ? 'text' : binaryMode === 'I' ? 'without-match' : 'binary'
   filters.silent = flags.has('s') || flags.has('no-messages')
   filters.follow = flags.has('R')
   try { return filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) }
@@ -71,7 +69,7 @@ function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
   const mode = ['l', 'L', 'c'].find((flag) => flags.has(flag))
   // Filename filters apply to named and recursively discovered files, but not stdin.
   let items = r.items
-  if (filters.name.length > 0) items = items.filter((item) => item.failure !== undefined || includedInput(item, filters))
+  if (filters.name.length > 0) items = items.filter((item) => isFailure(item) || includedInput(item, filters))
   // A file this cannot search is that file's trouble and not the search's.
   // GNU keeps what the other files matched and says which one it could not
   // read, so one such file in a tree does not take the rest of the answers
@@ -79,14 +77,14 @@ function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
   let gap = null
   if (counts.max !== 0) {
     items = items.flatMap((item) => {
-      if (item.failure !== undefined) return [item]
+      if (isFailure(item)) return [item]
       const inp = textInput(item, filters, re.res, invert, ctx)
-      const found = inputGap([inp], re.res, ctx.locale, !mode && flags.has('o'))
+      const found = inputGap(inp, re.res, ctx.locale, !mode && flags.has('o'))
         ?? (mode ? null : lateBinary(inp, re.res, invert, counts.after) ?? contextAcrossReads(inp, counts, flags, filters, ctx))
       gap ??= found
       return found ? [] : [inp]
     })
-    if (gap && items.every((item) => item.failure !== undefined)) return gap
+    if (gap && items.every(isFailure)) return gap
   }
   const showName = pickShowName(flags, rest.length)
   const opts = { showName, invert, showLine: flags.has('n'), only: flags.has('o'), binaryFiles: filters.binaryFiles, ...counts }
@@ -116,10 +114,10 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
     failed ||= r.failed
     if (paths.includes('-') || (paths.includes('/dev/stdin') && !ctx.stdinFile)) stdin = ''
     for (const item of r.items) {
-      if (item.failure !== undefined) { stderr += item.failure; continue }
+      if (isFailure(item)) { stderr += item.failure; continue }
       if (!includedInput(item, filters)) continue
       const inp = textInput(item, filters, res, invert, ctx)
-      const gap = inputGap([inp], res, ctx.locale)
+      const gap = inputGap(inp, res, ctx.locale)
       if (gap) { gap.stderr = stderr + gap.stderr; return gap }
       if (countMatches(inp, res, invert, 1) > 0) return { stdout: '', stderr, exitCode: 0 }
     }
@@ -136,20 +134,24 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
 // passes over that file instead, and `-a` reads both as text.
 function textInput(input, filters, res, invert, ctx) {
   const window = firstRead(input, ctx)
+  const skip = filters.binaryFiles === 'without-match'
+  const text = filters.binaryFiles === 'text'
   if (input.content === undefined) {
     // Unless nothing in it could have been selected anyway: a literal the
     // bytes do not hold selects no line of them, and `-v` selects the lines
     // a pattern does not, which is every line there is.
     if (!invert && cannotHoldMatch(input.bytes, res)) return { ...input, content: '' }
-    const at = filters.forceText ? -1 : input.bytes.indexOf(0)
-    if (at >= 0 && filters.ignoreBinary) return skipBinary(input, filters, at >= window)
+    const at = text ? -1 : input.bytes.indexOf(0)
+    if (at >= 0 && skip) return skipBinary(input, filters, at >= window)
     const marked = { ...input, content: decodeUtf8Marked(input.bytes), marked: true }
     return at < 0 ? marked : binaryInput(marked, input.bytes, at, window)
   }
-  const at = filters.forceText ? -1 : input.content.indexOf('\0')
+  const at = text ? -1 : input.content.indexOf('\0')
   if (at < 0) return input
-  const head = encodeUtf8Loose(input.content.slice(0, at))
-  return filters.ignoreBinary ? skipBinary(input, filters, head.length >= window) : binaryInput(input, head, head.length, window)
+  // A character is a byte at least, so the text up to the read's end in
+  // characters holds the whole read and says whether the NUL is past it.
+  const head = encodeUtf8Loose(input.content.slice(0, Math.min(at, window)))
+  return skip ? skipBinary(input, filters, head.length >= window) : binaryInput(input, head, head.length, window)
 }
 
 // A file GNU calls binary for a NUL at byte `at`: from the line that NUL is on
@@ -157,30 +159,27 @@ function textInput(input, filters, res, invert, ctx) {
 // lines ended within that read printed as text, if nothing between them and
 // the NUL's line depends on how the rest is read (lateBinary).
 function binaryInput(input, bytes, at, window) {
-  const late = at >= window
+  if (at < window) return { ...input, binaryLine: 0 }
   const lineStart = input.content.lastIndexOf('\n', input.content.indexOf('\0')) + 1
-  if (!late) return { ...input, nul: true, binaryLine: 0 }
-  let read = 0
-  for (let i = bytes.indexOf(10); i >= 0 && i < window; i = bytes.indexOf(10, i + 1)) read++
-  return { ...input, nul: true, late, lineStart, readLines: read, binaryLine: input.content.slice(0, lineStart).split('\n').length - 1 }
+  return { ...input, lineStart, readLines: countNewlines(bytes.subarray(0, window)), binaryLine: countNewlines(input.content.slice(0, lineStart)) }
 }
+
+const isStdin = (input) => input.name === null || input.name === '/dev/stdin'
 
 // GNU decides on what its first read holds: 96 KiB of a file, and of a pipe
 // what the pipe holds, which is 64 KiB.
-function firstRead(input, ctx) {
-  const stdin = input.name === null || input.name === '/dev/stdin'
-  return stdin && !ctx.stdinFile ? 64 * 1024 : 96 * 1024
-}
+const firstRead = (input, ctx) => (isStdin(input) && !ctx.stdinFile ? 64 * 1024 : 96 * 1024)
 
 // A NUL past that first read is found once earlier lines have been printed:
 // those ended within the read are text, and the file is binary from the NUL's
 // line. A line selected between the two, or context reaching past the read,
 // depends on how much each later read takes, which is not modelled.
 function lateBinary(input, res, invert, after) {
-  if (!input.late) return null
+  if (input.readLines === undefined) return null
   const lines = splitLines(input.content.slice(0, input.lineStart))
-  const selects = (some) => countMatches({ ...input, nul: false, content: joinLines(some) }, res, invert, 1) > 0
-  if (!selects(lines.slice(input.readLines)) && !(after > 0 && selects(lines.slice(Math.max(0, input.readLines - after), input.readLines)))) return null
+  const tests = matchersFor(input, res)
+  const selects = (from, to) => lines.slice(from, to).some((line) => anyMatch(tests, line) !== invert)
+  if (!selects(input.readLines) && !(after > 0 && selects(Math.max(0, input.readLines - after), input.readLines))) return null
   return unsupported('feature', 'grep', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported', 2)
 }
 
@@ -190,7 +189,7 @@ function lateBinary(input, res, invert, after) {
 // much each read past the first takes is not modelled; within that first
 // read, or with no context asked for, nothing depends on it.
 function contextAcrossReads(input, counts, flags, filters, ctx) {
-  if (!input.marked || input.nul || !counts.hasContext || flags.has('o') || filters.binaryFiles === 'text') return null
+  if (!input.marked || input.binaryLine !== undefined || !counts.hasContext || flags.has('o') || filters.binaryFiles === 'text') return null
   if (input.bytes.length <= firstRead(input, ctx)) return null
   return unsupported('feature', 'grep', 'binary context across reads', 'grep: context around lines held back past the first read is not supported', 2)
 }
@@ -200,7 +199,7 @@ function contextAcrossReads(input, counts, flags, filters, ctx) {
 // and a quiet success stay where the NUL is found late, which is refused.
 function skipBinary(input, filters, late) {
   if (late) throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
-  const path = input.name === null || input.name === '/dev/stdin' ? filters.stdinPath : resolve(filters.cwd, input.name)
+  const path = isStdin(input) ? filters.stdinPath : resolve(filters.cwd, input.name)
   if (path) filters.binary.add(path)
   else filters.binaryStdin = true
   return { ...input, content: '' }

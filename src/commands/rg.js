@@ -4,7 +4,7 @@
 // not model would silently shrink the answer.
 
 import { basename, dirname, lookup, relativeTo, walkTree } from '../fs.js'
-import { readTextOrBytes } from '../util.js'
+import { decodeUtf8Maybe, inputLabel, readTextOrBytes } from '../util.js'
 import { parseArgs } from '../args.js'
 import { unsupported, unsupportedNote } from '../unsupported.js'
 import { ARGS, checkPatterns, patternArgs, rgOptions } from './rg-options.js'
@@ -51,7 +51,7 @@ export function rg(stdin, tokens, ctx) {
   // ripgrep's "binary file matches" line, which this runtime cannot produce.
   const binary = options.text ? null : namedBinary(operands, ctx)
   if (binary) return gap('named binary file', `${JSON.stringify(binary)} is binary, and reporting a binary match is not supported`)
-  const refused = refusedFile(files, options, ctx)
+  const refused = refusedFile(files, options, ctx) ?? (targets.stdin ? refusedStdin(options, ctx) : null)
   if (refused) return gap(refused.detail, refused.message)
   // ripgrep treats a run that opened nothing as a mistake rather than a miss,
   // since a filter it applied is the usual cause. Only when it chose the
@@ -98,18 +98,32 @@ function refusedFile(files, options, ctx) {
     if (binary && !named && !options.text) continue
     const name = JSON.stringify(relativeTo(ctx.cwd === '/' ? '/' : ctx.cwd, path) || path)
     if (text === undefined) {
-      // Unless a literal that is nowhere in the bytes is all that was asked
-      // for: ripgrep matches the bytes as they are rather than the text they
-      // fail to spell, so it prints nothing for such a file and there is
-      // nothing to refuse. Only a literal read as written answers — `-i`
-      // folds by ripgrep's own tables — and `-v` selects the lines a pattern
-      // does not, which is every line there is.
-      if (!options.invert && !options.ignoreCase && literalsMissing(bytes, options.patterns, options.literal, ctx.locale)) continue
-      return { detail: 'unreadable bytes', message: `${name} holds bytes that are not text, and searching them is not supported` }
+      const unreadable = unreadableBytes(bytes, name, options, ctx)
+      if (unreadable) return unreadable
+      continue
     }
     if (text.startsWith('\uFEFF')) return { detail: 'byte-order mark', message: `${name} begins with a byte-order mark, which ripgrep strips before matching` }
   }
   return null
+}
+
+// Bytes that spell no text are refused unless a literal that is nowhere in
+// them is all that was asked for: ripgrep matches the bytes as they are rather
+// than the text they fail to spell, so it prints nothing for them and there is
+// nothing to refuse. Only a literal read as written answers — `-i` folds by
+// ripgrep's own tables — and `-v` selects the lines a pattern does not, which
+// is every line there is.
+function unreadableBytes(bytes, name, options, ctx) {
+  if (!options.invert && !options.ignoreCase && literalsMissing(bytes, options.patterns, options.literal, ctx.locale)) return null
+  return { detail: 'unreadable bytes', message: `${name} holds bytes that are not text, and searching them is not supported` }
+}
+
+// Piped bytes are asked the same, unless a NUL in them makes them binary,
+// which a search without `--text` passes over as it does a walked file.
+function refusedStdin(options, ctx) {
+  const bytes = ctx.stdinBytes
+  if (!bytes || (!options.text && bytes.includes(0)) || decodeUtf8Maybe(bytes) !== undefined) return null
+  return unreadableBytes(bytes, inputLabel(null, ctx), options, ctx)
 }
 
 // rg filters only what it discovers by walking; an operand named on the command

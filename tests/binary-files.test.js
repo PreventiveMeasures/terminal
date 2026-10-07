@@ -535,6 +535,17 @@ describe('searching a tree that holds files of bytes', () => {
     gap(t, 'rg -v zzz latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
     await check(t, 'rg zzz latin.bin', '', { exitCode: 1 })
   })
+
+  it('is what rg reads of piped bytes as of a file', async () => {
+    // ripgrep prints `more` as the line it is and `café latte` as its bytes,
+    // with or without -F and --text; a literal nowhere in them finds nothing.
+    const t = terminal()
+    const refused = 'rg: standard input holds bytes that are not text, and searching them is not supported\n'
+    for (const command of ['cat latin.bin | rg -F more', 'cat latin.bin | rg -F latte', 'cat latin.bin | rg latte', 'rg --text -F latte < latin.bin', 'cat latin.bin | rg -F -v zzz']) {
+      await gap(t, command, 'unreadable bytes', refused)
+    }
+    await check(t, 'cat latin.bin | rg -F zzz', '', { exitCode: 1 })
+  })
 })
 
 describe('a file of bytes and the writable overlay', () => {

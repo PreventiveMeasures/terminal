@@ -103,14 +103,40 @@ export function decodeUtf8Marked(bytes) {
 const CHUNK = 4096
 const WIDTH = Uint8Array.from({ length: 256 }, (_, byte) => SEQUENCE(byte))
 
-// A byte read as a marker, among the characters around it.
-export const MARKER = /[\uDC80-\uDCFF]/u
+// A byte read as a marker, among the characters around it: the range as a
+// regex set body, a test for one, and a test for a code point.
+export const MARKER_RANGE = '\\uDC80-\\uDCFF'
+export const MARKER = new RegExp(`[${MARKER_RANGE}]`, 'u')
+export const isMarker = (code) => code >= 0xdc80 && code <= 0xdcff
 
 // The bytes decodeUtf8Marked read: its markers back as the bytes they stand
-// for, and everything else as UTF-8.
+// for, and everything else as UTF-8, in one pass. A surrogate that is no
+// marker has no UTF-8 spelling and is refused as encodeUtf8 refuses it.
 export function encodeUtf8Marked(text) {
   if (!MARKER.test(text)) return encodeUtf8(text)
-  return joinBytes(text.split(/([\uDC80-\uDCFF])/u).map((part, i) => (i % 2 ? Uint8Array.of(part.codePointAt(0) - 0xdc00) : encodeUtf8(part))))
+  const out = new Uint8Array(text.length * 3)
+  let n = 0
+  for (let at = 0; at < text.length; at++) {
+    const code = text.codePointAt(at)
+    if (code < 0x80) out[n++] = code
+    else if (isMarker(code)) out[n++] = code - 0xdc00
+    else if (code < 0x800) n = put(out, n, 0xc0 | (code >> 6), code, 1)
+    else if (code < 0x10000) {
+      if (code >= 0xd800 && code <= 0xdfff) return encodeUtf8(text)
+      n = put(out, n, 0xe0 | (code >> 12), code, 2)
+    } else {
+      n = put(out, n, 0xf0 | (code >> 18), code, 3)
+      at++
+    }
+  }
+  return out.slice(0, n)
+}
+
+// A lead byte and the continuation bytes carrying the rest of the code point.
+function put(out, n, lead, code, rest) {
+  out[n++] = lead
+  for (let k = rest - 1; k >= 0; k--) out[n++] = 0x80 | ((code >> (6 * k)) & 0x3f)
+  return n
 }
 
 // One run of bytes out of several, which is what a pipe carrying both text

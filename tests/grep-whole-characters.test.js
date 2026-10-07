@@ -46,3 +46,13 @@ describe('grep reads a character past U+FFFF whole', () => {
     }
   })
 })
+
+describe('awk reads a character past U+FFFF whole', () => {
+  it('tests a line as its own match extent reads it', async () => {
+    // U+10080 is a letter: a line of it alone has word edges at both ends and
+    // none inside, so `\B` selects no line, as gsub finds no place for it.
+    await check(String.raw`awk '/\B/ { n++ } END { print n + 0 }' letter`, '0\n')
+    await check(String.raw`awk '{ print gsub(/\B/, "-") }' letter`, '0\n')
+    await check(String.raw`awk '/\y/ { n++ } END { print n + 0 }' letter`, '1\n')
+  })
+})

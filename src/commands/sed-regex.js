@@ -132,7 +132,7 @@ export function compilePattern(pattern, extended, noSub = false, ignoreCase = fa
   for (const [, escape] of translated.source.matchAll(/\\(.)/gu)) {
     if (/[1-9]/u.test(escape)) scriptGap('regex backreferences')
   }
-  const re = new AwkRegex(grepSource(translated.source, true, tables), false, null, tables)
+  const re = new AwkRegex(grepSource(translated.source, 'extent', tables), false, null, tables)
   return { re, noSub, locale, ignoreCase, pattern: normalized }
 }
 

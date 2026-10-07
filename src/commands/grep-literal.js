@@ -4,9 +4,12 @@
 // GNU's matchers make of a byte in such a file that spells no character,
 // which a search reads as a marker of its own (decodeUtf8Marked in
 // ../bytes.js), spelt for the JS matcher grepSource builds.
-import { LOCALE, classTables } from '../locale.js'
+import { LOCALE, classTables, wordEdges } from '../locale.js'
 import { compileNfa, search } from '../awk/re.js'
-import { encodeUtf8 } from '../util.js'
+import { MARKER_RANGE, encodeUtf8, isMarker } from '../util.js'
+import { validateBracket } from '../charclass.js'
+
+export { wholeCharacters } from '../unicode.js'
 
 // The bytes a plain literal can be, character by character: what each one is
 // as written, or the bytes of each character it stands for where `-i` folds
@@ -94,7 +97,8 @@ export function literalText(pattern, flags) {
 // starts at a letter, and after 0xD7, read as `×`, one does. `-w` asks GNU's
 // own word test instead, which takes such a byte for no word character at
 // all; its lookarounds are plain sets, which hold no marker, and say the same.
-export const MARKERS = '\\uDC80-\\uDCFF'
+// Only the escapes that read a marker differently are spelt here; grepSource
+// takes the rest as it spells them over text.
 const MARKED = new Map()
 
 export function markedAssertions(tables) {
@@ -102,31 +106,19 @@ export function markedAssertions(tables) {
   const js = tables.assertions()
   let latin = ''
   for (let byte = 0x80; byte <= 0xff; byte++) if (tables.has('word', byte)) latin += `\\u${(0xdc00 + byte).toString(16)}`
-  const w = `[${js.word.slice(1, -1)}${latin}]`
-  const set = {
-    '<': `(?<!${w})(?=${w})`, '>': `(?<=${w})(?!${w})`,
-    b: `(?:(?<!${w})(?=${w})|(?<=${w})(?!${w}))`, B: `(?:(?<=${w})(?=${w})|(?<!${w})(?!${w}))`,
-    w: js.word, W: markedClass(js.nonWord), s: js.space, S: markedClass(js.nonSpace), '`': '^', "'": '$',
-  }
+  const edges = wordEdges(tables.body('word') + latin)
+  const set = { '<': edges['<'], '>': edges['>'], b: edges.boundary, B: edges.inside, W: markedClass(js.nonWord), S: markedClass(js.nonSpace) }
   MARKED.set(tables, set)
   return set
 }
 
 // A set that leaves things out would take a marker, and one that names what
 // it holds may span the markers with a range, so either is kept off them.
-export const markedClass = (cls) => `(?:(?![${MARKERS}])${cls})`
-
-// V8 tries a match from between the two halves of a surrogate pair, where its
-// lookarounds read no character on either side, so an empty match or a word
-// edge is found inside a character GNU reads whole. Only there is neither the
-// start of the line nor a character behind, so only there no match starts.
-export const wholeCharacters = (source) => `(?:^|(?<=[^]))(?:${source})`
+export const markedClass = (cls) => `(?:(?![${MARKER_RANGE}])${cls})`
 
 // The extent matcher `-o` uses, reading a marker as the JS matcher does: as
 // nothing a wildcard or a set takes, and as the Latin-1 character it stands
 // for where a word edge is asked about.
-const isMarker = (code) => code >= 0xdc80 && code <= 0xdcff
-
 export function markedExtent(extent) {
   const nfa = compileNfa(extent.ast, extent.tables)
   const states = nfa.states.map((s) => {
@@ -182,6 +174,7 @@ export function glibcRuns(text) {
     const width = glibcSequence(run, 0)
     if (width === 3) found.surrogate = true
     else if (width) found.long = true
+    if (found.long && found.surrogate) break
   }
   return found
 }
@@ -192,18 +185,20 @@ export function glibcRuns(text) {
 // whether glibc's regex answers the whole pattern, which in a multibyte locale
 // it does for a backreference, a word edge, `\w`, `\s` and their negations,
 // and a set holding a class or a range — and then reads both those runs as
-// characters, as it always does for what `-o` prints.
-export function patternShape(pattern, backrefs, wordEdge) {
-  const shape = { negated: false, dot: false, regex: backrefs || wordEdge, wordEdge }
+// characters, as it always does for what `-o` prints. The pattern has passed
+// validateRegex, so every set in it ends where validateBracket says.
+export function patternShape(pattern, backrefs) {
+  const shape = { negated: false, dot: false, regex: backrefs, wordEdge: false }
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i]
     if (c === '\\') {
       const next = pattern[++i] ?? ''
-      if ('wsWS'.includes(next)) shape.regex = true
+      if ('<>bB'.includes(next)) shape.wordEdge = true
+      if ('<>bBwsWS'.includes(next)) shape.regex = true
       if ('WS'.includes(next)) shape.negated = true
     } else if (c === '.') shape.dot = true
     else if (c === '[') {
-      const end = bracketEnd(pattern, i)
+      const end = validateBracket(pattern, i)
       const body = pattern.slice(i + 1, end)
       if (body.startsWith('^')) shape.negated = true
       if (/\[:|.-./u.test(body.replace(/^\^?\]?/u, ''))) shape.regex = true
@@ -213,24 +208,10 @@ export function patternShape(pattern, backrefs, wordEdge) {
   return shape
 }
 
-function bracketEnd(pattern, start) {
-  let i = start + 1
-  if (pattern[i] === '^') i++
-  if (pattern[i] === ']') i++
-  for (; i < pattern.length; i++) {
-    if (pattern[i] === '[' && ':.='.includes(pattern[i + 1] ?? '')) {
-      const close = pattern.indexOf(pattern[i + 1] + ']', i + 2)
-      if (close >= 0) { i = close + 1; continue }
-    }
-    if (pattern[i] === ']') return i
-  }
-  return pattern.length
-}
-
 // Whether glibc and GNU's own matcher could answer this pattern differently
 // over text holding such runs; `-o` asks glibc's regex where a match ends.
 export function glibcDiffers(shape, reading, only) {
-  if (!shape || !(reading.long || reading.surrogate)) return false
+  if (!(reading.long || reading.surrogate)) return false
   if (shape.wordEdge || ((shape.dot || shape.negated) && (shape.regex || only))) return true
   return reading.long && shape.negated
 }
@@ -239,6 +220,6 @@ export function glibcDiffers(shape, reading, only) {
 // it stands for one byte, and GNU has no inside of it to stand in.
 const OUTSIDE = new Map()
 export function outsideWords(tables) {
-  if (!OUTSIDE.has(tables)) OUTSIDE.set(tables, new RegExp(`[^\\x00-\\x7f${MARKERS}${tables.assertions().word.slice(1, -1)}]`, 'u'))
+  if (!OUTSIDE.has(tables)) OUTSIDE.set(tables, new RegExp(`[^\\x00-\\x7f${MARKER_RANGE}${tables.body('word')}]`, 'u'))
   return OUTSIDE.get(tables)
 }

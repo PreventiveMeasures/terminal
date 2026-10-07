@@ -91,9 +91,9 @@ not UTF-8 by its own rules; a pattern holding an unpaired surrogate, which no
 bytes spell; and, beside a character glibc reads past U+10FFFF or a surrogate
 spelt in UTF-8, a pattern GNU's two matchers would answer differently. `rg`
 passes over a file of bytes that spell no text where a plain literal is
-nowhere in it and refuses it by name where one could be, and an `rg` walk
-passes over what ripgrep itself calls binary: a file holding a NUL, which it
-never reads past.
+nowhere in it and refuses it by name where one could be, and does the same
+for such bytes piped into it; an `rg` walk passes over what ripgrep itself
+calls binary: a file holding a NUL, which it never reads past.
 
 The terminal's own stdin and stdout are a terminal's: nothing can be typed
 into it, and it shows text. A command reads the terminal where nothing was

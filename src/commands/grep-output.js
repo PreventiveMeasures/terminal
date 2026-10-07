@@ -4,21 +4,23 @@
 // its locale cannot read is held back, the context and group separators go on
 // as if it had never been there, and the file is said to be binary once the
 // search is done with it.
-import { MARKER, encodeUtf8, encodeUtf8Marked, joinBytes, joinLines, splitLines } from '../util.js'
+import { MARKER, encodeUtf8Marked, joinLines, splitLines } from '../util.js'
 import { UnsupportedError } from '../unsupported.js'
 import { stepAt } from '../unicode.js'
-import { markedRegex } from './grep-pattern.js'
+import { markedRegex, plainRegex } from './grep-pattern.js'
 import { heldBack, markedExtent } from './grep-literal.js'
 
 export const anyMatch = (res, line) => res.some((re) => re.test(line))
 export const noMatch = () => ({ stdout: '', stderr: '', exitCode: 1 })
+export const isFailure = (item) => item.failure !== undefined
+const label = (input) => input.name ?? '(standard input)'
 
 // What a search reads a file as: lines, which in a file GNU calls binary for
 // a NUL are ended by every NUL too — it turns each into a line end before it
 // looks. A file of bytes that spell no text is matched with the patterns that
 // take no such byte for a character (markedRegex).
-const contentOf = (input) => (input.nul ? input.content.replaceAll('\0', '\n') : input.content)
-const matchersFor = (input, res) => (input.marked ? res.map(markedRegex) : res)
+const contentOf = (input) => (input.binaryLine === undefined ? input.content : input.content.replaceAll('\0', '\n'))
+export const matchersFor = (input, res) => res.map(input.marked ? markedRegex : plainRegex)
 
 // Stop at the selection limit without splitting the unvisited suffix.
 // A final newline ends its line; it does not create another empty line.
@@ -56,13 +58,13 @@ function output() {
   return {
     events,
     out(text) { if (text) add(1, text) },
-    // A file's lines, which for a file of bytes are a prefix and the line
-    // itself: only the line is that file's bytes, and the name and number in
-    // front of it are text like any other, whatever characters they hold.
-    lines(lines, marked) {
-      if (marked && lines.some(([, line]) => MARKER.test(line))) {
-        events.push({ fd: 1, bytes: joinBytes(lines.flatMap(([head, line]) => [encodeUtf8(head), encodeUtf8Marked(line), NEWLINE])) })
-      } else this.out(marked ? lines.map(([head, line]) => `${head}${line}\n`).join('') : joinLines(lines))
+    // A file's lines, which for a file of bytes go out as the bytes they are.
+    // The name in front of each is text like any other, so one that UTF-8
+    // cannot spell is refused here as such text always is.
+    lines(text, marked, name) {
+      if (!marked || !MARKER.test(text)) return this.out(text)
+      if (!name.isWellFormed()) throw new UnsupportedError('feature', 'unpaired surrogate', 'unpaired UTF-16 surrogates cannot be encoded as UTF-8')
+      events.push({ fd: 1, bytes: encodeUtf8Marked(text) })
     },
     err(text) { if (text) add(2, text) },
   }
@@ -82,8 +84,8 @@ function written(events, selected) {
 export function grepRun(items, res, opts) {
   const run = { used: false, write: output(), selected: false }
   for (const item of items) {
-    if (item.failure === undefined) grepFile(item, res, opts, run)
-    else run.write.err(item.failure)
+    if (isFailure(item)) run.write.err(item.failure)
+    else grepFile(item, res, opts, run)
   }
   return written(run.write.events, run.selected)
 }
@@ -94,16 +96,18 @@ export function grepRun(items, res, opts) {
 // lines begin there. A file is one read here: past GNU's first, a file whose
 // lines can be held back is refused where that would show (contextAcrossReads).
 function grepFile(input, res, opts, run) {
+  if (input.binaryLine === 0) return grepBinary(input, res, opts, run)
   const content = contentOf(input)
   const f = {
     input, opts, run, lines: splitLines(content), res, tests: matchersFor(input, res), bufbeg: 0,
-    out: [], lastout: null, pending: 0, outleft: opts.max ?? Infinity, quiet: false, quietSelected: 0, heldBack: false, done: false,
+    name: (opts.showName ?? input.recursive) ? label(input) : null,
+    out: [], lastout: null, pending: 0, outleft: opts.max ?? Infinity, quiet: false, heldBack: false,
   }
   const end = f.lines.length
   const ended = end > 0 && !content.endsWith('\n') ? end - 1 : end
   let selected = grepbuf(f, 0, ended)
   if (f.pending > 0) prpending(f, ended)
-  if (ended < end && !(f.outleft === 0 && f.pending === 0) && !f.done) {
+  if (ended < end && !(f.outleft === 0 && f.pending === 0) && !f.quiet) {
     let beg = ended
     for (let i = 0; i < opts.before && beg > 0 && beg !== f.lastout; i++) beg--
     if (beg !== f.lastout) f.lastout = null
@@ -111,12 +115,22 @@ function grepFile(input, res, opts, run) {
     if (f.outleft > 0) selected += grepbuf(f, ended, end)
     if (f.pending > 0) prpending(f, end)
   }
-  run.write.lines(f.out, input.marked)
+  run.write.lines(joinLines(f.out), input.marked, f.name ?? '')
   if (selected > 0) run.selected = true
   // `-I` holds the same lines back and says nothing; `-a` holds none back.
-  if (opts.binaryFiles === 'binary' && (f.heldBack || f.quietSelected > 0)) {
-    run.write.err(`grep: ${input.name ?? '(standard input)'}: binary file matches\n`)
-  }
+  if (f.heldBack || f.quiet) binaryMatches(input, opts, run)
+}
+
+// A file binary from its top prints nothing at all, and its first selected
+// line is the last thing GNU looks for.
+function grepBinary(input, res, opts, run) {
+  if (countMatches(input, res, opts.invert, 1) === 0) return
+  run.used = run.selected = true
+  binaryMatches(input, opts, run)
+}
+
+function binaryMatches(input, opts, run) {
+  if (opts.binaryFiles === 'binary') run.write.err(`grep: ${label(input)}: binary file matches\n`)
 }
 
 // GNU's grepbuf: find each selected line from `from` up to `to` — a block of
@@ -125,7 +139,7 @@ function grepFile(input, res, opts, run) {
 // nothing is printed and the first selection is the last.
 function grepbuf(f, from, to) {
   const { invert } = f.opts
-  const binaryLine = f.input.nul ? f.input.binaryLine : Infinity
+  const binaryLine = f.input.binaryLine ?? Infinity
   let selected = 0
   for (let p = from; p < to;) {
     let b = p
@@ -146,10 +160,7 @@ function grepbuf(f, from, to) {
         f.quiet = true
       }
       selected += invert ? prtext(f, p, b) : prtext(f, b, b + 1)
-      if (f.outleft === 0 || f.quiet) {
-        f.done = f.quiet
-        break
-      }
+      if (f.outleft === 0 || f.quiet) break
     }
     p = b + 1
   }
@@ -167,7 +178,7 @@ function prtext(f, beg, lim) {
   if (!f.quiet) {
     const bp = f.lastout ?? f.bufbeg
     for (let i = 0; i < before; i++) if (p > bp) p--
-    if (hasContext && f.run.used && p !== f.lastout) f.out.push(f.input.marked ? ['--', ''] : '--')
+    if (hasContext && f.run.used && p !== f.lastout) f.out.push('--')
     for (; p < beg; p++) prline(f, p, false)
   }
   let n
@@ -180,7 +191,6 @@ function prtext(f, beg, lim) {
   f.pending = f.quiet ? 0 : after
   f.run.used = true
   f.outleft -= n
-  if (f.quiet) f.quietSelected += n
   return n
 }
 
@@ -198,12 +208,11 @@ function prline(f, i, selected) {
   if (!f.opts.only) {
     if (f.input.marked && f.opts.binaryFiles !== 'text' && MARKER.test(line) && heldBack(line)) {
       f.heldBack = true
-      return false
+      return
     }
-    f.out.push(formatLine(line, f.input.name, i + 1, selected, f))
+    f.out.push(formatLine(f, line, i, selected))
   } else if (selected !== f.opts.invert) presentMatches(f, line, i, selected)
   f.lastout = i + 1
-  return true
 }
 
 // Across patterns, choose the leftmost-longest nonoverlapping match each time.
@@ -213,36 +222,36 @@ function presentMatches(f, line, i, selected) {
   let cursor = 0
   while (cursor < line.length) {
     let best = null
-    for (const [k, re] of f.res.entries()) {
-      const match = matchFrom(re, f.tests[k], line, cursor, marked)
+    for (let k = 0; k < f.res.length; k++) {
+      const match = matchFrom(f.res[k], f.tests[k], line, cursor, marked)
       if (match && (!best || match.start < best.start || (match.start === best.start && match.end > best.end))) best = match
     }
     if (!best) break
     if (best.end === best.start) { cursor = best.end + stepAt(line, best.end); continue }
-    f.out.push(formatLine(line.slice(best.start, best.end), f.input.name, i + 1, selected, f))
+    f.out.push(formatLine(f, line.slice(best.start, best.end), i, selected))
     cursor = best.end
   }
 }
 
 // Where the pattern next matches: by the POSIX extent matcher where it has
-// one, and by the matcher the line is selected with where it does not.
+// one, and by the matcher the line is selected with where it does not — a
+// global copy of it, kept apart so the one testing lines stays a plain RegExp.
+const SCANS = new WeakMap()
+
 function matchFrom(re, test, line, cursor, marked) {
   if (re.extent) return (marked ? re.markedExtent ??= markedExtent(re.extent) : re.extent).search(line, cursor)
-  const search = test.scan ??= new RegExp(test.source, test.flags + 'g')
-  search.lastIndex = cursor
-  const m = search.exec(line)
-  if (m && m[0] === '' && test.pcre) throw new UnsupportedError('feature', 'PCRE empty match extent', 'only-matching with empty PCRE matches is not supported')
+  let scan = SCANS.get(test)
+  if (!scan) SCANS.set(test, scan = new RegExp(test.source, test.flags + 'g'))
+  scan.lastIndex = cursor
+  const m = scan.exec(line)
+  if (m && m[0] === '' && re.pcre) throw new UnsupportedError('feature', 'PCRE empty match extent', 'only-matching with empty PCRE matches is not supported')
   return m ? { start: m.index, end: m.index + m[0].length } : null
 }
 
-function formatLine(text, name, lineNum, isMatch, f) {
+function formatLine(f, text, i, isMatch) {
   const sep = isMatch ? ':' : '-'
-  const showName = f.opts.showName ?? f.input.recursive
-  const head = (showName ? (name ?? '(standard input)') + sep : '') + (f.opts.showLine ? lineNum + sep : '')
-  return f.input.marked ? [head, text] : head + text
+  return (f.name === null ? '' : f.name + sep) + (f.opts.showLine ? i + 1 + sep : '') + text
 }
-
-const NEWLINE = Uint8Array.of(10)
 
 // -L lists files without selections, but status still reports any selected input.
 export function grepSummary(items, res, { mode, invert, showName, max = Infinity }) {
@@ -250,12 +259,11 @@ export function grepSummary(items, res, { mode, invert, showName, max = Infinity
   let anySelected = false
   const limit = mode === 'c' ? max : Math.min(1, max)
   for (const item of items) {
-    if (item.failure !== undefined) { write.err(item.failure); continue }
+    if (isFailure(item)) { write.err(item.failure); continue }
     const count = countMatches(item, res, invert, limit)
     if (count > 0) anySelected = true
-    const label = item.name ?? '(standard input)'
-    if (mode === 'c') write.out(((showName ?? item.recursive) ? label + ':' + count : String(count)) + '\n')
-    else if ((count > 0) === (mode === 'l')) write.out(label + '\n')
+    if (mode === 'c') write.out(((showName ?? item.recursive) ? label(item) + ':' + count : String(count)) + '\n')
+    else if ((count > 0) === (mode === 'l')) write.out(label(item) + '\n')
   }
   return written(write.events, anySelected)
 }
