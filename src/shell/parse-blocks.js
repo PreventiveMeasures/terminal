@@ -4,9 +4,9 @@
 
 import { NAME_RE } from './tokenize.js'
 import { sliceWord } from './word.js'
-import { tokenLabel } from './lex.js'
+import { syntaxLabel } from './lex.js'
 import { UnsupportedError } from '../unsupported.js'
-import { IncompleteInput, incomplete, tokenAt } from './parse-input.js'
+import { IncompleteInput, tokenAt, unexpectedEnd, unexpectedToken } from './parse-input.js'
 
 const BRANCH_ENDS = ['elif', 'else', 'fi']
 
@@ -29,48 +29,46 @@ export function parseConditional(p, buildSteps) {
   return { branches, otherwise }
 }
 // Parse NAME in WORDS; do BODY; done. Headers skip exactly one separator;
-// bodies allow newlines after do, but not semicolons. Implicit positional-
-// parameter loops remain explicitly unsupported.
+// bodies allow newlines after do, but not semicolons. A `{ … }` may stand in
+// for `do … done`, as bash allows. Implicit positional-parameter loops remain
+// explicitly unsupported.
 export function parseFor(p, buildSteps) {
   const { raw } = p
   const outer = p.loop
   p.loop = 'for'
   const nameTok = tokenAt(p)
   if (nameTok?.kind === 'paren_open') throw new UnsupportedError('feature', 'for ((', 'arithmetic `for ((…))` loops are not supported; use `for NAME in WORD...`')
-  if (nameTok === undefined || nameTok.kind !== 'word') throw new Error('for: expected a variable name')
+  if (nameTok === undefined || nameTok.kind !== 'word') throw nameTok === undefined && p.closer ? unexpectedToken(p.closer) : unexpectedToken(syntaxLabel(nameTok))
   const name = nameTok.value
-  if (nameTok.quoted || !NAME_RE.test(name)) throw new Error(`for: \`${name}\` is not a valid variable name`)
   p.i++
   const separator = tokenAt(p)
   if (separator?.kind === 'semi') p.i++
   const inToken = tokenAt(p)
-  if (separator?.kind === 'semi' && !separator.newline && isWord(inToken, 'in')) throw new Error('for: unexpected `in` after `;`')
+  if (separator?.kind === 'semi' && !separator.newline && isWord(inToken, 'in')) throw unexpectedToken('in')
   if (!isWord(inToken, 'in')) {
-    if (isWord(inToken, 'do') || inToken === undefined) {
+    if (isWord(inToken, 'do') || isWord(inToken, '{') || inToken === undefined) {
       const gap = new UnsupportedError('feature', 'for NAME; do', `\`for ${name}; do …\` iterates the positional parameters, which this shell does not have; write \`for ${name} in WORD...\``)
       throw inToken === undefined ? new IncompleteInput(gap) : gap
     }
-    throw new Error(`for: expected \`in\` after \`${name}\``)
+    throw unexpectedToken(syntaxLabel(inToken))
   }
   p.i++
   const words = []
-  // 'do' is a legal list item; remember it only for a missing-separator error.
-  let sawDo = false
   for (let t; (t = tokenAt(p)) && t.kind !== 'semi'; p.i++) {
-    if (t.kind !== 'word') throw new Error(`for: unexpected \`${tokenLabel(t)}\` in word list`)
-    if (isWord(t, 'do')) sawDo = true
+    if (t.kind !== 'word') throw unexpectedToken(syntaxLabel(t))
     words.push(sliceWord(t))
   }
   if (raw[p.i]?.kind === 'semi') p.i++
+  skipNewlines(p)
   const doToken = tokenAt(p)
-  if (!isWord(doToken, 'do')) {
-    if (doToken === undefined) throw incomplete(sawDo ? 'for: expected `;` or newline before `do`' : 'for: missing `do`')
-    if (sawDo) throw new Error('for: expected `;` or newline before `do`')
-    throw new Error(`for: expected \`do\`, got \`${tokenLabel(doToken)}\``)
-  }
+  const brace = isWord(doToken, '{')
+  if (!isWord(doToken, 'do') && !brace) throw doToken === undefined ? unexpectedEnd(p) : unexpectedToken(syntaxLabel(doToken))
   p.i++
   skipNewlines(p)
-  const loop = { name, words, body: buildSteps(p, 'done') }
+  // Bash reads a name it cannot assign as an error of the loop when it runs,
+  // not of the line: the loop then fails with status 1 and the line goes on.
+  const invalid = nameTok.quoted || !NAME_RE.test(name) ? { invalid: syntaxLabel(nameTok) } : {}
+  const loop = { name, words, body: buildSteps(p, brace ? '}' : 'done'), ...invalid }
   p.loop = outer
   return loop
 }
@@ -89,16 +87,27 @@ export function parseWhile(p, keyword, buildSteps) {
 }
 // `name () { list; }`, whose body is a list like any other. Bash takes any
 // compound command for a body; a brace group is the one this reads, since a
-// `( … )` body would keep to itself what a caller asked it to do.
+// `( … )` body would keep to itself what a caller asked it to do. A simple
+// command is no body at all, which is where bash's grammar stops.
+const COMPOUND = new Set(['(', 'if', 'for', 'while', 'until', 'case', 'select', '[[', '(('])
 export function parseFunction(p, name, buildSteps) {
-  if (name.quoted || !NAME_RE.test(name.value)) throw new UnsupportedError('feature', 'function', `shell functions named \`${name.value}\` are not supported`)
+  // A quoted name, one holding a `$`, or digits alone is one bash refuses
+  // when the definition runs, as an error of that command; other names
+  // outside the variable ones are names it would take.
+  const invalid = name.quoted || /^[0-9]+$/u.test(name.value) || name.value.includes('$')
+  if (!invalid && !NAME_RE.test(name.value)) throw new UnsupportedError('feature', 'function', `shell functions named \`${name.value}\` are not supported`)
   p.i += 2
   skipNewlines(p)
   const open = tokenAt(p)
-  if (!isWord(open, '{')) throw new UnsupportedError('feature', 'function', `\`${name.value}()\` needs a \`{ … }\` body`)
+  if (open === undefined) throw unexpectedEnd(p)
+  if (!isWord(open, '{')) {
+    if (open.kind === 'paren_open' || (open.kind === 'word' && !open.quoted && COMPOUND.has(open.value)) || open.kind === 'condition') throw new UnsupportedError('feature', 'function', `\`${name.value}()\` needs a \`{ … }\` body`)
+    throw unexpectedToken(syntaxLabel(open))
+  }
   p.i++
   skipNewlines(p)
   const body = buildSteps(p, '}')
+  if (invalid) return { name: name.value, body, invalid: syntaxLabel(name) }
   if (!macroSafe(body)) throw new UnsupportedError('feature', 'function', `\`${name.value}()\` is supported only while its body reads and writes no variable`)
   return { name: name.value, body }
 }

@@ -49,7 +49,7 @@ export function readInput(path, ctx, stdin) {
   if (path === '/dev/null') return { content: '' }
   if (path === '/dev/stdin') return { content: stdin }
   const { path: abs, error } = lookupWithNote(ctx, 'shell', path)
-  if (error) return { error: err(`error: ${path}: ${error}`) }
+  if (error) return { error: err(`${path}: ${error}`) }
   if (ctx.fs.isFile(abs)) {
     // A file of bytes is those bytes on the way in, as it is on the way out:
     // reading it as text here would refuse `wc -c < img.png` for spelling no

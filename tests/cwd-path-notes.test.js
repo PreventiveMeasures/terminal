@@ -54,7 +54,7 @@ const cases = [
   ['cp -t dir keep', 'cp', 'dir', 1, "cp: target directory 'dir': No such file or directory\n"],
   ['cp keep keep dir', 'cp', 'dir', 1, "cp: target 'dir': No such file or directory\n"],
   ['rm file', 'rm', 'file', 1, "rm: cannot remove 'file': No such file or directory\n"],
-  ['cat <file', 'shell', 'file', 1, 'error: file: No such file or directory\n'],
+  ['cat <file', 'shell', 'file', 1, 'file: No such file or directory\n'],
 ]
 
 describe('cwd notes accompany actual relative-path lookup failures', () => {
@@ -185,7 +185,7 @@ const rootedCases = [
   ['awk -f /file', 'awk', '/file', 2, 'awk: cannot open program file `/file`: No such file or directory\n'],
   ['cp /file /tmp/file', 'cp', '/file', 1, "cp: cannot stat '/file': No such file or directory\n"],
   ['rm /file', 'rm', '/file', 1, "rm: cannot remove '/file': No such file or directory\n"],
-  ['cat </file', 'shell', '/file', 1, 'error: /file: No such file or directory\n'],
+  ['cat </file', 'shell', '/file', 1, '/file: No such file or directory\n'],
 ]
 
 describe('root notes accompany an absolute path another root answers for', () => {

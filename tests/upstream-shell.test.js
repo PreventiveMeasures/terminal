@@ -19,7 +19,7 @@ describe('Bash here-document EOF handling', () => {
   for (const [suffix, stdout] of [['', ''], ['\n', ''], ['\ntext', 'text\n'], ['\ntext\n', 'text\n'], ['\n\n', '\n'], ['\n\\\n', ''], ['\ntext\\\n', 'text\n']]) {
     it(`does not invent a record at EOF: ${JSON.stringify(suffix)}`, async () => {
       assert.deepEqual(await terminal().run('cat <<END' + suffix), {
-        stdout, stderr: "warning: here-document delimited by end-of-file (wanted `END')\n",
+        stdout, stderr: "warning: here-document at line 1 delimited by end-of-file (wanted `END')\n",
         exitCode: 0, cwd: '/', notes: [], unsupported: [],
       })
     })
@@ -39,14 +39,14 @@ describe('Bash here-document EOF handling', () => {
     it(`keeps earlier commands before a later heredoc warning: ${JSON.stringify(separator)}`, async () => {
       const result = await terminal().run('echo before >&2' + separator + 'cat <<END\ntext\n')
       assert.equal(result.stdout, 'text\n')
-      assert.equal(result.stderr, "before\nwarning: here-document delimited by end-of-file (wanted `END')\n")
+      assert.equal(result.stderr, "before\nwarning: here-document at line 2 delimited by end-of-file (wanted `END')\n")
       assert.deepEqual(result.unsupported, [])
     })
   }
   it('warns before commands on the same input line', async () => {
     const result = await terminal().run('echo before >&2; cat <<END\ntext\n')
     assert.equal(result.stdout, 'text\n')
-    assert.equal(result.stderr, "warning: here-document delimited by end-of-file (wanted `END')\nbefore\n")
+    assert.equal(result.stderr, "warning: here-document at line 1 delimited by end-of-file (wanted `END')\nbefore\n")
   })
   it('warns about skipped commands without changing their gate status', async () => {
     const result = await terminal().run('false && cat <<END\ntext\n')
@@ -91,7 +91,7 @@ describe('ANSI-C source boundaries and control escapes', () => {
   it('does not let control decoding close an unterminated source quote', async () => {
     const result = await terminal().run(String.raw`args $'\c\'`)
     assert.equal(result.exitCode, 2)
-    assert.match(result.stderr, /unterminated single quote/u)
+    assert.equal(result.stderr, "unexpected EOF while looking for matching `''\n")
     assert.deepEqual(result.unsupported, [])
   })
 })
@@ -194,7 +194,7 @@ describe('upstream shell audit — heredocs and redirection', () => {
     ['descriptor-like arguments separated by blanks stay arguments', 'echo red 1 >&2', '', 0, 'red 1\n'],
     ['input duplication syntax can duplicate output descriptors', 'echo red 1<&2', '', 0, 'red\n'],
     ['group redirection retains existing stderr routing', '{ echo red >&2; echo blue; } >/dev/null', '', 0, 'red\n'],
-    ['redirection errors do not leak into the next command', 'echo lost <missing; echo kept', 'kept\n', 0, 'error: missing: No such file or directory\n'],
+    ['redirection errors do not leak into the next command', 'echo lost <missing; echo kept', 'kept\n', 0, 'missing: No such file or directory\n'],
   ])
 })
 

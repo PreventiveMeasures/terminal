@@ -26,7 +26,7 @@ describe('a path failure sent to /dev/null is reported anyway', () => {
     ['ls a.txt/x 2>/dev/null', ['ls: cannot access \'a.txt/x\': Not a directory']],
     ['cd nope 2>/dev/null', ['cd: nope: No such file or directory']],
     ['cd a.txt 2>/dev/null', ['cd: a.txt: Not a directory']],
-    ['cat 2>/dev/null < nope', ['error: nope: No such file or directory']],
+    ['cat 2>/dev/null < nope', ['bash: nope: No such file or directory']],
     // A closed descriptor discards just as thoroughly as /dev/null.
     ['cat nope 2>&-', ['cat: nope: No such file or directory']],
     // Hidden inside a group, a substitution, or a loop, it is still hidden.

@@ -5,6 +5,19 @@ import { err } from '../util.js'
 import { parseLine } from './parse.js'
 import { MAX_SUBSTITUTION_DEPTH } from './substitution.js'
 
+// A backtick body is read as a script is, so its syntax error says where in
+// the body it is, and one the grammar found shows the line it found it on.
+// The end of the input is the line past the last, and a line's own number is
+// only known here for a body of one line.
+function backtickError(command, message) {
+  if (command.includes('\n')) return null
+  const where = (line) => `command substitution: line ${line}: `
+  if (message === 'syntax error: unexpected end of file') return where(2) + message
+  if (message.startsWith('unexpected EOF while looking for matching') && !message.includes('\n')) return where(1) + message
+  if (!message.split('\n').at(-1).startsWith('syntax error near ')) return null
+  return [...message.split('\n'), `\`${command}'`].map((line) => where(1) + line).join('\n')
+}
+
 export async function commandSubstitution(command, ctx, runSteps, backtick = false) {
   const depth = (ctx.substitutionDepth ?? 0) + 1
   if (depth > MAX_SUBSTITUTION_DEPTH) throw new UnsupportedError('feature', 'command substitution nesting limit', `command substitution nesting beyond ${MAX_SUBSTITUTION_DEPTH} levels is not supported`)
@@ -24,7 +37,8 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
         // unit instead, where the error takes the line down with it, so that
         // form keeps failing. Heredoc bodies are parsed during expansion,
         // where Bash's recovery depends on builtin versus external scopes.
-        if (backtick) return err(`error: command substitution: ${e.message}`, 2)
+        const said = backtick ? backtickError(command, e.message) : null
+        if (said) return err(said, 2)
         throw new UnsupportedError('feature', 'command substitution syntax', `runtime command substitution syntax errors are not supported: ${e.message}`)
       }
       ctx.unsupported.add(note)

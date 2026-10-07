@@ -52,7 +52,7 @@ describe('the development REPL runs a session over a real directory', () => {
   it('reports a line that is wrong rather than unfinished', () => {
     const r = session('echo "unterminated\n')
     assert.equal(r.stdout, '')
-    assert.match(r.stderr, /unterminated double quote/u)
+    assert.match(r.stderr, /unexpected EOF while looking for matching `"'/u)
     assert.equal(r.status, 2)
   })
 

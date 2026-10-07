@@ -19,6 +19,28 @@ in, and `$1`, a `local` and the rest are nothing the body could have read. A
 body that needs any of them is refused rather than run as something it is
 not.
 
+A line is read as a line typed at an interactive bash with nothing more to
+come after it, so a line bash cannot read says what that bash says, in one
+line and with status 2: ``syntax error near unexpected token `)'``, the end of
+the line being the token `newline`; `syntax error: unexpected end of file`
+where a block or a `|` is still open; ``unexpected EOF while looking for
+matching `"'`` where a quote or a substitution is. `bash -c` would add a second
+line echoing the source, which a typed line does not get, and nothing of the
+line runs either way. The shell's own diagnostics leave off the `bash: ` in
+front of them, as every diagnostic here does — `cd: nope: No such file or
+directory`, `x: parameter not set`, `$f: ambiguous redirect` — and a
+here-document the input ends inside is `here-document at line N`, counted in
+the line handed to `run()`. Only a refusal says `error: `. `${x?}` ends the
+line with status 127, which is what `bash -c` reports for a shell that it
+ended, and 1 where a subshell or a substitution catches it.
+
+`< dir` opens, as a directory does for reading, and what fails is the read: a
+command that never reads its stdin runs as anywhere else, and one whose only
+input it is fails as the GNU tool does — `cat: -: Is a directory`, `wc:
+'standard input': Is a directory` — while `$(< dir)` is empty with status 0.
+A reader each tool words differently again, such as one handed `-` beside
+another file, is refused.
+
 `ls` `cd` `cat` `grep` `rg` `egrep` `fgrep` `sed` `awk` `find` `head` `tail` `wc`
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
 `printf` `test` `cp` `rm` `mkdir` `touch` `ln` `diff` `patch` `du` `stat` `realpath`

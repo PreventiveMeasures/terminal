@@ -138,7 +138,7 @@ describe('parse() hands back the line as the parser read it', () => {
   it('keeps a redirect target that brace expansion would multiply', async () => {
     assert.deepEqual(list('ls > {a,b}')[0].redirects, [{ fd: 1, op: '>', target: { type: 'brace', source: '{a,b}' } }])
     assert.deepEqual(list('ls > {1..1}')[0].redirects, [{ fd: 1, op: '>', target: '1' }])
-    assert.equal((await terminal().run('ls > {a,b}')).stderr.trim(), 'error: {a,b}: ambiguous redirect')
+    assert.equal((await terminal().run('ls > {a,b}')).stderr.trim(), '{a,b}: ambiguous redirect')
   })
 
   it("carries a loop's variable, the words after `in` and the list it runs", () => {
@@ -215,7 +215,7 @@ describe('parse() hands back the line as the parser read it', () => {
   })
 
   it('warns about a here-document the input ended before its delimiter', () => {
-    assert.match(list('cat <<EOF\nbody')[0].warnings, /here-document delimited by end-of-file/u)
+    assert.match(list('cat <<EOF\nbody')[0].warnings, /here-document at line 1 delimited by end-of-file/u)
     assert.equal(list('cat <<EOF\nbody\nEOF')[0].warnings, undefined)
   })
 
@@ -312,9 +312,9 @@ describe('parse() spells a value out only when expansion still decides it', () =
     }])
     assert.deepEqual(list('until a; do b; done')[0].type, 'until')
     assert.deepEqual(list('while a; do b; done > /tmp/out')[0].redirects, [{ fd: 1, op: '>', target: '/tmp/out' }])
-    assert.deepEqual(verdict('while a; do b'), { ok: false, incomplete: true, error: 'while: missing `done`' })
-    assert.deepEqual(verdict('until a; do b'), { ok: false, incomplete: true, error: 'until: missing `done`' })
-    assert.deepEqual(verdict('while a'), { ok: false, incomplete: true, error: 'while: missing `do`' })
+    assert.deepEqual(verdict('while a; do b'), { ok: false, incomplete: true, error: 'syntax error: unexpected end of file' })
+    assert.deepEqual(verdict('until a; do b'), { ok: false, incomplete: true, error: 'syntax error: unexpected end of file' })
+    assert.deepEqual(verdict('while a'), { ok: false, incomplete: true, error: 'syntax error: unexpected end of file' })
   })
 
   // `[[` opens a conditional only where a command may start, and is the plain
@@ -344,7 +344,7 @@ describe('parse() spells a value out only when expansion still decides it', () =
     // its arguments, and quoting settles it wherever a conditional could open.
     assert.deepEqual(list('echo until [[ x ]]')[0].argv, ['echo', 'until', '[[', 'x', ']]'])
     assert.deepEqual(list('echo "[[" -f x "]]"')[0].argv, ['echo', '[[', '-f', 'x', ']]'])
-    assert.deepEqual(verdict('{ a; } [[ -f x ]]'), { ok: false, incomplete: false, error: 'unexpected token after `}`' })
+    assert.deepEqual(verdict('{ a; } [[ -f x ]]'), { ok: false, incomplete: false, error: "syntax error near unexpected token `[['" })
   })
 
   // A body holds its operands in an expression rather than a word list, and
@@ -476,7 +476,7 @@ describe('parse() spells a value out only when expansion still decides it', () =
 
   // Bash reads a backtick when it expands it, so the line still parses.
   it('keeps the diagnostic of a backtick body that does not parse', () => {
-    assert.deepEqual(list('echo `echo )`')[0].argv[1], parts({ type: 'substitution', list: [], error: 'unexpected `)`', multi: true }))
+    assert.deepEqual(list('echo `echo )`')[0].argv[1], parts({ type: 'substitution', list: [], error: "syntax error near unexpected token `)'", multi: true }))
     assert.equal(parse('echo `echo )`').ok, true)
     assert.equal(parse('echo $(echo ))').ok, false)
   })
@@ -552,8 +552,8 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   }
 
   for (const [line, message] of [
-    ['echo )', 'unexpected `)`'],
-    ['for f in a; do', 'for: missing `done`'],
+    ['echo )', "syntax error near unexpected token `)'"],
+    ['for f in a; do', 'syntax error: unexpected end of file'],
     ['case x in a) :;; esac', '`case` statements are not supported; gate on exit status with `&&` / `||` instead'],
     ['ls ~user', 'named-user and directory-stack tilde prefixes are not supported'],
   ]) {
@@ -600,7 +600,7 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
     assert.deepEqual(summarize('echo `a`'), [[['echo', shell([[['a']]], true)]]])
     assert.deepEqual(summarize('x=$(date) ls'), [[[{ type: 'assignments', assignments: [{ name: 'x', value: shell([[['date']]], false) }] }, 'ls']]])
     assert.deepEqual(summarize('ls $(cat f)/x'), [[['ls', parts(shell([[['cat', 'f']]], true), '/x')]]])
-    assert.throws(() => summarize('echo `echo )`'), { message: 'unexpected `)`' })
+    assert.throws(() => summarize('echo `echo )`'), { message: "syntax error near unexpected token `)'" })
   })
 
   // A definition runs nothing, so it says nothing; the body stands where the
@@ -908,57 +908,67 @@ describe('summarize() answers for a simple chain, and refuses the rest', () => {
   })
 })
 
+// Bash's own words, as an interactive shell prints them: the token its
+// grammar stopped at, or the character a quote or substitution still wanted.
 describe('parse() reports a syntax error as run() would, and runs nothing', () => {
   for (const [line, error] of [
-    ['echo )', 'unexpected `)`'],
-    ['echo ;;', 'syntax error near unexpected token `;;`'],
-    ['echo "', 'unterminated double quote'],
-    ['echo $(cat', 'unterminated command substitution'],
-    ['for 1 in a; do :; done', 'for: `1` is not a valid variable name'],
-    ['echo a > ', 'redirect `>` requires a target'],
-    ['} echo', 'syntax error near unexpected token `}`'],
+    ['echo )', "syntax error near unexpected token `)'"],
+    ['echo ;;', "syntax error near unexpected token `;;'"],
+    ['echo "', "unexpected EOF while looking for matching `\"'"],
+    ['echo $(cat', "unexpected EOF while looking for matching `)'"],
+    ['echo a > ', "syntax error near unexpected token `newline'"],
+    ['} echo', "syntax error near unexpected token `}'"],
     // A block ends where its closer does, and bash rejects a word after one.
     // A definition ends on its `}` like a group, and so rejects one too —
     // `f() { ls; } ls` is a syntax error, not a definition with `ls` dropped.
-    ['f() { ls; } ls', 'unexpected token after `}`'],
-    ['f() { echo hi; } echo bye', 'unexpected token after `}`'],
-    ['{ ls; } ls', 'unexpected token after `}`'],
-    ['( ls ) ls', 'unexpected token after `)`'],
-    ['while false; do ls; done ls', 'unexpected token after `done`'],
-    ['until false; do ls; done ls', 'unexpected token after `done`'],
-    ['if true; then ls; fi ls', 'unexpected token after `fi`'],
-    ['ls ; ; ls', 'empty pipeline stage'],
-    ['a & & b', 'empty pipeline stage'],
-    ['(ls)(ls)', 'unexpected `(`'],
-    ['until a; do b; done; done', 'unexpected `done`'],
+    ['f() { ls; } ls', "syntax error near unexpected token `ls'"],
+    ['f() { echo hi; } echo bye', "syntax error near unexpected token `echo'"],
+    ['{ ls; } ls', "syntax error near unexpected token `ls'"],
+    ['( ls ) ls', "syntax error near unexpected token `ls'"],
+    ['while false; do ls; done ls', "syntax error near unexpected token `ls'"],
+    ['until false; do ls; done ls', "syntax error near unexpected token `ls'"],
+    ['if true; then ls; fi ls', "syntax error near unexpected token `ls'"],
+    ['ls ; ; ls', "syntax error near unexpected token `;'"],
+    ['a & & b', "syntax error near unexpected token `&'"],
+    ['(ls)(ls)', "syntax error near unexpected token `('"],
+    ['until a; do b; done; done', "syntax error near unexpected token `done'"],
   ]) {
     it(`reports ${JSON.stringify(error)} for ${JSON.stringify(line)}`, async () => {
       assert.deepEqual(verdict(line), { ok: false, incomplete: false, error })
       assert.deepEqual(list(line), [])
-      assert.equal((await terminal().run(line)).stderr, `error: ${error}\n`)
+      assert.equal((await terminal().run(line)).stderr, `${error}\n`)
     })
   }
+
+  // A name `for` cannot assign is the loop's error when it runs, which bash
+  // reports and goes on past.
+  it('reads `for 1 in a` as a loop that fails when it runs', async () => {
+    assert.equal(parse('for 1 in a; do :; done').ok, true)
+    const r = await terminal().run('for 1 in a; do :; done; echo $?')
+    assert.equal(r.stderr, "`1': not a valid identifier\n")
+    assert.equal(r.stdout, '1\n')
+  })
 })
 
 describe('parse() separates input it could still be handed more of', () => {
   for (const [line, error] of [
-    ['(echo a', 'unmatched `(`'],
-    ['{ echo a', 'unmatched `{`'],
-    ['{ echo a;', 'unmatched `{`'],
-    ['if true', 'if: missing `then`'],
-    ['if true; then ls', 'if: missing `fi`'],
-    ['if true; then ls; else', 'if: missing `fi`'],
-    ['for f in a', 'for: missing `do`'],
-    ['for f in a; do echo x', 'for: missing `done`'],
-    ['while true', 'while: missing `do`'],
-    ['while true; do ls', 'while: missing `done`'],
-    ['until true', 'until: missing `do`'],
-    ['until true; do ls', 'until: missing `done`'],
-    ['f() {', 'unmatched `{`'],
-    ['f() { ls;', 'unmatched `{`'],
-    ['ls &&', 'empty pipeline stage'],
-    ['ls ||', 'empty pipeline stage'],
-    ['ls |', 'empty pipeline stage'],
+    ['(echo a', 'syntax error: unexpected end of file'],
+    ['{ echo a', 'syntax error: unexpected end of file'],
+    ['{ echo a;', 'syntax error: unexpected end of file'],
+    ['if true', 'syntax error: unexpected end of file'],
+    ['if true; then ls', 'syntax error: unexpected end of file'],
+    ['if true; then ls; else', 'syntax error: unexpected end of file'],
+    ['for f in a', 'syntax error: unexpected end of file'],
+    ['for f in a; do echo x', 'syntax error: unexpected end of file'],
+    ['while true', 'syntax error: unexpected end of file'],
+    ['while true; do ls', 'syntax error: unexpected end of file'],
+    ['until true', 'syntax error: unexpected end of file'],
+    ['until true; do ls', 'syntax error: unexpected end of file'],
+    ['f() {', 'syntax error: unexpected end of file'],
+    ['f() { ls;', 'syntax error: unexpected end of file'],
+    ['ls &&', 'syntax error: unexpected end of file'],
+    ['ls ||', 'syntax error: unexpected end of file'],
+    ['ls |', 'syntax error: unexpected end of file'],
   ]) {
     it(`asks for more after ${JSON.stringify(line)}`, () => {
       assert.deepEqual(verdict(line), { ok: false, incomplete: true, error })
@@ -979,7 +989,7 @@ describe('parse() separates input it could still be handed more of', () => {
   }
 
   it('keeps the commands that parsed ahead of the error', () => {
-    assert.deepEqual(verdict('ls\ncat a.txt\nfor f in a; do'), { ok: false, incomplete: true, error: 'for: missing `done`' })
+    assert.deepEqual(verdict('ls\ncat a.txt\nfor f in a; do'), { ok: false, incomplete: true, error: 'syntax error: unexpected end of file' })
     assert.deepEqual(named('ls\ncat a.txt\nfor f in a; do'), ['ls', 'cat'])
   })
 })

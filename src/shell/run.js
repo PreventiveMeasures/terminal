@@ -244,19 +244,19 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
     // oxlint-disable no-await-in-loop -- a redirect is applied after the one to its left.
     for (const r of stage.redirs) {
       if (r.op === 'dup') {
-        if (fds[r.toFd] === undefined || fds[r.toFd] === 'closed') return done(err(`error: ${r.toFd}: Bad file descriptor`))
+        if (fds[r.toFd] === undefined || fds[r.toFd] === 'closed') return done(err(`${r.toFd}: Bad file descriptor`))
         fds[r.fd] = fds[r.toFd]
       } else if (r.op === 'close') fds[r.fd] = 'closed'
       else if (r.op === 'to') {
         const t = r.target === undefined ? await expand(() => expandRedirect(r.word, ctx)) : { value: r.target }
-        if (t.error) return done(err(`error: ${t.error}`))
+        if (t.error) return done(err(t.error))
         const dest = t.value === '/dev/null' ? 'null' : t.value === '/dev/stdout' ? fds[1] : t.value === '/dev/stderr' ? fds[2] : ctx.writable ? ctx.fs.openWritable(ctx.cwd, t.value, r.append) : null
         if (dest === null) {
           const e = refusedWrite(r.label, t.value, ctx.writable)
           ctx.unsupported.add(unsupportedNote(e))
           return done(err(`error: ${e.message}`))
         }
-        if (dest === 'closed') return done(err(`error: ${t.value}: No such file or directory`))
+        if (dest === 'closed') return done(err(`${t.value}: No such file or directory`))
         fds[r.fd] = dest
         if (r.both) fds[2] = dest
       } else if (r.op === 'text') { input = r.expand ? await expand(() => expandScalar(heredocWord(r.body), ctx)) : r.body; file = false; directory = false; inherited = false; piped = null; terminal = false }
@@ -264,7 +264,7 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
       else if (r.op === 'herestring') { input = await expand(() => expandScalar(r.word, ctx)) + '\n'; file = false; directory = false; inherited = false; piped = null; terminal = false }
       else {
         const t = await expand(() => expandRedirect(r.word, ctx))
-        const read = t.error ? { error: err(`error: ${t.error}`) } : readInput(t.value, ctx, file ? origin : input)
+        const read = t.error ? { error: err(t.error) } : readInput(t.value, ctx, file ? origin : input)
         if (read.error) return done(read.error)
         input = read.content
         // `/dev/stdin` is the stream already there, and keeps what it carried.
@@ -295,12 +295,14 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
 // pipeline stages survive, and redirections may silence only stderr.
 // An error that ends the shell itself is 127 where it ends the line's own
 // shell, as `bash -c` reports it; a subshell or a substitution catching it
-// exits 1 instead.
+// exits 1 instead. What bash itself says — a missing file, an ambiguous
+// redirect, a parameter it will not expand — is said in its words; only a
+// refusal says that it is one.
 function shellFailure(ctx, e) {
   missingPathNote(ctx, 'shell', e?.path, e?.fsError)
   const note = unsupportedNote(e)
   if (note) ctx.unsupported.add(note)
-  return { ...err(`error: ${reason(e)}`, e?.fatal && !ctx.subshell ? 127 : 1), ...(e?.halt ? { halt: true } : {}) }
+  return { ...err(note ? `error: ${reason(e)}` : reason(e), e?.fatal && !ctx.subshell ? 127 : 1), ...(e?.halt ? { halt: true } : {}) }
 }
 
 async function shellResult(ctx, fn) {

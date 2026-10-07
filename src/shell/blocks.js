@@ -4,12 +4,17 @@
 
 import { expandWords } from './expand.js'
 import { err } from '../util.js'
-import { appendOutput, emptyOutput } from './output.js'
+import { appendOutput, emptyOutput, routeOutput } from './output.js'
 import { isolated, withState } from './state.js'
 import { evaluateConditional } from './conditional.js'
 
+// A name a definition or a loop cannot take fails the command when it runs,
+// in bash's words, and the line goes on.
+const notIdentifier = (name, ctx) => routeOutput(err(`\`${name}': not a valid identifier`, 1), { fds: ctx.outputFds }, ctx)
+
 export function runBlock(stage, ctx, stdin, runSteps) {
   // A definition runs nothing and leaves the body where a call can reach it.
+  if (stage.define?.invalid) return notIdentifier(stage.define.invalid, ctx)
   if (stage.define) { ctx.functions.set(stage.define.name, stage.define.body); return emptyOutput() }
   if (stage.test) return evaluateConditional(stage.test, ctx)
   if (stage.group) return runGroup(stage, ctx, stdin, runSteps)
@@ -66,6 +71,7 @@ async function runWhile(loop, ctx, runSteps) {
 // nested break/continue signals propagate one level per enclosing loop.
 const FOR_KEYWORD = { value: 'for', mask: null }
 async function runLoop(loop, ctx, runSteps) {
+  if (loop.invalid) return notIdentifier(loop.invalid, ctx)
   const expanded = await expandWords([FOR_KEYWORD, ...loop.words], ctx)
   const result = emptyOutput()
   const stream = { text: ctx.stdinLeft, bytes: ctx.stdinBytes }

@@ -1,5 +1,6 @@
 import { UnsupportedError } from '../unsupported.js'
 import { parseParameter } from './parameter-parse.js'
+import { unmatched } from './substitution.js'
 
 const gap = (detail, message) => new UnsupportedError('feature', detail, message)
 const limit = (depth) => {
@@ -41,7 +42,7 @@ export function readBracedExpansion(line, start, open, depth, quoted, helpers) {
       return { raw: line.slice(start, i + 1), parameter }
     }
   }
-  throw gap('${', 'unterminated parameter expansion')
+  throw unmatched(quote ?? '}')
 }
 
 export function readArithmeticExpansion(line, start, open, depth, helpers) {
@@ -66,5 +67,5 @@ export function readArithmeticExpansion(line, start, open, depth, helpers) {
     if (line[end] !== ')') throw gap('$((', 'arithmetic expansion requires a closing `))`')
     return { raw: line.slice(start, end + 1), arithmetic: line.slice(open + 1, i) }
   }
-  throw gap('$((', 'unterminated arithmetic expansion')
+  throw unmatched(')')
 }
