@@ -223,6 +223,11 @@ describe('tar lists what an archive holds', () => {
       'prw-r--r-- 0/0               0 2024-05-06 07:08 sp/fifo',
       'hrw-r--r-- 0/0               0 2024-05-06 07:08 sp/hard link to sp/f',
     )))
+    // --strip-components takes leading names off what a hard link names, as
+    // it would off a name, while the entry's own name is printed as stored;
+    // a target with no more names than that is left with none.
+    assert.deepEqual(await t.run('tar -tvf sp.tar --strip-components=1 sp/hard'), result(lines('hrw-r--r-- 0/0               0 2024-05-06 07:08 sp/hard link to f')))
+    assert.deepEqual(await t.run('tar -tvf sp.tar --strip-components=2 sp/hard'), result(lines('hrw-r--r-- 0/0               0 2024-05-06 07:08 sp/hard link to ')))
   })
 
   it('reads a gzip archive with -z, and without it from a file that says it is one', async () => {

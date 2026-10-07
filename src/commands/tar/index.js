@@ -47,7 +47,7 @@ async function readMembers(opts, state) {
   // Where -O is given, even to a mode that writes nothing out, GNU lists on
   // stderr.
   if (opts.toStdout) state.listTo = 2
-  const line = opts.verbose > 1 ? longLines(ctx, opts) : null
+  const line = opts.verbose > 1 ? longLines(ctx, opts, opts.strip) : null
   const places = new Map()
   for (const [i, entry] of read.entries.entries()) {
     // What GNU says of an entry's header it says as it reads it, whatever
