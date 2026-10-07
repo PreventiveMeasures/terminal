@@ -694,7 +694,7 @@ describe('createTerminal — text commands', () => {
     const t = createTerminal({ 'f.txt': 'foo\n' })
     const r = await t.run("grep f.txt -e")
     assert.equal(r.exitCode, 2)
-    assert.match(r.stderr, /-e requires an argument/u)
+    assert.equal(r.stderr, "grep: option requires an argument -- 'e'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n")
   })
 
   it('grep `-e` composes with -i / -E / -F', async () => {

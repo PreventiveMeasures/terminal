@@ -2,7 +2,7 @@
 
 import { basename, lookup, relativeTo, resolve, walkTree } from '../fs.js'
 import { lookupWithNote, omissionNote } from '../notes.js'
-import { parseArgs } from '../args.js'
+import { OptionError, optionFailure, parseArgs } from '../args.js'
 import { consumeStdin, countNewlines, decodeUtf8Marked, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, readTextOrBytes, splitLines, usage } from '../util.js'
 import { UnsupportedError, markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { AwkError } from '../awk/common.js'
@@ -33,7 +33,7 @@ export function grep(stdin, tokens, ctx) {
   let parsed
   try { parsed = parseArgs(tokens, ARGS) }
   // Preserve diagnostic metadata when converting argument errors to grep status 2.
-  catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
+  catch (e) { return e instanceof OptionError ? optionFailure('grep', e) : unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
   const { flags, values } = parsed
   const source = grepPatterns(parsed, stdin, ctx)
   if (!source) return usage(USAGE, 2)

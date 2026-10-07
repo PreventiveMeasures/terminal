@@ -13,6 +13,7 @@ export { textOfFile } from './fs.js'
 export { err, ok, usage } from './result.js'
 export { discardedNotes, missingPathNote } from './notes.js'
 export { byteLocale, classTables } from './locale.js'
+export { OptionError, optionFailure } from './args.js'
 
 // Empty input has no lines; a trailing newline terminates the preceding line.
 export function splitLines(s, delimiter = '\n') {

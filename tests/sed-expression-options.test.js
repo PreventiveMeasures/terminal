@@ -78,8 +78,11 @@ describe('sed expression regex dialect follows option order', () => {
 describe('sed reports expression argument and option errors precisely', () => {
   for (const option of ['-e', '--expression']) {
     for (const prefix of ['sed ', "sed -e 's/a/A/' input "]) {
-      it(`missing ${option} argument after ${prefix}`, async () => {
-        assert.deepEqual(await createTerminal(FILES).run(prefix + option), result('', 1, `sed: ${option} requires an argument\n`))
+      it(`missing ${option} argument after ${prefix} is refused`, async () => {
+        // GNU follows getopt's line with sed's whole usage text.
+        const getopt = option === '-e' ? "option requires an argument -- 'e'" : `option '${option}' requires an argument`
+        const message = `sed: ${getopt} (what sed says after this is not supported)`
+        assert.deepEqual(await createTerminal(FILES).run(prefix + option), result('', 1, message + '\n', [{ kind: 'option', command: 'sed', detail: option, message }]))
       })
     }
   }
@@ -111,7 +114,6 @@ describe('sed reports expression argument and option errors precisely', () => {
     "sed -e 's/a/A' --expression='/' input",
     "sed -Ee 's/(/X/' input",
     "sed -e 's/a/A/' -e 's/b/\\1/' input",
-    "sed --regexp-extended=value -e 's/a/A/' input",
     'sed -e -n input',
     'sed -e -- input',
   ]) {
@@ -123,6 +125,11 @@ describe('sed reports expression argument and option errors precisely', () => {
       assert.deepEqual(actual.unsupported, [])
     })
   }
+  it('refuses an argument handed to a flag, which GNU follows with its usage text', async () => {
+    const actual = await createTerminal(FILES).run("sed --regexp-extended=value -e 's/a/A/' input")
+    const message = "sed: option '--regexp-extended' doesn't allow an argument (what sed says after this is not supported)"
+    assert.deepEqual(actual, result('', 1, message + '\n', [{ kind: 'option', command: 'sed', detail: '--regexp-extended', message }]))
+  })
   for (const command of ['sed -e l input', 'sed -e F input']) {
     it(`attributes unsupported command text to the script: ${command}`, async () => {
       const actual = await createTerminal(FILES).run(command)

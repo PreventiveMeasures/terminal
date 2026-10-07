@@ -1,3 +1,4 @@
+import { OptionError, optionFailure } from '../args.js'
 import { UnsupportedError, unsupported, unsupportedFrom } from '../unsupported.js'
 
 export const SED_SUBSET = 'sed: supported commands are p, P, n, N, d, D, a, i, c, g, G, h, H, x, w, q, =, y, :, b, t, T, { }, and s/regexp/replacement/[NgiIpw]'
@@ -7,6 +8,7 @@ export const MAX_SED_OUTPUT = 64 * 1024 * 1024
 export function scriptGap(detail = 'script') { throw new UnsupportedError('feature', detail, SED_SUBSET) }
 
 export function sedFailure(e) {
+  if (e instanceof OptionError) return optionFailure('sed', e)
   if (e.gap) return unsupported('feature', 'sed', e.gap, `sed: ${e.message}`)
   if (e instanceof RangeError) return unsupported('feature', 'sed', 'regex runtime limit', `sed: ${e.message}`)
   return unsupportedFrom(e, 'sed', `sed: ${e.message.replace(/^sed: /u, '')}`, e.exitCode)

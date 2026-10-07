@@ -74,14 +74,22 @@ describe('sed script files preserve source order and script boundaries', () => {
   it('does not combine incomplete commands across script sources', async () => {
     await ordinaryError("sed -f scripts/broken -e '/A/' input", 1, /unterminated/u)
   })
+  // GNU follows getopt's line with sed's whole usage text, which is not carried.
+  async function refusedOption(command, detail, pattern) {
+    const actual = await createTerminal(FILES).run(command)
+    assert.equal(actual.stdout, '')
+    assert.equal(actual.exitCode, 1)
+    assert.match(actual.stderr, pattern)
+    assert.deepEqual(actual.unsupported.map(({ kind, command: name, detail: what }) => ({ kind, command: name, detail: what })), [{ kind: 'option', command: 'sed', detail }])
+  }
   for (const option of ['-f', '--file']) {
-    it(`missing ${option} argument is an ordinary option error`, async () => {
-      await ordinaryError('sed ' + option, 1, /requires an argument/u)
+    it(`refuses a missing ${option} argument`, async () => {
+      await refusedOption('sed ' + option, option, /requires an argument/u)
     })
   }
   for (const option of ['--null-data=value', '--separate=value', '--quiet=value']) {
-    it(`rejects an argument supplied to ${option}`, async () => {
-      await ordinaryError(`sed ${option} -f scripts/replace input`, 1, /doesn't allow an argument/u)
+    it(`refuses an argument supplied to ${option}`, async () => {
+      await refusedOption(`sed ${option} -f scripts/replace input`, option.replace(/=.*/u, ''), /doesn't allow an argument/u)
     })
   }
   it('attributes unsupported script contents to sed rather than -f', async () => {

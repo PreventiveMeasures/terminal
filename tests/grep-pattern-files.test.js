@@ -144,7 +144,7 @@ describe('grep — pattern file errors and diagnostics', () => {
       const result = await createTerminal(FILES).run(command)
       assert.equal(result.stdout, '', command)
       assert.equal(result.exitCode, 2, command)
-      assert.match(result.stderr, /^grep: .+\n$/u, command)
+      assert.match(result.stderr, /^grep: .+\n(?:.+\n)*$/u, command)
       assert.deepEqual(result.unsupported, [], command)
     }
   })

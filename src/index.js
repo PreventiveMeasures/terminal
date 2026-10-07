@@ -11,7 +11,7 @@ import { parseUnits } from './shell/parse.js'
 import { createRegistry, defaultRegistry, unknownCommand } from './registry.js'
 import { networkOption } from './net.js'
 import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
-import { discardedNotes, err, missingPathNote, reason } from './util.js'
+import { OptionError, discardedNotes, err, missingPathNote, optionFailure, reason } from './util.js'
 import { complete } from './complete.js'
 import { commandSubstitution } from './shell/capture.js'
 import { BindingMap, isolated, withState } from './shell/state.js'
@@ -117,6 +117,9 @@ async function dispatch(name, tokens, stdin, ctx, external = false) {
     return await ctx.io.run(resolved, async () => route(await run()))
   } catch (e) {
     missingPathNote(ctx, name, e?.path, e?.fsError)
+    // A command line the command could not read is answered in its tool's
+    // own words, which name it by what it was run as.
+    if (e instanceof OptionError) return route(optionFailure(name, e, resolved))
     const message = `${name}: ${reason(e)}`
     const note = unsupportedNote(e)
     // Shared parsers cannot name the command; complete their notes here.
