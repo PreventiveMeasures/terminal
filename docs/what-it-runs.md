@@ -86,7 +86,8 @@ NUL in that first read and holds such lines back without saying so; `-a`
 prints them as the bytes they are, which a pipe or a file takes. What is
 refused: a NUL found past that first read, where what GNU prints before it
 depends on how it reads the rest; `-P`, whose PCRE reads bytes that are not
-UTF-8 by its own rules; and, beside a character glibc reads past U+10FFFF or a
+UTF-8 by its own rules; a pattern holding an unpaired surrogate, which no
+bytes spell; and, beside a character glibc reads past U+10FFFF or a
 surrogate spelt in UTF-8, a pattern GNU's two matchers would answer
 differently. `rg` passes over a file of bytes that spell no text where a plain
 literal is nowhere in it and refuses it by name where one could be, and an
@@ -222,9 +223,11 @@ Kelvin sign for itself alone, and a range runs between its endpoints' upper
 cases, so `[a-{]` takes `_` under `-i`. A range or a collating element with a
 character past ASCII in it is GNU's "Invalid collation character", as it is in
 C.UTF-8. What still reports an unsupported diagnostic over non-ASCII text:
-`-P`, whose PCRE reads its own tables; `-i` with a backreference; and case
+`-P`, whose PCRE reads its own tables; `-i` with a backreference; case
 folding over the Cyrillic Extended-C letters, which GNU's two matchers read
-differently.
+differently; and `-w` with a pattern that can match nothing, over a character
+past ASCII that is no word character, inside which GNU, reading bytes, finds
+an empty match.
 
 The locale is C.UTF-8 and nothing else: `$LANG` answers it, and a `LANG`,
 `LC_ALL` or `LC_CTYPE` set to any other value, or a `LANG` unset, is refused,

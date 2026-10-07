@@ -150,4 +150,25 @@ describe('grep over a file that is not text', () => {
   it('refuses PCRE over bytes that are not UTF-8, which PCRE reads by its own rules', async () => {
     await refuses('grep -P foo mid', 'binary input', 'grep: PCRE matching over bytes that spell no text is not supported')
   })
+
+  it('refuses a pattern holding an unpaired surrogate over bytes, which no bytes spell', async () => {
+    // A byte that spells no character is read as such a surrogate, and must
+    // not be taken for one a pattern names.
+    for (const command of ["grep -cF '\uDCFF' x80", "grep -c 'a\uDCE9' e9"]) {
+      await refuses(command, 'unpaired surrogate', 'grep: a pattern holding an unpaired UTF-16 surrogate cannot be matched against bytes')
+    }
+  })
+
+  it('writes the name in front of a line of bytes as text, whatever it holds', async () => {
+    // A name holding an unpaired surrogate is refused where it is written as
+    // bytes, as it is beside a file of text, rather than spelt as a byte.
+    const name = 'n\uDCFF'
+    const t = createTerminal({ [name]: bytes('foo', [0xe9], '\nfoo\n'), text: 'foo\n' })
+    const asText = await t.run('grep -H foo n* | base64')
+    assert.deepEqual([asText.stdout, asText.unsupported.map((u) => u.detail)], ['', ['unpaired surrogate']])
+    const asBytes = await t.run('grep -aH foo n* | base64')
+    assert.deepEqual([asBytes.stdout, asBytes.stderr, asBytes.unsupported.map((u) => u.detail)], ['', 'grep: unpaired UTF-16 surrogates cannot be encoded as UTF-8\n', ['unpaired surrogate']])
+    // An ordinary name in front of such a line is the name's own UTF-8.
+    await check('grep -aH foo mid | base64', 'bWlkOmZvbzEKbWlkOmNhZukgZm9vMgptaWQ6Zm9vMwo=\n')
+  })
 })

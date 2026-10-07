@@ -28,7 +28,7 @@ const SEQUENCE = (byte) => byte < 0x80 ? 1 : byte >= 0xc2 && byte <= 0xdf ? 2 : 
 // more must.
 export function* utf8CodePoints(bytes) {
   for (let at = 0; at < bytes.length;) {
-    const width = SEQUENCE(bytes[at])
+    const width = WIDTH[bytes[at]]
     const code = width === 1 ? bytes[at] : width === 0 ? -1 : sequenceCode(bytes, at, width)
     yield code
     at += code < 0 ? 1 : width
@@ -76,18 +76,32 @@ export function decodeUtf8Maybe(bytes) {
 export function decodeUtf8Marked(bytes) {
   const text = decodeUtf8Maybe(bytes)
   if (text !== undefined) return text
-  const parts = []
-  let run = 0
+  // One code unit per byte at most, so the units fit in as many; a string is
+  // made of them a chunk at a time, which is far cheaper than a string per
+  // run where nearly every other byte is a marker.
+  const units = new Uint16Array(bytes.length)
+  let n = 0
   for (let at = 0; at < bytes.length;) {
-    const width = SEQUENCE(bytes[at])
-    if (width === 1 || (width > 1 && sequenceCode(bytes, at, width) >= 0)) { at += width; continue }
-    if (run < at) parts.push(utf8toString(bytes.subarray(run, at)))
-    parts.push(String.fromCodePoint(0xdc00 + bytes[at]))
-    run = ++at
+    const width = WIDTH[bytes[at]]
+    const code = width === 1 ? bytes[at] : width === 0 ? -1 : sequenceCode(bytes, at, width)
+    if (code < 0) {
+      units[n++] = 0xdc00 + bytes[at++]
+      continue
+    }
+    if (code > 0xffff) {
+      units[n++] = 0xd7c0 + (code >> 10)
+      units[n++] = 0xdc00 + (code & 0x3ff)
+    } else units[n++] = code
+    at += width
   }
-  if (run < bytes.length) parts.push(utf8toString(bytes.subarray(run)))
-  return parts.join('')
+  let out = ''
+  // oxlint-disable-next-line unicorn/prefer-code-point -- these are UTF-16 code units, which fromCharCode takes; spread into a call they walk an iterator, several times slower.
+  for (let at = 0; at < n; at += CHUNK) out += String.fromCharCode.apply(null, units.subarray(at, Math.min(n, at + CHUNK)))
+  return out
 }
+
+const CHUNK = 4096
+const WIDTH = Uint8Array.from({ length: 256 }, (_, byte) => SEQUENCE(byte))
 
 // A byte read as a marker, among the characters around it.
 export const MARKER = /[\uDC80-\uDCFF]/u

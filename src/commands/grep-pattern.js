@@ -6,7 +6,7 @@ import { parseEre } from '../awk/re-parse.js'
 import { breToEs, validateBackreferences } from '../bre.js'
 import { EXTENDED_C, LOCALE, classTables } from '../locale.js'
 import { foldFixed, foldPattern } from '../regex-fold.js'
-import { MARKERS, glibcDiffers, glibcReading, literalText, markedAssertions, markedClass, patternShape } from './grep-literal.js'
+import { MARKERS, glibcDiffers, glibcRuns, literalText, markedAssertions, markedClass, outsideWords, patternShape, wholeCharacters } from './grep-literal.js'
 import { pcreSource } from './grep-pcre.js'
 
 export { cannotHoldMatch } from './grep-literal.js'
@@ -106,7 +106,7 @@ function wordEdge(source) {
 // PCRE's reading of bytes that are not UTF-8 is refused before this is asked.
 export function markedRegex(re) {
   if (re.markedSource === undefined) return re
-  re.marked ??= new RegExp(grepSource(re.markedSource, false, re.tables, true), re.flags)
+  re.marked ??= new RegExp(wholeCharacters(grepSource(re.markedSource, false, re.tables, true)), re.flags)
   return re.marked
 }
 
@@ -328,7 +328,7 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       // `-P` selects the ECMAScript reading, where `a+?` really is lazy,
       // so the rewrite is ERE's alone.
       const quantified = gnu ? posixQuantifiers(source) : source
-      const re = new RegExp(gnu ? grepSource(quantified, false, tables) : source, reFlags)
+      const re = new RegExp(wholeCharacters(gnu ? grepSource(quantified, false, tables) : source), reFlags)
       // What a line holding bytes that spell no character is matched with,
       // and what the pattern asks of a character, which says whether glibc
       // reads some such bytes as GNU's own matcher does not (inputGap).
@@ -340,6 +340,9 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       re.folded = folded
       re.extendedC = folded && EXTENDED_C.test(pattern)
       re.unicodePattern = /[\u0080-\u{10FFFF}]/u.test(pattern)
+      re.wellFormed = pattern.isWellFormed()
+      // Whether -w meets a pattern that can match nothing at all (inputGap).
+      re.emptyWord = word && !re.pcre && new RegExp(gnu ? grepSource(posixQuantifiers(canonical), false, tables) : canonical, reFlags).test('')
       // Whether the pattern reads a character at a time rather than a byte: a
       // wildcard and a set spelt by what it excludes both reach past ASCII,
       // and a locale's own classes name ASCII alone outside C.UTF-8 — so a set
@@ -392,11 +395,26 @@ export function inputGap(inputs, res, locale = LOCALE, only = false) {
   if (res.some((re) => re.pcre) && inputs.some((inp) => inp.marked)) {
     return unsupported('feature', 'grep', 'binary input', 'grep: PCRE matching over bytes that spell no text is not supported', 2)
   }
+  // A pattern holding an unpaired surrogate has no UTF-8 spelling, so no bytes
+  // could be what it names; over bytes it would meet the markers instead,
+  // which are such surrogates standing for bytes (decodeUtf8Marked).
+  if (res.some((re) => !re.wellFormed) && inputs.some((inp) => inp.marked)) {
+    return unsupported('feature', 'grep', 'unpaired surrogate', 'grep: a pattern holding an unpaired UTF-16 surrogate cannot be matched against bytes', 2)
+  }
+  // GNU's -w takes an empty match from inside a character it reads byte by
+  // byte, where that character is no word character; this matcher reads every
+  // character whole and cannot stand inside one, so a pattern that can match
+  // nothing is refused over text holding such a character past ASCII.
+  if (res.some((re) => re.emptyWord) && inputs.some((inp) => outsideWords(classTables(locale)).test(inp.content))) {
+    return unsupported('feature', 'grep', 'empty word match', 'grep: -w with a pattern that can match nothing, over non-ASCII text that is not word characters, is not supported', 2)
+  }
   // A surrogate spelt in UTF-8, or a character past U+10FFFF, is one glibc
   // reads as a character where GNU's own matcher reads its bytes as none, and
-  // which of the two answers is GNU's choice per pattern (glibcDiffers).
-  const readings = inputs.filter((inp) => inp.marked).map((inp) => glibcReading(inp.content))
-  if (res.some((re) => readings.some((reading) => glibcDiffers(re.shape, reading, only)))) {
+  // which of the two answers is GNU's choice per pattern (glibcDiffers). Only
+  // a wildcard, a negated set or a word edge could tell, so only those look.
+  const asks = res.filter((re) => re.shape && (re.shape.wordEdge || re.shape.dot || re.shape.negated))
+  const readings = asks.length ? inputs.filter((inp) => inp.marked).map((inp) => glibcRuns(inp.content)) : []
+  if (asks.some((re) => readings.some((reading) => glibcDiffers(re.shape, reading, only)))) {
     return unsupported('feature', 'grep', 'binary input', 'grep: matching this pattern beside bytes glibc reads as a character is not supported', 2)
   }
   // The matcher reads a character at a time, which is C.UTF-8's reading and

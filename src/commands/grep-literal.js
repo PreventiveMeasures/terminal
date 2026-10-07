@@ -41,8 +41,15 @@ export function literalsMissing(bytes, patterns, literal, locale = LOCALE) {
     !holdsMask(bytes, literalMask({ pattern, tables }, false)))
 }
 
+// Only where one of the first character's spellings begins can the literal,
+// so the search jumps from one such byte to the next.
 function holdsMask(haystack, mask) {
-  for (let at = 0; at + mask.length <= haystack.length; at++) if (maskAt(haystack, at, mask, 0)) return true
+  if (mask.length === 0) return true
+  for (const first of new Set(mask[0].map((option) => option[0]))) {
+    for (let at = haystack.indexOf(first); at >= 0 && at + mask.length <= haystack.length; at = haystack.indexOf(first, at + 1)) {
+      if (maskAt(haystack, at, mask, 0)) return true
+    }
+  }
   return false
 }
 
@@ -109,6 +116,12 @@ export function markedAssertions(tables) {
 // it holds may span the markers with a range, so either is kept off them.
 export const markedClass = (cls) => `(?:(?![${MARKERS}])${cls})`
 
+// V8 tries a match from between the two halves of a surrogate pair, where its
+// lookarounds read no character on either side, so an empty match or a word
+// edge is found inside a character GNU reads whole. Only there is neither the
+// start of the line nor a character behind, so only there no match starts.
+export const wholeCharacters = (source) => `(?:^|(?<=[^]))(?:${source})`
+
 // The extent matcher `-o` uses, reading a marker as the JS matcher does: as
 // nothing a wildcard or a set takes, and as the Latin-1 character it stands
 // for where a word edge is asked about.
@@ -143,20 +156,32 @@ function glibcSequence(text, at) {
   return width === 3 ? (code >= 0xd800 && code <= 0xdfff ? 3 : 0) : width && code >= LEAST[width] ? width : 0
 }
 
-// Whether the text holds a byte glibc reads as no character — which GNU will
-// not print — and whether it holds a run some reading of glibc's takes for a
-// character: a form past U+10FFFF, or a surrogate.
-export function glibcReading(text) {
-  const found = { errors: false, long: false, surrogate: false }
-  for (let at = 0; at < text.length; at++) {
-    const code = text.codePointAt(at)
+// Whether GNU holds the line back: it has a byte glibc reads as no character,
+// which a surrogate spelt in UTF-8 is to every reading but its regex's.
+export function heldBack(line) {
+  for (let at = 0; at < line.length; at++) {
+    const code = line.codePointAt(at)
     if (code > 0xffff) at++
     if (!isMarker(code)) continue
-    const width = glibcSequence(text, at)
-    if (width === 0) { found.errors = true; continue }
-    if (width === 3) found.errors = found.surrogate = true
-    else found.long = true
+    const width = glibcSequence(line, at)
+    if (width === 0 || width === 3) return true
     at += width - 1
+  }
+  return false
+}
+
+// Whether the text holds a run some reading of glibc's takes for a character:
+// a form past U+10FFFF, or a surrogate. Only a lead byte for three bytes up
+// to six with continuation bytes after it can begin one, which a regex finds
+// without walking the rest.
+const RUN = /[\uDCED\uDCF0-\uDCFD][\uDC80-\uDCBF]{2,5}/gu
+
+export function glibcRuns(text) {
+  const found = { long: false, surrogate: false }
+  for (const [run] of text.matchAll(RUN)) {
+    const width = glibcSequence(run, 0)
+    if (width === 3) found.surrogate = true
+    else if (width) found.long = true
   }
   return found
 }
@@ -208,4 +233,12 @@ export function glibcDiffers(shape, reading, only) {
   if (!shape || !(reading.long || reading.surrogate)) return false
   if (shape.wordEdge || ((shape.dot || shape.negated) && (shape.regex || only))) return true
   return reading.long && shape.negated
+}
+
+// A character past ASCII that is no word character, which a marker is not:
+// it stands for one byte, and GNU has no inside of it to stand in.
+const OUTSIDE = new Map()
+export function outsideWords(tables) {
+  if (!OUTSIDE.has(tables)) OUTSIDE.set(tables, new RegExp(`[^\\x00-\\x7f${MARKERS}${tables.assertions().word.slice(1, -1)}]`, 'u'))
+  return OUTSIDE.get(tables)
 }

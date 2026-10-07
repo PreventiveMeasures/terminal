@@ -4,11 +4,11 @@
 // its locale cannot read is held back, the context and group separators go on
 // as if it had never been there, and the file is said to be binary once the
 // search is done with it.
-import { MARKER, encodeUtf8Marked, joinLines, splitLines } from '../util.js'
+import { MARKER, encodeUtf8, encodeUtf8Marked, joinBytes, joinLines, splitLines } from '../util.js'
 import { UnsupportedError } from '../unsupported.js'
 import { stepAt } from '../unicode.js'
 import { markedRegex } from './grep-pattern.js'
-import { glibcReading, markedExtent } from './grep-literal.js'
+import { heldBack, markedExtent } from './grep-literal.js'
 
 export const anyMatch = (res, line) => res.some((re) => re.test(line))
 export const noMatch = () => ({ stdout: '', stderr: '', exitCode: 1 })
@@ -55,9 +55,14 @@ function output() {
   }
   return {
     events,
-    out(text, marked = false) {
-      if (marked && MARKER.test(text)) events.push({ fd: 1, bytes: encodeUtf8Marked(text) })
-      else if (text) add(1, text)
+    out(text) { if (text) add(1, text) },
+    // A file's lines, which for a file of bytes are a prefix and the line
+    // itself: only the line is that file's bytes, and the name and number in
+    // front of it are text like any other, whatever characters they hold.
+    lines(lines, marked) {
+      if (marked && lines.some(([, line]) => MARKER.test(line))) {
+        events.push({ fd: 1, bytes: joinBytes(lines.flatMap(([head, line]) => [encodeUtf8(head), encodeUtf8Marked(line), NEWLINE])) })
+      } else this.out(marked ? lines.map(([head, line]) => `${head}${line}\n`).join('') : joinLines(lines))
     },
     err(text) { if (text) add(2, text) },
   }
@@ -119,7 +124,7 @@ function grepFile(input, res, opts, run) {
     p = b + 1
   }
   if (f.pending > 0) prpending(f, f.lines.length)
-  run.write.out(joinLines(f.out), input.marked)
+  run.write.lines(f.out, input.marked)
   if (selected > 0) run.selected = true
   // `-I` holds the same lines back and says nothing; `-a` holds none back.
   if (opts.binaryFiles === 'binary' && (f.heldBack || f.quietSelected > 0)) {
@@ -138,7 +143,7 @@ function prtext(f, beg, lim) {
   if (!f.quiet) {
     const bp = f.lastout ?? 0
     for (let i = 0; i < before; i++) if (p > bp) p--
-    if (hasContext && f.run.used && p !== f.lastout) f.out.push('--')
+    if (hasContext && f.run.used && p !== f.lastout) f.out.push(f.input.marked ? ['--', ''] : '--')
     for (; p < beg; p++) prline(f, p, false)
   }
   let n
@@ -167,7 +172,7 @@ function prpending(f, lim) {
 function prline(f, i, selected) {
   const line = f.lines[i]
   if (!f.opts.only) {
-    if (f.input.marked && f.opts.binaryFiles !== 'text' && MARKER.test(line) && glibcReading(line).errors) {
+    if (f.input.marked && f.opts.binaryFiles !== 'text' && MARKER.test(line) && heldBack(line)) {
       f.heldBack = true
       return false
     }
@@ -209,8 +214,11 @@ function matchFrom(re, test, line, cursor, marked) {
 function formatLine(text, name, lineNum, isMatch, f) {
   const sep = isMatch ? ':' : '-'
   const showName = f.opts.showName ?? f.input.recursive
-  return (showName ? (name ?? '(standard input)') + sep : '') + (f.opts.showLine ? lineNum + sep : '') + text
+  const head = (showName ? (name ?? '(standard input)') + sep : '') + (f.opts.showLine ? lineNum + sep : '')
+  return f.input.marked ? [head, text] : head + text
 }
+
+const NEWLINE = Uint8Array.of(10)
 
 // -L lists files without selections, but status still reports any selected input.
 export function grepSummary(items, res, { mode, invert, showName, max = Infinity }) {
