@@ -253,11 +253,20 @@ is printed is read back and held to the change set. Neither a change set that
 would not reconstruct the second file nor a rendering that does not say what
 it was given is ever printed — both are refused as trouble instead, so no
 diff this terminal emits loses a line. Which of several shortest change sets
-it picks can differ from GNU's; given the same change set, the bytes are
-GNU's. The virtual filesystem keeps no modification
-times, so headers carry the name alone, as they do under `--label`; a file
-`-N` stands in for gets the epoch, which is what tells `patch` it did not
-exist. A name a directory holds and cannot read — a link leading nowhere, or
+it picks can differ from GNU's, which sets aside lines that cannot match
+before it searches and settles where every run of changes sits, in every
+output style, within the stretch the files' identical ends leave; nothing
+here can tell when the two differ. Given the same change set, the bytes are
+GNU's. A header dates each file the way GNU's does, by its modification
+time — which this terminal keeps as the moment it was made, the time `ls -l`
+shows — to the nanosecond in GNU's ISO form, or ctime's for a context diff
+where `LC_TIME` is `C`, in the host's zone unless `TZ` is set. Standard input
+is dated now, and a file `-N` stands in for gets the epoch, which is what
+tells `patch` it did not exist. `/dev/null` is read as the empty file it is,
+but its time is the host's own: a header that would print it is refused,
+and `--label` names that side without one. A NUL makes a file binary only in
+the first 4096 bytes, the block GNU's first read takes; past them it is text
+like any other byte. A name a directory holds and cannot read — a link leading nowhere, or
 one that loops — is answered for as that read rather than as a type of its
 own, whatever is across from it, and what stopped the read is what is said.
 `-y`, `-e`, `-B`, `-I` and the rest report an unsupported diagnostic.
