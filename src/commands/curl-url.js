@@ -51,9 +51,10 @@ function guessScheme(text) {
 }
 
 // curl's globbing: a `[...]` or `{...}` anywhere but around an IPv6 address
-// in the host, which it reads as one.
+// in the host, which it reads as one — after however many of the one to
+// three slashes it takes after a scheme.
 function globbed(text) {
-  const start = SCHEME_WRITTEN.exec(text)?.[0].length ?? 0
+  const start = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/{1,3}/u.exec(text)?.[0].length ?? 0
   const host = /^(?:[^/?#@]*@)?\[[0-9a-fA-F:.]+(?:%[0-9a-zA-Z._~-]+)?\]/u.exec(text.slice(start))
   const rest = host ? text.slice(0, start) + text.slice(start + host[0].length) : text
   return /[[\]{}]/u.test(rest)

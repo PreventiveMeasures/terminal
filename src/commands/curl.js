@@ -229,7 +229,9 @@ async function finish(response, hop, file, opts, state) {
     return fail(state, 22, `The requested URL returned error: ${response.status}`)
   }
   const encoding = response.headers.get('content-encoding')
-  if (response.status !== 204 && response.status !== 304 && !decodedAlike(encoding, opts.compressed)) {
+  // An answer that says it is empty has no bytes for decoding to change.
+  const empty = /^0+$/u.test(response.headers.get('content-length') ?? '')
+  if (response.status !== 204 && response.status !== 304 && !empty && !decodedAlike(encoding, opts.compressed)) {
     await discard(response)
     return gap(state, 'feature', 'content encoding', 2, `the answer is ${encoding}-encoded, and the runtime hands back only the decoded bytes, where curl ${opts.compressed ? 'does not know the coding' : 'writes them as they came without --compressed'}`)
   }

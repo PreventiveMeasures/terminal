@@ -55,7 +55,7 @@ export function requestHeaders({ values, order, body, compressed, state }) {
     const header = customHeader(value)
     if (header === null) continue
     if (header.name.toLowerCase() === 'expect' && header.value === null) expect = false
-    if (!setCustom(headers, implied, header, sent, state, value)) return null
+    if (!setCustom(headers, implied, header, sent, state, value, body.bytes !== null)) return null
   }
   if (expect) return gap(state, 'feature', 'Expect', 2, 'a body over 1 MiB is sent after `Expect: 100-continue`, which the runtime does not do; -H "Expect:" sends it without')
   return { list: headers, implied }
@@ -78,11 +78,13 @@ function customHeader(written) {
   return { name: written.slice(0, colon), value: value === '' ? null : value }
 }
 
-function setCustom(headers, implied, { name, value }, sent, state, written) {
+function setCustom(headers, implied, { name, value }, sent, state, written, hasBody) {
   const key = name.toLowerCase()
   const refuse = (why) => gap(state, 'option', '-H', 2, `-H ${JSON.stringify(written)}: ${why}`)
   if (value === null) {
-    if (KEPT.has(key) || (key === 'content-length' && implied.has('content-type'))) return refuse('taking away a header the runtime sends is not supported')
+    // The runtime sends a body's length whatever the line says, so taking
+    // it away is refused wherever there is a body, typed or not.
+    if (KEPT.has(key) || (key === 'content-length' && hasBody)) return refuse('taking away a header the runtime sends is not supported')
     if (key !== 'accept-encoding') headers.delete(key)
     implied.delete(key)
     return true

@@ -251,6 +251,12 @@ describe('curl sends what it was told to send', () => {
     const taken = await term.run(`curl -H 'Accept:' ${HOST}/x`)
     assert.equal(taken.exitCode, 2)
     assert.deepEqual(feed(taken), [{ kind: 'option', detail: '-H' }])
+    // A body's length goes with it, whichever Content-Type the line gave it.
+    for (const types of ['', "-H 'Content-Type: text/plain' "]) {
+      // oxlint-disable-next-line no-await-in-loop -- one spelling after the last.
+      const r = await term.run(`curl -d x ${types}-H 'Content-Length:' ${HOST}/x`)
+      assert.deepEqual([r.exitCode, feed(r)], [2, [{ kind: 'option', detail: '-H' }]], types)
+    }
     // The runtime sends its own Host, and will not send some headers at all.
     for (const header of ['Host: example.test', 'Expect: 100-continue', 'Transfer-Encoding: chunked', 'X-Twice: 1']) {
       // oxlint-disable-next-line no-await-in-loop -- one header after the last.
@@ -434,6 +440,11 @@ describe('curl reports a transfer that failed the way curl reports it', () => {
     assert.deepEqual(await online().run(`curl --compressed ${HOST}/gz`), result('decoded\n'))
   })
 
+  it('writes an encoded answer that says it is empty, which no decoding changes', async (t) => {
+    serving(t, { '/none': () => new Response(null, { status: 200, headers: { 'content-encoding': 'gzip', 'content-length': '0' } }) })
+    assert.deepEqual(await online().run(`curl ${HOST}/none`), result(''))
+  })
+
   it('puts a deadline on the request where --max-time asked for one', async (t) => {
     const calls = serving(t, { '/slow': () => { throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }) } })
     const r = await online().run(`curl -s -m 2 ${HOST}/slow`)
@@ -540,6 +551,16 @@ describe('curl refuses what it cannot do rather than dropping it', () => {
     const calls = serving(t, { '/x': text('ok\n') })
     assert.deepEqual(await online().run(`curl --compressed --no-progress-meter ${HOST}/x`), result('ok\n'))
     assert.equal(calls.length, 1)
+  })
+
+  it('reads brackets around an IPv6 host as the address, after one to three slashes', async (t) => {
+    const calls = serving(t, { '/x': text('ok\n') })
+    const term = online()
+    for (const url of ['http:/[::1]:8080/x', 'http://[::1]:8080/x', 'http:///[::1]:8080/x']) {
+      // oxlint-disable-next-line no-await-in-loop -- one URL after the last.
+      assert.deepEqual(await term.run(`curl '${url}'`), result('ok\n'), url)
+    }
+    assert.deepEqual(calls.map((call) => String(call.url)), ['http://[::1]:8080/x', 'http://[::1]:8080/x', 'http://[::1]:8080/x'])
   })
 
   it('refuses a URL the runtime would send other than as curl sends it', async (t) => {
