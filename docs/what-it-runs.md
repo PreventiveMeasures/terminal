@@ -362,9 +362,11 @@ Info-ZIP's, so the share a file reports saved is this archive's, and can be a
 few points away from what Info-ZIP's would be: 56% for the numbers 1 to 400,
 a line each, where Info-ZIP saves 53%. Adding to an archive already there, a
 file operand `-`, which Info-ZIP reads from stdin, a compression level and the
-rest are refused. `unzip` answers as Debian's UnZip 6.00 does: `-l`, dated
-year first, `-t`, `-p`, and extraction with `-q`, `-o`, `-n` — which wins over
-`-o`, with UnZip's caution, where both are given — `-j`, `-d` and `-x`, the
+rest are refused. `unzip` answers as Debian's UnZip 6.00 does: its usage
+where it is given no archive, the archive's comment under its name where it
+is not quiet, `-l`, dated year first, `-t`, `-p`, and extraction with `-q`,
+`-o`, `-n` — which wins over `-o`, with UnZip's caution, where both are
+given — `-j`, `-d` and `-x`, the
 overwrite question included — UnZip asks it on stdin, and a stdin with
 nothing on it answers with its end, which UnZip takes as "None". A link is
 made last, its name held until then by a placeholder of its target, as UnZip

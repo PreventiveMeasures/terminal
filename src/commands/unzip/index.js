@@ -33,7 +33,10 @@ const NO_DIRECTORY = [
 
 export async function unzip(_stdin, tokens, ctx) {
   const opts = parseUnzip(tokens)
-  if (opts.usage) return { stdout: '', stderr: opts.usage.text, exitCode: opts.usage.status }
+  if (opts.usage) {
+    const stdout = opts.usage.fd === 1 ? opts.usage.text : ''
+    return { stdout, stderr: stdout ? '' : opts.usage.text, exitCode: opts.usage.status }
+  }
   // -t says everything on stdout, errors and all; -p keeps stdout for the
   // members, and is as quiet as -q.
   const run = unzipRun(ctx, opts)
@@ -66,6 +69,7 @@ export async function unzip(_stdin, tokens, ctx) {
     const [detail, message] = refusalOf(stored)
     return run.refuse('feature', detail, `${stored}: ${message}`)
   }
+  run.comment = commentOf(bytes)
   if (entries.length === 0) {
     run.heading(found.name, false)
     run.say(2, `warning [${found.name}]:  zipfile is empty\n`)
@@ -93,14 +97,33 @@ function findArchive(name, ctx) {
   return null
 }
 
-// Whether the end record's signature is anywhere UnZip looks for it: the
+// Where the end record's signature is, of the places UnZip looks for it: the
 // last 22 bytes and the longest comment before them. Where it is not, UnZip
 // says so in words of its own; where it is, what went wrong is past saying.
-function hasEndRecord(bytes) {
+function endRecord(bytes) {
   for (let at = bytes.length - 4; at >= Math.max(0, bytes.length - 22 - 0xffff); at--) {
-    if (bytes[at] === 0x50 && bytes[at + 1] === 0x4b && bytes[at + 2] === 0x05 && bytes[at + 3] === 0x06) return true
+    if (bytes[at] === 0x50 && bytes[at + 1] === 0x4b && bytes[at + 2] === 0x05 && bytes[at + 3] === 0x06) return at
   }
-  return false
+  return -1
+}
+const hasEndRecord = (bytes) => endRecord(bytes) >= 0
+
+// The archive's comment as UnZip shows it under the archive's name: as far
+// as a NUL, which ends it as a C string, without a carriage return, an
+// escape shown as `^[` rather than sent to the terminal, and ended with a
+// newline where it does not end with one.
+function commentOf(bytes) {
+  const at = endRecord(bytes)
+  const stored = bytes.subarray(at + 22, at + 22 + bytes[at + 20] + bytes[at + 21] * 0x100)
+  const end = stored.indexOf(0)
+  const shown = []
+  for (const byte of end < 0 ? stored : stored.subarray(0, end)) {
+    if (byte === 0x0d) continue
+    if (byte === 0x1b) shown.push(0x5e, 0x5b)
+    else shown.push(byte)
+  }
+  if (shown.length > 0 && shown.at(-1) !== 0x0a) shown.push(0x0a)
+  return Uint8Array.from(shown)
 }
 
 const bytesOf = (text) => encodeUtf8(text)
@@ -185,11 +208,15 @@ function unzipRun(ctx, opts) {
     quiet: opts.mode === 'pipe' ? Math.max(opts.quiet, 1) : opts.quiet,
     say(fd, text) { run.events.push({ fd: everythingOut ? 1 : fd, text }) },
     bytes(bytes) { run.events.push({ fd: 1, bytes }) },
-    // "Archive:" before anything else, where UnZip is not quiet; where it
-    // is, an error names the archive on a line of its own instead.
+    // "Archive:" before anything else, where UnZip is not quiet, and the
+    // archive's comment under it; where it is quiet, an error names the
+    // archive on a line of its own instead.
+    comment: null,
     heading(name, failing) {
-      if (run.quiet === 0) run.say(1, `Archive:  ${name}\n`)
-      else if (failing) run.say(2, `[${name}]\n`)
+      if (run.quiet === 0) {
+        run.say(1, `Archive:  ${name}\n`)
+        if (run.comment?.length) run.events.push({ fd: 1, bytes: run.comment })
+      } else if (failing) run.say(2, `[${name}]\n`)
     },
     refuse(kind, detail, message) {
       run.say(2, `unzip: ${message}\n`)

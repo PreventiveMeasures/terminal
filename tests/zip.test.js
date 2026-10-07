@@ -183,6 +183,35 @@ describe('unzip lists and tests what an archive holds', () => {
     assert.deepEqual(await t.run('unzip -p empty.zip'), result('', { stderr: 'warning [empty.zip]:  zipfile is empty\n', exitCode: 1 }))
   })
 
+  it('shows the archive comment under its name, unless quiet', async () => {
+    // The comment goes after the end record, whose last field counts it.
+    const commented = (text) => {
+      const comment = Buffer.from(text, 'latin1')
+      const out = Uint8Array.of(...PKG_ZIP, ...comment)
+      out[PKG_ZIP.length - 2] = comment.length
+      return out
+    }
+    const t = createTerminal({ 'c.zip': commented('my comment'), 'odd.zip': commented('a\r\nb\u001Bc\0d') }, { mount: '/repo', writable: '/tmp/' })
+    const tested = (name) => `    testing: pkg/README.md            OK\nNo errors detected in ${name} for the 1 file tested.\n`
+    assert.deepEqual(await t.run('unzip -t c.zip pkg/README.md'), result(`Archive:  c.zip\nmy comment\n${tested('c.zip')}`))
+    assert.deepEqual(await t.run('unzip -tq c.zip pkg/README.md'), result('No errors detected in c.zip for the 1 file tested.\n'))
+    // As UnZip shows it: no carriage return, an escape spelt out, nothing
+    // past a NUL, and a newline at the end.
+    assert.deepEqual(await t.run('unzip -t odd.zip pkg/README.md'), result(`Archive:  odd.zip\na\nb^[c\n${tested('odd.zip')}`))
+  })
+
+  it('prints its usage where it is given no archive', async () => {
+    const t = await terminal()
+    const usage = await t.run('unzip')
+    assert.match(usage.stdout, /^UnZip 6\.00 of 20 April 2009, by Debian\. Original by Info-ZIP\.\n\nUsage: unzip /u)
+    assert.equal(usage.exitCode, 0)
+    // Anything given, and still no archive, is an error; a `-` alone is a
+    // word of no options, and -t says even this on stdout.
+    assert.deepEqual(await t.run('unzip -l -'), result('', { stderr: usage.stdout, exitCode: 10 }))
+    assert.deepEqual(await t.run('unzip -t -'), result(usage.stdout, { exitCode: 10 }))
+    assert.deepEqual(await t.run('unzip -qql -- - pkg.zip pkg/README.md'), result('        6  2024-05-06 07:08   pkg/README.md\n'))
+  })
+
   it('refuses an archive whose names it cannot give back as stored', async () => {
     // UnZip lists and matches `./a` as it is stored; the package hands it out
     // as `a`. Nothing is extracted, and no -d directory made.
