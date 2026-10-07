@@ -173,7 +173,9 @@ function safeRun(line, ctx) {
       const note = unsupportedNote(e)
       if (note) feed.add(note)
       ctx.lastExit = e.exitCode ?? (note ? 1 : 2)
-      result.stderr += `error: ${e.message}\n`
+      // A refusal says that it is one; a line bash cannot read either says
+      // what bash says of it.
+      result.stderr += note ? `error: ${e.message}\n` : `${e.message}\n`
       result.exitCode = ctx.lastExit
     }
     return finish(result, ctx, feed)

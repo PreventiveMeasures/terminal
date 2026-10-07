@@ -13,6 +13,9 @@ const VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/u
 export async function evaluateParameter(ref, ctx, options) {
   const { lookup, expand } = options
   const { name, operator, word = '' } = ref
+  // `${x:}` names no offset, which bash calls a bad substitution whatever x
+  // holds — even nothing.
+  if (operator === ':' && word.replaceAll('\\\n', '') === '') throw Object.assign(new Error('bad substitution'), { badSubstitution: true })
   const found = lookup(name, { quiet: operator !== '' })
   if (!operator) return found
   if (operator === 'length') return parameterLength(name, found.value, ctx)
@@ -58,6 +61,9 @@ async function requiredParameter(name, word, nullness, expand, ctx) {
   const error = new Error(`${name}: ${message}`)
   error.exitCode = 1
   error.halt = true
+  // Bash takes this one further than any other expansion error: it ends a
+  // shell that is not interactive, and `bash -c` reports that end as 127.
+  error.fatal = true
   return error
 }
 

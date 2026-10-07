@@ -585,24 +585,26 @@ describe('GNU conformance — a conditional bash rejects too', () => {
   // Every syntax error inside `[[ … ]]` was reported as a gap, exit 1, so a
   // caller reading the feed was told the shell was missing something where
   // bash rejects the same line. Bash exits 2 on all of these; nothing here
-  // is missing, and nothing reaches the feed. Recorded from bash 5.2.21.
+  // is missing, and nothing reaches the feed. Recorded from an interactive
+  // bash 5.2.21: what its conditional reader expected, then the token its
+  // grammar names — read back from the line, so `]]` and not a newline.
+  const near = (token) => `syntax error near \`${token}'\n`
   const MALFORMED = [
-    ['[[ ]]', 'error: [[ expected an operand\n'],
-    ['[[ -f ]]', 'error: [[ expected an operand\n'],
-    ['[[ a == ]]', 'error: [[ expected an operand\n'],
-    ['[[ ! ]]', 'error: [[ expected an operand\n'],
-    // bash: `conditional binary operator expected`, word for word.
-    ['[[ a b ]]', 'error: [[ conditional binary operator expected\n'],
-    ['[[ -Q value ]]', 'error: [[ conditional binary operator expected\n'],
-    ['[[ a -Q b ]]', 'error: [[ conditional binary operator expected\n'],
-    ["[[ a '==' a ]]", 'error: [[ conditional binary operator expected\n'],
-    ['[[ x -a y ]]', 'error: [[ conditional binary operator expected\n'],
-    ['[[ a == a -o b == b ]]', 'error: [[ unexpected token `-o`\n'],
-    ['[[ a == b extra ]]', 'error: [[ unexpected token `extra`\n'],
-    ['[[ (a ]]', 'error: [[ expected `)`\n'],
-    ['[[ a == b', 'error: [[ missing `]]`\n'],
-    ['[[ a == "b ]]', 'error: [[ unterminated double quote\n'],
-    ['[[ a == b ]] extra', 'error: unexpected token after `]]`\n'],
+    ['[[ ]]', near(']]')],
+    ['[[ -f ]]', "unexpected argument `]]' to conditional unary operator\n" + near(']]')],
+    ['[[ a == ]]', "unexpected argument `]]' to conditional binary operator\n" + near(']]')],
+    ['[[ ! ]]', near(']]')],
+    ['[[ a b ]]', 'conditional binary operator expected\n' + near('b')],
+    ['[[ -Q value ]]', 'conditional binary operator expected\n' + near('value')],
+    ['[[ a -Q b ]]', 'conditional binary operator expected\n' + near('-Q')],
+    ["[[ a '==' a ]]", 'conditional binary operator expected\n' + near("'=='")],
+    ['[[ x -a y ]]', 'conditional binary operator expected\n' + near('-a')],
+    ['[[ a == a -o b == b ]]', 'syntax error in conditional expression\n' + near('-o')],
+    ['[[ a == b extra ]]', 'syntax error in conditional expression\n' + near('extra')],
+    ['[[ (a ]]', "unexpected token `]]', expected `)'\n" + near(']]')],
+    ['[[ a == b', "unexpected EOF while looking for `]]'\nsyntax error: unexpected end of file\n"],
+    ['[[ a == "b ]]', "unexpected EOF while looking for matching `\"'\nunexpected argument to conditional binary operator\n"],
+    ['[[ a == b ]] extra', "syntax error near unexpected token `extra'\n"],
   ]
   for (const [command, stderr] of MALFORMED) {
     it(JSON.stringify(command), async () => {

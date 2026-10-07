@@ -41,7 +41,7 @@ describe('command substitution lexical boundaries', () => {
     it(`rejects incomplete ${JSON.stringify(source)}`, () => {
       assert.throws(() => readExpansion(source, 0), (error) => {
         assert.equal(unsupportedNote(error), null)
-        assert.match(error.message, /unterminated/u)
+        assert.match(error.message, /^unexpected EOF while looking for matching /u)
         return true
       })
     })
@@ -74,13 +74,13 @@ describe('command substitution word masks', () => {
   it('protects inner source from outer expansion without making a bare word quoted', () => {
     const raw = '$(printf "%s" "$value" ~ {a,b} *.js)'
     const word = tokenize('pre' + raw + 'post')[0]
-    assert.deepEqual(word, { kind: 'word', value: 'pre' + raw + 'post', mask: '0000' + '1'.repeat(raw.length - 1) + '0000', quoted: false })
+    assert.deepEqual(word, { kind: 'word', value: 'pre' + raw + 'post', mask: '0000' + '1'.repeat(raw.length - 1) + '0000', quoted: false, raw: 'pre' + raw + 'post' })
   })
 
   it('retains the surrounding double-quote context on the active dollar', () => {
     const raw = '$(echo "inner")'
     const word = tokenize(`"pre${raw}post"`)[0]
-    assert.deepEqual(word, { kind: 'word', value: 'pre' + raw + 'post', mask: '2222' + '1'.repeat(raw.length - 1) + '2222', quoted: true })
+    assert.deepEqual(word, { kind: 'word', value: 'pre' + raw + 'post', mask: '2222' + '1'.repeat(raw.length - 1) + '2222', quoted: true, raw: `"pre${raw}post"` })
   })
 
   it('does not rewrite a command substitution before an adjacent quoted fragment', () => {

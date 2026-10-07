@@ -28,6 +28,10 @@ const refused = (name) => new UnsupportedError('feature', `$${name}`, `shell par
 // what it says rather than to nothing. An unset name appends to nothing.
 export const boundValue = (name, ctx) => parameterValue(name, ctx)?.value ?? ''
 
+// Whether bash would find a variable by this name to unset: one bound or
+// answered here, or one bash sets itself.
+export const variableSet = (name, ctx) => parameterValue(name, ctx)?.set === true || unknown(name)
+
 function parameterValue(name, ctx) {
   if (name === '?') return { value: String(ctx.lastExit), set: true }
   if (name === '#') return { value: '0', set: true }

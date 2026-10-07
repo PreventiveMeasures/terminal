@@ -41,6 +41,8 @@ function write(name, bytes, append, state, ctx) {
   try {
     handle = ctx.writable && ctx.fs.openWritable?.(ctx.cwd, name, append)
   } catch (e) {
+    // A refusal is the line's to report, not this file's.
+    if (unsupportedNote(e)) throw e
     // The message names the file it is about, as GNU's does.
     state.stderr += `tee: ${e.message}\n`
     state.status = 1

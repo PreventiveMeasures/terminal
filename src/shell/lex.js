@@ -3,7 +3,7 @@
 
 import { decodeUtf8, encodeUtf8Loose } from '../bytes.js'
 import { UnsupportedError } from '../unsupported.js'
-import { readCommandSubstitution } from './substitution.js'
+import { readCommandSubstitution, unmatched } from './substitution.js'
 import { isUnicodeScalar } from '../unicode.js'
 import { readArithmeticExpansion, readBracedExpansion } from './expansion-scan.js'
 import { readConditional } from './conditional-lex.js'
@@ -62,7 +62,7 @@ export function readProcessSubstitution(line, i, options = {}) {
 }
 
 // A backtick outside single quotes opens the other command substitution.
-export { readBacktickSubstitution } from './substitution.js'
+export { doubleQuotedBacktick, readBacktickSubstitution } from './substitution.js'
 export const backtickGap = () => new UnsupportedError('feature', '`', 'command substitution (backticks) is not supported')
 
 
@@ -76,7 +76,7 @@ function ansiQuoteEnd(line, start) {
     if (line[i] === '\\') i++
     else if (line[i] === "'") return i
   }
-  throw new Error('unterminated single quote')
+  throw unmatched("'")
 }
 
 export function decodeAnsiC(line, start) {
@@ -172,6 +172,16 @@ export function tokenLabel(t) {
   return LABELS[t.kind]
 }
 
+// The token as bash names it in a syntax error: a word as it was written,
+// quotes and all, and the end of a line — or of the input, which a typed
+// line ends with a newline — as `newline`.
+export function syntaxLabel(t) {
+  if (t === undefined || (t.kind === 'semi' && t.newline)) return 'newline'
+  if (t.kind === 'word') return t.raw ?? t.value
+  if (t.kind === 'condition') return '[['
+  return tokenLabel(t)
+}
+
 const tok = (kind, end) => ({ token: { kind }, end })
 const redir = (fd, op, end, fields) => ({ token: { kind: 'redir', fd, op, ...fields }, end })
 
@@ -205,6 +215,13 @@ function readDup(line, ampAt, fd, label) {
   const boundary = after === undefined || /[ \t\n|&>;()<]/u.test(after)
   if (/[0-9]/u.test(target ?? '') && boundary) return redir(fd, 'dup', targetAt + 1, { toFd: Number(target) })
   if (target === '-' && boundary) return redir(fd, 'close', targetAt + 1)
+  // With no word at all after it, the operator wants one where the line, or
+  // the next operator, stands.
+  let next = targetAt
+  while (line[next] === ' ' || line[next] === '\t') next = skipContinuations(line, next + 1)
+  if (line[next] === undefined || line[next] === '\n') throw Object.assign(new Error("syntax error near unexpected token `newline'"), { grammar: true })
+  const op = /[|&;()<>]/u.test(line[next]) ? readOperator(line, next, false) : null
+  if (op) throw Object.assign(new Error(`syntax error near unexpected token \`${tokenLabel(op.token)}'`), { grammar: true })
   throw new UnsupportedError('feature', 'redirect target', `redirect \`${label}\` requires a file descriptor number (or \`-\`) followed by a token boundary`)
 }
 
@@ -215,6 +232,9 @@ function readDup(line, ampAt, fd, label) {
 export function readHeredocBodies(line, newlineAt, pending) {
   let i = newlineAt + 1
   for (const h of pending) {
+    // Bash names the line its reader had reached when the body began, which
+    // is the line ahead of it; the end of a typed line is a newline too.
+    const at = countNewlines(line.slice(0, Math.min(i, line.length))) + (i > line.length ? 1 : 0)
     const lines = []
     let terminated = false
     while (i < line.length) {
@@ -234,10 +254,12 @@ export function readHeredocBodies(line, newlineAt, pending) {
       if (end === -1) break
     }
     h.body = lines.length === 0 ? '' : lines.join('\n') + '\n'
-    if (!terminated) h.warning = `warning: here-document delimited by end-of-file (wanted \`${h.delim}')\n`
+    if (!terminated) h.warning = `warning: here-document at line ${at} delimited by end-of-file (wanted \`${h.delim}')\n`
   }
   return i - 1
 }
+
+const countNewlines = (text) => text.split('\n').length - 1
 
 // A line ending in an odd number of backslashes: the last one escapes
 // the newline (`a\\` ends in an escaped backslash instead).

@@ -101,7 +101,7 @@ describe('command substitution — state and status', () => {
     const r = await terminal().run('for f in a b; do echo "$(break; echo "$f")"; done')
     assert.equal(r.stdout, 'a\nb\n')
     assert.equal(r.exitCode, 0)
-    assert.match(r.stderr, /break: only meaningful in a `for`, `while` or `until` loop/u)
+    assert.match(r.stderr, /break: only meaningful in a `for', `while', or `until' loop/u)
     assert.deepEqual(r.unsupported, [])
   })
 })
@@ -161,4 +161,19 @@ describe('command substitution — redirects and diagnostics', () => {
       assert.deepEqual(r.unsupported, [], command)
     }
   })
+})
+
+// Inside double quotes a backtick body loses the backslash before `"` too, so
+// "`echo \"q\"`" runs `echo "q"`; outside them, and in a here-document, the
+// backslash reaches the inner command.
+describe('command substitution — backticks inside double quotes', () => {
+  const cases = [
+    ['echo "`echo \\"q\\"`"', 'q\n'],
+    ['x="`echo \\"a  b\\"`"; echo "$x"', 'a  b\n'],
+    ['echo "`echo \\\\\\"q\\\\\\"`"', '"q"\n'],
+    ['echo `echo \\"q\\"`', '"q"\n'],
+    ['cat <<EOF\n`echo \\"q\\"`\nEOF', '"q"\n'],
+    ['[[ "`echo \\"q\\"`" == q ]] && echo yes', 'yes\n'],
+  ]
+  for (const [command, stdout] of cases) it(command, () => check(command, stdout))
 })

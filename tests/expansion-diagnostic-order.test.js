@@ -76,7 +76,7 @@ describe('expansion diagnostics use descriptors active at the expansion site', (
     ['input target expansion interleaves warnings and substitution errors', 'cat <"$MISSING$(cat nope)input"', 'present\n', missing + nope],
     ['input target expansion follows an earlier stderr redirect', 'cat 2>/dev/null <"$MISSING$(cat nope)input"', 'present\n', '', ['MISSING'], 0, hidden(nope)],
     ['input target diagnostics precede a later stderr redirect', 'cat <"$MISSING$(cat nope)input" 2>/dev/null', 'present\n', missing + nope],
-    ['input target diagnostics precede a failed file open', 'cat <"$MISSING$(cat nope)absent"', '', missing + nope + 'error: absent: No such file or directory\n', ['MISSING'], 1],
+    ['input target diagnostics precede a failed file open', 'cat <"$MISSING$(cat nope)absent"', '', missing + nope + 'absent: No such file or directory\n', ['MISSING'], 1],
     ['output target expansion precedes the output redirect', 'echo ready >"$MISSING$(cat nope)/dev/null"', '', missing + nope],
     ['redirect expansions retain order when later redirects change stderr', 'cat <<<"$MISSING$(cat nope)" 2>/dev/null <<<"$OTHER$(cat gone)"', '\n', missing + nope, ['MISSING', 'OTHER'], 0, hidden(gone)],
     ['heredoc expansions share the same diagnostic ordering', 'cat <<END\n$MISSING$(cat nope)$OTHER$(cat gone)\nEND', '\n', missing + nope + other + gone, ['MISSING', 'OTHER']],

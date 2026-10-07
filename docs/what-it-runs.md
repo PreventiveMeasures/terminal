@@ -19,6 +19,49 @@ in, and `$1`, a `local` and the rest are nothing the body could have read. A
 body that needs any of them is refused rather than run as something it is
 not.
 
+A line is read as a line typed at an interactive bash with nothing more to
+come after it, so a line bash cannot read says what that bash says, in one
+line and with status 2: ``syntax error near unexpected token `)'``, the end of
+the line being the token `newline`; `syntax error: unexpected end of file`
+where a block or a `|` is still open; ``unexpected EOF while looking for
+matching `"'`` where a quote or a substitution is. `bash -c` would add a second
+line echoing the source, which a typed line does not get, and nothing of the
+line runs either way. The shell's own diagnostics leave off the `bash: ` in
+front of them, as every diagnostic here does — `cd: nope: No such file or
+directory`, `x: parameter not set`, `$f: ambiguous redirect` — and a
+here-document the input ends inside is `here-document at line N`, counted in
+the line handed to `run()`. Only a refusal says `error: `. `${x?}` ends the
+line with status 127, which is what `bash -c` reports for a shell that it
+ended, and 1 where a subshell or a substitution catches it.
+
+`< dir` opens, as a directory does for reading, and what fails is the read: a
+command that never reads its stdin runs as anywhere else, and one whose only
+input it is fails as the GNU tool does — `cat: -: Is a directory`, `wc:
+'standard input': Is a directory` — while `$(< dir)` is empty with status 0.
+A reader each tool words differently again, such as one handed `-` beside
+another file, is refused.
+
+The stages of a pipeline run here one after the other, where bash runs them
+side by side, and that is the same answer wherever no file passes between
+them. Where one stage writes a file another stage of the same pipeline reads —
+`grep x f | cat > f`, `cat f | cat >> f`, a stage's stderr landing in a file
+the next stage reads — bash's answer is whatever the scheduler let through
+first, so the line is refused rather than given one of its outcomes. `sort`
+is the exception that proves it: it writes only once it has read everything,
+so `cat f | sort -o f` is answered.
+
+A glob matches the way bash's does in C.UTF-8 — in pathname expansion, in
+`[[ … == … ]]`, in `${x#…}` and `${x/…}`, and in `find -name` — a character at
+a time: `?`, a set and a negated set each take one character, accented or not.
+A POSIX class such as `[[:alpha:]]` tested against a name past ASCII is
+refused, since glibc's C.UTF-8 fills the classes with all of Unicode. `${x/…}`
+keeps bash 5.2's own reading of a set that opens on `]` after its `!` or `^`:
+with no `*` in the pattern, `${x/[!]]/X}` matches nothing at all, as bash
+sizes that set wrongly before it matches it.
+
+`cd //` keeps the two slashes, as bash does — `pwd` and `$PWD` say `//`, and
+`//tmp` after a `cd tmp` there — while three or more read as one.
+
 `ls` `cd` `cat` `grep` `rg` `egrep` `fgrep` `sed` `awk` `find` `head` `tail` `wc`
 `tree` `sort` `uniq` `cut` `tr` `nl` `tac` `hexdump` `base64` `xargs` `echo`
 `printf` `test` `cp` `rm` `mkdir` `touch` `ln` `diff` `patch` `du` `stat` `realpath`

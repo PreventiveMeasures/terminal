@@ -99,8 +99,8 @@ describe('the parse entry point reads a line with no terminal at all', () => {
   })
 
   it('reports unfinished input, a syntax error and a refused construct apart', () => {
-    assert.deepEqual(pick(parse('for f in a; do')), { ok: false, incomplete: true, error: 'for: missing `done`', gaps: [] })
-    assert.deepEqual(pick(parse('echo )')), { ok: false, incomplete: false, error: 'unexpected `)`', gaps: [] })
+    assert.deepEqual(pick(parse('for f in a; do')), { ok: false, incomplete: true, error: 'syntax error: unexpected end of file', gaps: [] })
+    assert.deepEqual(pick(parse('echo )')), { ok: false, incomplete: false, error: "syntax error near unexpected token `)'", gaps: [] })
     assert.deepEqual(pick(parse('case x in a) :;; esac')), {
       ok: false,
       incomplete: false,

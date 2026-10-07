@@ -227,13 +227,15 @@ echo [ab]* => "a a b a*b a-b a.b.c a.txt a?b a]b ab ab.txt abc b.txt\n"
 "for f in *; do echo \"<$f>\"; done" => "<1>\n<10>\n<2>\n<A.txt>\n<B>\n<a>\n<a b>\n<a*b>\n<a-b>\n<a.b.c>\n<a.txt>\n<a?b>\n<a]b>\n<ab>\n<ab.txt>\n<abc>\n<b.txt>\n<dir>\n"
 
 @tree wide
-# matching that would need a locale is refused, not guessed
-echo ? => ! non-ASCII glob matching 1
-echo ?? => ! non-ASCII glob matching 1
-echo a?b => ! non-ASCII glob matching 1
-echo na?ve => ! non-ASCII glob matching 1
-echo [μ] => ! non-ASCII glob matching 1
-echo [ab]* => ! non-ASCII glob matching 1
+# C.UTF-8 matches a character a code point at a time, as this does; a POSIX
+# class, which glibc fills with the whole of Unicode, is refused, not guessed
+echo ? => "a μ\n"
+echo ?? => "ab\n"
+echo a?b => "a b a*b aμb\n"
+echo na?ve => "naïve\n"
+echo [μ] => "μ\n"
+echo [ab]* => "a a b a*b ab aμb b.txt\n"
+echo [[:alpha:]] => ! non-ASCII glob matching 1
 echo * => "a a b a*b ab aμb b.txt naïve μ\n"
 
 @tree glob

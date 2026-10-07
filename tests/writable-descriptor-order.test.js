@@ -40,10 +40,12 @@ describe('writable redirects are visible while enclosing commands execute', () =
     await check(t, '{ value=$(cat missing 2>&1); printf "%s" "$value"; } 2>/tmp/errors', ERROR.trimEnd())
     await check(t, 'cat /tmp/errors')
   })
-  it('pipeline stderr reaches its inherited file before the next stage reads it', async () => {
-    const t = terminal()
-    await check(t, '{ cat missing | cat /tmp/errors; } 2>/tmp/errors', ERROR)
-    await check(t, 'cat /tmp/errors', ERROR)
+  // The two stages run side by side under bash, and whether the second reads
+  // the first one's diagnostic is up to the scheduler: a race, refused.
+  it('refuses a pipeline stage reading the file another stage writes its stderr to', async () => {
+    const r = await terminal().run('{ cat missing | cat /tmp/errors; } 2>/tmp/errors')
+    assert.notEqual(r.exitCode, 0)
+    assert.equal(r.unsupported[0]?.detail, 'pipeline file race')
   })
   it('inner redirects override and then restore the enclosing file', async () => {
     const t = terminal()

@@ -7,27 +7,58 @@ export class IncompleteInput extends Error {
 
 export const incomplete = (message) => new IncompleteInput(new Error(message))
 
+// Bash's own words for input it cannot read, as an interactive shell prints
+// them: one line — the shell's name dropped, as from every diagnostic here,
+// and no echo of the source, which only a script's error adds. A grammar
+// error names the token it stopped at, and the end of a line is the token
+// `newline`; input that ends where the grammar wants more is the end of the
+// file, which more input could still have supplied. Inside `$( … )` the
+// closing parenthesis is where that input ends.
+export const unexpectedToken = (label) => Object.assign(new Error(`syntax error near unexpected token \`${label}'`), { grammar: true })
+export const unexpectedEnd = (p) => (p?.closer ? unexpectedToken(p.closer) : new IncompleteInput(Object.assign(new Error('syntax error: unexpected end of file'), { grammar: true })))
+
 export function tokenAt(p, index = p.i) {
   while (index >= p.raw.length && !p.done) {
-    const next = p.read()
+    let next
+    try { next = p.read() } catch (error) {
+      // The tokens ahead of a word the tokenizer cannot finish are bash's
+      // to read first, as its reader takes one token at a time: the grammar
+      // may fail at one of them, and only past them is the word's error.
+      if (!error.tokens) throw error
+      next = { tokens: error.tokens, done: true }
+      p.lexError = error
+    }
     p.raw = next.tokens
     p.done = next.done
   }
+  if (index >= p.raw.length && p.lexError) throw p.lexError
   return p.raw[index]
 }
 
+// A grammar error inside `$( … )` stops the enclosing reader too, which adds
+// a plain `syntax error` of its own for each level it is nested in.
 function validationOptions(hasCommand, options, parseTokens) {
   const validation = options.validation ?? new Map()
   return { validateSubstitution(command) {
     if (validation.has(command)) return
-    readLine(command, true, hasCommand, { validation, syntaxOnly: true }, parseTokens)
+    try {
+      readLine(command, true, hasCommand, { validation, syntaxOnly: true, closer: ')' }, parseTokens)
+    } catch (error) {
+      if (!error.grammar) throw error
+      throw Object.assign(new Error(`${error.message}\nsyntax error`), { grammar: true })
+    }
     validation.set(command, true)
   } }
 }
 
 export function readLine(line, writable, hasCommand, options, parseTokens) {
   try {
-    return parseTokens(tokenize(line, validationOptions(hasCommand, options, parseTokens)), writable, hasCommand, options)
+    let tokens
+    try { tokens = tokenize(line, validationOptions(hasCommand, options, parseTokens)) } catch (error) {
+      if (!error.tokens) throw error
+      return parseTokens(error.tokens, writable, hasCommand, { ...options, lexError: error })
+    }
+    return parseTokens(tokens, writable, hasCommand, options)
   } catch (error) { throw error instanceof IncompleteInput ? error.finalError : error }
 }
 

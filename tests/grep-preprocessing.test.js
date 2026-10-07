@@ -42,7 +42,7 @@ describe('grep input preprocessing', () => {
   const filteredFiles = { 'late.js': 'x'.repeat(100000) + '\0', 'café.js': 'TODO\n' }
 
   it('finishes filename filtering before inspecting binary contents', async () => {
-    await diagnoses("grep -I --include='?*.js' TODO late.js café.js", filteredFiles,
+    await diagnoses("grep -I --include='[[:alpha:]]*.js' TODO late.js café.js", filteredFiles,
       'non-ASCII glob matching', 'grep: locale-dependent glob matching of non-ASCII names is not supported', 1)
   })
 

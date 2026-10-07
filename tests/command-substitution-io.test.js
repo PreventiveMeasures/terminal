@@ -32,9 +32,11 @@ describe('command substitution — Bash file shorthand', () => {
   for (const [command, stdout] of cases) it(command, () => check(command, stdout))
 
   it('reports missing or directory input without marking it unsupported', async () => {
-    await check('x=$(<missing)', '', 1, 'error: missing: No such file or directory\n')
-    await check('x=$(<dir)', '', 1, 'error: dir: Is a directory\n')
-    await check('echo "$(<missing)"', '\n', 0, 'error: missing: No such file or directory\n')
+    await check('x=$(<missing)', '', 1, 'missing: No such file or directory\n')
+    // Bash reads the file itself and nothing fails a directory but the read,
+    // which it says nothing about.
+    await check('x=$(<dir); echo "$? [$x]"', '0 []\n')
+    await check('echo "$(<missing)"', '\n', 0, 'missing: No such file or directory\n')
   })
 })
 

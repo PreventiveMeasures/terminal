@@ -189,6 +189,7 @@
     "src/shell/parse.js",
     "src/shell/run.js",
     "src/shell/state.js",
+    "src/shell/stdin.js",
     "src/shell/substitution.js",
     "src/shell/tokenize.js",
     "src/shell/variables.js",

@@ -7,9 +7,10 @@
 // quotes only $, backtick, quote, backslash and newline are escaped.
 // lex.js handles substitutions, operators, ANSI-C strings and here-documents.
 
-import { NAME_RE, decodeAnsiC, readBacktickSubstitution, readExpansion, readHeredocBodies, readOperator, readProcessSubstitution, skipContinuations } from './lex.js'
+import { NAME_RE, decodeAnsiC, doubleQuotedBacktick, readBacktickSubstitution, readExpansion, readHeredocBodies, readOperator, readProcessSubstitution, skipContinuations } from './lex.js'
 import { UnsupportedError } from '../unsupported.js'
 import { readConditional } from './conditional-lex.js'
+import { unmatched } from './substitution.js'
 
 export { NAME_RE }
 
@@ -21,14 +22,24 @@ const NEWLINE_ABSORB = new Set(['semi', 'amp', 'and', 'or', 'pipe', 'pipe_err', 
 const isBlank = (c) => c === ' ' || c === '\t'
 
 export function tokenize(line, options = {}) {
-  return scan(newScanner(line, options), false).tokens
+  const st = newScanner(line, options)
+  return withTokens(st, () => scan(st, false)).tokens
 }
 
 // Keep unfinished grammar in the token buffer. The parser clears it only after
 // accepting an input unit, before this scanner reads any of the next unit.
 export function createTokenizer(line, options = {}) {
   const st = newScanner(line, options)
-  return { read: () => scan(st, true), reset: () => { st.tokens = [] } }
+  return { read: () => withTokens(st, () => scan(st, true)), reset: () => { st.tokens = [] } }
+}
+
+// A word the scanner cannot finish carries the tokens ahead of it, which the
+// grammar reads before it ever reaches that word.
+function withTokens(st, fn) {
+  try { return fn() } catch (error) {
+    if (error !== null && typeof error === 'object') error.tokens = st.tokens
+    throw error
+  }
 }
 
 function scan(st, incremental) {
@@ -68,7 +79,7 @@ function scan(st, incremental) {
     put(st, c, '0')
     st.i++
   }
-  if (st.quote) throw new Error(`unterminated ${st.quote === "'" ? 'single' : 'double'} quote`)
+  if (st.quote) throw unmatched(st.quote)
   flush(st)
   if (st.heredocs.length > 0) readHeredocBodies(st.line, st.line.length, st.heredocs)
   return { tokens: st.tokens, done: true }
@@ -76,7 +87,7 @@ function scan(st, incremental) {
 
 function newScanner(line, options = {}) {
   return {
-    line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoted: false, quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2,
+    line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoted: false, quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2, start: null,
     readExpansion: (source, at, depth = 0, quoted = false) => readExpansion(source, at, depth, quoted, options),
     readProcess: (source, at) => readProcessSubstitution(source, at, options),
   }
@@ -128,6 +139,7 @@ function conditionalPosition(tokens) {
 
 // Empty quotes are significant even when no character gets a quoting mask.
 function openQuote(st, c) {
+  st.start ??= st.i
   st.quoteStart = st.cur.length
   st.quote = c
 }
@@ -139,6 +151,7 @@ function closeQuote(st) {
 
 // Quote masks count UTF-16 units, including both halves of astral characters.
 function put(st, ch, m, quoted = m !== '0') {
+  st.start ??= st.i
   st.cur += ch
   st.mask += m.repeat(ch.length)
   st.quoted ||= quoted
@@ -147,7 +160,10 @@ function put(st, ch, m, quoted = m !== '0') {
 function flush(st) {
   if (st.cur !== '' || st.empty.length > 0) {
     const quoted = st.empty.length > 0 || st.quoted
-    const token = { kind: 'word', value: st.cur, mask: /[12]/u.test(st.mask) || quoted ? st.mask : null, quoted, ...(st.empty.length ? { empty: st.empty } : {}) }
+    // `raw` is the word as written, quotes and all, which is how a syntax
+    // error names it.
+    const raw = st.line.slice(st.start ?? st.i, st.i).replaceAll('\\\n', '')
+    const token = { kind: 'word', value: st.cur, mask: /[12]/u.test(st.mask) || quoted ? st.mask : null, quoted, raw, ...(st.empty.length ? { empty: st.empty } : {}) }
     st.tokens.push(token)
     // A heredoc delimiter remains a word token and also guides body collection.
     const pending = st.heredocs.find((h) => h.delim === null)
@@ -157,6 +173,7 @@ function flush(st) {
   st.mask = ''
   st.empty = []
   st.quoted = false
+  st.start = null
 }
 
 function emit(st, token) {
@@ -243,7 +260,7 @@ function readBacktick(st) {
   const m = st.quote === '"' || st.fragmentQuoted ? '2' : '0'
   const { raw } = readBacktickSubstitution(st.line, st.i)
   put(st, '`', m)
-  put(st, raw.slice(1), '1', false)
+  put(st, (st.quote === '"' ? doubleQuotedBacktick(raw) : raw).slice(1), '1', false)
   st.i += raw.length
 }
 

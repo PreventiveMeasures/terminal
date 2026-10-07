@@ -149,3 +149,40 @@ describe('combined output ordering follows file identity after replacement', () 
     assert.match((await terminal.run('cat /tmp/log.bak')).stdout, /^olderror: merging/u)
   })
 })
+
+// Bash runs a pipeline's stages side by side, so a file one stage writes while
+// another reads it holds whatever the scheduler let through first. Running
+// them in turn would pass one of those outcomes off as the answer.
+describe('a pipeline whose stages race over one file is refused', () => {
+  for (const line of [
+    'grep x /tmp/f | cat > /tmp/f',
+    'cat /tmp/f | cat >> /tmp/f',
+    'cat < /tmp/f | sort > /tmp/f',
+    'echo y > /tmp/f | cat /tmp/f',
+    'sort /tmp/f | tee /tmp/f',
+    'echo $(cat /tmp/f) | cat > /tmp/f',
+  ]) {
+    it(line, async () => {
+      const t = createTerminal({}, options)
+      await t.run('echo x > /tmp/f')
+      const r = await t.run(line)
+      assert.notEqual(r.exitCode, 0)
+      assert.equal(r.unsupported[0]?.detail, 'pipeline file race')
+    })
+  }
+
+  // `sort` writes only after reading everything, by when every stage ahead of
+  // it is done; and a file one stage alone reads and writes is that stage's.
+  for (const [line, stdout] of [
+    ['cat /tmp/f | sort -o /tmp/f; cat /tmp/f', 'a\nb\n'],
+    ['cat /tmp/f | sort >> /tmp/f; cat /tmp/f', 'b\na\na\nb\n'],
+    ['cat /tmp/f | tee /tmp/g > /dev/null; cat /tmp/g', 'b\na\n'],
+    ['{ cat /tmp/f; echo c > /tmp/f; } | cat; cat /tmp/f', 'b\na\nc\n'],
+  ]) {
+    it(line, async () => {
+      const t = createTerminal({}, options)
+      await t.run('printf "b\\na\\n" > /tmp/f')
+      assert.deepEqual(await t.run(line), expected(stdout))
+    })
+  }
+})
