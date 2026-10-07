@@ -59,7 +59,10 @@ const copiedSession = (parent) => ({ vars: new BindingMap(parent.vars), function
 function fork(parent, opts = {}) {
   const { cwd, home, user, locale, inherit } = forkSettings(parent, opts)
   const session = inherit ? copiedSession(parent) : freshSession()
-  return terminal(context(parent, { cwd, home, user, locale, ...session }), 'fork')
+  // Where it stands is the parent's own spelling of it — `//` included —
+  // unless it was given a cwd of its own.
+  const doubleSlash = opts.cwd === undefined ? parent.doubleSlash : false
+  return terminal(context(parent, { cwd, home, user, locale, doubleSlash, ...session }), 'fork')
 }
 
 // Stdin position, open descriptors and the two diagnostic feeds belong to
