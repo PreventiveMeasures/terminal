@@ -5,6 +5,8 @@
 # session to the Node.js version pinned in .nvmrc (currently 24) via nvm,
 # persists that PATH for every later shell command, and installs the dev
 # dependencies so `node --run lint` and `node --run test` work right away.
+# When Claude works in a worktree of this repository, that worktree is set
+# up instead of the main checkout.
 set -euo pipefail
 
 # Only run in remote (Claude Code on the web) sessions.
@@ -12,7 +14,29 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
 
+# SessionStart stdout is added to Claude's context, so the nvm, corepack
+# and pnpm logs go to stderr. Only the closing summary line is written to
+# the original stdout, kept on fd 3.
+exec 3>&1 1>&2
+
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+
+# CLAUDE_PROJECT_DIR stays at the checkout the session started in, while
+# the hook input's cwd follows Claude into a worktree. Set that worktree
+# up instead when it belongs to the same repository, so it gets its own
+# node_modules and nvm reads its .nvmrc. There may be no node to parse the
+# input with yet, so cwd is matched with a regex; one holding `"` or `\`,
+# like another repo, a non-git cwd or no input, keeps the project dir.
+cwd_re='"cwd"[[:space:]]*:[[:space:]]*"([^"\]*)"'
+if [ ! -t 0 ] && [[ "$(cat)" =~ $cwd_re ]]; then
+  HOOK_CWD="${BASH_REMATCH[1]}"
+  git_common_dir() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
+  if WORKTREE="$(git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null)" &&
+    [ "$(git_common_dir "$WORKTREE")" = "$(git_common_dir "$PROJECT_DIR")" ]; then
+    PROJECT_DIR="$WORKTREE"
+  fi
+fi
+
 cd "$PROJECT_DIR"
 
 export NVM_DIR="${NVM_DIR:-/opt/nvm}"
@@ -51,4 +75,4 @@ fi
 
 pnpm install --frozen-lockfile
 
-echo "Node $(node --version) from $NODE_BIN, pnpm $(pnpm --version)"
+echo "Node $(node --version) from $NODE_BIN, pnpm $(pnpm --version) in $PROJECT_DIR" >&3
