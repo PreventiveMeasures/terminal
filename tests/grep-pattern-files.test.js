@@ -39,7 +39,8 @@ describe('grep — patterns from virtual files', () => {
     ['grep -Pf patterns/empty data', '', 1],
     ['grep -Pvf patterns/empty data', FILES.data],
     ['grep -vf patterns/empty data', FILES.data],
-    ['grep -cf patterns/empty data', '0\n', 1],
+    // No pattern selects no line, a search GNU does not run: no count either.
+    ['grep -cf patterns/empty data', '', 1],
     ['grep -Lf patterns/empty data', 'data\n', 1],
     ['grep -lf patterns/empty data', '', 1],
     ['grep -f /dev/null data', '', 1],

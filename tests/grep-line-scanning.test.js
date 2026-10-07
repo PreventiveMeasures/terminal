@@ -30,10 +30,20 @@ describe('grep line scanning', () => {
     for (const name of ['empty', 'terminated', 'unterminated']) await check("grep -qm1 '^$' " + name, '', 1)
   })
 
-  it('keeps binary and locale diagnostics after an early matching line', async () => {
-    const inputs = { binary: 'hit\n\0', unicode: 'hit\né\n' }
+  it('reads a NUL after an early matching line as GNU does, in every mode', async () => {
+    // Checked against GNU grep 3.11: the NUL is in the first read, so the
+    // file is binary from its first line.
+    const inputs = { binary: 'hit\n\0' }
+    for (const [mode, stdout, stderr] of [['-q', ''], ['-l', 'binary\n'], ['-L', ''], ['-cm1', '1\n'], ['-m1', '', 'grep: binary: binary file matches\n']]) {
+      assert.deepEqual(await createTerminal(inputs).run(`grep ${mode} hit binary`), {
+        stdout, stderr: stderr ?? '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
+      }, mode)
+    }
+  })
+
+  it('keeps locale diagnostics after an early matching line', async () => {
+    const inputs = { unicode: 'hit\né\n' }
     const cases = [
-      ['hit binary', 'binary input', 'grep: binary input detection and output are not supported'],
       ["-i '\\(h\\)\\1' unicode", 'non-ASCII regex semantics', 'grep: case-insensitive matching with backreferences on non-ASCII input is not supported'],
     ]
     for (const mode of ['-q', '-l', '-L', '-cm1', '-m1']) {

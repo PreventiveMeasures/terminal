@@ -3,12 +3,12 @@
 import { basename, lookup, relativeTo, resolve, walkTree } from '../fs.js'
 import { lookupWithNote, omissionNote } from '../notes.js'
 import { parseArgs } from '../args.js'
-import { consumeStdin, decodeUtf8Maybe, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, readTextOrBytes, usage } from '../util.js'
+import { consumeStdin, countNewlines, decodeUtf8Marked, encodeUtf8Loose, err, parseNonNegativeInt, readFilesFor, readInputs, readTextOrBytes, splitLines, usage } from '../util.js'
 import { UnsupportedError, markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { AwkError } from '../awk/common.js'
 import { cannotHoldMatch, compilePatterns, inputGap } from './grep-pattern.js'
 import { compileGlob } from '../glob.js'
-import { countMatches, grepRun, grepSummary, noMatch } from './grep-output.js'
+import { anyMatch, countMatches, grepRun, grepSummary, isFailure, matchersFor, noMatch } from './grep-output.js'
 import { grepPatterns } from './grep-pattern-files.js'
 
 const FLAGS = '[-i] [-a|-I] [-s] [-v] [-n] [-r|-R] [-w] [-x] [-o] [-E|-F|-G|-P] [-l] [-L] [-c] [-q] [-m N] [-h] [-H] [-A N] [-B N] [-C N] [--include=GLOB] [--exclude=GLOB] [--exclude-dir=GLOB]'
@@ -47,14 +47,14 @@ export function grep(stdin, tokens, ctx) {
   if (re.error) return re.error
   const counts = parseCounts(values)
   if (counts.error) return counts.error
-  // -L still lists readable files at -m0; other modes never open input.
-  if (counts.max === 0 && (!flags.has('L') || flags.has('q'))) return noMatch()
+  // -L still lists readable files at -m0; other modes never open input. Nor
+  // do they for a search that can select no line, which GNU does not run.
+  if ((counts.max === 0 || selectsNothing(patterns, flags)) && (!flags.has('L') || flags.has('q'))) return noMatch()
   if (counts.max !== 0 && ctx.stdinFile && (flags.has('q') || flags.has('l') || flags.has('L') || values.has('m')) && (rest.length === 0 || rest.includes('-'))) return unsupported('feature', 'grep', 'partial stdin reads', 'grep: early termination on shared file input is not supported', 2)
   const recursive = flags.has('r') || flags.has('R')
   const filters = compileFilters(parsed, ctx)
   const binaryMode = parsed.order.findLast((o) => ['a', 'I', 'text'].includes(o.name))?.name
-  filters.ignoreBinary = binaryMode === 'I' && counts.max !== 0
-  filters.forceText = binaryMode === 'a' || binaryMode === 'text'
+  filters.binaryFiles = binaryMode === 'a' || binaryMode === 'text' ? 'text' : binaryMode === 'I' ? 'without-match' : 'binary'
   filters.silent = flags.has('s') || flags.has('no-messages')
   filters.follow = flags.has('R')
   try { return filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) }
@@ -65,26 +65,32 @@ function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
   if (flags.has('q')) return grepQuiet(stdin, rest, ctx, recursive, filters, re.res, flags.has('v'))
   const r = grepInputs(recursive, stdin, rest, ctx, filters)
   if (counts.max === 0) consumeStdin(ctx, stdin)
+  const invert = flags.has('v')
+  const mode = ['l', 'L', 'c'].find((flag) => flags.has(flag))
   // Filename filters apply to named and recursively discovered files, but not stdin.
-  let inputs = r.inputs
-  if (filters.name.length > 0) inputs = inputs.filter((inp) => includedInput(inp, filters))
-  if (counts.max !== 0) inputs = inputs.map((inp) => textInput(inp, filters, re.res, flags.has('v')))
+  let items = r.items
+  if (filters.name.length > 0) items = items.filter((item) => isFailure(item) || includedInput(item, filters))
   // A file this cannot search is that file's trouble and not the search's.
   // GNU keeps what the other files matched and says which one it could not
   // read, so one such file in a tree does not take the rest of the answers
   // with it; only a search with nothing left to read is the gap itself.
-  const gap = counts.max === 0 ? null : inputGap(inputs, re.res, flags.has('v'), filters.forceText, ctx.locale)
-  if (gap) {
-    inputs = inputs.filter((inp) => !inputGap([inp], re.res, flags.has('v'), filters.forceText, ctx.locale))
-    if (inputs.length === 0) return gap
+  let gap = null
+  if (counts.max !== 0) {
+    items = items.flatMap((item) => {
+      if (isFailure(item)) return [item]
+      const inp = textInput(item, filters, re.res, invert, ctx)
+      const found = inputGap(inp, re.res, ctx.locale, !mode && flags.has('o'))
+        ?? (mode ? null : lateBinary(inp, re.res, invert, counts.after) ?? contextAcrossReads(inp, counts, flags, filters, ctx))
+      gap ??= found
+      return found ? [] : [inp]
+    })
+    if (gap && items.every(isFailure)) return gap
   }
   const showName = pickShowName(flags, rest.length)
-  const invert = flags.has('v')
-  const opts = { showName, invert, showLine: flags.has('n'), only: flags.has('o'), ...counts }
-  const mode = ['l', 'L', 'c'].find((flag) => flags.has(flag))
+  const opts = { showName, invert, showLine: flags.has('n'), only: flags.has('o'), binaryFiles: filters.binaryFiles, ...counts }
   let result
   try {
-    result = mode ? grepSummary(inputs, re.res, { ...opts, mode }) : grepRun(inputs, re.res, opts)
+    result = mode ? grepSummary(items, re.res, { ...opts, mode }) : grepRun(items, re.res, opts)
   } catch (e) {
     if (e instanceof AwkError && e.gap) return unsupported('feature', 'grep', e.gap, `grep: ${e.message}`, 2)
     return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2)
@@ -92,11 +98,10 @@ function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts) {
   // Read errors preserve successful output but override the match status with exit 2.
   if (gap) {
     const note = unsupportedNote(gap)
-    const left = { stdout: result.stdout, stderr: r.stderr + result.stderr + gap.stderr, exitCode: 2 }
+    const left = { ...result, stderr: result.stderr + gap.stderr, exitCode: 2, events: [...result.events, { fd: 2, text: gap.stderr }] }
     return markUnsupported(left, note.kind, note.command, note.detail, note.message)
   }
-  if (r.failed) return { stdout: result.stdout, stderr: r.stderr + result.stderr, exitCode: 2 }
-  return result
+  return r.failed ? { ...result, exitCode: 2 } : result
 }
 
 // Quiet searches stop at the first selected line. Earlier read errors
@@ -106,76 +111,98 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
   let failed = false
   for (const paths of rest.length ? rest.map((p) => [p]) : [[]]) {
     const r = grepInputs(recursive, stdin, paths, ctx, filters)
-    stderr += r.stderr
     failed ||= r.failed
     if (paths.includes('-') || (paths.includes('/dev/stdin') && !ctx.stdinFile)) stdin = ''
-    for (const input of r.inputs) {
-      if (!includedInput(input, filters)) continue
-      const inp = textInput(input, filters, res, invert)
-      const gap = inputGap([inp], res, invert, filters.forceText, ctx.locale)
+    for (const item of r.items) {
+      if (isFailure(item)) { stderr += item.failure; continue }
+      if (!includedInput(item, filters)) continue
+      const inp = textInput(item, filters, res, invert, ctx)
+      const gap = inputGap(inp, res, ctx.locale)
       if (gap) { gap.stderr = stderr + gap.stderr; return gap }
-      if (countMatches(inp.content, res, invert, 1) > 0) return { stdout: '', stderr, exitCode: 0 }
+      if (countMatches(inp, res, invert, 1) > 0) return { stdout: '', stderr, exitCode: 0 }
     }
   }
   return { stdout: '', stderr, exitCode: failed ? 2 : 1 }
 }
 
-// Retain empty operands for -L and -c. Default binary mode treats NUL as
-// a record separator, so an input of unselected empty records is a non-match.
-function textInput(input, filters, res, invert) {
-  // Bytes that spell no text are binary whatever they hold: GNU calls a file
-  // its locale cannot read binary, and what this terminal cannot do is search
-  // those bytes at all — so `-I` passes over such a file, as it passes over
-  // any binary one, and every other reading says so.
+// What a search reads a file as. Text is read as it is, and bytes that spell
+// none as the characters they do spell with a marker for each byte that is
+// none (decodeUtf8Marked) — GNU searches such a file all the same, and holds
+// back each line it would print that has such a byte in it (grepRun). A NUL
+// within GNU's first read makes the file binary from its first line: NULs end
+// lines there, and the first selection only says that the file matches. `-I`
+// passes over that file instead, and `-a` reads both as text.
+function textInput(input, filters, res, invert, ctx) {
+  const window = firstRead(input, ctx)
+  const skip = filters.binaryFiles === 'without-match'
+  const text = filters.binaryFiles === 'text'
   if (input.content === undefined) {
     // Unless nothing in it could have been selected anyway: a literal the
     // bytes do not hold selects no line of them, and `-v` selects the lines
     // a pattern does not, which is every line there is.
     if (!invert && cannotHoldMatch(input.bytes, res)) return { ...input, content: '' }
-    // What is left of such a file is the gap `inputGap` reports for every
-    // other binary one, in the same words and with grep's own status.
-    if (!filters.ignoreBinary) return input
-    if (!stopsBeingTextWithin(input.bytes, BINARY_BUFFER)) {
-      throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
-    }
-    return skipBinary(input, filters)
+    const at = text ? -1 : input.bytes.indexOf(0)
+    if (at >= 0 && skip) return skipBinary(input, filters, at >= window)
+    const marked = { ...input, content: decodeUtf8Marked(input.bytes), marked: true }
+    return at < 0 ? marked : binaryInput(marked, input.bytes, at, window)
   }
-  if (!input.content.includes('\0') || filters.forceText) return input
-  if (!filters.ignoreBinary) {
-    // oxlint-disable-next-line no-control-regex -- GNU binary mode uses NUL as a record delimiter.
-    return /^[\0\n]+$/u.test(input.content) && res.some((re) => re.test('')) === invert
-      ? { ...input, content: '' } : input
-  }
-  // GNU's initial 96 KiB read detects NUL before matching that buffer.
-  // Later discovery may retain earlier output, counts, or a quiet success;
-  // buffer growth and read boundaries are not represented by this runtime.
-  if (encodeUtf8Loose(input.content.slice(0, input.content.indexOf('\0'))).length >= BINARY_BUFFER) throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
-  return skipBinary(input, filters)
+  const at = text ? -1 : input.content.indexOf('\0')
+  if (at < 0) return input
+  // A character is a byte at least, so the text up to the read's end in
+  // characters holds the whole read and says whether the NUL is past it.
+  const head = encodeUtf8Loose(input.content.slice(0, Math.min(at, window)))
+  return skip ? skipBinary(input, filters, head.length >= window) : binaryInput(input, head, head.length, window)
 }
 
-// GNU reads this much before it decides, so what that read holds is what
-// makes a file binary.
-const BINARY_BUFFER = 96 * 1024
+// A file GNU calls binary for a NUL at byte `at`: from the line that NUL is on
+// where GNU's first read held it, and from the top where it did not — with the
+// lines ended within that read printed as text, if nothing between them and
+// the NUL's line depends on how the rest is read (lateBinary).
+function binaryInput(input, bytes, at, window) {
+  if (at < window) return { ...input, binaryLine: 0 }
+  const lineStart = input.content.lastIndexOf('\n', input.content.indexOf('\0')) + 1
+  return { ...input, lineStart, readLines: countNewlines(bytes.subarray(0, window)), binaryLine: countNewlines(input.content.slice(0, lineStart)) }
+}
+
+const isStdin = (input) => input.name === null || input.name === '/dev/stdin'
+
+// GNU decides on what its first read holds: 96 KiB of a file, and of a pipe
+// what the pipe holds, which is 64 KiB.
+const firstRead = (input, ctx) => (isStdin(input) && !ctx.stdinFile ? 64 * 1024 : 96 * 1024)
+
+// A NUL past that first read is found once earlier lines have been printed:
+// those ended within the read are text, and the file is binary from the NUL's
+// line. A line selected between the two, or context reaching past the read,
+// depends on how much each later read takes, which is not modelled.
+function lateBinary(input, res, invert, after) {
+  if (input.readLines === undefined) return null
+  const lines = splitLines(input.content.slice(0, input.lineStart))
+  const tests = matchersFor(input, res)
+  const selects = (from, to) => lines.slice(from, to).some((line) => anyMatch(tests, line) !== invert)
+  if (!selects(input.readLines) && !(after > 0 && selects(Math.max(0, input.readLines - after), input.readLines))) return null
+  return unsupported('feature', 'grep', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported', 2)
+}
+
+// GNU searches a file a read at a time, and a line it holds back leaves the
+// last line it printed behind where a read ends. Where the next read begins
+// then decides the group separators and the context that follow, and how
+// much each read past the first takes is not modelled; within that first
+// read, or with no context asked for, nothing depends on it.
+function contextAcrossReads(input, counts, flags, filters, ctx) {
+  if (!input.marked || input.binaryLine !== undefined || !counts.hasContext || flags.has('o') || filters.binaryFiles === 'text') return null
+  if (input.bytes.length <= firstRead(input, ctx)) return null
+  return unsupported('feature', 'grep', 'binary context across reads', 'grep: context around lines held back past the first read is not supported', 2)
+}
 
 // `-I` passes over a binary file: the name is kept for the note that says so,
-// and the search is handed the nothing it reads of it.
-function skipBinary(input, filters) {
-  const path = input.name === null || input.name === '/dev/stdin' ? filters.stdinPath : resolve(filters.cwd, input.name)
+// and the search is handed the nothing it reads of it. Earlier output, counts
+// and a quiet success stay where the NUL is found late, which is refused.
+function skipBinary(input, filters, late) {
+  if (late) throw new UnsupportedError('feature', 'late binary detection', 'grep: binary detection after the initial input buffer is not supported')
+  const path = isStdin(input) ? filters.stdinPath : resolve(filters.cwd, input.name)
   if (path) filters.binary.add(path)
   else filters.binaryStdin = true
   return { ...input, content: '' }
-}
-
-// Whether the bytes stop being text inside that first read. A prefix of valid
-// text can fail to decode only by ending inside a character, which at most
-// three more bytes complete, so a prefix that decodes with any of them is one
-// this read never saw the end of.
-function stopsBeingTextWithin(bytes, limit) {
-  if (bytes.length <= limit) return true
-  for (let end = limit; end <= limit + 3 && end <= bytes.length; end++) {
-    if (decodeUtf8Maybe(bytes.subarray(0, end)) !== undefined) return false
-  }
-  return true
 }
 
 function filterNotes(filters, notes) {
@@ -200,6 +227,14 @@ function checkConflicts(flags) {
     return err(`grep: ${dialects.map((f) => `-${f}`).join(' / ')} are mutually exclusive`, 2)
   }
   return null
+}
+
+// No pattern at all matches no line, which GNU reads as `-v ''`; and an
+// empty pattern matches every line, so `-v` with nothing else selects none —
+// unless -x or -w ask more of a line than that it is there.
+function selectsNothing(patterns, flags) {
+  if (patterns.length === 0) return !flags.has('v')
+  return flags.has('v') && !flags.has('x') && !flags.has('w') && patterns.every((pattern) => pattern === '')
 }
 
 function parseCounts(values) {
@@ -227,25 +262,29 @@ function pickShowName(flags, nFiles) {
   return nFiles > 1 ? true : undefined
 }
 
+// What a search reads, in the order it reads it: each file, and the words for
+// one it could not open where that one came. -s drops the words.
 function grepInputs(recursive, stdin, rest, ctx, filters) {
+  const say = (failure) => (filters.silent ? [] : [{ failure }])
   if (!recursive) {
     const r = readInputs('grep', rest, stdin, ctx, { read: 'maybe-text' })
-    return { ...r, stderr: filters.silent ? '' : r.stderr, inputs: r.inputs.map((input) => input.name === '-' ? { ...input, name: null } : input) }
+    const items = r.entries.flatMap((entry) => (entry.kind === 'file' ? [entry.name === '-' ? { ...entry, name: null } : entry] : say(entry.failure)))
+    return { items, failed: r.failed }
   }
-  const inputs = []
-  let stderr = ''
+  const items = []
   let failed = false
+  const fail = (failure) => { items.push(...say(failure)); failed = true }
   for (const p of rest.length ? rest : ['.']) {
     if (p === '-' || p === '/dev/stdin' || p === '/dev/null') {
       const r = readFilesFor('grep', [p], ctx, stdin)
-      inputs.push(...r.inputs.map((inp) => ({ ...inp, name: p === '-' ? null : p })))
+      items.push(...r.inputs.map((inp) => ({ ...inp, name: p === '-' ? null : p })))
       if (p === '-' || p === '/dev/stdin') stdin = ''
       continue
     }
     const { path: abs, error } = lookupWithNote(ctx, 'grep', p)
     // Filename filters apply after collecting both explicit and discovered files.
-    if (ctx.fs.isFile(abs)) { inputs.push({ name: p, ...searchable(ctx, abs) }); continue }
-    if (error) { stderr += `grep: ${p}: ${error}\n`; failed = true; continue }
+    if (ctx.fs.isFile(abs)) { items.push({ name: p, ...searchable(ctx, abs) }); continue }
+    if (error) { fail(`grep: ${p}: ${error}\n`); continue }
     if (excludedStartDir(p, filters.dir)) { filters.excluded.add(abs); continue }
     const descend = (path) => {
       if (path === abs || filters.dir.length === 0 || !someMatch(filters.dir, basename(path))) return true
@@ -257,17 +296,17 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
       if (entry.kind === 'link') {
         if (!filters.follow) continue
         const found = followedLink(entry.path, displayName(rest.length ? p : '', abs, entry.path), ctx, filters)
-        if (found?.input) inputs.push(found.input)
-        if (found?.error) { stderr += found.error; failed = true }
+        if (found?.input) items.push(found.input)
+        if (found?.error) fail(found.error)
         continue
       }
       if (entry.kind !== 'file') continue
       const filePath = entry.path
       // Preserve operand spelling; the implicit '.' root has no display prefix.
-      inputs.push({ name: displayName(rest.length ? p : '', abs, filePath), ...searchable(ctx, filePath), recursive: true })
+      items.push({ name: displayName(rest.length ? p : '', abs, filePath), ...searchable(ctx, filePath), recursive: true })
     }
   }
-  return { inputs, stderr: filters.silent ? '' : stderr, failed }
+  return { items, failed }
 }
 
 // What `-R` makes of a link a walk reached: the file it names, read under the

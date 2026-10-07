@@ -83,18 +83,15 @@ describe('grep binary inputs containing only empty records', () => {
     await check('grep -Iv . zero', '', 1, '', FILES, notes)
   })
 
-  for (const command of [
-    'grep . binary',
-    "grep '' zero",
-    "grep '^$' zero",
-    'grep -v . zero',
-    "grep -e . -e '^$' zero",
+  // A record that can be selected makes the file one GNU says matches, on
+  // stderr and with nothing of it printed.
+  for (const [command, name] of [
+    ['grep . binary', 'binary'],
+    ["grep '' zero", 'zero'],
+    ["grep '^$' zero", 'zero'],
+    ['grep -v . zero', 'zero'],
+    ["grep -e . -e '^$' zero", 'zero'],
   ]) {
-    it(`retains binary diagnostics when a record can be selected: ${command}`, async () => {
-      const result = await createTerminal(FILES).run(command)
-      assert.equal(result.stdout, '')
-      assert.equal(result.exitCode, 2)
-      assert.deepEqual(result.unsupported.map(({ command: name, detail }) => [name, detail]), [['grep', 'binary input']])
-    })
+    it(`says a binary file matches when a record can be selected: ${command}`, () => check(command, '', 0, `grep: ${name}: binary file matches\n`))
   }
 })

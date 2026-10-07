@@ -1,8 +1,15 @@
 // What a plain literal is in each dialect, and whether the bytes of a file
 // this terminal cannot read as text can hold it: GNU and ripgrep print
-// nothing for such a file where they cannot, so neither does this.
-import { LOCALE, classTables } from '../locale.js'
-import { encodeUtf8 } from '../util.js'
+// nothing for such a file where they cannot, so neither does this. And what
+// GNU's matchers make of a byte in such a file that spells no character,
+// which a search reads as a marker of its own (decodeUtf8Marked in
+// ../bytes.js), spelt for the JS matcher grepSource builds.
+import { LOCALE, classTables, wordEdges } from '../locale.js'
+import { compileNfa, search } from '../awk/re.js'
+import { MARKER_RANGE, encodeUtf8, isMarker } from '../util.js'
+import { validateBracket } from '../charclass.js'
+
+export { wholeCharacters } from '../unicode.js'
 
 // The bytes a plain literal can be, character by character: what each one is
 // as written, or the bytes of each character it stands for where `-i` folds
@@ -37,8 +44,15 @@ export function literalsMissing(bytes, patterns, literal, locale = LOCALE) {
     !holdsMask(bytes, literalMask({ pattern, tables }, false)))
 }
 
+// Only where one of the first character's spellings begins can the literal,
+// so the search jumps from one such byte to the next.
 function holdsMask(haystack, mask) {
-  for (let at = 0; at + mask.length <= haystack.length; at++) if (maskAt(haystack, at, mask, 0)) return true
+  if (mask.length === 0) return true
+  for (const first of new Set(mask[0].map((option) => option[0]))) {
+    for (let at = haystack.indexOf(first); at >= 0 && at + mask.length <= haystack.length; at = haystack.indexOf(first, at + 1)) {
+      if (maskAt(haystack, at, mask, 0)) return true
+    }
+  }
   return false
 }
 
@@ -73,4 +87,139 @@ export function literalText(pattern, flags) {
     text += c
   }
   return text
+}
+
+// A byte that spells no character is one no pattern names: GNU's matchers
+// never take it for a wildcard, a set or a literal, whatever the set holds.
+// It still sits between characters, and where glibc's regex asks whether a
+// word starts or ends there it reads the byte as the character of that value,
+// as the C locale reads every byte — so after 0xE9, read as `é`, no word
+// starts at a letter, and after 0xD7, read as `×`, one does. `-w` asks GNU's
+// own word test instead, which takes such a byte for no word character at
+// all; its lookarounds are plain sets, which hold no marker, and say the same.
+// Only the escapes that read a marker differently are spelt here; grepSource
+// takes the rest as it spells them over text.
+const MARKED = new Map()
+
+export function markedAssertions(tables) {
+  if (MARKED.has(tables)) return MARKED.get(tables)
+  const js = tables.assertions()
+  let latin = ''
+  for (let byte = 0x80; byte <= 0xff; byte++) if (tables.has('word', byte)) latin += `\\u${(0xdc00 + byte).toString(16)}`
+  const edges = wordEdges(tables.body('word') + latin)
+  const set = { '<': edges['<'], '>': edges['>'], b: edges.boundary, B: edges.inside, W: markedClass(js.nonWord), S: markedClass(js.nonSpace) }
+  MARKED.set(tables, set)
+  return set
+}
+
+// A set that leaves things out would take a marker, and one that names what
+// it holds may span the markers with a range, so either is kept off them.
+export const markedClass = (cls) => `(?:(?![${MARKER_RANGE}])${cls})`
+
+// The extent matcher `-o` uses, reading a marker as the JS matcher does: as
+// nothing a wildcard or a set takes, and as the Latin-1 character it stands
+// for where a word edge is asked about.
+export function markedExtent(extent) {
+  const nfa = compileNfa(extent.ast, extent.tables)
+  const states = nfa.states.map((s) => {
+    if (s.op === 'any') return { op: 'set', test: (code) => !isMarker(code), next: s.next }
+    return s.op === 'set' ? { ...s, test: (code) => !isMarker(code) && s.test(code) } : s
+  })
+  const marked = { ...nfa, states, isWord: (code) => extent.tables.has('word', isMarker(code) ? code - 0xdc00 : code) }
+  return { search: (line, from) => search(marked, line, from) }
+}
+
+// What glibc reads at a marker: a character after all where the bytes from
+// there spell one past U+10FFFF in its shortest form of four bytes up to six,
+// which every reading of glibc's takes for one, and a surrogate spelt in
+// three, which only its regex does. The width read, or 0 where it reads none.
+const LEAST = [0, 0, 0, 0, 0x110000, 0x200000, 0x4000000]
+const byteAt = (text, at) => (isMarker(text.codePointAt(at)) ? text.codePointAt(at) - 0xdc00 : -1)
+
+function glibcSequence(text, at) {
+  const lead = byteAt(text, at)
+  const width = lead === 0xed ? 3 : lead >= 0xf0 && lead <= 0xf7 ? 4 : lead >= 0xf8 && lead <= 0xfb ? 5 : lead === 0xfc || lead === 0xfd ? 6 : 0
+  let code = lead & (0x7f >> width)
+  for (let k = 1; k < width; k++) {
+    const next = byteAt(text, at + k)
+    if (next < 0x80 || next > 0xbf) return 0
+    code = (code << 6) | (next & 0x3f)
+  }
+  return width === 3 ? (code >= 0xd800 && code <= 0xdfff ? 3 : 0) : width && code >= LEAST[width] ? width : 0
+}
+
+// Whether GNU holds the line back: it has a byte glibc reads as no character,
+// which a surrogate spelt in UTF-8 is to every reading but its regex's.
+export function heldBack(line) {
+  for (let at = 0; at < line.length; at++) {
+    const code = line.codePointAt(at)
+    if (code > 0xffff) at++
+    if (!isMarker(code)) continue
+    const width = glibcSequence(line, at)
+    if (width === 0 || width === 3) return true
+    at += width - 1
+  }
+  return false
+}
+
+// Whether the text holds a run some reading of glibc's takes for a character:
+// a form past U+10FFFF, or a surrogate. Only a lead byte for three bytes up
+// to six with continuation bytes after it can begin one, which a regex finds
+// without walking the rest.
+const RUN = /[\uDCED\uDCF0-\uDCFD][\uDC80-\uDCBF]{2,5}/gu
+
+export function glibcRuns(text) {
+  const found = { long: false, surrogate: false }
+  for (const [run] of text.matchAll(RUN)) {
+    const width = glibcSequence(run, 0)
+    if (width === 3) found.surrogate = true
+    else if (width) found.long = true
+    if (found.long && found.surrogate) break
+  }
+  return found
+}
+
+// What a GNU pattern, as written, asks of a character, where that decides
+// which of GNU's matchers answers: a set spelt by what it leaves out, which
+// takes a character past U+10FFFF even in GNU's own matcher; a wildcard; and
+// whether glibc's regex answers the whole pattern, which in a multibyte locale
+// it does for a backreference, a word edge, `\w`, `\s` and their negations,
+// and a set holding a class or a range — and then reads both those runs as
+// characters, as it always does for what `-o` prints. The pattern has passed
+// validateRegex, so every set in it ends where validateBracket says.
+export function patternShape(pattern, backrefs) {
+  const shape = { negated: false, dot: false, regex: backrefs, wordEdge: false }
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]
+    if (c === '\\') {
+      const next = pattern[++i] ?? ''
+      if ('<>bB'.includes(next)) shape.wordEdge = true
+      if ('<>bBwsWS'.includes(next)) shape.regex = true
+      if ('WS'.includes(next)) shape.negated = true
+    } else if (c === '.') shape.dot = true
+    else if (c === '[') {
+      const end = validateBracket(pattern, i)
+      const body = pattern.slice(i + 1, end)
+      if (body.startsWith('^')) shape.negated = true
+      if (/\[:|.-./u.test(body.replace(/^\^?\]?/u, ''))) shape.regex = true
+      i = end
+    }
+  }
+  return shape
+}
+
+// Whether glibc and GNU's own matcher could answer this pattern differently
+// over text holding such runs; `-o` asks glibc's regex where a match ends.
+export function glibcDiffers(shape, reading, only) {
+  if (!(reading.long || reading.surrogate)) return false
+  if (shape.wordEdge || ((shape.dot || shape.negated) && (shape.regex || only))) return true
+  return reading.long && shape.negated
+}
+
+// A character past ASCII that is no word character, which a marker is not:
+// it stands for one byte, and GNU has no inside of it to stand in.
+const OUTSIDE = new Map()
+export function outsideWords(tables) {
+  if (!OUTSIDE.has(tables)) OUTSIDE.set(tables, new RegExp(`[^\\x00-\\x7f${MARKER_RANGE}${tables.body('word')}]`, 'u'))
+  return OUTSIDE.get(tables)
 }

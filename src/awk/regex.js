@@ -8,7 +8,7 @@ import { AwkError } from './common.js'
 import { EXTENDED_C, LOCALE, classTables } from '../locale.js'
 import { parseEre, toJsSource } from './re-parse.js'
 import { compileNfa, search } from './re.js'
-import { stepAt } from '../unicode.js'
+import { stepAt, wholeCharacters } from '../unicode.js'
 
 export { stepAt }
 
@@ -24,7 +24,7 @@ export class AwkRegex {
     this.source = toJsSource(ast, tables)
     this.flags = 'su'
     try {
-      this.js = new RegExp(this.source, this.flags)
+      this.js = new RegExp(wholeCharacters(this.source), this.flags)
     } catch (e) {
       throw new AwkError(`cannot compile regex /${src}/: ${e.message}`, null, 'regex engine limit')
     }

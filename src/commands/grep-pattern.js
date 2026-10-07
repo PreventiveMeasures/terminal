@@ -1,12 +1,12 @@
 import { MAX_INTERVAL, checkInterval, readPosixClass, validateBracket } from '../charclass.js'
 import { UnsupportedError, unsupported } from '../unsupported.js'
-import { err } from '../util.js'
+import { MARKER_RANGE, err } from '../util.js'
 import { AwkRegex } from '../awk/regex.js'
 import { parseEre } from '../awk/re-parse.js'
 import { breToEs, validateBackreferences } from '../bre.js'
 import { EXTENDED_C, LOCALE, classTables } from '../locale.js'
 import { foldFixed, foldPattern } from '../regex-fold.js'
-import { literalText } from './grep-literal.js'
+import { glibcDiffers, glibcRuns, literalText, markedAssertions, markedClass, outsideWords, patternShape, wholeCharacters } from './grep-literal.js'
 import { pcreSource } from './grep-pcre.js'
 
 export { cannotHoldMatch } from './grep-literal.js'
@@ -60,17 +60,15 @@ export function localeSensitive(source) {
 }
 
 // The canonical pattern retains GNU assertions. Render them separately
-// for the boolean JS matcher and the AWK extent matcher. Walk escapes
+// for the boolean JS matcher (`js`), the AWK extent matcher (`extent`) and
+// the JS matcher over a line holding markers (`marked`). Walk escapes
 // instead of replaceAll so a literal `\\b` remains a backslash and b.
 // The JS matcher gets the locale's word and space sets spelt out, since
 // its own `\\b` and `\\w` know ASCII only; the extent matcher reads the
 // escapes itself, from the same tables.
-export function grepSource(source, extent = false, tables = classTables(LOCALE)) {
-  const js = tables.assertions()
-  const assertions = extent ? { b: '\\y' } : {
-    '<': js['<'], '>': js['>'], b: js.boundary, B: js.inside,
-    w: js.word, W: js.nonWord, s: js.space, S: js.nonSpace, '`': '^', "'": '$',
-  }
+export function grepSource(source, mode = 'js', tables = classTables(LOCALE)) {
+  const extent = mode === 'extent', marked = mode === 'marked'
+  const assertions = extent ? { b: '\\y' } : marked ? { ...jsAssertions(tables), ...markedAssertions(tables) } : jsAssertions(tables)
   let out = ''
   let bracket = false
   for (let i = 0; i < source.length; i++) {
@@ -79,13 +77,40 @@ export function grepSource(source, extent = false, tables = classTables(LOCALE))
       const next = source[++i]
       out += !bracket && Object.hasOwn(assertions, next) ? assertions[next] : c + next
       if (!extent && !bracket && /[1-9]/u.test(next) && /\d/u.test(source[i + 1] ?? '')) out += '(?:)'
-    } else {
+    } else if (marked && c === '[') {
+      const end = classEnd(source, i)
+      out += markedClass(source.slice(i, end + 1))
+      i = end
+    } else if (marked && c === '.') out += `[^${MARKER_RANGE}]`
+    else {
       if (c === '[') bracket = true
       if (c === ']') bracket = false
       out += c
     }
   }
   return out
+}
+
+function jsAssertions(tables) {
+  const js = tables.assertions()
+  return {
+    '<': js['<'], '>': js['>'], b: js.boundary, B: js.inside,
+    w: js.word, W: js.nonWord, s: js.space, S: js.nonSpace, '`': '^', "'": '$',
+  }
+}
+
+// What a search tests lines with: a copy of the compiled pattern bearing none
+// of the properties set on it here, which would keep V8 off its fast path for
+// every line.
+export const plainRegex = (re) => re.plain ??= new RegExp(re.source, re.flags)
+
+// The matcher for a file holding markers, built the first time one is met.
+// `-F` and `-P` spell their own sources: a fixed string names no marker, and
+// PCRE's reading of bytes that are not UTF-8 is refused before this is asked.
+export function markedRegex(re) {
+  if (re.markedSource === undefined) return plainRegex(re)
+  re.marked ??= new RegExp(wholeCharacters(grepSource(re.markedSource, 'marked', re.tables)), re.flags)
+  return re.marked
 }
 
 const ERE_INTERVAL = /^\{(?=\d|,)(\d*)(?:,(\d*))?\}/u
@@ -305,7 +330,12 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       // already reads those the way GNU does, so it takes `source` as is.
       // `-P` selects the ECMAScript reading, where `a+?` really is lazy,
       // so the rewrite is ERE's alone.
-      const re = new RegExp(gnu ? grepSource(posixQuantifiers(source), false, tables) : source, reFlags)
+      const quantified = gnu ? posixQuantifiers(source) : source
+      const re = new RegExp(wholeCharacters(gnu ? grepSource(quantified, 'js', tables) : source), reFlags)
+      // What a line holding bytes that spell no character is matched with,
+      // and what the pattern asks of a character, which says whether glibc
+      // reads some such bytes as GNU's own matcher does not (inputGap).
+      if (gnu) Object.assign(re, { markedSource: quantified, tables, shape: patternShape(pattern, backrefs) })
       re.pcre = flags.has('P')
       // What still reads text by rules other than the locale's tables:
       // PCRE's own, and the JS case flag a backreference pattern keeps.
@@ -313,13 +343,15 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       re.folded = folded
       re.extendedC = folded && EXTENDED_C.test(pattern)
       re.unicodePattern = /[\u0080-\u{10FFFF}]/u.test(pattern)
+      re.wellFormed = pattern.isWellFormed()
+      // Whether -w meets a pattern that can match nothing at all (inputGap).
+      re.emptyWord = word && !re.pcre && new RegExp(gnu ? grepSource(posixQuantifiers(canonical), 'js', tables) : canonical, reFlags).test('')
       // Whether the pattern reads a character at a time rather than a byte: a
       // wildcard and a set spelt by what it excludes both reach past ASCII,
       // and a locale's own classes name ASCII alone outside C.UTF-8 — so a set
       // spelt by what it holds reads the same either way, and a literal does.
       re.anyCharacter = readsAnyCharacter(canonical)
       const literal = literalText(pattern, flags)
-      re.binaryLiteral = !whole && !word && literal !== null
       // Whether the bytes alone can say that a file this terminal cannot read
       // as text holds no match — which only a plain literal answers, and only
       // one read as written or folded by the locale's own tables, never by
@@ -330,7 +362,7 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       if (literal?.isWellFormed() && (folded || !flags.has('i'))) re.literal = { pattern: literal, tables }
       if (flags.has('o') && gnu && !whole) {
         if (word || /\\[1-9]|\(\?/u.test(source)) return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: only-matching with backreferences, lookarounds or word constraints is not supported', 2) }
-        try { re.extent = new AwkRegex(grepSource(source, true, tables), false, null, tables) } catch {
+        try { re.extent = new AwkRegex(grepSource(source, 'extent', tables), false, null, tables) } catch {
           return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: POSIX match extent for this pattern is not supported', 2) }
         }
       }
@@ -356,38 +388,56 @@ function gnuSyntaxGap(source, flags) {
   if (!flags.has('E') && /(?<!\\)\{(?!\d*(?:,\d*)?\})/u.test(source)) return false
   // References were validated before compilation. Their ERE-parser escape
   // reading is only a syntax proof here; it is never used to match input.
-  try { parseEre(grepSource(source, true)); return true } catch (e) { return Boolean(e.gap) }
+  try { parseEre(grepSource(source, 'extent')); return true } catch (e) { return Boolean(e.gap) }
 }
 
-export function inputGap(inputs, res, invert, forceText = false, locale = LOCALE) {
-  if (inputs.length === 0) return null
-  // Bytes that spell no text are binary to GNU whatever else they hold, and
-  // searching them is what a terminal working in text cannot do: `-a` asks
-  // for those bytes as the output itself, which it cannot print either.
-  if (inputs.some((inp) => inp.content === undefined)) {
-    return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
+// What a search cannot answer of one file as GNU would, refused before any of
+// it is read; `only` is -o, which asks where each match ends.
+export function inputGap(inp, res, locale = LOCALE, only = false) {
+  const refuse = (detail, message) => unsupported('feature', 'grep', detail, `grep: ${message}`, 2)
+  if (inp.marked) {
+    // PCRE reads bytes that are not UTF-8 by rules of its own, which are not
+    // the ones GNU's matchers go by (markedRegex), and are not modelled.
+    if (res.some((re) => re.pcre)) return refuse('binary input', 'PCRE matching over bytes that spell no text is not supported')
+    // A pattern holding an unpaired surrogate has no UTF-8 spelling, so no
+    // bytes could be what it names; over bytes it would meet the markers
+    // instead, which are such surrogates standing for bytes (decodeUtf8Marked).
+    if (res.some((re) => !re.wellFormed)) return refuse('unpaired surrogate', 'a pattern holding an unpaired UTF-16 surrogate cannot be matched against bytes')
   }
-  // A literal absent from a binary file is still safely a non-match.
-  // Regex anchors and classes can see NUL boundaries differently in GNU.
-  if (!forceText && inputs.some((inp) => inp.content.includes('\0') && (invert || res.some((re) => !re.binaryLiteral || re.test(inp.content))))) return unsupported('feature', 'grep', 'binary input', 'grep: binary input detection and output are not supported', 2)
+  // GNU's -w takes an empty match from inside a character it reads byte by
+  // byte, where that character is no word character; this matcher reads every
+  // character whole and cannot stand inside one, so a pattern that can match
+  // nothing is refused over text holding such a character past ASCII.
+  if (res.some((re) => re.emptyWord) && outsideWords(classTables(locale)).test(inp.content)) {
+    return refuse('empty word match', '-w with a pattern that can match nothing, over non-ASCII text that is not word characters, is not supported')
+  }
+  // A surrogate spelt in UTF-8, or a character past U+10FFFF, is one glibc
+  // reads as a character where GNU's own matcher reads its bytes as none, and
+  // which of the two answers is GNU's choice per pattern (glibcDiffers). Only
+  // a wildcard, a negated set or a word edge could tell, so only those look.
+  const asks = inp.marked ? res.filter((re) => re.shape && (re.shape.wordEdge || re.shape.dot || re.shape.negated)) : []
+  const reading = asks.length ? glibcRuns(inp.content) : null
+  if (asks.some((re) => glibcDiffers(re.shape, reading, only))) {
+    return refuse('binary input', 'matching this pattern beside bytes glibc reads as a character is not supported')
+  }
   // The matcher reads a character at a time, which is C.UTF-8's reading and
   // no other locale's: anywhere else, a pattern the locale could change is
   // refused over non-ASCII text before any of it is read. A wildcard is one
   // such pattern — where a byte is a character it matches one byte of what is
   // spelt in more than one — so it is refused with the rest rather than
   // answered a character at a time.
-  const nonAscii = /[\u0080-\u{10FFFF}]/u
-  if (locale !== LOCALE && res.some((re) => re.localeSensitive || re.folded || re.anyCharacter) && (res.some((re) => re.unicodePattern) || inputs.some((inp) => nonAscii.test(inp.content)))) {
-    return unsupported('feature', 'grep', 'locale', `grep: matching non-ASCII text in the ${locale} locale is not supported`, 2)
+  const nonAscii = () => res.some((re) => re.unicodePattern) || /[\u0080-\u{10FFFF}]/u.test(inp.content)
+  if (locale !== LOCALE && res.some((re) => re.localeSensitive || re.folded || re.anyCharacter) && nonAscii()) {
+    return refuse('locale', `matching non-ASCII text in the ${locale} locale is not supported`)
   }
   // GNU's two matchers fold the Cyrillic Extended-C letters differently
   // (see EXTENDED_C in ../locale.js), so a case-insensitive match over them
   // is refused rather than guessed.
-  if (res.some((re) => re.extendedC) || (res.some((re) => re.folded) && inputs.some((inp) => EXTENDED_C.test(inp.content)))) {
-    return unsupported('feature', 'grep', 'locale-sensitive regex', 'grep: case-insensitive matching over Cyrillic Extended-C letters is not supported', 2)
+  if (res.some((re) => re.extendedC) || (res.some((re) => re.folded) && EXTENDED_C.test(inp.content))) {
+    return refuse('locale-sensitive regex', 'case-insensitive matching over Cyrillic Extended-C letters is not supported')
   }
   const sensitive = res.filter((re) => re.localeSensitive)
-  if (sensitive.length === 0 || !(sensitive.some((re) => re.unicodePattern) || inputs.some((inp) => nonAscii.test(inp.content)))) return null
+  if (sensitive.length === 0 || !nonAscii()) return null
   const why = sensitive.some((re) => re.pcre) ? 'PCRE matching' : 'case-insensitive matching with backreferences'
-  return unsupported('feature', 'grep', 'non-ASCII regex semantics', `grep: ${why} on non-ASCII input is not supported`, 2)
+  return refuse('non-ASCII regex semantics', `${why} on non-ASCII input is not supported`)
 }

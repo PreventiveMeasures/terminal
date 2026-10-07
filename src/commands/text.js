@@ -5,7 +5,7 @@ import { echo } from './echo.js'
 import { printf } from './printf.js'
 import { parseArgs } from '../args.js'
 import { formatWc } from './wc-format.js'
-import { byteLocale, classTables, consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8CodePoints } from '../util.js'
+import { byteLocale, classTables, consumeStdin, countNewlines, decodeUtf8, encodeUtf8Loose, err, inputLabel, joinLines, ok, okWith, parseNonNegativeInt, parseSignedCount, readContent, readInputs, splitLines, utf8CodePoints } from '../util.js'
 import { awk } from '../awk/index.js'
 import { grep } from './grep.js'
 import { sort } from './sort.js'
@@ -206,15 +206,6 @@ function wcCounts(input, ctx, which, needsWidth) {
 }
 
 const byteLength = (input) => typeof input === 'string' ? encodeUtf8Loose(input).length : input.length
-
-// A newline is one byte and no part of another, and one character and no part
-// of another, so counting them is counting lines whatever the file holds.
-function countNewlines(input) {
-  let lines = 0
-  const newline = typeof input === 'string' ? '\n' : 0x0a
-  for (let at = input.indexOf(newline); at >= 0; at = input.indexOf(newline, at + 1)) lines++
-  return lines
-}
 
 // A character of the text, which a JS string spells in one UTF-16 unit or two.
 // Bytes are counted for the characters they do spell: a byte that spells none
