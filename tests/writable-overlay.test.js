@@ -142,7 +142,7 @@ describe('existing filesystem consumers see current overlay contents', () => {
     await check(t, 'ls -A /tmp', '.hidden\nalpha.txt\nzeta.js\n')
     await check(t, 'find /tmp -type f', '/tmp/.hidden\n/tmp/alpha.txt\n/tmp/zeta.js\n')
     // `.hidden` is not a `.txt` name, so the dotfile gate changed nothing here.
-    check(t, "printf '%s\\n' /tmp/*.txt", '/tmp/alpha.txt\n')
+    await check(t, "printf '%s\\n' /tmp/*.txt", '/tmp/alpha.txt\n')
     assert.deepEqual(await t.run("printf '%s\\n' /tmp/*"), {
       stdout: '/tmp/alpha.txt\n/tmp/zeta.js\n', stderr: '', exitCode: 0, cwd: '/repo', unsupported: [],
       notes: ['glob: omitted 1 hidden entry while expanding "/tmp/*": "/tmp/.hidden".'],

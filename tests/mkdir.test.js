@@ -106,7 +106,7 @@ describe('mkdir refuses what it cannot make', () => {
     const t = terminal()
     // A silent success here would let `mkdir -p "$dir" && …` run on a name it
     // never got.
-    check(t, "mkdir -p ''", '', "mkdir: cannot create directory ‘’: No such file or directory\n", 1)
+    await check(t, "mkdir -p ''", '', "mkdir: cannot create directory ‘’: No such file or directory\n", 1)
     await check(t, "mkdir ''", '', "mkdir: cannot create directory ‘’: No such file or directory\n", 1)
     const gated = await t.run("mkdir -p '' && echo continued")
     assert.equal(gated.stdout, '')

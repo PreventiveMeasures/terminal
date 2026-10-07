@@ -71,7 +71,7 @@ describe('touch reports the times it cannot set', () => {
     await check(t, 'printf kept >/tmp/held')
     await gap(t, 'touch /tmp/held', TIMES('/tmp/held'))
     // The gap is a refusal, not a rewrite: what the file holds is untouched.
-    check(t, 'cat /tmp/held', 'kept')
+    await check(t, 'cat /tmp/held', 'kept')
   })
 
   it('names a directory that is already there', async () => {

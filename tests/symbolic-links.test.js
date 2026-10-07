@@ -183,7 +183,7 @@ describe('find names a link, and passes over what it points at', () => {
     await check(t, 'find pkg', 'pkg\n')
     await check(t, 'find pkg -type l', 'pkg\n')
     // A trailing slash names the directory, which is the target's to be.
-    check(t, 'find pkg/', 'pkg/\npkg/bin\npkg/bin/cli.js\npkg/index.js\n')
+    await check(t, 'find pkg/', 'pkg/\npkg/bin\npkg/bin/cli.js\npkg/index.js\n')
   })
 
   it('counts a link neither empty nor a directory', async () => {
@@ -277,14 +277,14 @@ describe('the rest of the tree tools answer for a link without crossing it', () 
     })
     // A link is named beside what it points at and crossed no further, while
     // the counts follow where it leads: `up` is one of the directories.
-    check(t, 'tree a', 'a\n├── dir\n│   └── deep\n├── file\n├── gone -> nowhere\n├── link -> file\n└── up -> dir\n\n3 directories, 4 files\n')
+    await check(t, 'tree a', 'a\n├── dir\n│   └── deep\n├── file\n├── gone -> nowhere\n├── link -> file\n└── up -> dir\n\n3 directories, 4 files\n')
     // `-F` marks what a name leads to, so the mark lands on the target.
-    check(t, 'tree -F a', 'a/\n├── dir/\n│   └── deep\n├── file\n├── gone -> nowhere\n├── link -> file\n└── up -> dir/\n\n3 directories, 4 files\n')
+    await check(t, 'tree -F a', 'a/\n├── dir/\n│   └── deep\n├── file\n├── gone -> nowhere\n├── link -> file\n└── up -> dir/\n\n3 directories, 4 files\n')
     // `-d` lists the directories, which a link to one is, and marks none.
-    check(t, 'tree -d a', 'a\n├── dir\n└── up -> dir\n\n3 directories\n')
+    await check(t, 'tree -d a', 'a\n├── dir\n└── up -> dir\n\n3 directories\n')
     // The operand is opened for where it leads and printed for what it is, so
     // the `@` is its own and a link leading nowhere is still a name found.
-    check(t, 'tree -F a/up', 'a/up@\n└── deep\n\n1 directory, 1 file\n')
+    await check(t, 'tree -F a/up', 'a/up@\n└── deep\n\n1 directory, 1 file\n')
     await check(t, 'tree -F a/gone', 'a/gone@  [error opening dir]\n\n0 directories, 1 file\n')
   })
 
@@ -297,13 +297,13 @@ describe('the rest of the tree tools answer for a link without crossing it', () 
     // `-D`, spelled `-H` as well, asks about what an operand points at, which
     // is a name away and needs no walk; `-L` asks it of every link a walk
     // reaches. The three name one setting, so the last of them answers.
-    check(t, 'du -Db node_modules/.bin/cli', '4\tnode_modules/.bin/cli\n')
+    await check(t, 'du -Db node_modules/.bin/cli', '4\tnode_modules/.bin/cli\n')
     await check(t, 'du -Hb node_modules/.bin/cli', '4\tnode_modules/.bin/cli\n')
     await check(t, 'du -PHb node_modules/.bin/cli', '4\tnode_modules/.bin/cli\n')
     await check(t, 'du -HPb node_modules/.bin/cli', '17\tnode_modules/.bin/cli\n')
     // An operand followed is the only link `-D` and `-H` follow: the ones a
     // walk reaches below it are measured as the links they are.
-    check(t, 'du -Hb node_modules/.bin', '31\tnode_modules/.bin\n')
+    await check(t, 'du -Hb node_modules/.bin', '31\tnode_modules/.bin\n')
     await gap(t, 'du -Lb node_modules/.bin', 'dereference', 'du: following symbolic links is not supported: node_modules/.bin/cli\n')
     await check(t, 'du -LPb node_modules/.bin', '31\tnode_modules/.bin\n')
   })
@@ -325,7 +325,7 @@ describe('the rest of the tree tools answer for a link without crossing it', () 
     await check(t, 'test -d pkg && echo dir', 'dir\n')
     await check(t, 'test -L src; echo $?', '1\n')
     // A link leading nowhere is a link, and is nothing else.
-    check(t, 'test -e node_modules/.bin/stale; echo $?', '1\n')
+    await check(t, 'test -e node_modules/.bin/stale; echo $?', '1\n')
     await check(t, 'test -f node_modules/.bin/stale; echo $?', '1\n')
   })
 })
@@ -337,7 +337,7 @@ describe('the shell expands and completes a link by its own name', () => {
     await check(t, 'echo p*', 'pkg\n')
     // A segment with a path after it is crossed where the link leads to a
     // directory, as the shell resolves each component before matching the next.
-    check(t, 'echo p*/index.js', 'pkg/index.js\n')
+    await check(t, 'echo p*/index.js', 'pkg/index.js\n')
     await check(t, 'echo */bin/cli.js', 'pkg/bin/cli.js\n')
     await check(t, 'echo */*/bin/cli.js', 'node_modules/pkg/bin/cli.js\n')
   })
@@ -365,12 +365,12 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     // `-R` reads the file a link names, under the link's own name, and says so
     // of one that names nothing — which is an error, and the status GNU gives
     // a search that could not read something it was going to.
-    check(t, 'grep -Rn run node_modules', 'node_modules/.bin/cli:1:run\nnode_modules/pkg/bin/cli.js:1:run\n', {
+    await check(t, 'grep -Rn run node_modules', 'node_modules/.bin/cli:1:run\nnode_modules/pkg/bin/cli.js:1:run\n', {
       stderr: 'grep: node_modules/.bin/stale: No such file or directory\n', exitCode: 2,
     })
     // A rule keeping the name out is what no spelling ever opens, so no
     // diagnostic is earned by a link the rules have already passed over.
-    check(t, 'grep -Rn --exclude=stale run node_modules', 'node_modules/.bin/cli:1:run\nnode_modules/pkg/bin/cli.js:1:run\n', {
+    await check(t, 'grep -Rn --exclude=stale run node_modules', 'node_modules/.bin/cli:1:run\nnode_modules/pkg/bin/cli.js:1:run\n', {
       notes: ['grep: excluded 1 entry by --include/--exclude/--exclude-dir rules: "/node_modules/.bin/stale".'],
     })
   })
@@ -380,7 +380,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     await gap(t, 'grep -Rn run .', '-R', 'grep: following a symbolic link to a directory is not supported: ./pkg\n')
     // `--exclude-dir` names a link to a directory as it names a directory,
     // where `--exclude` names neither.
-    check(t, 'grep -Rn --exclude-dir=pkg --exclude=stale run .', './node_modules/.bin/cli:1:run\n', {
+    await check(t, 'grep -Rn --exclude-dir=pkg --exclude=stale run .', './node_modules/.bin/cli:1:run\n', {
       notes: ['grep: excluded 3 entries by --include/--exclude/--exclude-dir rules: "/node_modules/.bin/stale", "/node_modules/pkg", "/pkg".'],
     })
   })
@@ -397,7 +397,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     const t = createTerminal(SOURCES, { mount: '/repo', writable: '/tmp/' })
     await check(t, 'cp node_modules/.bin/cli /tmp/cli; cat /tmp/cli', 'run\n', { cwd: '/repo' })
     // A link leading nowhere is one GNU cannot read through either.
-    check(t, 'cp node_modules/.bin/stale /tmp/stale', '', {
+    await check(t, 'cp node_modules/.bin/stale /tmp/stale', '', {
       stderr: "cp: cannot stat 'node_modules/.bin/stale': No such file or directory\n", exitCode: 1, cwd: '/repo',
     })
   })
@@ -407,13 +407,13 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     // A copy the destination turns away never reaches the tree, so what it
     // holds is not what the refusal is about.
-    check(t, 'cp -rT a a', '', { stderr: "cp: 'a' and 'a' are the same file\n", exitCode: 1, cwd: '/repo' })
+    await check(t, 'cp -rT a a', '', { stderr: "cp: 'a' and 'a' are the same file\n", exitCode: 1, cwd: '/repo' })
     await check(t, 'cp -r a afile', '', { stderr: "cp: cannot overwrite non-directory 'afile' with directory 'a'\n", exitCode: 1, cwd: '/repo' })
     await check(t, 'cp -r a /tmp/nodir/deep', '', { stderr: "cp: cannot create directory '/tmp/nodir/deep': No such file or directory\n", exitCode: 1, cwd: '/repo' })
     // GNU makes the destination before the walk can find it reaching back
     // into the source, so a directory it cannot make answers ahead of that
     // loop — and where it can be made, the loop is what answers.
-    check(t, 'cp -r a a', '', { stderr: "cp: cannot create directory 'a/a': Read-only file system\n", exitCode: 1, cwd: '/repo' })
+    await check(t, 'cp -r a a', '', { stderr: "cp: cannot create directory 'a/a': Read-only file system\n", exitCode: 1, cwd: '/repo' })
     await check(t, 'mkdir /tmp/d; cp -r /tmp/d /tmp/d/sub', '', {
       stderr: "cp: cannot copy a directory, '/tmp/d', into itself, '/tmp/d/sub'\n", exitCode: 1, cwd: '/repo',
     })
@@ -426,7 +426,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     const seed = 'mkdir /tmp/src; printf a > /tmp/src/f; '
     // A destination reaching back into the source through a link is the loop
     // it is however it is spelled, and nothing of it is written.
-    check(await made(), seed + 'cp -r /tmp/src into', '', {
+    await check(await made(), seed + 'cp -r /tmp/src into', '', {
       stderr: "cp: cannot copy a directory, '/tmp/src', into itself, 'into/src'\n", exitCode: 1, ...at,
     })
     await check(await made(), seed + 'cp -r /tmp/src into/sub; find /tmp -type f', '/tmp/src/f\n', {
@@ -434,11 +434,11 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     })
     // Two names for one directory are the same file, which GNU answers before
     // it asks what the destination is.
-    check(await made(), seed + 'cp -rT /tmp/src into', '', {
+    await check(await made(), seed + 'cp -rT /tmp/src into', '', {
       stderr: "cp: '/tmp/src' and 'into' are the same file\n", exitCode: 1, ...at,
     })
     // A link leading somewhere else is a directory to copy into, as ever.
-    check(await made(), 'mkdir /tmp/src; cp -r a into; find /tmp -type f', '/tmp/src/a/file\n', at)
+    await check(await made(), 'mkdir /tmp/src; cp -r a into; find /tmp -type f', '/tmp/src/a/file\n', at)
   })
 
   it('cp refuses a link a recursive copy meets, before that copy writes anything', async () => {
@@ -452,7 +452,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     await check(t, 'ls /tmp', '', { cwd: '/repo' })
     await gap(t, 'cp -r a/link /tmp/copy', 'symbolic link', 'cp: copying a symbolic link is not supported: a/link (a recursive copy keeps the link, which cp does not make here)\n')
     // A tree with no link in it is copied as ever.
-    check(t, 'cp -r plain /tmp/plain; find /tmp -type f', '/tmp/plain/f\n', { cwd: '/repo' })
+    await check(t, 'cp -r plain /tmp/plain; find /tmp -type f', '/tmp/plain/f\n', { cwd: '/repo' })
     await check(t, 'cp -r a/sub /tmp/sub; find /tmp/sub -type f', '/tmp/sub/deep\n', { cwd: '/repo' })
   })
 
@@ -474,7 +474,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
       await gap(t, `diff -rN ${order}`, 'symbolic link to a directory', 'diff: comparing what a symbolic link to a directory holds is not supported: b/only\n')
     }
     // With no walk to cross it, GNU names it a directory the two share.
-    check(t, 'diff -N a b', 'Common subdirectories: a/only and b/only\n')
+    await check(t, 'diff -N a b', 'Common subdirectories: a/only and b/only\n')
   })
 
   it('diff reads a name a directory cannot answer for rather than typing it', async () => {
@@ -497,7 +497,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     await check(t, 'diff -rN a b', '', { stderr: unreadable, exitCode: 2 })
     // An operand answers for itself before the directory beside it is opened,
     // where `-N` makes an absent one the empty directory the walk compares.
-    check(t, 'diff a/gone b', '', { stderr: 'diff: a/gone: No such file or directory\n', exitCode: 2 })
+    await check(t, 'diff a/gone b', '', { stderr: 'diff: a/gone: No such file or directory\n', exitCode: 2 })
     await check(t, 'diff -N a/gone b', [
       'Common subdirectories: a/gone/gone and b/gone',
       'diff -N a/gone/keep b/keep', '0a1', '> same',
@@ -515,7 +515,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     const t = terminal(sources)
     // `-N` stands in for a name the directory does not have; a name it has and
     // cannot read is answered for, whatever is across from it.
-    check(t, 'diff -rN a b', 'diff -rN a/only b/only\n0a1\n> real\n', {
+    await check(t, 'diff -rN a b', 'diff -rN a/only b/only\n0a1\n> real\n', {
       stderr: [
         'diff: a/alone: No such file or directory',
         'diff: a/both: No such file or directory',
@@ -527,7 +527,7 @@ describe('a search, a copy and a comparison each meet a link on their own terms'
     })
     // Two operands have no listing behind them, so `-N` covers the one that
     // cannot be read — unless it is all either of them is.
-    check(t, 'diff -N a/pair b/pair', '0a1\n> realfile\n', { exitCode: 1 })
+    await check(t, 'diff -N a/pair b/pair', '0a1\n> realfile\n', { exitCode: 1 })
     await check(t, 'diff -N a/alone b/nothere', '', {
       stderr: 'diff: a/alone: No such file or directory\ndiff: b/nothere: No such file or directory\n', exitCode: 2,
     })
@@ -556,13 +556,13 @@ describe('what a link cannot change', () => {
     const at = { cwd: '/repo' }
     // Opening a link opens what it names, and a link to a name not there yet
     // is that name made — the file written either way is the overlay's.
-    check(await made(), 'printf seed > /tmp/out; echo x > out; cat /tmp/out', 'x\n', at)
+    await check(await made(), 'printf seed > /tmp/out; echo x > out; cat /tmp/out', 'x\n', at)
     await check(await made(), 'echo y > fresh; cat /tmp/new', 'y\n', at)
     await check(await made(), 'printf seed > /tmp/out; cp file out; cat /tmp/out', 'src\n', at)
     await check(await made(), 'touch fresh; wc -c /tmp/new', '0 /tmp/new\n', at)
     await check(await made(), 'mkdir /tmp/d; mkdir -p dirlink/sub; find /tmp -type d', '/tmp\n/tmp/d\n/tmp/d/sub\n', at)
     // A link leading into the sources leads nowhere a write may go.
-    gap(await made(), 'echo z > outside', '>', 'error: `>` cannot write to `outside`: only `/tmp/` is writable\n')
+    await gap(await made(), 'echo z > outside', '>', 'error: `>` cannot write to `outside`: only `/tmp/` is writable\n')
   })
 
   it('refuses a write to a link naming a file under a directory that is not there', async () => {
@@ -571,11 +571,11 @@ describe('what a link cannot change', () => {
     // The name a link leads to answers for its own parent: where that is not
     // there, the write fails as the kernel fails it rather than leaving bytes
     // under a directory nothing can reach.
-    check(await made(), 'echo x > orphan', '', { stderr: 'error: orphan: No such file or directory\n', exitCode: 1, cwd: '/repo' })
+    await check(await made(), 'echo x > orphan', '', { stderr: 'error: orphan: No such file or directory\n', exitCode: 1, cwd: '/repo' })
     await check(await made(), 'touch orphan', '', { stderr: "touch: cannot touch 'orphan': No such file or directory\n", exitCode: 1, cwd: '/repo' })
     // `cp` has a rule of its own for a destination leading nowhere, which it
     // gives whatever the name is missing.
-    check(await made(), 'cp file orphan', '', { stderr: "cp: not writing through dangling symlink 'orphan'\n", exitCode: 1, cwd: '/repo' })
+    await check(await made(), 'cp file orphan', '', { stderr: "cp: not writing through dangling symlink 'orphan'\n", exitCode: 1, cwd: '/repo' })
     // Nothing of the refused write is left behind, reachable or not.
     const after = await made()
     await after.run('echo x > orphan')
@@ -594,7 +594,7 @@ describe('what a link cannot change', () => {
     // `cp` opens neither the link, which is a name already taken, nor the file
     // it names, which is not there — so a name a redirect would have made is
     // refused here.
-    check(await made(), 'cp file fresh', '', { stderr: "cp: not writing through dangling symlink 'fresh'\n", exitCode: 1, ...at })
+    await check(await made(), 'cp file fresh', '', { stderr: "cp: not writing through dangling symlink 'fresh'\n", exitCode: 1, ...at })
     await check(await made(), 'cp file outside', '', { stderr: "cp: not writing through dangling symlink 'outside'\n", exitCode: 1, ...at })
     // Nothing is left where that copy would have gone.
     const refused = await made()
@@ -602,16 +602,16 @@ describe('what a link cannot change', () => {
     await check(refused, 'find /tmp', '/tmp\n', at)
     // GNU announces the copy it is about to make before the refusal, as it
     // announces one it goes on to make.
-    check(await made(), 'cp -v file fresh', "'file' -> 'fresh'\n", {
+    await check(await made(), 'cp -v file fresh', "'file' -> 'fresh'\n", {
       stderr: "cp: not writing through dangling symlink 'fresh'\n", exitCode: 1, ...at,
     })
     // A directory copy meets the same name as one already taken by something
     // that is not a directory, however little is at the end of it.
-    check(await made(), 'cp -r d fresh', '', {
+    await check(await made(), 'cp -r d fresh', '', {
       stderr: "cp: cannot overwrite non-directory 'fresh' with directory 'd'\n", exitCode: 1, ...at,
     })
     // A link leading somewhere is written through, as it always was.
-    check(await made(), 'printf seed > /tmp/out; cp file out; cat /tmp/out', 'src\n', at)
+    await check(await made(), 'printf seed > /tmp/out; cp file out; cat /tmp/out', 'src\n', at)
   })
 
   it('copies into the directory a link names, and over no link that is not one', async () => {
@@ -620,13 +620,13 @@ describe('what a link cannot change', () => {
     const at = { cwd: '/repo' }
     // A copy lands where the name leads, so what the overlay may hold is asked
     // of the walk rather than of the spelling.
-    check(await made(), 'mkdir /tmp/d; cp -r d dirlink; find /tmp', '/tmp\n/tmp/d\n/tmp/d/d\n/tmp/d/d/inner\n', at)
+    await check(await made(), 'mkdir /tmp/d; cp -r d dirlink; find /tmp', '/tmp\n/tmp/d\n/tmp/d/d\n/tmp/d/d/inner\n', at)
     await check(await made(), 'mkdir /tmp/d; cp -r d dirlink/sub; find /tmp', '/tmp\n/tmp/d\n/tmp/d/sub\n/tmp/d/sub/inner\n', at)
     await check(await made(), 'mkdir /tmp/d; cp -rv d dirlink', "'d' -> 'dirlink/d'\n'd/inner' -> 'dirlink/d/inner'\n", at)
     // A regular file can be written through a link and a directory cannot, so
     // GNU reads the destination of a directory copy as `lstat` reads it: `-T`
     // names the link itself, which is no directory to overwrite.
-    check(await made(), 'mkdir /tmp/d; cp -rT d dirlink', '', {
+    await check(await made(), 'mkdir /tmp/d; cp -rT d dirlink', '', {
       stderr: "cp: cannot overwrite non-directory 'dirlink' with directory 'd'\n", exitCode: 1, ...at,
     })
   })
@@ -643,7 +643,7 @@ describe('what a link cannot change', () => {
     const taken = (name) => `mkdir: cannot create directory ‘${name}’: File exists\n`
     // The name is taken whatever the link leads to, which `mkdir` never
     // follows — `-p` follows it, and passes over a directory at the end of it.
-    check(await made(), 'mkdir fresh', '', { stderr: taken('fresh'), exitCode: 1, ...at })
+    await check(await made(), 'mkdir fresh', '', { stderr: taken('fresh'), exitCode: 1, ...at })
     await check(await made(), 'mkdir -p fresh', '', { stderr: taken('fresh'), exitCode: 1, ...at })
     await check(await made(), 'mkdir -p through', '', { stderr: taken('through'), exitCode: 1, ...at })
     await check(await made(), 'mkdir /tmp/d; mkdir dirlink', '', { stderr: taken('dirlink'), exitCode: 1, ...at })
@@ -652,7 +652,7 @@ describe('what a link cannot change', () => {
     // Under `-p` a component that is not the last answers with what stopped
     // the walk: a link leading nowhere is its own name in the way, and one
     // leading through a file cannot hold the name below it.
-    check(await made(), 'mkdir -p fresh/sub', '', { stderr: taken('fresh'), exitCode: 1, ...at })
+    await check(await made(), 'mkdir -p fresh/sub', '', { stderr: taken('fresh'), exitCode: 1, ...at })
     await check(await made(), 'mkdir -p through/sub', '', {
       stderr: "mkdir: cannot create directory ‘through’: Not a directory\n", exitCode: 1, ...at,
     })
@@ -670,7 +670,7 @@ describe('what a link cannot change', () => {
     // Resolution answers before the filesystem does, as it does for the name
     // written out in full: what is left for a name that resolves is the
     // read-only filesystem it lands on.
-    check(await made(), 'touch orphan', '', { stderr: "touch: cannot touch 'orphan': No such file or directory\n", exitCode: 1, ...at })
+    await check(await made(), 'touch orphan', '', { stderr: "touch: cannot touch 'orphan': No such file or directory\n", exitCode: 1, ...at })
     await check(await made(), 'touch /repo/missing/file', '', {
       stderr: "touch: cannot touch '/repo/missing/file': No such file or directory\n", exitCode: 1, ...at,
     })
@@ -685,14 +685,14 @@ describe('what a link cannot change', () => {
     const blocked = 'mkdir -p /tmp/dest/g; printf BLOCK > /tmp/dest/g/sub; '
     // A destination the walk cannot enter ends that branch above the link, so
     // GNU answers with the name in the way and copies the rest of the tree.
-    check(await made(), blocked + 'cp -r g /tmp/dest', '', {
+    await check(await made(), blocked + 'cp -r g /tmp/dest', '', {
       stderr: "cp: cannot overwrite non-directory '/tmp/dest/g/sub' with directory 'g/sub'\n", exitCode: 1, ...at,
     })
     const after = await made()
     await after.run(blocked + 'cp -r g /tmp/dest')
     await check(after, 'find /tmp -type f', '/tmp/dest/g/f\n/tmp/dest/g/sub\n', at)
     // Where the copy does reach it, the link is refused as ever.
-    gap(await made(), 'cp -r g /tmp/fresh', 'symbolic link', 'cp: copying a symbolic link is not supported: g/sub/gl (a recursive copy keeps the link, which cp does not make here)\n')
+    await gap(await made(), 'cp -r g /tmp/fresh', 'symbolic link', 'cp: copying a symbolic link is not supported: g/sub/gl (a recursive copy keeps the link, which cp does not make here)\n')
   })
 
   it('leaves a link alone where -n has left its destination alone', async () => {
@@ -708,12 +708,12 @@ describe('what a link cannot change', () => {
     // `-n` answers from the destination before the source is opened, so a
     // name already there is left as it is and the copy neither fails nor
     // happens — the link it would have carried is never in question.
-    check(await made(), 'printf seed > /tmp/out; cp -rn out /tmp/out 2>/dev/null; cat /tmp/out', 'seed', at)
+    await check(await made(), 'printf seed > /tmp/out; cp -rn out /tmp/out 2>/dev/null; cat /tmp/out', 'seed', at)
     await check(await made(), kept + 'cp -rn e /tmp/dest 2>/dev/null; cat /tmp/dest/e/el /tmp/dest/e/f', 'keptkept', at)
     await check(await made(), kept + 'cp -rn e/el /tmp/dest/e/el 2>/dev/null; cat /tmp/dest/e/el', 'kept', at)
     // A name is taken whatever it leads to: nothing is written through a link,
     // so `-n` reads the destination as `lstat` reads it.
-    check(await made(), 'cp -rn e/el gone 2>/dev/null; find /tmp -type f', '', at)
+    await check(await made(), 'cp -rn e/el gone 2>/dev/null; find /tmp -type f', '', at)
     // A link the copy would reach is refused as ever, and before it writes.
     // The warning the 9.4 that GNU/Linux distributions ship gives of every
     // -n comes first, as it is read.
@@ -736,7 +736,7 @@ describe('what a link cannot change', () => {
     const at = { cwd: '/repo' }
     // The file a write lands on is the walk's answer, so a link on the way
     // leads where it leads — the overlay owns what is under it.
-    check(await made(), 'patch into/out < /tmp/d.patch; cat /tmp/out', 'patching file into/out\nb\n', at)
+    await check(await made(), 'patch into/out < /tmp/d.patch; cat /tmp/out', 'patching file into/out\nb\n', at)
     // GNU patches a regular file and nothing else, and reads the name itself
     // to decide: a link is none, whatever it leads to. What is left is the
     // rejects, beside the link and so in the read-only sources.
@@ -762,9 +762,13 @@ describe('what a link cannot change', () => {
     const t = createTerminal({ dirlink: { type: 'symlink', target: '/tmp/d' } }, { mount: '/repo', writable: '/tmp/' })
     await check(t, 'mkdir /tmp/d; printf x > /tmp/d/f', '', { cwd: '/repo' })
     // GNU walks into the directory the slash asked for, empties it, and then
-    // fails the name itself, which is a link and not the directory it led to.
-    check(t, 'rm -r dirlink/', '', { stderr: "rm: cannot remove 'dirlink/': Not a directory\n", exitCode: 1, cwd: '/repo' })
+    // fails the name itself — on the read-only mount the link is on before
+    // anything is looked up there, and in /tmp because it is a link and not
+    // the directory it led to.
+    await check(t, 'rm -r dirlink/', '', { stderr: "rm: cannot remove 'dirlink/': Read-only file system\n", exitCode: 1, cwd: '/repo' })
     await check(t, 'find /tmp', '/tmp\n/tmp/d\n', { cwd: '/repo' })
+    await check(t, 'printf x > /tmp/d/f; ln -s /tmp/d /tmp/l; rm -r /tmp/l/', '', { stderr: "rm: cannot remove '/tmp/l/': Not a directory\n", exitCode: 1, cwd: '/repo' })
+    await check(t, 'find /tmp', '/tmp\n/tmp/d\n/tmp/l\n', { cwd: '/repo' })
   })
 
   it('watches the file a copy will write, where a link names the one it reports on', async () => {
@@ -788,12 +792,12 @@ describe('what a link cannot change', () => {
     const at = { cwd: '/repo' }
     // `rm` takes the name away and `sed -i` writes a file over it, so both
     // answer for a name the sources hold — never for what it points at.
-    check(await made(), 'printf kept > /tmp/out; rm out; cat /tmp/out', 'kept', {
+    await check(await made(), 'printf kept > /tmp/out; rm out; cat /tmp/out', 'kept', {
       stderr: "rm: cannot remove 'out': Read-only file system\n", cwd: '/repo',
     })
     await gap(await made(), 'printf seed > /tmp/out; sed -i s/seed/other/ out', '-i', 'sed: out: file system is read-only\n')
     // A link on the way to the name is followed all the same.
-    check(await made(), 'mkdir /tmp/d; printf a > /tmp/d/f; sed -i s/a/b/ dirlink/f; cat /tmp/d/f', 'b', at)
+    await check(await made(), 'mkdir /tmp/d; printf a > /tmp/d/f; sed -i s/a/b/ dirlink/f; cat /tmp/d/f', 'b', at)
     await check(await made(), 'mkdir /tmp/d; printf a > /tmp/d/f; rm dirlink/f; find /tmp -type f', '', at)
   })
 
@@ -804,7 +808,7 @@ describe('what a link cannot change', () => {
     await check(t, 'realpath -s node_modules/.bin/cli', '/node_modules/.bin/cli\n')
     // Only the last component may be missing: a link to a name in a directory
     // that is not there is the resolution failing before it.
-    check(t, 'realpath node_modules/.bin/stale', '', {
+    await check(t, 'realpath node_modules/.bin/stale', '', {
       stderr: 'realpath: node_modules/.bin/stale: No such file or directory\n', exitCode: 1,
     })
     await check(t, 'realpath -m node_modules/.bin/stale', '/node_modules/gone/cli.js\n')
@@ -815,17 +819,17 @@ describe('what a link cannot change', () => {
   it('realpath takes `..` from the name as written under -L, and from what a link leads to under -P', async () => {
     const t = terminal({ 'd/f': 'f\n', 'x/y/z': 'z\n', 'sub/l': { type: 'symlink', target: '../x/y' }, l: { type: 'symlink', target: 'd' } })
     // `-P`, the default, expands the link and takes `..` from where it leads.
-    check(t, 'realpath sub/l/../z', '/x/z\n')
+    await check(t, 'realpath sub/l/../z', '/x/z\n')
     await check(t, 'realpath -P sub/l/../z', '/x/z\n')
     // `-L` cancels the component before a `..` — link or not — and resolves
     // what is left, so the link is never expanded at all.
-    check(t, 'realpath -L sub/l/../z', '/sub/z\n')
+    await check(t, 'realpath -L sub/l/../z', '/sub/z\n')
     await check(t, 'realpath -L l/f', '/d/f\n')
     // What a `..` passes over is still checked where the walk would check it.
-    check(t, 'realpath -L nope/../l/f', '', { stderr: 'realpath: nope/../l/f: No such file or directory\n', exitCode: 1 })
+    await check(t, 'realpath -L nope/../l/f', '', { stderr: 'realpath: nope/../l/f: No such file or directory\n', exitCode: 1 })
     await check(t, 'realpath -Lm nope/../l/f', '/d/f\n')
     // The last of `-L`, `-P` and `-s` on the line is the one that answers.
-    check(t, 'realpath -sL l/f', '/d/f\n')
+    await check(t, 'realpath -sL l/f', '/d/f\n')
     await check(t, 'realpath -Ls l/f', '/l/f\n')
   })
 
@@ -836,27 +840,27 @@ describe('what a link cannot change', () => {
     await check(t, 'realpath -s -m l/nope', '/l/nope\n')
     await check(t, 'realpath -s -m l/../z', '/z\n')
     // `-e` still asks the filesystem, which answers through the link.
-    check(t, 'realpath -s -e l/nope', '', { stderr: 'realpath: l/nope: No such file or directory\n', exitCode: 1 })
+    await check(t, 'realpath -s -e l/nope', '', { stderr: 'realpath: l/nope: No such file or directory\n', exitCode: 1 })
   })
 
   it('realpath -s -e asks about the name it reduced to, not the spelling it came from', async () => {
     const t = terminal({ 'x/z': 'z\n', 'x/y/f': 'y\n', l: { type: 'symlink', target: 'x/y' } })
     // `l/../z` is `z` where no link is expanded, and `z` is what has to be
     // there; the walk `-e` makes without `-s` asks about `x/z` instead.
-    check(t, 'realpath -s l/../z', '/z\n')
+    await check(t, 'realpath -s l/../z', '/z\n')
     await check(t, 'realpath -s -e l/../z', '', { stderr: 'realpath: l/../z: No such file or directory\n', exitCode: 1 })
     await check(t, 'realpath -e l/../z', '/x/z\n')
     await check(t, 'realpath -s -e l/f', '/l/f\n')
   })
 
-  it('stat measures the link a redirect points through, and refuses only what -L would measure', () => {
+  it('stat measures the link a redirect points through, and refuses only what -L would measure', async () => {
     const sources = { file: 'content\n', link: { type: 'symlink', target: '/tmp/out' } }
     const t = createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     // The size is the link's own — the path it holds — so the file the output
     // is going to is nothing this measured, and GNU answers it too.
-    check(t, 'printf seed > /tmp/out; stat -c %s link > /tmp/out; cat /tmp/out', '8\n', { cwd: '/repo' })
+    await check(t, 'printf seed > /tmp/out; stat -c %s link > /tmp/out; cat /tmp/out', '8\n', { cwd: '/repo' })
     // `-L` measures what the link points at, which is that same file.
-    gap(t, 'stat -L -c %s link > /tmp/out', 'metadata output overlap', 'stat: buffered output sharing a measured file is not supported\n')
+    await gap(t, 'stat -L -c %s link > /tmp/out', 'metadata output overlap', 'stat: buffered output sharing a measured file is not supported\n')
   })
 
   it('realpath keeps a path it cannot resolve where -m asked for one that need not be there', async () => {
@@ -866,7 +870,7 @@ describe('what a link cannot change', () => {
     await check(t, 'realpath -m a.txt/under', '/a.txt/under\n')
     // A name that is not there is kept as it was spelled and the walk goes
     // on, so a `..` after it cancels it and a link past it is expanded.
-    check(t, 'realpath -m nope/../a.txt', '/a.txt\n')
+    await check(t, 'realpath -m nope/../a.txt', '/a.txt\n')
   })
 
   it('hands a wired command the links a directory holds, and the target each one carries', async () => {

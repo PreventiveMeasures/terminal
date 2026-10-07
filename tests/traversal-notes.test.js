@@ -56,7 +56,7 @@ describe('tree depth omission notes', () => {
   it('does not claim a hidden entry the depth limit had already cut off', async () => {
     // `/dir` stops at the frontier, so its `.child` was never a name this
     // listing passed over for being hidden — the depth note covers it whole.
-    check('tree -L 1', ['/dir'], { 'dir/.child': '', 'dir/shown': '' })
+    await check('tree -L 1', ['/dir'], { 'dir/.child': '', 'dir/shown': '' })
     await check('tree -L 2', [], { 'dir/.child': '', 'dir/shown': '' }, ['/dir/.child'])
   })
 
