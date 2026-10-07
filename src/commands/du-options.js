@@ -1,6 +1,7 @@
 import { parseArgs } from '../args.js'
 import { INT64_MAX, UINT64_MAX } from '../numeric.js'
 import { UnsupportedError } from '../unsupported.js'
+import { quoteLocale } from './mkdir.js'
 
 const ALIASES = new Map(Object.entries({
   all: 'a', 'apparent-size': 'A', bytes: 'b', total: 'c', null: '0', 'count-links': 'l',
@@ -14,31 +15,43 @@ const ALIASES = new Map(Object.entries({
 // setting, so the last of them on the line is the one that answers.
 const DEREFERENCE = { P: 'none', D: 'args', H: 'args', L: 'all' }
 
+// What GNU says after a command line it will not run, pointing at --help.
+const TRY = "\nTry 'du --help' for more information."
+
 export function duOptions(tokens, ctx) {
   const parsed = parseArgs(tokens, {
-    // `-A` is the BSD/macOS spelling of GNU's long-only `--apparent-size`.
-    short: ['0', 'a', 'A', 'b', 'c', 'h', 'H', 'k', 'l', 'm', 's', 'S', 'L', 'D', 'P'],
+    // `--apparent-size` has no short spelling in GNU's du; BSD's `-A` is not
+    // one it takes.
+    short: ['0', 'a', 'b', 'c', 'h', 'H', 'k', 'l', 'm', 's', 'S', 'L', 'D', 'P'],
     long: [...ALIASES.keys()].filter((name) => !['d', 'B'].includes(ALIASES.get(name))).concat(['inodes', 'si']),
     valueShort: ['d', 'B'], valueLong: ['max-depth', 'block-size'],
   })
   const options = { operands: parsed.positional.length ? parsed.positional : ['.'], depth: Infinity, flags: new Set(), links: 'none', scale: null, stderr: '' }
+  // GNU reads every option before it gives up on a depth it could not read.
+  const invalid = []
   for (const { name, value } of parsed.order) {
     const flag = ALIASES.get(name) ?? name
     options.flags.add(flag)
     if (Object.hasOwn(DEREFERENCE, flag)) options.links = DEREFERENCE[flag]
-    if (flag === 'd') options.depth = depthOption(value)
+    if (flag === 'd') {
+      const depth = depthOption(value)
+      if (depth === null) invalid.push(`invalid maximum depth ${quoteLocale(value, ctx)}`)
+      else options.depth = depth
+    }
     if (flag === 'B') options.scale = blockSize(value)
     if (flag === 'b') { options.flags.add('A'); options.scale = { unit: 1n } }
     if (flag === 'k' || flag === 'm') options.scale = { unit: flag === 'k' ? 1024n : 1024n ** 2n }
     if (flag === 'h' || flag === 'si') options.scale = { base: flag === 'h' ? 1024n : 1000n, unit: 1n }
   }
+  if (invalid.length) throw new Error(invalid.join('\ndu: ') + TRY)
   const { flags } = options
-  if (flags.has('a') && flags.has('s')) throw new Error('cannot both summarize and show all entries')
+  if (flags.has('a') && flags.has('s')) throw new Error('cannot both summarize and show all entries' + TRY)
   if (flags.has('s') && flags.has('d')) {
-    if (options.depth !== 0) throw new Error(`summarizing conflicts with --max-depth=${options.depth}`)
+    if (options.depth !== 0) throw new Error(`warning: summarizing conflicts with --max-depth=${options.depth}${TRY}`)
     options.stderr += 'du: warning: summarizing is the same as using --max-depth=0\n'
   }
   if (flags.has('s')) options.depth = 0
+  if (options.depth < 0) options.depth = Infinity
   if (flags.has('inodes') && flags.has('A')) options.stderr += 'du: warning: options --apparent-size and -b are ineffective with --inodes\n'
   if (!options.scale) {
     const configured = ctx.vars.get('DU_BLOCK_SIZE') ?? ctx.vars.get('BLOCK_SIZE') ?? ctx.vars.get('BLOCKSIZE')
@@ -65,11 +78,13 @@ export function humanScale(ctx, base = 1024n) {
   return { base, unit: 1n }
 }
 
+// A depth is any intmax_t. GNU compares an entry's level, a size_t, with it,
+// which turns a negative one into a depth nothing is below: no limit at all.
 function depthOption(value) {
   const match = /^[ \t\n\r\v\f]*([+-]?)(0[xX][\da-fA-F]+|0[0-7]*|[1-9]\d*)$/u.exec(value)
-  if (!match) throw new Error(`invalid maximum depth: ${value}`)
-  const depth = unsignedInteger(match[2])
-  if (depth > INT64_MAX || match[1] === '-' && depth !== 0n) throw new Error(`invalid maximum depth: ${value}`)
+  if (!match) return null
+  const depth = (match[1] === '-' ? -1n : 1n) * unsignedInteger(match[2])
+  if (depth > INT64_MAX || depth < -INT64_MAX - 1n) return null
   return Number(depth)
 }
 

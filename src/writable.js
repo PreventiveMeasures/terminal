@@ -1,11 +1,22 @@
 import { VfsError } from '@preventive/vfs'
-import { dirname, lookup, walkPath, writeTarget } from './fs.js'
+import { dirname, lookup, pathTooLong, slashedTarget, walkPath, writeTarget } from './fs.js'
 import { decodeUtf8, encodeUtf8 } from './util.js'
 
 // The overlay is mounted at /tmp, so what may be written is what falls inside
 // it. Commands ask before acting, where the answer decides more than whether a
 // write would succeed.
 export const inOverlay = (absolute) => absolute === '/tmp' || absolute.startsWith('/tmp/')
+
+// What a write outside the overlay meets, asked of the directory a name is
+// made in or taken from, or of the entry whose times would change. The tree
+// the sources are in is a read-only mount; `/` and any directory on the way
+// down to the mount are the root filesystem's, which is writable, but by root
+// and not by the session's user, as `/` is on any Linux system.
+export function writeRefusal(ctx, absolute) {
+  const { mount = '/' } = ctx
+  const mounted = mount === '/' || absolute === mount || absolute.startsWith(mount + '/')
+  return mounted ? 'Read-only file system' : 'Permission denied'
+}
 
 const EMPTY = new Uint8Array()
 
@@ -20,6 +31,9 @@ export function writableFs(base) {
   const fs = {
     ...base,
     observeIo: (value) => { overlay.observer = value },
+    // The newest inode any name here was given, which a later one is newer
+    // than: what tells a walk an entry was made after it began.
+    newestInode: () => overlay.newest,
     fileIdentity: overlay.identity,
     readIdentity: (cell) => { overlay.observer?.read(cell); return decodeUtf8(cellBytes(base.vfs, cell)) },
     readFile: (path) => { observe(path); return base.readFile(path) },
@@ -46,10 +60,12 @@ export function writableFs(base) {
 function overlayOf(base) {
   const { vfs } = base
   const cells = new Map()
-  return {
+  const overlay = {
     base,
     vfs,
     observer: undefined,
+    // Every name the sources declared was made before /tmp was.
+    newest: vfs.lstat('/tmp').ino,
     identity: (path) => {
       if (!inOverlay(String(path)) || !base.isFile(path)) return
       const { ino } = vfs.lstat(path)
@@ -69,14 +85,18 @@ function overlayOf(base) {
       left.cell.detached = left.bytes
       cells.delete(left.ino)
     },
-    // A change to the tree's shape, said as the name that asked for it.
-    change: (path, apply) => {
+    // A change to the tree's shape, said as the name that asked for it, at
+    // the absolute names it makes or takes away.
+    change: (path, apply, ...changed) => {
       try { return apply() } catch (e) {
         if (!(e instanceof VfsError)) throw e
         throw pathError(path, strerror(e.code))
-      } finally { base.reshaped() }
+      } finally {
+        overlay.newest = Math.max(overlay.newest, base.reshaped(...changed) ?? 0)
+      }
     },
   }
+  return overlay
 }
 
 // What the Vfs says of a code, without the path its messages put in front.
@@ -89,10 +109,13 @@ const cellBytes = (vfs, cell) => cell.detached ?? vfs.readFile(cell.path)
 function openFile(fs, overlay, cwd, path, append) {
   const absolute = writeTarget(fs, cwd, path)
   if (!inOverlay(absolute)) return null
+  // A link whose target asks for a directory is opened as that spelling is.
+  const slashed = slashedTarget(cwd, path, fs)
+  if (slashed !== null) throw pathError(path, slashed)
   checkTarget(fs, cwd, path)
   let cell = overlay.identity(absolute)
   if (cell === undefined) {
-    overlay.change(path, () => overlay.vfs.writeFile(absolute, EMPTY))
+    overlay.change(path, () => overlay.vfs.writeFile(absolute, EMPTY), absolute)
     cell = overlay.identity(absolute)
   } else if (!append) {
     overlay.observer?.write(cell)
@@ -113,7 +136,7 @@ function addDirectory(fs, overlay, cwd, path) {
   // checkTarget passes a name already taken by a file or a link, which is not
   // a name a directory can take.
   if (fs.isFile(absolute) || fs.isLink(absolute)) throw new Error(`${path}: File exists`)
-  overlay.change(path, () => overlay.vfs.mkdir(absolute))
+  overlay.change(path, () => overlay.vfs.mkdir(absolute), absolute)
   return true
 }
 
@@ -123,7 +146,7 @@ function addLink(fs, overlay, cwd, path, target) {
   const absolute = writeTarget(fs, cwd, path, false)
   if (!absolute.startsWith('/tmp/')) return false
   checkNewName(fs, cwd, path)
-  overlay.change(path, () => overlay.vfs.symlink(target, absolute))
+  overlay.change(path, () => overlay.vfs.symlink(target, absolute), absolute)
   return true
 }
 
@@ -171,7 +194,7 @@ function replaceFile(fs, overlay, cwd, path, content, backupPath) {
       overlay.release(left)
     }
     vfs.writeFile(absolute, bytes)
-  })
+  }, absolute, ...backup === null ? [] : [backup])
   return true
 }
 
@@ -185,25 +208,26 @@ function removeFile(fs, overlay, cwd, path) {
   if (!inOverlay(found.path)) return false
   // Open handles retain the unlinked file until their last writer ends.
   const left = overlay.leaving(found.path)
-  overlay.change(path, () => overlay.vfs.unlink(found.path))
+  overlay.change(path, () => overlay.vfs.unlink(found.path), found.path)
   overlay.release(left)
   return true
 }
 
 // Removing a directory is removing it alone: `rm -r` clears what is inside it
 // first, so anything left here is a caller's mistake. `/tmp` is where the
-// overlay is mounted rather than something inside it, and a mount point is not
-// the tree below it to remove — which is the busy device Linux reports.
+// overlay is mounted rather than something inside it, and the directory it is
+// in is `/`, which the session's user cannot write: Linux refuses that before
+// it would get as far as the mount point.
 function dropDirectory(fs, overlay, cwd, path) {
   const absolute = writeTarget(fs, cwd, path, false)
   if (!inOverlay(absolute)) return false
   const found = lookup(cwd, path, fs)
   if (found.error) throw pathError(path, found.error)
   if (!inOverlay(found.path) || !fs.isDir(found.path)) throw new Error(`${path}: Not a directory`)
-  if (found.path === '/tmp') throw new Error(`${path}: Device or resource busy`)
+  if (found.path === '/tmp') throw pathError(path, 'Permission denied')
   const { dirs, files, links } = fs.listDir(found.path)
   if (dirs.length || files.length || links.length) throw new Error(`${path}: Directory not empty`)
-  overlay.change(path, () => overlay.vfs.rmdir(found.path))
+  overlay.change(path, () => overlay.vfs.rmdir(found.path), found.path)
   return true
 }
 
@@ -213,16 +237,23 @@ function dropDirectory(fs, overlay, cwd, path) {
 // leads to answers for its own parent — a link into a directory that is not
 // there names a file nothing can make, where the spelling's parent is fine.
 function checkTarget(fs, cwd, path) {
+  // A trailing slash asks for a directory, which open(2) neither makes nor
+  // writes: once the way to the last name is walked, that is EISDIR whatever
+  // the last name is, or is not, and without looking it up.
+  if (path.endsWith('/') && !pathTooLong(path)) {
+    const bare = path.replace(/\/+$/u, '')
+    const cut = bare.lastIndexOf('/') + 1
+    const parent = cut === 0 ? null : lookup(cwd, bare.slice(0, cut), fs)
+    throw pathError(path, parent?.error ?? 'Is a directory')
+  }
   const found = walkPath(cwd, path, fs)
   if (found.error === null) {
     if (fs.isDir(found.path)) throw new Error(`${path}: Is a directory`)
-    // A trailing slash names a directory, and what is there is not one.
-    if (path.endsWith('/')) throw pathError(path, 'Not a directory')
     return
   }
   // Only the last name may be missing, and only where it is a name a file can
-  // take: a trailing slash names a directory, and a NUL names nothing.
-  if (found.rest.length > 0 || path.endsWith('/') || path.includes('\0')) throw pathError(path, found.error)
+  // take: a NUL names nothing.
+  if (found.rest.length > 0 || path.includes('\0')) throw pathError(path, found.error)
   if (!fs.isDir(dirname(found.path))) throw pathError(path, 'No such file or directory')
 }
 

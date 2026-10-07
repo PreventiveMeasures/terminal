@@ -140,16 +140,33 @@ patches a regular file and nothing else, so a link operand is `not a regular
 file -- refusing to patch` whatever it leads to, while a link on the way to
 the file is followed as any other component is.
 
+A name is held to the lengths Linux holds one to: a component longer than 255
+bytes is `File name too long` where a directory is asked about it, and so is a
+whole name of 4096 bytes or more, before anything in it is looked up. A walk is
+held to neither, since `find`, `rm -r` and `du` hand the kernel one
+directory's names at a time, and `mkdir -p` makes a long path one component at
+a time, as GNU's does. So a `find -exec` that makes the directories its own
+walk goes into stops where GNU's stops, at the first name too long to hand
+over; one that would go on past four thousand of them — a command making two
+at every level — reports an unsupported diagnostic instead.
+
 `mkdir` makes them one at a time and `mkdir -p` makes a whole path, passing
 over what is already there and naming the component it stops at. A name a link
 holds is a name already taken, which making a directory never follows; `-p`
 follows it, and passes over only a link that leads to a directory. `rm -r`
-takes a tree away again, emptying a directory before removing it. The overlay's
-`/tmp` is where it is mounted rather than something inside it, so `rm -r /tmp`
-is refused as the busy device Linux calls a mount point, and nothing in it is
-removed on the way to finding that out.
+takes a tree away again, emptying a directory before removing it, and naming
+each entry it cannot remove rather than the directories above it, which it
+does not try to remove once one of their entries is left. The sources are a
+read-only mount, so what is written there fails as `Read-only file system`;
+`/`, and any directory on the way down to the mount, is the root
+filesystem's, which the session's user cannot write, so a name made in or
+taken out of it fails as `Permission denied` — `rm -r /tmp` empties the
+overlay and then cannot remove `/tmp` itself, as GNU's cannot, and `rm -r /`
+is GNU's preserve-root refusal.
 
-`touch` creates the empty files it names, and `-c` leaves an absent name alone.
+`touch` creates the empty files it names, and `-c` leaves an absent name alone;
+`touch -` touches what standard output is, which a terminal or a pipe takes
+without a word.
 Times are the half it cannot answer: every entry carries the one time the
 terminal was made, so a name already there reports an unsupported diagnostic
 rather than a success that changed nothing, and `-a`, `-m`, `-d`, `-t` and `-r`
@@ -178,9 +195,9 @@ the `lrwxrwxrwx` every link on Linux carries, the length of the path it holds
 as its size, and that path named after it.
 
 `du -b` measures UTF-8 content bytes recursively, including hidden files;
-`du -bs src` reports a directory total. `--apparent-size` (also accepted as the
-BSD `-A`) supports block and human-readable units, and `--inodes` counts
-entries. Plain `du`, `du -sh` and the rest report what ext4 would allocate for
+`du -bs src` reports a directory total. `--apparent-size` supports block and
+human-readable units, and `--inodes` counts entries; BSD's `-A` is not GNU's,
+and is not taken here either. Plain `du`, `du -sh` and the rest report what ext4 would allocate for
 the same tree — the model `ls -l` reads its `total` from: 4 KiB blocks, a
 directory taking one, an empty file none, and a link whose target is under 60
 bytes none — so a total reads as it would from a disk holding the tree, block
@@ -407,7 +424,11 @@ NUL terminators (`-z`). It resolves paths within the virtual filesystem, each
 of the three ways GNU offers: `-P`, the default, expands every link it walks
 through, `..` taken from what the link leads to; `-L` takes `..` from the name
 as written, cancelling the component before it; and `-s` expands no link at
-all, asking the filesystem only whether what the name leads to is there.
+all, asking the filesystem only whether what the name leads to is there. A
+chain of links is followed to its end however long it is, as gnulib's
+canonicalization follows one, and only a link met again on the same rest of
+the name is a loop — where everything that opens a name stops at the
+kernel's forty.
 
 Behaviour is checked against the real tools: bash 5.2, GNU grep 3.11, GNU sed
 4.9, gawk 5.2, ripgrep 14.1, GNU diff 3.10 and GNU patch 2.7.6 in the C

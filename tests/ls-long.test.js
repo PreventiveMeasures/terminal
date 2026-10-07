@@ -68,9 +68,11 @@ describe('ls -l lists what the filesystem does not keep as this terminal’s def
     )))
   })
 
+  // GNU measures every operand before it sets the directories aside, so the
+  // file rows are as wide as a directory's would be.
   it('files come first, then each directory under its name, and a missing operand still fails', async () => {
     assert.deepEqual(await run(await made(), 'ls -l README.md src missing'), expected(lines(
-      '-rw------- 1 user user 12 Sep 18 05:52 README.md',
+      '-rw------- 1 user user   12 Sep 18 05:52 README.md',
       '',
       'src:',
       'total 8',

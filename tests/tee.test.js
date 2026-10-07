@@ -64,6 +64,14 @@ describe('tee writes what it reads twice over', () => {
     assert.deepEqual(await t.run('cat /tmp/here'), result('a\nb\n'))
   })
 
+  it('keeps the gap an open it refused carries, rather than passing it off as an error', async () => {
+    const t = terminal()
+    const r = await t.run('echo hi > /tmp/a; tee /tmp/a < /tmp/a')
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stderr, 'tee: writing to an actively read input file is not supported\n')
+    assert.deepEqual(r.unsupported.map(({ command, detail }) => [command, detail]), [['tee', 'streaming self-output']])
+  })
+
   it('is a command a pipe offers, and not one the hint announces', async () => {
     const t = terminal()
     assert.deepEqual(t.complete('te'), ['test', 'tee'])

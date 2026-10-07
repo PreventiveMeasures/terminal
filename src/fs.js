@@ -31,6 +31,37 @@ export function resolve(cwd, path) {
 // Linux gives one resolution 40 links before it calls the path a loop.
 const LINK_LIMIT = 40
 
+// The two lengths Linux holds a name to. A path is copied in from the caller
+// whole before anything is looked up, into PATH_MAX bytes that end with its
+// NUL, so one of 4096 bytes or more is too long before any component of it is
+// asked about; and a directory answers for a component past NAME_MAX bytes,
+// when the walk looks it up there, that no name that long can be in it. Both
+// are bytes, as the kernel counts them: a marker is the one byte it stands
+// for, and a character past ASCII the UTF-8 it encodes to.
+const PATH_MAX = 4096
+const NAME_MAX = 255
+const TOO_LONG = 'File name too long'
+
+// A name of `limit / 3` UTF-16 units or fewer cannot be `limit` bytes long,
+// which is nearly every name, so only a longer one is counted.
+function bytesAtLeast(text, limit) {
+  if (text.length * 3 < limit) return false
+  let bytes = 0
+  for (let at = 0; at < text.length; at++) {
+    const code = text.codePointAt(at)
+    if (code < 0x80 || code >= 0xdc80 && code <= 0xdcff) bytes += 1
+    else if (code < 0x800) bytes += 2
+    else if (code < 0x10000) bytes += 3
+    else { bytes += 4; at++ }
+  }
+  return bytes >= limit
+}
+
+// Whether a path is past what the kernel takes as one: the path itself is too
+// long to be handed over, or a component of it too long to be looked up.
+export const pathTooLong = (path) => bytesAtLeast(path, PATH_MAX)
+export const nameTooLong = (name) => bytesAtLeast(name, NAME_MAX + 1)
+
 // Only a filesystem carrying declared links answers this at all: the writable
 // overlay and the view a wired command is handed pass it through, while a
 // stand-in filesystem may leave it out entirely.
@@ -58,15 +89,29 @@ export function lookup(cwd, path, fs, { follow = true } = {}) {
 // furthest point plus what is left of the name. `lenient` is what `realpath -m`
 // asks for, where none of the path need be there: a component the filesystem
 // cannot answer for is kept as it was spelled and the walk goes on, so a `..`
-// after it cancels it and a link past it is expanded as ever.
+// after it cancels it and a link past it is expanded as ever — a name too
+// long to be there among them, since a lenient walk asks where a name would
+// be rather than whether the kernel would take it.
 export function walkPath(cwd, path, fs, { follow = true, lenient = false } = {}) {
   if (path === '' || path.includes('\0')) return { path: '/', error: 'No such file or directory', rest: [] }
   const rest = (path.startsWith('/') ? path : cwd + '/' + path).split('/').filter(Boolean)
+  if (!lenient && pathTooLong(path)) return { path: '/', error: TOO_LONG, rest }
   // A trailing slash names a directory, which is the target's to be and not
   // the link's: `ls link/` lists what `link` points at however it was asked.
   const followFinal = follow || path.endsWith('/')
   let budget = LINK_LIMIT
   let at = '/'
+  // The filesystem answers for a directory by its name alone, never through a
+  // link, so where the spelling up to its last name is a plain run of names
+  // that is a directory, walking it would cross nothing but directories and
+  // end there. The walk starts there instead: asking again about every
+  // directory above would cost a deep tree its depth at every name in it.
+  const plain = rest.findIndex((part) => part === '.' || part === '..')
+  const skip = Math.min(plain < 0 ? rest.length : plain, rest.length - 1)
+  if (skip > 1) {
+    const prefix = '/' + rest.slice(0, skip).join('/')
+    if (fs.isDir(prefix)) { at = prefix; rest.splice(0, skip) }
+  }
   while (rest.length > 0) {
     const part = rest.shift()
     if (!fs.isDir(at)) {
@@ -81,6 +126,7 @@ export function walkPath(cwd, path, fs, { follow = true, lenient = false } = {})
       continue
     }
     if (part === '..') { at = dirname(at); continue }
+    if (!lenient && part !== '.' && nameTooLong(part)) return { path: at, error: TOO_LONG, rest: [part, ...rest] }
     if (part !== '.') at = joinPath(at, part)
     if (!isLink(fs, at) || (rest.length === 0 && !followFinal)) continue
     if (budget-- === 0) return { path: at, error: 'Too many levels of symbolic links', rest: [...rest] }
@@ -111,9 +157,18 @@ export const writeTarget = (fs, cwd, path, follow = true) => path === '' || path
 // What creating `name` would fail with, before anything tries: path resolution
 // reports a missing or non-directory parent ahead of whatever the filesystem
 // would say about being read-only, and a name that resolves needs no answer.
+// A trailing slash asks for a directory, which open(2) never makes: once the
+// way to the last name is walked, that is EISDIR, whatever the last name is.
 export function creationError(cwd, name, fs, found = lookup(cwd, name, fs)) {
   if (found.path !== null) return null
-  if (name === '' || name.includes('\0') || name.endsWith('/') || found.error !== 'No such file or directory') return found.error
+  if (name.endsWith('/') && !pathTooLong(name)) {
+    const bare = name.replace(/\/+$/u, '')
+    const cut = bare.lastIndexOf('/') + 1
+    return (cut === 0 ? null : lookup(cwd, bare.slice(0, cut), fs).error) ?? 'Is a directory'
+  }
+  const slashed = slashedTarget(cwd, name, fs)
+  if (slashed !== null) return slashed
+  if (name === '' || name.includes('\0') || found.error !== 'No such file or directory') return found.error
   // The parent is the resolved name's rather than the spelling's: a link
   // leading into a directory that is not there names a file nothing can make,
   // where the spelling's own parent is fine. Asking the walk keeps every
@@ -122,6 +177,26 @@ export function creationError(cwd, name, fs, found = lookup(cwd, name, fs)) {
   const walk = walkPath(cwd, name, fs)
   if (walk.rest.length > 0) return walk.error
   return fs.isDir(dirname(walk.path)) ? null : 'Not a directory'
+}
+
+// The same for a name whose last component is a link: open(2) follows it to
+// the name its target spells, and a target written with a trailing slash is
+// that slash's to answer for — EISDIR, as for a name spelled with one, once
+// the way to what it names is walked. Nothing, where no such link is there.
+export function slashedTarget(cwd, name, fs) {
+  if (name === '' || name.includes('\0') || pathTooLong(name)) return null
+  let at = lookup(cwd, name, fs, { follow: false })
+  for (let budget = LINK_LIMIT; at.error === null && isLink(fs, at.path) && budget > 0; budget--) {
+    const target = fs.readLink(at.path)
+    const from = dirname(at.path)
+    if (target.endsWith('/')) {
+      const bare = target.replace(/\/+$/u, '')
+      const cut = bare.lastIndexOf('/') + 1
+      return (cut === 0 ? null : lookup(from, bare.slice(0, cut), fs).error) ?? 'Is a directory'
+    }
+    at = lookup(from, target, fs, { follow: false })
+  }
+  return null
 }
 
 export function dirname(path) {
@@ -188,6 +263,15 @@ export function* walkTree(fs, root, maxDepth = Number.POSITIVE_INFINITY, shouldD
     const entry = stack.pop()
     yield entry
     if (entry.kind !== 'dir' || entry.depth >= maxDepth || !shouldDescend(entry.path)) continue
+    // A directory is read when the walk goes into it, after whatever the
+    // walk did on reaching it — `find -exec rm -r` may have taken it away,
+    // or put something else there — and one that cannot be read is said to
+    // be what it is rather than read as what it was.
+    if (!fs.isDir(entry.path)) {
+      const error = fs.isFile(entry.path) || isLink(fs, entry.path) ? 'Not a directory' : 'No such file or directory'
+      yield { path: entry.path, kind: 'unreadable', depth: entry.depth, error }
+      continue
+    }
     const { dirs, files, links = [] } = fs.listDir(entry.path)
     // Every list is sorted. Push the three merged, in reverse order, so the
     // children are visited in name order whatever their kinds.

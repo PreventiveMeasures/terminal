@@ -75,7 +75,7 @@ describe('rm force and verbose behavior', () => {
     assert.deepEqual(await (await setup()).run('rm -vf /tmp/missing /tmp/a /tmp/a /tmp/b'), result("removed '/tmp/a'\nremoved '/tmp/b'\n"))
   })
   for (const command of ['rm', 'rm --', 'rm -v']) {
-    it(`requires operands: ${command}`, async () => assert.deepEqual(await (await setup()).run(command), result('', 1, 'rm: missing operand\n')))
+    it(`requires operands: ${command}`, async () => assert.deepEqual(await (await setup()).run(command), result('', 1, "rm: missing operand\nTry 'rm --help' for more information.\n")))
   }
 })
 

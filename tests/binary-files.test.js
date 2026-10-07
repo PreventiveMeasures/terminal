@@ -550,7 +550,7 @@ describe('a file of bytes and the writable overlay', () => {
     const t = overlay()
     await check(t, 'cp text.txt /tmp/one && wc -c /tmp/one', '20 /tmp/one\n')
     await check(t, 'cp img.png /tmp/one && wc -c /tmp/one', '19 /tmp/one\n')
-    await check(t, 'cp -n bytes.txt /tmp/one && wc -c /tmp/one', '19 /tmp/one\n')
+    await check(t, 'cp -n bytes.txt /tmp/one 2>/dev/null && wc -c /tmp/one', '19 /tmp/one\n')
     await check(t, 'cp img.png img.png', '', { stderr: "cp: 'img.png' and 'img.png' are the same file\n", exitCode: 1 })
   })
 

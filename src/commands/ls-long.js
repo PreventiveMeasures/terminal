@@ -34,9 +34,12 @@ export function longFormat(ctx, human) {
   return {
     // Entries carry a name to print, an absolute path and what kind of entry
     // they are — a link also carries what it points at, which the row names
-    // after it; a directory listing gets its `total` line first.
-    lines(entries, listing) {
-      const rows = entries.map(({ name, abs, kind, target }) => {
+    // after it; a directory listing gets its `total` line first. `others`
+    // are rows GNU measured with these and prints elsewhere: the directories
+    // among the operands, listed after the files, whose columns the files'
+    // are as wide as.
+    lines(entries, listing, others = []) {
+      const rowOf = ({ name, abs, kind, target }) => {
         const dir = kind === 'dir'
         const bytes = dir ? BLOCK : ctx.fs.fileSize(abs) ?? encodeUtf8(ctx.fs.readFile(abs)).length
         // A link's own mode is the one every symbolic link on Linux carries.
@@ -44,8 +47,10 @@ export function longFormat(ctx, human) {
         const units = allocated(bytes, kind) / 512
         const shown = kind === 'link' ? `${name} -> ${target}` : name
         return { name: shown, mode, units, links: String(dir ? 2 + ctx.fs.listDir(abs).dirs.length : 1), size: size(bytes) }
-      })
-      const linkWidth = width(rows.map((row) => row.links)), sizeWidth = width(rows.map((row) => row.size))
+      }
+      const rows = entries.map(rowOf)
+      const measured = [...rows, ...others.map(rowOf)]
+      const linkWidth = width(measured.map((row) => row.links)), sizeWidth = width(measured.map((row) => row.size))
       const lines = rows.map((row) => `${row.mode} ${row.links.padStart(linkWidth)} ${user} ${user} ${row.size.padStart(sizeWidth)} ${time} ${row.name}`)
       if (listing) {
         const units = rows.reduce((sum, row) => sum + row.units, 0)

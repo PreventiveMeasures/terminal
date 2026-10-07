@@ -18,6 +18,8 @@ async function check(t, command, stdout = '', stderr = '', exitCode = 0, cwd = '
   assert.deepEqual(await t.run(command), { stdout, stderr, exitCode, cwd, notes: [], unsupported: [] }, command)
 }
 const check2 = (t, command, stdout = '') => check(t, command, stdout, '', 0, '/tmp')
+// What the coreutils 9.4 GNU/Linux distributions ship says of every -n.
+const NO_CLOBBER = 'cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead\n'
 
 const TREE = '/tmp/copy\n/tmp/copy/.hidden\n/tmp/copy/one\n/tmp/copy/sub\n/tmp/copy/sub/deep\n/tmp/copy/sub/deep/three\n/tmp/copy/sub/two\n'
 
@@ -84,7 +86,7 @@ describe('cp -r copies a tree into the writable filesystem', () => {
     const t = terminal()
     await check(t, 'cp -r a /tmp/copy')
     await check(t, 'printf mine >/tmp/copy/one')
-    await check(t, 'cp -rn a/. /tmp/copy')
+    await check(t, 'cp -rn a/. /tmp/copy', '', NO_CLOBBER)
     await check(t, 'cat /tmp/copy/one', 'mine')
   })
 
@@ -344,7 +346,7 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     await check(t, 'cp -r a /tmp/dest')
     // Every name is already there, so nothing is copied and nothing is
     // announced: there is no buffered line to be unsure about.
-    check(t, 'cp -rvn a/. /tmp/dest >/tmp/dest/one')
+    check(t, 'cp -rvn a/. /tmp/dest >/tmp/dest/one', '', NO_CLOBBER)
     await check(t, 'cat /tmp/dest/one', '')
     await check(t, 'cat /tmp/dest/sub/two', '2\n')
   })
@@ -358,7 +360,7 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     // the lines land there when the buffer flushes at exit.
     const lines = (await terminal().run(`${setup}; cp -rvn a/. /tmp/d`)).stdout
     assert.ok(lines.includes("'a/./sub/two' -> '/tmp/d/./sub/two'") && !lines.includes("/tmp/d/./one"), lines)
-    await check(t, 'cp -rvn a/. /tmp/d >/tmp/d/one')
+    await check(t, 'cp -rvn a/. /tmp/d >/tmp/d/one', '', NO_CLOBBER)
     await check(t, 'cat /tmp/d/one', lines)
     await check(t, 'cat /tmp/d/sub/two', '2\n')
     // Without -n the same name is overwritten, and that is still refused.
@@ -375,7 +377,7 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     // of the tree is copied with its lines landing there, as GNU has it.
     const lines = (await terminal().run(`${setup}; cp -rv /tmp/s/. /tmp/d`)).stdout
     assert.ok(lines.includes("'/tmp/s/./sub/two' -> '/tmp/d/./sub/two'") && !lines.includes("'/tmp/d/./one'"), lines)
-    await check(t, 'cp -rv /tmp/s/. /tmp/d >/tmp/s/one', '', "cp: cannot overwrite directory '/tmp/d/./one' with non-directory '/tmp/s/./one'\n", 1)
+    await check(t, 'cp -rv /tmp/s/. /tmp/d >/tmp/s/one', '', "cp: cannot overwrite directory '/tmp/d/./one' with non-directory\n", 1)
     await check(t, 'cat /tmp/s/one', lines)
     await check(t, 'cat /tmp/d/sub/two', '2\n')
     // A descriptor on an entry that is copied still refuses.

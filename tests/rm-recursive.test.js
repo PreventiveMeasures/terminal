@@ -81,12 +81,25 @@ describe('rm -r removes a tree', () => {
 })
 
 describe('rm -r refuses the overlay root and the names that are not one', () => {
-  it('will not remove /tmp itself, or empty it in the attempt', async () => {
+  it('empties /tmp, and then cannot take it out of the root it is in', async () => {
     const t = await terminal()
-    await check(t, 'rm -r /tmp', '', "rm: cannot remove '/tmp': Device or resource busy\n", 1)
-    await check(t, 'rm -rf /tmp', '', "rm: cannot remove '/tmp': Device or resource busy\n", 1)
     await check(t, 'cd /tmp; rm -r .', '', "rm: refusing to remove '.' or '..' directory: skipping '.'\n", 1, '/tmp')
     await check(t, 'find /tmp', '/tmp\n/tmp/d\n/tmp/d/one\n/tmp/d/sub\n/tmp/d/sub/two\n/tmp/file\n', '', 0, '/tmp')
+    // `/` is root's, as it is on any Linux system, so removing a name from
+    // it is refused, once everything under that name is gone.
+    await check(t, 'rm -r /tmp', '', "rm: cannot remove '/tmp': Permission denied\n", 1, '/tmp')
+    await check(t, 'find /tmp', '/tmp\n', '', 0, '/tmp')
+    await check(t, 'rm -rf /tmp', '', "rm: cannot remove '/tmp': Permission denied\n", 1, '/tmp')
+  })
+
+  it('will not operate recursively on the root, however it is spelled', async () => {
+    const t = await terminal()
+    const dangerous = (name, same) => `rm: it is dangerous to operate recursively on '${name}'${same ? " (same as '/')" : ''}\nrm: use --no-preserve-root to override this failsafe\n`
+    await check(t, 'rm -rf /', '', dangerous('/'), 1)
+    await check(t, 'rm -r //', '', dangerous('//', true), 1)
+    await check(t, 'rm -r /tmp/../', '', "rm: refusing to remove '.' or '..' directory: skipping '/tmp/../'\n", 1)
+    await check(t, 'rm /', '', "rm: cannot remove '/': Is a directory\n", 1)
+    await check(t, 'find /tmp -type f', '/tmp/d/one\n/tmp/d/sub/two\n/tmp/file\n')
   })
 
   it("will not remove '.' or '..' by those names", async () => {
@@ -97,9 +110,9 @@ describe('rm -r refuses the overlay root and the names that are not one', () => 
     await check(t, 'find . -type f', './one\n./sub/two\n', '', 0, '/tmp/d')
   })
 
-  it('will not remove a read-only tree, or walk into one', async () => {
+  it('names each entry of a read-only tree it cannot remove, and nothing above them', async () => {
     const t = await terminal()
-    await check(t, 'rm -r /repo/d', '', "rm: cannot remove '/repo/d': Read-only file system\n", 1)
+    await check(t, 'rm -r /repo/d', '', "rm: cannot remove '/repo/d/one': Read-only file system\nrm: cannot remove '/repo/d/sub/two': Read-only file system\n", 1)
     await check(t, 'find /repo/d -type f', '/repo/d/one\n/repo/d/sub/two\n')
   })
 

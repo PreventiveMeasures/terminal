@@ -5,7 +5,7 @@
 import { Vfs, VfsError } from '@preventive/vfs'
 import { fromBase64 } from '@exodus/bytes/base64.js'
 import { encodeUtf8 } from './bytes.js'
-import { joinPath, normalize, sameBytes, textOfFile, walkFiles } from './fs.js'
+import { compareNames, joinPath, normalize, sameBytes, textOfFile, walkFiles } from './fs.js'
 
 // The tree the sources declare, under `mount`, as the filesystem a command
 // reads.
@@ -92,7 +92,7 @@ const emptyListing = () => ({ dirs: [], files: [], links: [] })
 // they are, where the Vfs resolves every path from the root. Where the tree
 // may change from — `writableAt` names it — names are read from the Vfs as
 // they are asked for instead, one directory at a time, and forgotten each
-// time a writer says the tree has `reshaped`.
+// time a writer says the tree has `reshaped` there.
 function vfsFs(vfs) {
   let writableRoot = null
   let fixed = null
@@ -145,7 +145,20 @@ function vfsFs(vfs) {
       fixed = null
       changing = { children: new Map(), types: new Map() }
     },
-    reshaped: () => { changing = { children: new Map(), types: new Map() } },
+    // The names a change made or took away: each is read again, once, and
+    // put in its directory's listing or taken out of it, and what it lists
+    // itself is read afresh; every other answer is kept. Those names were all
+    // that changed — nothing is made below a name that was not there, and
+    // only an empty directory is taken away — so what is known of the rest
+    // still holds, which keeps a walk that grows the tree it walks from
+    // reading each directory on its way again at every step. A listing
+    // already handed out is never written into. The answer is the newest
+    // inode among the names, which is what a writer keeps count of; without
+    // names, everything is read again.
+    reshaped: (...paths) => {
+      if (paths.length === 0) changing = { children: new Map(), types: new Map() }
+      return paths.reduce((newest, path) => Math.max(newest, reread(vfs, changing, path)?.ino ?? 0), 0) || undefined
+    },
     isFile: (p) => type(p) === 'file',
     isDir: (p) => type(p) === 'directory',
     isLink: (p) => type(p) === 'symlink',
@@ -168,6 +181,9 @@ function vfsFs(vfs) {
     // A link is as long as the path it holds, which is what the disk stores
     // of it and what `ls -l`, `du` and `stat` report for one.
     fileSize: (p) => { const s = stat(p); return s === undefined || s.type === 'directory' ? undefined : s.size },
+    // Which inode a name holds. They are numbered as they are made, so a
+    // later number is a later entry.
+    inode: (p) => stat(p)?.ino,
     // Informational comparisons must not throw, so two files are compared as
     // the bytes they hold rather than as the text they may not spell.
     sameFileContents: (a, b) => sameBytes(bytes(a), bytes(b)),
@@ -185,6 +201,40 @@ function vfsFs(vfs) {
     walkFiles: (root) => walkFiles(fs, root),
   }
   return fs
+}
+
+// One changed name read again into what is kept of a changing tree: what it
+// is now, nothing kept of what it lists, and its place in its directory's
+// listing where that is kept. The answer is what lstat says of it, if
+// anything is there.
+function reread(vfs, changing, path) {
+  let now
+  try { now = vfs.lstat(path) } catch (e) { if (!(e instanceof VfsError)) throw e }
+  changing.types.set(path, now?.type ?? '')
+  changing.children.delete(path)
+  const parent = changing.children.get(parentOf(path))
+  if (parent !== undefined) relisted(parent, path.slice(path.lastIndexOf('/') + 1), now?.type)
+  return now
+}
+
+// A kept listing with `name` taken out of the list it was in and put in the
+// one for what it is now, if anything, in name order; each list touched is a
+// new one, so a listing a caller still holds is the one it was handed.
+function relisted(children, name, type) {
+  const before = children.types.get(name)
+  const listing = { ...children.listing }
+  if (before !== undefined) listing[LISTS[before]] = listing[LISTS[before]].filter((other) => other !== name)
+  children.types.delete(name)
+  if (type === undefined) {
+    children.listing = listing
+    return
+  }
+  const list = listing[LISTS[type]]
+  let at = 0
+  while (at < list.length && compareNames(list[at], name) < 0) at++
+  listing[LISTS[type]] = list.toSpliced(at, 0, name)
+  children.types.set(name, type)
+  children.listing = listing
 }
 
 // Every name the tree holds outside the directories `volatile` says may

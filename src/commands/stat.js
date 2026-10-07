@@ -11,7 +11,7 @@ export function stat(_stdin, tokens, ctx) {
   const { order, positional } = parseArgs(tokens, {
     short: ['L', 't'], long: ['dereference', 'terse'], valueShort: ['c'], valueLong: ['format', 'printf', 'cached'],
   })
-  if (!positional.length) return err('stat: missing operand')
+  if (!positional.length) return err("stat: missing operand\nTry 'stat --help' for more information.")
   // stat describes the name it is given, as `lstat` does; `-L` asks about
   // what a link points at instead.
   const follow = order.some(({ name }) => name === 'L' || name === 'dereference')

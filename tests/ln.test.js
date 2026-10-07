@@ -69,8 +69,8 @@ describe('ln -s makes a symbolic link in the writable overlay', () => {
     await fails(t, 'ln -sn /repo/file dl', "ln: failed to create symbolic link 'dl': File exists\n")
     await fails(t, 'ln -sT /repo/file d', "ln: failed to create symbolic link 'd': File exists\n")
     await check(t, 'ln -sfn /repo/file dl; cat dl', 'plain\n')
-    await fails(t, 'ln -sT x y z', "ln: extra operand 'z'\n")
-    await fails(t, 'ln -sT x', "ln: missing destination file operand after 'x'\n")
+    await fails(t, 'ln -sT x y z', "ln: extra operand 'z'\nTry 'ln --help' for more information.\n")
+    await fails(t, 'ln -sT x', "ln: missing destination file operand after 'x'\nTry 'ln --help' for more information.\n")
     await fails(t, 'ln -s -t d -T x', 'ln: cannot combine --target-directory and --no-target-directory\n')
   })
 
@@ -118,8 +118,8 @@ describe('ln -s makes a symbolic link in the writable overlay', () => {
     await fails(t, 'ln -sT x d/', "ln: failed to create symbolic link 'd/': File exists\n")
     await fails(t, 'ln -sT x /', "ln: failed to create symbolic link '/': File exists\n")
     await fails(t, 'ln -s x gone/', "ln: failed to create symbolic link 'gone/': File exists\n")
-    await fails(t, 'ln -s', 'ln: missing file operand\n')
-    await fails(t, 'ln', 'ln: missing file operand\n')
+    await fails(t, 'ln -s', "ln: missing file operand\nTry 'ln --help' for more information.\n")
+    await fails(t, 'ln', "ln: missing file operand\nTry 'ln --help' for more information.\n")
     await check(t, 'ls /tmp', 'd\ngone\n')
   })
 
@@ -152,7 +152,7 @@ describe('a link ln made is a name the rest of the overlay answers for', () => {
     const t = terminal()
     await check(t, 'ln -s /tmp/out link; echo x > link; cat /tmp/out', 'x\n')
     await check(t, 'mkdir d; ln -s d dl; mkdir -p dl/sub; touch dl/f; cp /repo/file dl/c; find /tmp/d', '/tmp/d\n/tmp/d/c\n/tmp/d/f\n/tmp/d/sub\n')
-    await fails(t, 'mkdir dl', "mkdir: cannot create directory 'dl': File exists\n")
+    await fails(t, 'mkdir dl', "mkdir: cannot create directory ‘dl’: File exists\n")
     await fails(t, 'echo x > dl', 'error: dl: Is a directory\n')
   })
 

@@ -8,6 +8,8 @@ import { quoteName } from '../src/commands/quote-name.js'
 // https://github.com/coreutils/coreutils/blob/v9.11/src/copy.c
 const makeTerminal = () => createTerminal({ a: 'alpha', b: 'beta', 'dir/file': 'nested' }, { mount: '/repo', writable: '/tmp/', cwd: '/repo' })
 const expected = (stdout = '', stderr = '', exitCode = 0) => ({ stdout, stderr, exitCode, cwd: '/repo', notes: [], unsupported: [] })
+// What the coreutils 9.4 GNU/Linux distributions ship says of every -n.
+const NO_CLOBBER = 'cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead\n'
 
 describe('cp does not invent a verbose-output buffering order', () => {
   for (const operator of ['>', '>>']) {
@@ -102,8 +104,8 @@ describe('cp does not invent a verbose-output buffering order', () => {
   it('does not diagnose no-clobber when no verbose output is emitted', async () => {
     const terminal = makeTerminal()
     await terminal.run('printf original >/tmp/out')
-    assert.deepEqual(await terminal.run('cp -nv a /tmp/out >>/tmp/out'), expected())
-    assert.deepEqual(await terminal.run('cp -nv /tmp/out /tmp/out >>/tmp/out'), expected())
+    assert.deepEqual(await terminal.run('cp -nv a /tmp/out >>/tmp/out'), expected('', NO_CLOBBER))
+    assert.deepEqual(await terminal.run('cp -nv /tmp/out /tmp/out >>/tmp/out'), expected('', NO_CLOBBER))
     assert.deepEqual(await terminal.run('cat /tmp/out'), expected('original'))
   })
 
@@ -116,7 +118,7 @@ describe('cp does not invent a verbose-output buffering order', () => {
   it('does not write or fail on closed stdout when no-clobber skips the copy', async () => {
     const terminal = makeTerminal()
     await terminal.run('printf original >/tmp/b')
-    assert.deepEqual(await terminal.run('cp -nv a /tmp/b >&-'), expected())
+    assert.deepEqual(await terminal.run('cp -nv a /tmp/b >&-'), expected('', NO_CLOBBER))
     assert.deepEqual(await terminal.run('cat /tmp/b'), expected('original'))
   })
 
@@ -130,7 +132,7 @@ describe('cp does not invent a verbose-output buffering order', () => {
 
 describe('cp follows operand and failure ordering', () => {
   for (const command of ['cp -T -t /tmp', 'cp -t /tmp -T', 'cp -T --target-directory=/tmp']) {
-    it(command, async () => assert.deepEqual(await makeTerminal().run(command), expected('', 'cp: missing file operand\n', 1)))
+    it(command, async () => assert.deepEqual(await makeTerminal().run(command), expected('', "cp: missing file operand\nTry 'cp --help' for more information.\n", 1)))
   }
 
   it('prints the attempted copy before a missing-parent open failure', async () => {

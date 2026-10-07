@@ -1,10 +1,11 @@
 import { parseArgs } from '../args.js'
-import { dirname, lookup, walkPath } from '../fs.js'
+import { dirname, lookup, pathTooLong, walkPath, writeTarget } from '../fs.js'
 import { err, reason } from '../util.js'
 import { unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { quoteName, quoteShell } from './quote-name.js'
 import { missingPathNote } from '../notes.js'
 import { canonicalize, relativePath } from './realpath.js'
+import { writeRefusal } from '../writable.js'
 
 // `ln -s` makes a symbolic link in the writable overlay, holding the target as
 // it was written: it is resolved from the link's own directory when the link
@@ -17,6 +18,7 @@ import { canonicalize, relativePath } from './realpath.js'
 // name for one inode; the overlay has inodes, but nothing else here reads two
 // names as one file, so it is refused rather than made as a copy.
 const LONG = { symbolic: 's', force: 'f', 'no-dereference': 'n', 'no-target-directory': 'T', verbose: 'v', relative: 'r', logical: 'L', physical: 'P' }
+const TRY = "Try 'ln --help' for more information."
 
 export function ln(_stdin, tokens, ctx) {
   const parsed = parseArgs(tokens, { short: Object.values(LONG), long: Object.keys(LONG), valueShort: ['t'], valueLong: ['target-directory'] })
@@ -26,7 +28,7 @@ export function ln(_stdin, tokens, ctx) {
   const files = parsed.positional
   if (directory !== null && opts.noTargetDirectory) return err('ln: cannot combine --target-directory and --no-target-directory')
   if (opts.relative && !has('s')) return err('ln: cannot do --relative without --symbolic')
-  if (files.length === 0) return err('ln: missing file operand')
+  if (files.length === 0) return err(`ln: missing file operand\n${TRY}`)
   if (!has('s')) return unsupported('feature', 'ln', 'hard link', `ln: hard links are not supported: ${quoteName(files[0], ctx)} (ln -s makes a symbolic one)`)
   const state = { ctx, events: [], stdout: '', stderr: '' }
   try {
@@ -57,7 +59,7 @@ function destinations(files, directory, opts, ctx) {
     return files.map((target) => inside(directory, target))
   }
   if (files.length === 1) {
-    if (opts.noTargetDirectory) return { error: err(`ln: missing destination file operand after ${shown(files[0])}`) }
+    if (opts.noTargetDirectory) return { error: err(`ln: missing destination file operand after ${shown(files[0])}\n${TRY}`) }
     return [inside('.', files[0])]
   }
   // Two operands name a link outright when the second is not a directory —
@@ -66,7 +68,7 @@ function destinations(files, directory, opts, ctx) {
     const found = lookup(ctx.cwd, files[1], ctx.fs, { follow: !opts.noDereference })
     if (opts.noTargetDirectory || found.error !== null || !ctx.fs.isDir(found.path)) return [[files[0], files[1]]]
   }
-  if (opts.noTargetDirectory) return { error: err(`ln: extra operand ${shown(files[2])}`) }
+  if (opts.noTargetDirectory) return { error: err(`ln: extra operand ${shown(files[2])}\n${TRY}`) }
   const last = files.at(-1)
   const found = lookup(ctx.cwd, last, ctx.fs)
   const error = found.error ?? (ctx.fs.isDir(found.path) ? null : 'Not a directory')
@@ -90,11 +92,16 @@ function link(target, dest, opts, state, nameless = false) {
   const { ctx } = state
   const shown = quoteName(dest, ctx)
   const source = opts.relative ? relativeTarget(ctx, target, dest) : target
+  // GNU names both halves of a link it could not make where the target may
+  // be why — an empty one, or one too long — and only the name otherwise.
   const fail = (message) => report(state, `ln: failed to create symbolic link ${shown}${message}\n`)
+  const failed = (error) => fail(`${error === 'File name too long' ? ` -> ${quoteName(source, ctx)}` : ''}: ${error}`)
   // symlink(2) reads the target before the name, and an empty one is a name
-  // it cannot make; GNU shows both halves then. An empty name is not there
-  // to make either, -f or not, since -f only replaces what is there.
+  // it cannot make, as one too long to be handed over is not one at all. An
+  // empty name is not there to make either, -f or not, since -f only
+  // replaces what is there.
   if (source === '') return fail(` -> ${quoteName(source, ctx)}: No such file or directory`)
+  if (pathTooLong(source)) return failed('File name too long')
   if (nameless) return fail(': No such file or directory')
   // -f replaces whatever holds the name, short of a directory.
   if (opts.force) {
@@ -102,24 +109,24 @@ function link(target, dest, opts, state, nameless = false) {
     if (there.error === null) {
       if (ctx.fs.isDir(there.path)) return report(state, `ln: ${quoteShell(dest, ctx)}: cannot overwrite directory\n`)
       try {
-        if (!ctx.fs.removeWritable?.(ctx.cwd, dest)) return fail(': Read-only file system')
+        if (!ctx.fs.removeWritable?.(ctx.cwd, dest)) return failed(writeRefusal(ctx, dirname(there.path)))
       } catch (e) {
         if (unsupportedNote(e)) throw e
-        return fail(`: ${fsReason(e, dest)}`)
+        return failed(fsReason(e, dest))
       }
     }
   }
   const invalid = nameError(ctx, dest)
   if (invalid) {
     missingPathNote(ctx, 'ln', dest, invalid)
-    return fail(`: ${invalid}`)
+    return failed(invalid)
   }
   try {
-    if (!ctx.fs.makeWritableLink?.(ctx.cwd, dest, source)) return fail(': Read-only file system')
+    if (!ctx.fs.makeWritableLink?.(ctx.cwd, dest, source)) return failed(writeRefusal(ctx, dirname(writeTarget(ctx.fs, ctx.cwd, dest, false))))
   } catch (e) {
     if (unsupportedNote(e)) throw e
     missingPathNote(ctx, 'ln', e?.path, e?.fsError)
-    return fail(`: ${fsReason(e, dest)}`)
+    return failed(fsReason(e, dest))
   }
   if (opts.verbose) report(state, `${shown} -> ${quoteName(source, ctx)}\n`, 1)
 }
