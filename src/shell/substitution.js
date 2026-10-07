@@ -4,18 +4,28 @@ export const MAX_SUBSTITUTION_DEPTH = 64
 
 // What bash says when the input ends inside a quote or a substitution: the
 // character it was still looking for.
-export const unmatched = (closer) => Object.assign(new Error(`unexpected EOF while looking for matching \`${closer}'`), { kind: 'unmatched' })
+export const unmatched = (closer) => {
+  const message = `unexpected EOF while looking for matching \`${closer}'`
+  return Object.assign(new Error(message), { kind: 'unmatched', messages: [message] })
+}
 
-// Bash's own words for input it cannot read, as distinct from a refusal. A
-// `kind` says which of its forms an error is, for a reader that reports one
-// form differently: `near` for a token the grammar stopped at, `end` for the
-// end of the input.
-export const syntaxError = (message, kind) => Object.assign(new Error(message), { grammar: true, kind })
-export const unexpectedToken = (label) => syntaxError(`syntax error near unexpected token \`${label}'`, 'near')
+// Bash's own words for input it cannot read, as distinct from a refusal: one
+// message, or one from each of its readers that the error stopped, which the
+// shell signs one by one. A `kind` says which of its forms an error is, for a
+// reader that reports one form differently: `near` for a token the grammar
+// stopped at, `end` for the end of the input.
+export const syntaxError = (messages, kind) => {
+  const said = [messages].flat()
+  return Object.assign(new Error(said.join('\n')), { grammar: true, kind, messages: said })
+}
+// The error keeps the token, which the shell names as bash does when it
+// prints it: spelt as an ANSI-C string where it would not print.
+export const nearMessage = (label) => `syntax error near unexpected token \`${label}'`
+export const unexpectedToken = (label) => Object.assign(syntaxError(nearMessage(label), 'near'), { token: label })
 
 // A grammar error inside `$( … )` stops the enclosing reader too, which adds
 // a plain `syntax error` of its own for each level it is nested in.
-export const nestedSyntaxError = (error) => (error?.grammar ? syntaxError(`${error.message}\nsyntax error`) : error)
+export const nestedSyntaxError = (error) => (error?.grammar ? Object.assign(syntaxError([...error.messages, 'syntax error']), { token: error.token }) : error)
 
 // Backticks quote differently from `$( )`: a backslash escapes only `$`, a
 // backslash, a newline and a backtick, and every other backslash reaches the

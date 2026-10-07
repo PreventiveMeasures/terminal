@@ -1,11 +1,11 @@
 import { expandRedirect, expandScalar, expandWords } from './expand.js'
 import { refusedWrite } from './parse.js'
-import { BindingMap } from './bindings.js'
 import { gateBlame, gateTracker, missingPathNote } from '../notes.js'
 import { UnsupportedError, diagnostic, shellMessage, unsupported, unsupportedNote } from '../unsupported.js'
 import { decodeUtf8Maybe, encodeUtf8, err, joinBytes, reason } from '../util.js'
 import { appendOutput, emptyOutput, routeOutput } from './output.js'
-import { isolated, withState } from './state.js'
+import { BindingMap, isolated, withState } from './state.js'
+import { bashMessages } from './printable.js'
 import { runBlock } from './blocks.js'
 import { heredocWord, readDirectoryInput, readInput } from './stdin.js'
 
@@ -46,7 +46,7 @@ export async function runSteps(steps, ctx, stream, condition = false) {
   // there; only a chain run for its effects has anything to report.
   let blame = null, gate = null
   for (const [index, step] of steps.entries()) {
-    if (step.warnings) appendOutput(result, routeOutput({ ...emptyOutput(shellMessage(step.warnings)), exitCode: result.exitCode, ignored: result.ignored }, { fds: ctx.outputFds }, ctx))
+    if (step.warnings) appendOutput(result, routeOutput({ ...emptyOutput(step.warnings.map(shellMessage).join('')), exitCode: result.exitCode, ignored: result.ignored }, { fds: ctx.outputFds }, ctx))
     if (step.gate === 'and' && result.exitCode !== 0) { (gate ??= gateTracker()).skip(condition ? null : blame, result.exitCode); continue }
     if (step.gate === 'or' && result.exitCode === 0) continue
     gate?.flush(ctx.notes)
@@ -305,11 +305,15 @@ async function resolveRedirs(stage, ctx, stdin, stdinFile, initialFds) {
 // exits 1 instead. What bash itself says — a missing file, an ambiguous
 // redirect, a parameter it will not expand — is said in its words; only a
 // refusal says that it is one.
+// How the shell prints an error that reached it: diagnostic(), with the
+// token a syntax error stopped at named as bash names it.
+export const shellDiagnostic = (e, message) => diagnostic(e, message, bashMessages(e, message))
+
 function shellFailure(ctx, e) {
   missingPathNote(ctx, 'shell', e?.path, e?.fsError)
   const note = unsupportedNote(e)
   if (note) ctx.unsupported.add(note)
-  return { ...err(diagnostic(e, reason(e)), e?.fatal && !ctx.subshell ? 127 : 1), ...(e?.halt ? { halt: true } : {}) }
+  return { ...err(shellDiagnostic(e, reason(e)), e?.fatal && !ctx.subshell ? 127 : 1), ...(e?.halt ? { halt: true } : {}) }
 }
 
 async function shellResult(ctx, fn) {

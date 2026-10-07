@@ -87,7 +87,7 @@ function scan(st, incremental) {
 
 function newScanner(line, options = {}) {
   return {
-    line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoted: false, quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2, start: null,
+    line, i: 0, tokens: [], cur: '', mask: '', empty: [], quoted: false, quoteStart: 0, quote: null, heredocs: [], lastParenAt: -2, start: null, rewrites: [],
     readExpansion: (source, at, depth = 0, quoted = false) => readExpansion(source, at, depth, quoted, options),
     readProcess: (source, at) => readProcessSubstitution(source, at, options),
   }
@@ -160,9 +160,10 @@ function put(st, ch, m, quoted = m !== '0') {
 function flush(st) {
   if (st.cur !== '' || st.empty.length > 0) {
     const quoted = st.empty.length > 0 || st.quoted
-    // `raw` is the word as written, quotes and all, which is how a syntax
-    // error names it.
-    const raw = st.line.slice(st.start ?? st.i, st.i).replaceAll('\\\n', '')
+    // `raw` is the word as bash's reader holds it, quotes and all, which is
+    // how a syntax error names it: as written, but for what that reader has
+    // already rewritten.
+    const raw = rawWord(st)
     const token = { kind: 'word', value: st.cur, mask: /[12]/u.test(st.mask) || quoted ? st.mask : null, quoted, raw, ...(st.empty.length ? { empty: st.empty } : {}) }
     st.tokens.push(token)
     // A heredoc delimiter remains a word token and also guides body collection.
@@ -174,7 +175,25 @@ function flush(st) {
   st.empty = []
   st.quoted = false
   st.start = null
+  st.rewrites = []
 }
+
+// Bash's reader decodes `$'…'` as it reads it, holding the text single-quoted
+// — and, inside that, CTLESC ahead of the two bytes its internal quoting
+// uses, \001 and \177 — and reads `$"…"` as the string it is in the C
+// locale. Backslash-newline is gone before any of it.
+function rawWord(st) {
+  let at = st.start ?? st.i, raw = ''
+  for (const { from, to, text } of st.rewrites) {
+    raw += st.line.slice(at, from) + text
+    at = to
+  }
+  return (raw + st.line.slice(at, st.i)).replaceAll('\\\n', '')
+}
+
+const CTLESC = '\u0001'
+const escaped = (c) => (c === CTLESC || c === '\u007F' ? CTLESC + c : c)
+const singleQuoted = (text) => `'${[...text].map(escaped).join('').replaceAll("'", "'\\''")}'`
 
 function emit(st, token) {
   if (token.kind === 'paren_open') {
@@ -223,10 +242,16 @@ function readDollar(st) {
     }
     if (r.text === '') st.empty.push(st.cur.length)
     put(st, r.text, '1')
+    st.rewrites.push({ from: st.i, to: r.end, text: singleQuoted(r.text) })
     st.i = r.end
     return
   }
-  if ((m === '0' || (st.fragmentQuoted && !st.quote)) && n === '"') { openQuote(st, '"'); st.i += 2; return }
+  if ((m === '0' || (st.fragmentQuoted && !st.quote)) && n === '"') {
+    openQuote(st, '"')
+    st.rewrites.push({ from: st.i, to: st.i + 1, text: '' })
+    st.i += 2
+    return
+  }
   const ref = st.readExpansion(line, st.i, 0, m === '2')
   if (!ref) { put(st, '$', '1'); st.i++; return }
   if (ref.command !== undefined || ref.parameter !== undefined || ref.arithmetic !== undefined) {

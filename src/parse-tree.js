@@ -66,7 +66,7 @@ function nodeOf(step, op) {
     ...(op ? { op } : {}),
     ...(step.negate ? { negate: true } : {}),
     ...(step.background ? { background: true } : {}),
-    ...(step.warnings ? { warnings: step.warnings } : {}),
+    ...(step.warnings ? { warnings: step.warnings.join('') } : {}),
     ...rest,
   }
 }

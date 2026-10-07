@@ -7,7 +7,7 @@ import { cat } from './commands/cat.js'
 import { sed } from './commands/sed.js'
 import { bracket, test } from './commands/test.js'
 import { markUnsupported, shellMessage, unsupported, unsupportedNote } from './unsupported.js'
-import { SHELL_BUILTINS, SHELL_GAPS, commandPathFailure } from './shell/builtins.js'
+import { SHELL_BUILTINS, SHELL_GAPS, commandFailure } from './shell/builtins.js'
 import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './commands/text.js'
 import { quietSearch } from './commands/grep.js'
 
@@ -149,7 +149,6 @@ export const defaultRegistry = (network) => {
 export function unknownCommand(name, reg, external = false, ctx = null) {
   const gap = SHELL_GAPS.get(name)
   if (gap !== undefined) return unsupported('feature', name, name, `${name}: ${gap}`, 127)
-  const [why, code] = name.includes('/') && ctx ? commandPathFailure(name, ctx) : ['command not found', 127]
-  const missing = `${name}: ${why}`
+  const [missing, code] = commandFailure(name, ctx)
   return unsupported('command', name, name, `${external ? missing : shellMessage(missing)}. Available: ${reg.known}`, code)
 }

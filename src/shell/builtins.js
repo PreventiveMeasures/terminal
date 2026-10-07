@@ -8,15 +8,18 @@ import { NAME_RE } from './lex.js'
 import { boundValue, variableSet } from './variables.js'
 import { INT64_MAX, INT64_MIN } from '../numeric.js'
 import { lookup } from '../fs.js'
+import { printableName } from './printable.js'
 
 // Bash accepts signed 64-bit control counts. Exit status wraps modulo 256;
 // malformed exit numbers take precedence over excess-argument errors.
 // Subshell/pipeline boundaries consume halt without stopping the outer shell.
+// Bash's legal_number: strtoimax skips any leading space, newline included,
+// and only blanks may follow the digits. A message names the word as it was.
 function controlNumber(value) {
-  const arg = value.replace(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/gu, '')
-  const parsed = /^[+-]?\d+$/u.test(arg) ? BigInt(arg) : null
+  const digits = /^[ \t\n\r\v\f]*([+-]?\d+)[ \t]*$/u.exec(value)?.[1]
+  const parsed = digits === undefined ? null : BigInt(digits)
   const n = parsed !== null && parsed >= INT64_MIN && parsed <= INT64_MAX ? parsed : null
-  return { arg, n }
+  return { arg: value, n }
 }
 
 const halt = (result) => ({ ...result, halt: true })
@@ -117,13 +120,16 @@ export const SHELL_BUILTINS = {
   exit, break: loopControl('break'), continue: loopControl('continue'), export: exportCmd, set: setOptions, unset,
 }
 
-// Why the shell could not run a path, as bash says it: a path is run rather
-// than looked for, so the answer is what is there — nothing, a directory, or
-// a file, none of which is executable here.
-export function commandPathFailure(name, ctx) {
+// Why the shell could not run a name, as bash says it, and the status: a
+// bare name was not found, and is spelt as an ANSI-C string where it would
+// not print; a path is run rather than looked for, so the answer is what is
+// there — nothing, a directory, or a file, none of which is executable here —
+// and the path is named as it was.
+export function commandFailure(name, ctx) {
+  if (!name.includes('/') || !ctx) return [`${printableName(name)}: command not found`, 127]
   const { path, error } = lookup(ctx.cwd, name, ctx.fs)
-  if (error) return [error, 127]
-  return ctx.fs.isDir(path) ? ['Is a directory', 126] : ['Permission denied', 126]
+  if (error) return [`${name}: ${error}`, 127]
+  return [`${name}: ${ctx.fs.isDir(path) ? 'Is a directory' : 'Permission denied'}`, 126]
 }
 
 // Diagnose unavailable shell machinery after checking registered overrides.

@@ -32,9 +32,16 @@ for the other — and, as an interactive bash does, with no `line N:`: a
 syntax error, `terminal: cd: nope: No such file or directory`, `terminal: x:
 parameter not set`, `terminal: $f: ambiguous redirect`, `terminal: frobnicate:
 command not found`, and `terminal: warning: here-document at line N delimited
-by end-of-file`, counted in the line handed to `run()`. What a command prints
-is that command's own, and bash adds nothing to it: `cat: x: No such file or
-directory`. `printf`, `test` and `[`, `echo` and `pwd` answer as the GNU
+by end-of-file`, counted in the line handed to `run()`. Each message is
+signed once, and a line break in the name or text it carries stays the data
+it is, as bash leaves it; where bash says several things at once — a `[[`
+reader and the grammar after it, a `syntax error` for each `$( … )` an error
+stops — each is signed. A `cd` operand, a name not found as a command and
+the token a syntax error stops at are spelt as bash spells a name that would
+not print, as an ANSI-C string — ``terminal: cd: $'a\nb': No such file or
+directory`` — and are as they are where every character prints. What a
+command prints is that command's own, and bash adds nothing to it: `cat: x:
+No such file or directory`. `printf`, `test` and `[`, `echo` and `pwd` answer as the GNU
 programs of those names do, unsigned, until they have forms of their own as
 bash's builtins. Only a refusal says `error: `. `${x?}` ends the line with
 status 127, which is what `bash -c` reports for a shell that it ended, and 1

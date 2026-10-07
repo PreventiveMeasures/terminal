@@ -128,7 +128,7 @@ function buildSteps(p, end) {
     if (t.kind === 'redir') {
       // Bash reads a complete top-level line before executing its commands.
       // Warnings precede that unit even when its gated command is skipped.
-      if (t.warning) p.unit.warnings = (p.unit.warnings ?? '') + t.warning
+      if (t.warning) (p.unit.warnings ??= []).push(t.warning)
       if (stage.define) throw new UnsupportedError('feature', 'function', `\`${stage.define.name}()\` with a redirect of its own is not supported`)
       const redir = parseRedirect(p)
       if (redir) stage.redirs.push(redir)

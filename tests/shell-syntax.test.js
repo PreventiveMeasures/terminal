@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { createTerminal } from '@preventive/terminal'
+import { parse } from '@preventive/terminal/parse.js'
 
 const SOURCES = {
   'a.txt': 'x y z\nhello world\n',
@@ -959,5 +960,89 @@ describe('shell syntax — builtins and expansions as bash 5.2 answers them', ()
   it('keeps bash 5.2 matching nothing with `[!]…]` in a fixed-size replacement', async () => {
     assert.equal(await out('x=a]b; echo ${x/[!]]/X} ${x//[^]]/X} ${x/#[!]]/X} ${x/a[!]]/X}'), 'a]b a]b a]b a]b\n')
     assert.equal(await out('x=abc; echo ${x/[!]]*/X} ${x/*[!]]/X} ${x/[!\\]]/X} ${x#[!]]}'), 'X X Xbc bc\n')
+  })
+})
+
+// An interactive bash signs each message of its own once, and a line break in
+// the data a message carries is that data: `bash: x⏎y: No such file or
+// directory`. Where it says several things at once — a `[[` reader and its
+// grammar, each `$( … )` reader an error stops, a backtick's line and its
+// source — each is signed. Recorded from bash 5.2.21 on a terminal.
+describe('the shell signs each of its messages once', () => {
+  const run = (line) => createTerminal({ 'a.txt': '' }, { mount: '/repo', writable: '/tmp/' }).run(line)
+  for (const [line, stderr, stdout = ''] of [
+    ["cat < $'x\\ny'", 'terminal: x\ny: No such file or directory\n'],
+    ["cat < $'x\\ry'", 'terminal: x\ry: No such file or directory\n'],
+    ["echo ${x?$'one\\ntwo'}", 'terminal: x: one\ntwo\n'],
+    ["echo hi > $'/tmp/no\\ndir/x'", 'terminal: /tmp/no\ndir/x: No such file or directory\n'],
+    ["exit $'1\\n2'", 'terminal: exit: 1\n2: numeric argument required\n'],
+    ["for i in 1; do break $'x\\ny'; done", 'terminal: break: x\ny: numeric argument required\n'],
+    // Only blanks may follow the digits, and the word is named as it was.
+    ["for i in 1; do break $'1\\n'; done", 'terminal: break: 1\n: numeric argument required\n'],
+    ["export $'a\\nb=1'", "terminal: export: `a\nb=1': not a valid identifier\n"],
+    ["for $'a\\nb' in 1; do :; done", "terminal: `'a\nb'': not a valid identifier\n"],
+    ['[[ a', "terminal: unexpected token `newline', conditional binary operator expected\nterminal: syntax error near `a'\n"],
+    ['echo $(echo $(echo ;;))', "terminal: syntax error near unexpected token `;;'\nterminal: syntax error\nterminal: syntax error\n"],
+    ['echo `echo (`', "terminal: command substitution: line 1: syntax error near unexpected token `newline'\nterminal: command substitution: line 1: `echo ('\n", '\n'],
+    ['cat <<A; cat <<B', "terminal: warning: here-document at line 1 delimited by end-of-file (wanted `A')\nterminal: warning: here-document at line 1 delimited by end-of-file (wanted `B')\n"],
+  ]) {
+    it(line, async () => {
+      const r = await run(line)
+      assert.deepEqual([r.stdout, r.stderr], [stdout, stderr])
+      assert.deepEqual(r.unsupported, [])
+    })
+  }
+
+  it('reads blanks around a loop count as bash does', async () => {
+    assert.equal((await run("for i in 1 2; do break ' 1 '; done; echo $?")).stdout, '0\n')
+    assert.equal((await run("for i in 1 2; do break $'\\t1'; done; echo $?")).stdout, '0\n')
+  })
+})
+
+// Bash names a `cd` operand, a name it cannot find, and the token a syntax
+// error stops at as it would print them: as they are where every character
+// prints, and otherwise as an ANSI-C string (printable_filename, ansic_quote),
+// what prints being glibc's C.UTF-8 `print` class. A redirect target, a path
+// it runs and a word another builtin rejects are named as they are.
+describe('the shell names an unprintable name as bash does', () => {
+  const run = (line) => createTerminal({ 'a.txt': '' }).run(line)
+  for (const [line, stderr] of [
+    ["cd $'a\\nb'", "terminal: cd: $'a\\nb': No such file or directory\n"],
+    ["cd $'a\\rb'", "terminal: cd: $'a\\rb': No such file or directory\n"],
+    ["cd $'a\\tb'", "terminal: cd: $'a\\tb': No such file or directory\n"],
+    ["cd $'\\e'", "terminal: cd: $'\\E': No such file or directory\n"],
+    ["cd $'a\\x01b'", "terminal: cd: $'a\\001b': No such file or directory\n"],
+    ["cd $'a\\x7fb'", "terminal: cd: $'a\\177b': No such file or directory\n"],
+    ["cd $'it\\'s\\n'", "terminal: cd: $'it\\'s\\n': No such file or directory\n"],
+    ["cd $'\\u0085'", "terminal: cd: $'\\302\\205': No such file or directory\n"],
+    ["cd $'\\u2028'", "terminal: cd: $'\\342\\200\\250': No such file or directory\n"],
+    ["cd a.txt/$'x\\ny'", "terminal: cd: $'a.txt/x\\ny': Not a directory\n"],
+    ["OLDPWD=$'a\\nb'; cd -", "terminal: cd: $'a\\nb': No such file or directory\n"],
+    // What prints is named as it is, a backslash and a quote included.
+    ["cd $'a\\\\b'", 'terminal: cd: a\\b: No such file or directory\n'],
+    ["cd \"it's\"", "terminal: cd: it's: No such file or directory\n"],
+    ['cd é', 'terminal: cd: é: No such file or directory\n'],
+    ["cd $'\\u200b'", 'terminal: cd: \u200B: No such file or directory\n'],
+    ["{ :; } $'a\\nb'", "terminal: syntax error near unexpected token `$'\\'a\\nb\\'''\n"],
+    ["{ :; } $'it\\'s'", "terminal: syntax error near unexpected token `'it'\\''s''\n"],
+    ["{ :; } x$'\\t'y", "terminal: syntax error near unexpected token `$'x\\'\\t\\'y''\n"],
+    ["{ :; } $'\\001'", "terminal: syntax error near unexpected token `$'\\'\\001\\001\\'''\n"],
+    ["{ :; } $'\\177'", "terminal: syntax error near unexpected token `$'\\'\\001\\177\\'''\n"],
+    ['{ :; } $"ab"', "terminal: syntax error near unexpected token `\"ab\"'\n"],
+    ["{ :; } \"a\nb\"", "terminal: syntax error near unexpected token `$'\"a\\nb\"''\n"],
+  ]) {
+    it(line, async () => {
+      assert.equal((await run(line)).stderr, stderr)
+    })
+  }
+
+  it('spells a command it cannot find, and names a path it cannot run as it is', async () => {
+    assert.match((await run("$'a\\nb'")).stderr, /^terminal: \$'a\\nb': command not found\. /u)
+    assert.match((await run("$'a\\001b'")).stderr, /^terminal: \$'a\\001b': command not found\. /u)
+    assert.match((await run("./$'a\\nb'")).stderr, /^terminal: \.\/a\nb: No such file or directory\. /u)
+  })
+
+  it('leaves the token as it was read to a reader of the parse', () => {
+    assert.equal(parse("{ :; } $'a\\nb'").error, "syntax error near unexpected token `'a\nb''")
   })
 })

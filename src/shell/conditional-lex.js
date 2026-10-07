@@ -77,7 +77,7 @@ const bare = (token, value) => token.kind === 'word' && !token.quoted && token.v
 // token before where that reader stopped, read back from the line itself.
 function syntax(p, message) {
   const near = `syntax error near \`${nearText(p.line, p.i)}'`
-  throw syntaxError(message ? `${message}\n${near}` : near, 'near')
+  throw syntaxError(message ? [message, near] : near, 'near')
 }
 
 // The token as bash's conditional reader names it.
@@ -104,7 +104,7 @@ function nearText(line, at) {
 function readOperand(p, kind) {
   try { advance(p) } catch (error) {
     if (!error.quoteEof) throw error
-    throw syntaxError(`${unmatched(error.quoteEof).message}\nunexpected argument to conditional ${kind} operator`)
+    throw syntaxError([unmatched(error.quoteEof).message, `unexpected argument to conditional ${kind} operator`])
   }
   if (p.token.kind !== 'word') syntax(p, `unexpected argument \`${tokenText(p.token)}' to conditional ${kind} operator`)
   return p.token
@@ -136,7 +136,7 @@ function nextToken(p) {
     return bare(word, ']]') ? { kind: 'end' } : word
   }
   if (!p.ended) { p.ended = true; return { kind: 'newline' } }
-  throw syntaxError("unexpected EOF while looking for `]]'\nsyntax error: unexpected end of file")
+  throw syntaxError(["unexpected EOF while looking for `]]'", 'syntax error: unexpected end of file'])
 }
 
 function readWord(p) {

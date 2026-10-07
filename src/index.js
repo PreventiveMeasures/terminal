@@ -10,12 +10,12 @@ import { forkSettings, mountSources } from './mount.js'
 import { parseUnits } from './shell/parse.js'
 import { createRegistry, defaultRegistry, unknownCommand } from './registry.js'
 import { networkOption } from './net.js'
-import { createUnsupportedFeed, diagnostic, unsupported, unsupportedNote } from './unsupported.js'
+import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
 import { discardedNotes, err, missingPathNote, reason } from './util.js'
 import { complete } from './complete.js'
 import { commandSubstitution } from './shell/capture.js'
 import { BindingMap, isolated, withState } from './shell/state.js'
-import { commandWriteError, createIoGuard, routeExternalOutput, runSteps } from './shell/run.js'
+import { commandWriteError, createIoGuard, routeExternalOutput, runSteps, shellDiagnostic } from './shell/run.js'
 
 export function createTerminal(sources, opts = {}) {
   const { fs, cwd, home, mount, writable, locale } = mountSources(sources, opts)
@@ -176,7 +176,7 @@ function safeRun(line, ctx) {
       const note = unsupportedNote(e)
       if (note) feed.add(note)
       ctx.lastExit = e.exitCode ?? (note ? 1 : 2)
-      result.stderr += `${diagnostic(e, e.message)}\n`
+      result.stderr += `${shellDiagnostic(e, e.message)}\n`
       result.exitCode = ctx.lastExit
     }
     return finish(result, ctx, feed)

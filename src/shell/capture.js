@@ -4,18 +4,20 @@ import { isolated, withState } from './state.js'
 import { err } from '../util.js'
 import { parseLine } from './parse.js'
 import { MAX_SUBSTITUTION_DEPTH } from './substitution.js'
+import { bashMessages } from './printable.js'
 
 // A backtick body is read as a script is, so its syntax error says where in
 // the body it is, and one the grammar found shows the line it found it on.
 // The end of the input is the line past the last, and a line's own number is
 // only known here for a body of one line.
-function backtickError(command, { kind, message }) {
+function backtickError(command, e) {
+  const { kind, message } = e
   if (command.includes('\n')) return null
   const where = (line) => `command substitution: line ${line}: `
-  if (kind === 'end') return where(2) + message
-  if (kind === 'unmatched') return where(1) + message
+  if (kind === 'end') return [where(2) + message]
+  if (kind === 'unmatched') return [where(1) + message]
   if (kind !== 'near') return null
-  return [...message.split('\n'), `\`${command}'`].map((line) => where(1) + line).join('\n')
+  return [...bashMessages(e), `\`${command}'`].map((said) => where(1) + said)
 }
 
 export async function commandSubstitution(command, ctx, runSteps, backtick = false) {
@@ -38,7 +40,7 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
         // form keeps failing. Heredoc bodies are parsed during expansion,
         // where Bash's recovery depends on builtin versus external scopes.
         const said = backtick ? backtickError(command, e) : null
-        if (said) return err(shellMessage(said), 2)
+        if (said) return err(said.map(shellMessage).join('\n'), 2)
         throw new UnsupportedError('feature', 'command substitution syntax', `runtime command substitution syntax errors are not supported: ${e.message}`)
       }
       ctx.unsupported.add(note)
