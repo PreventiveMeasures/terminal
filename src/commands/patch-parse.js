@@ -1,6 +1,9 @@
 import { UnsupportedError } from '../unsupported.js'
 import { lineRecords } from '../util.js'
-import { parseContextHunk, parseNormalHunk, parseUnifiedHunk } from './patch-hunks.js'
+import { lineReader, parseNormalHunk, parseUnifiedHunk, restartAt } from './patch-hunks.js'
+import { parseContextHunk } from './patch-context.js'
+
+export { restartAt } from './patch-hunks.js'
 
 // Reading a patch the way GNU patch's pch.c does: scan forward for the
 // headers that name a file, until a hunk of some format begins; then the
@@ -16,14 +19,22 @@ export class PatchFatal extends Error {
 
 const refuse = (detail, message) => { throw new UnsupportedError('feature', detail, message) }
 
-export function createScanner(text) {
+// The patch as lines, and what reading it carries from one hunk to the next
+// (see lineReader in ./patch-hunks.js). A last line without its newline is
+// kept, with one, for the text a missing file's message shows; `end` is
+// where the lines patch can read stop, short of it. `say` is where patch's
+// own remarks about the input go, between the lines of its output.
+export function createScanner(text, say, loose) {
   const lines = lineRecords(text)
-  // A last line without its newline still reads as a line.
-  if (lines.length && !lines.at(-1).endsWith('\n')) lines[lines.length - 1] += '\n'
-  return { lines, pos: 0, base: 0, empty: text === '' }
+  const incomplete = lines.length > 0 && !lines.at(-1).endsWith('\n')
+  if (incomplete) lines[lines.length - 1] += '\n'
+  return {
+    lines, pos: 0, base: 0, empty: text === '', end: lines.length - (incomplete ? 1 : 0), incomplete, markers: [],
+    say, loose, hunkmax: 125, prefixContext: 0, hunkBeg: 0, newStyle: false, skew: 0,
+  }
 }
 
-const NORMAL_COMMAND = /^\d+(?:,\d+)?[acd]\d+(?:,\d+)?[ \t]*\r?\n$/u
+const NORMAL_COMMAND = /^\d[\d,]*[acd][\d,]*[ \t]*\r?\n$/u
 const ED_COMMAND = /^(?:\d+(?:,\d+)?)?(?:[acdi]|s\/\.\/\/)[ \t]*\n$/u
 const HEX = /^[0-9a-fA-F]+/u
 
@@ -32,48 +43,63 @@ const HEX = /^[0-9a-fA-F]+/u
 // a unified hunk starts; a context hunk uses them as they are. `/dev/null`
 // leaves the slot alone and marks the side nonexistent, which is how a git
 // header's name survives it.
+// What the headers of a patch say, before any has said anything.
+export const blankHeader = () => ({ names: { old: null, new: null, index: null }, stamps: { old: -1, new: -1 }, timestrs: { old: null, new: null },
+  says: [0, 0], git: false, rename: [false, false], copy: [false, false], extended: false })
+
 export function scanHeaders(scanner, { needHeader, strip, format }) {
-  const { lines } = scanner
-  const h = { names: { old: null, new: null, index: null }, stamps: { old: -1, new: -1 }, timestrs: { old: null, new: null },
-    says: [0, 0], git: false, rename: [false, false], copy: [false, false], extended: false }
+  const h = blankHeader()
   let need = needHeader && format !== 'normal' && format !== 'ed'
-  let edCommand = false, firstCommand = -1, lastCommand = false, starsLast = false
-  for (let i = scanner.pos; ; i++) {
-    if (i >= lines.length) {
+  // What the last line was carries over as pch.c keeps it: a line is taken
+  // for a command only where it starts like one, and every other line leaves
+  // the answer as it was; the stars are looked at only once a header has
+  // been seen. A hunk starts where the read that found it did, comments it
+  // passed over and all.
+  let command = false, edCommand = false, firstCommand = -1, starsThis = false
+  const reader = lineReader(scanner)
+  let start = reader.at
+  for (;;) {
+    const lastCommand = command, previous = start, starsLast = starsThis
+    start = reader.at
+    const s = reader.next()
+    if (s === null) {
       // Nothing but ed commands, deletes most likely: GNU would run ed.
       if (edCommand) refuse('ed script', 'ed scripts are not supported')
-      if (h.extended) return { ...h, type: 'unified', start: i, hunkLine: i, empty: true }
+      if (h.extended) return { ...h, type: 'unified', start, sline: reader.line, empty: true }
       return null
     }
-    const s = lines[i]
+    // A git header with no hunks under it ends at the next one, which is
+    // read again, its names its own, as the start of the next patch.
+    if (h.extended && s.startsWith('diff --git ')) return { ...h, type: 'unified', start, sline: reader.line, empty: true }
     // GNU reads past indentation when looking for a command line.
     const bare = s.replace(/^[ \tX]+/u, '')
-    const isCommand = /^\d/u.test(bare) && NORMAL_COMMAND.test(bare)
-    if (!need && firstCommand < 0 && (ED_COMMAND.test(bare) || isCommand)) { firstCommand = i; edCommand = ED_COMMAND.test(bare) }
+    if (/^\d[\d,]*[acd]/u.test(bare)) command = NORMAL_COMMAND.test(bare)
+    if (!need && firstCommand < 0 && (ED_COMMAND.test(bare) || command)) { firstCommand = start; edCommand = ED_COMMAND.test(bare) }
     const header = headerLine(s, h, strip, starsLast)
     if (header === 'binary') refuse('git binary patch', 'git binary diffs are not supported')
     if (header === 'prereq') refuse('Prereq', 'Prereq: lines are not supported')
-    if (header === 'git' && h.extended) return { ...h, type: 'unified', start: i, hunkLine: i, empty: true }
     if (header) need = false
-    const starsThis = s.startsWith('********')
     // GNU reads a hunk through its indentation, announcing the depth.
     if (/^[ \t]+(?:@@ -\d|\*{8})/u.test(s)) refuse('indented patch', 'indented patches are not supported')
-    if (!need) {
-      if (s.endsWith('\r\n') && (s.startsWith('@@ -') || starsLast)) refuse('CRLF patch', 'patches with CRLF line endings are not supported')
-      if ((format === null || format === 'ed') && firstCommand >= 0 && s === '.\n') refuse('ed script', 'ed scripts are not supported')
-      if ((format === null || format === 'unified') && s.startsWith('@@ -')) return unifiedStart(h, i, s)
-      if ((format === null || format === 'context') && starsLast && s.startsWith('*** ')) return contextStart(scanner, h, i, s)
-      if ((format === null || format === 'normal') && lastCommand && (s.startsWith('< ') || s.startsWith('> '))) return { ...h, type: 'normal', start: i - 1, hunkLine: i - 1 }
-    }
-    starsLast = starsThis
-    lastCommand = isCommand
+    if (need) continue
+    if (s.endsWith('\r\n') && (s.startsWith('@@ -') || starsLast)) refuse('CRLF patch', 'patches with CRLF line endings are not supported')
+    if ((format === null || format === 'ed') && firstCommand >= 0 && s === '.\n') refuse('ed script', 'ed scripts are not supported')
+    if ((format === null || format === 'unified') && s.startsWith('@@ -')) return unifiedStart(h, start, reader.line, s)
+    starsThis = s.startsWith('********')
+    if ((format === null || format === 'context') && starsLast && s.startsWith('*** ')) return contextStart(scanner, h, previous, reader.line - 1, s)
+    if ((format === null || format === 'normal') && lastCommand && (s.startsWith('< ') || s.startsWith('> '))) return { ...h, type: 'normal', start: previous, sline: reader.line - 1 }
   }
 }
 
 function headerLine(s, h, strip, starsLast) {
   if (!starsLast && s.startsWith('*** ')) return fetchInto(h, 'old', s.slice(4), strip)
   if (s.startsWith('+++ ')) return fetchInto(h, 'old', s.slice(4), strip)
-  if (s.startsWith('Index:')) { h.names.index = fetchName(s.slice(6), strip, false).name; return 'index' }
+  if (s.startsWith('Index:')) {
+    // A name with too few slashes for -p leaves the slot as it was.
+    const { name } = fetchName(s.slice(6), strip, false)
+    if (name !== undefined) h.names.index = name
+    return 'index'
+  }
   if (s.startsWith('Prereq:')) return 'prereq'
   if (s.startsWith('diff --git ')) {
     const first = parseName(s.slice(11), strip)
@@ -123,25 +149,37 @@ function fetchInto(h, slot, text, strip) {
   return 'name'
 }
 
-function unifiedStart(h, i, s) {
+// pch.c reads the counts for what they say of the two files before the hunk
+// itself is read: an old side starting at line 0 is a file that is not
+// there yet, and so is a new one — the digits alone, whatever follows them.
+function unifiedStart(h, start, sline, s) {
   const swapped = { names: { ...h.names, old: h.names.new, new: h.names.old }, stamps: { old: h.stamps.new, new: h.stamps.old }, timestrs: { old: h.timestrs.new, new: h.timestrs.old } }
-  const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?/u.exec(s)
   const says = [...h.says]
-  if (m && m[1] === '0') says[0] = 1 + (swapped.stamps.old === 0 ? 1 : 0)
-  if (m && m[3] === '0') says[1] = 1 + (swapped.stamps.new === 0 ? 1 : 0)
-  return { ...h, ...swapped, says, type: 'unified', start: i, hunkLine: i }
+  let at = 4
+  if (s[at] === '0' && !/\d/u.test(s[at + 1])) says[0] = 1 + (swapped.stamps.old === 0 ? 1 : 0)
+  while (at < s.length && s[at] !== ' ' && s[at] !== '\n') at++
+  while (s[at] === ' ') at++
+  if (s[at] === '+' && s[at + 1] === '0' && !/\d/u.test(s[at + 2])) says[1] = 1 + (swapped.stamps.new === 0 ? 1 : 0)
+  return { ...h, ...swapped, says, type: 'unified', start, sline }
 }
 
-// GNU reads the first hunk here to see whether it empties the file.
-function contextStart(scanner, h, i, s) {
+// GNU reads the first hunk here to see whether it empties the file, and
+// whatever it finds wrong with that hunk on the way stops it here, before a
+// file is named. A `*** ` line ending in `*` is the new style of context
+// diff, which pch.c reads a little differently; the old style can turn out
+// to be the new one, but not on this first look.
+function contextStart(scanner, h, start, sline, s) {
   const says = [...h.says]
   if (/^\*\*\* 0(?!\d)/u.test(s)) says[0] = 1 + (h.stamps.old === 0 ? 1 : 0)
-  const probe = { ...scanner, pos: i - 1 }
-  try {
-    const first = parseContextHunk(probe)
-    if (first && first.newLines.length === 0 && first.newStart === 1) says[1] = 1 + (h.stamps.new === 0 ? 1 : 0)
-  } catch { /* a malformed first hunk is reported when it is applied */ }
-  return { ...h, says, type: 'context', start: i - 1, hunkLine: i - 1 }
+  const newStyle = s.at(-2) === '*'
+  const resume = scanner.pos
+  restartAt(scanner, start, sline)
+  scanner.newStyle = newStyle
+  const first = parseContextHunk(scanner)
+  scanner.newStyle = newStyle
+  scanner.pos = resume
+  if (first && first.newLines.length === 0 && first.newStart === 1) says[1] = 1 + (h.stamps.new === 0 ? 1 : 0)
+  return { ...h, says, type: 'context', start, sline }
 }
 
 export function nextHunk(scanner, type) {

@@ -103,3 +103,64 @@ describe('what diff writes, patch applies, in every style', () => {
     assert.equal((await t.run('patch -d /nowhere < /tmp/p')).stderr, "patch: **** Can't change to directory /nowhere : No such file or directory\n")
   })
 })
+
+// Patches that are not what diff writes, as GNU patch 2.7.6 reads them: each
+// expectation here was checked against it, over the same files.
+describe('patch reads a damaged patch the way GNU does', () => {
+  const G = { g: 'alpha\nbeta\ngamma\n', crlf: 'alpha\r\nbeta\r\ngamma\r\n' }
+  const U = '--- g\n+++ g\n'
+  const BODY = ' alpha\n-beta\n+BETA\n gamma\n'
+  const write = (name, text) => `printf '%s' '${text.replaceAll("'", String.raw`'\''`)}' > ${name}; `
+  const run = async (patchText, line, files = G) => (await overlay(files)).run(write('p', patchText) + line)
+  const result = (r) => [r.stdout, r.stderr, r.exitCode]
+  it('names no file for an Index: line -p strips away', async () => {
+    const r = await run('Index: g\n--- g.orig\n+++ g.new\n@@ -1,3 +1,3 @@\n' + BODY, 'patch -p1 < p')
+    assert.deepEqual(result(r), ["can't find file to patch at input line 4\nPerhaps you used the wrong -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|Index: g\n|--- g.orig\n|+++ g.new\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\n", '', 1])
+  })
+  it('stops at a hunk header it cannot read, and takes one with a single @', async () => {
+    const bad = await run(U + '@@ -1,3 +1,3 @@\n' + BODY + '@@ -x +1 @@\n', 'patch < p; cat g')
+    assert.deepEqual(result(bad), ['patching file g\n' + G.g, 'patch: **** missing line number at line 8: @@ -x +1 @@\n\n', 0])
+    assert.equal((await run(U + '@@ -1,3 +1,3\n' + BODY, 'patch < p')).stderr, 'patch: **** malformed patch at line 3: @@ -1,3 +1,3\n\n')
+    assert.deepEqual(result(await run(U + '@@ -1,3 +1,3 @\n' + BODY, 'patch < p; cat g')), ['patching file g\nalpha\nBETA\ngamma\n', '', 0])
+    assert.equal((await run('2c\n< beta\n---\n> BETA\n', 'patch g < p')).stderr, 'patch: **** missing line number at line 1: 2c\n\n')
+  })
+  it('passes over comments, and says when the patch ends inside a line', async () => {
+    assert.equal((await run('# HG changeset patch\n' + U + '# c\n@@ -1,3 +1,3 @@\n alpha\n# c\n-beta\n+BETA\n gamma\n', 'patch < p; cat g')).stdout, 'patching file g\nalpha\nBETA\ngamma\n')
+    const r = await run(U + '@@ -1,3 +1,3 @@\n' + BODY.slice(0, -1), 'patch < p; ls')
+    assert.equal(r.stdout, 'patching file g\npatch unexpectedly ends in middle of line\nHunk #1 succeeded at 1 with fuzz 1.\ncrlf\ng\ng.orig\np\n')
+  })
+  it('numbers the lines after a missing newline the way GNU counts them', async () => {
+    const r = await run(U + '@@ -1,3 +1,3 @@\n' + BODY + '\\ No newline at end of file\n@@ -x +1 @@\n', 'patch < p')
+    assert.equal(r.stderr, 'patch: **** missing line number at line 8: @@ -x +1 @@\n\n')
+  })
+  it('reads a context hunk with what it says of one gone wrong', async () => {
+    const C = '*** g\n--- g\n***************\n*** 1,3 ****\n  alpha\n! beta\n  gamma\n'
+    assert.deepEqual(result(await run(C, 'patch < p')), ['', 'patch: **** unexpected end of file in patch\n', 2])
+    assert.deepEqual(result(await run(C + '--- 1,3 ----\n  alpha\n! BETA\n', 'patch < p; cat g')), ['patching file g\nalpha\nBETA\ngamma\n', '', 0])
+    assert.equal((await run(C + '--- 1,3 ----\n  alpha\n! BETA\n***************\n*** 5 ****\n--- 5 ----\n', 'patch < p')).stderr, 'patch: **** unexpected end of hunk at line 11\n')
+  })
+  it('gives a git header with no hunks the name it names', async () => {
+    const git = 'diff --git a/x b/x\nindex 1..2 100644\nBinary files a/x and b/x differ\ndiff --git a/g b/g\nindex 1..2 100644\n--- a/g\n+++ b/g\n@@ -1,3 +1,3 @@\n' + BODY
+    assert.equal((await run(git, 'patch -p1 < p', { ...G, x: 'xx\n' })).stdout, 'patching file x\npatching file g\n')
+    const r = await run(git, 'patch -p1 < p')
+    assert.equal(r.stdout, "can't find file to patch at input line 4\nPerhaps you used the wrong -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|diff --git a/x b/x\n|index 1..2 100644\n|Binary files a/x and b/x differ\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\npatching file g\n")
+  })
+  it('says what GNU says of misordered hunks and line endings', async () => {
+    const mis = await run(U + '@@ -3,1 +3,1 @@\n-gamma\n+GAMMA\n@@ -1,1 +1,1 @@\n-alpha\n+ALPHA\n', 'patch < p')
+    assert.equal(mis.stdout, 'patching file g\nmisordered hunks! output would be garbled\nHunk #2 FAILED at 1.\n1 out of 2 hunks FAILED -- saving rejects to file g.rej\n')
+    const crlf = await run('--- crlf\n+++ crlf\n@@ -1,3 +1,3 @@\n' + BODY, 'patch < p')
+    assert.equal(crlf.stdout, 'patching file crlf\nHunk #1 FAILED at 1 (different line endings).\n1 out of 1 hunk FAILED -- saving rejects to file crlf.rej\n')
+  })
+  it('leaves behind what GNU leaves behind', async () => {
+    const missing = await run('--- crlf\n+++ crlf\n@@ -1,3 +1,3 @@\n' + BODY, 'patch nope < p; ls')
+    assert.deepEqual(result(missing), ['patching file nope\nHunk #1 FAILED at 1.\ncrlf\ng\nnope.orig\np\n', "patch: **** Can't reopen file nope : No such file or directory\n", 0])
+    // An output file is made before the input is read: the same name reads empty.
+    const same = await run(U + '@@ -1,3 +1,3 @@\n' + BODY, 'patch -o g < p; cat g; ls')
+    assert.equal(same.stdout, 'patching file g\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file g.rej\ncrlf\ng\ng.rej\np\n')
+    // A file is backed up once, before patch first writes it, and not
+    // again by a later patch to it that would otherwise ask for one.
+    const twice = U + '@@ -1,3 +1,3 @@\n' + BODY + U + '@@ -2,3 +2,3 @@\n alpha\n-BETA\n+B2\n gamma\n'
+    assert.equal((await run(twice, 'patch -b < p; cat g.orig')).stdout, 'patching file g\npatching file g\nHunk #1 succeeded at 1 (offset -1 lines).\n' + G.g)
+    assert.equal((await run(twice, 'patch < p; ls')).stdout, 'patching file g\npatching file g\nHunk #1 succeeded at 1 (offset -1 lines).\ncrlf\ng\np\n')
+  })
+})

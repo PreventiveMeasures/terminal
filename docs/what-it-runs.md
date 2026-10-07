@@ -278,7 +278,15 @@ with fuzz, exactly as GNU patch does, with the same messages, reject files,
 `-d`, `-r`, `-b`, `-z`, `--dry-run` and `--reject-format`. It writes only
 inside a writable `/tmp/` overlay; a target anywhere else is refused with an
 unsupported diagnostic, while `--dry-run` and `-o -` work everywhere. Ed
-scripts and git binary patches are refused the same way.
+scripts and git binary patches are refused the same way. A patch is read
+the way GNU's pch.c reads one: a line starting with `#` is a comment it
+passes over, a last line without its newline is said to end the patch in the
+middle of a line and is not read, a hunk header is read as leniently as GNU
+reads it and a damaged one stops the patch in GNU's words, and the line
+numbers it gives are the ones GNU counts. An output file is made before the
+patch is read and keeps what was written before a patch that stops partway,
+a file is backed up once, before patch first writes it, and a file a patch
+deletes goes once the whole input has been read.
 
 `gzip`, `gunzip`, `zcat` and `gzcat` compress and decompress through the
 runtime's stream as GNU gzip 1.12 does, with `-c`, `-d`, `-k` and `-f`, which

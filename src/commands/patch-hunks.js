@@ -1,3 +1,4 @@
+import { UnsupportedError } from '../unsupported.js'
 import { PatchFatal } from './patch-parse.js'
 
 // One hunk of each format, read as pch.c another_hunk reads it, into one
@@ -6,170 +7,205 @@ import { PatchFatal } from './patch-parse.js'
 // has no newline compares only with a last line that has none.
 //
 // A hunk: { oldStart, oldLines, newStart, newLines, prefix, suffix, fn,
-//   marks, line }. `marks` keeps context-format markers for rejects.
+//   marks, beg, blank } (the context format's is in ./patch-context.js). `marks` keeps context-format markers, for rejects
+// and for the change runs a context hunk is applied by; `beg` is the line
+// GNU counts the hunk's lines from, and `blank` whether a blank line stood
+// before its `---`, which shifts that count.
 
-// GNU names the line it stopped at, text and all; past the end, the last one.
-const malformed = (scanner, i, raw) => { throw new PatchFatal(`malformed patch at line ${Math.min(i, scanner.lines.length - 1) + 1}: ${raw ?? ''}`) }
+// pch.c pget_line, as a cursor from line `at`: a line starting with `#` is
+// a comment patch passes over — counted, as it counts every line it reads —
+// and a last line without its newline is no line at all: patch says so each
+// time it reaches it, and reads the end of the patch there. `line` is the
+// number patch gives the last line read, and `incomplete` takes the `\ No
+// newline` line after it, which patch reads past without counting, so the
+// numbers it gives the lines after one lag behind their places. They can run
+// ahead too: see restartAt.
+export function lineReader(scanner, at = scanner.pos) {
+  const reader = {
+    at,
+    line: at - markersBefore(scanner, at) + scanner.skew,
+    next() {
+      for (;;) {
+        if (reader.at >= scanner.end) {
+          if (reader.at === scanner.end && scanner.incomplete) {
+            scanner.say('patch unexpectedly ends in middle of line\n')
+            reader.at++
+          }
+          return null
+        }
+        const text = scanner.lines[reader.at]
+        reader.line = lineNumber(scanner, reader.at++)
+        if (!text.startsWith('#')) return text
+      }
+    },
+    incomplete() {
+      if (!scanner.lines[reader.at]?.startsWith('\\')) return false
+      if (!scanner.markers.includes(reader.at)) scanner.markers.push(reader.at)
+      reader.at++
+      return true
+    },
+  }
+  return reader
+}
 
-// `\ No newline at end of file` after a line takes that line's newline away.
-function incomplete(scanner, i) {
-  if (scanner.lines[i + 1]?.startsWith('\\')) return true
-  return false
+const markersBefore = (scanner, at) => scanner.markers.filter((marker) => marker < at).length
+const lineNumber = (scanner, at) => at + 1 - markersBefore(scanner, at) + scanner.skew
+
+// pch.c skip_to: reading resumes at a hunk's first line, numbered from the
+// number patch noted for it — counted, for a context or normal hunk, as the
+// line before the one that showed the hunk had begun. A comment between the
+// two goes uncounted that way, and every number after it is one more than
+// the line it names.
+export function restartAt(scanner, at, line) {
+  scanner.pos = at
+  scanner.skew = line - 1 - (at - markersBefore(scanner, at))
+}
+
+// GNU names the line it stopped at, text and all.
+export const malformed = (reader, text) => { throw new PatchFatal(`malformed patch at line ${reader.line}: ${text}`) }
+
+// The arrays a hunk is read into grow as pch.c grow_hunkmax grows them, and
+// a context hunk too long for them is one patch gives up on.
+export function grow(scanner, size) {
+  while (size + 1 >= scanner.hunkmax) scanner.hunkmax *= 2
+}
+
+export const isDigit = (c) => c >= '0' && c <= '9'
+
+// pch.c scan_linenum: the digits at `at`, which have to be there. A number
+// past what patch's line counter holds is fatal, and one past what a double
+// holds exactly, short of that, is a count this code cannot keep.
+export function scanLinenum(reader, text, at) {
+  const digits = /^\d*/u.exec(text.slice(at))[0]
+  if (digits === '') throw new PatchFatal(`missing line number at line ${reader.line}: ${text}`)
+  const value = BigInt(digits)
+  if (value > LINENUM_MAX) throw new PatchFatal(`line number ${digits} is too large at line ${reader.line}: ${text}`)
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new UnsupportedError('feature', 'line number size', `line number ${digits} at line ${reader.line} is too large to be counted here`)
+  return { value: Number(value), at: at + digits.length }
+}
+
+const LINENUM_MAX = 2n ** 63n - 1n
+
+// The header, read the way another_hunk reads it: a number, an optional
+// count, a blank or not, `+`, the same again, a blank or not, and an `@` —
+// one is enough. A second `@` and a blank start the function -p named.
+// Anything else in its place is a malformed patch, which is fatal.
+function unifiedHeader(reader, text) {
+  let at = 4
+  const range = () => {
+    const first = scanLinenum(reader, text, at)
+    at = first.at
+    if (text[at] !== ',') return [first.value, 1]
+    const count = scanLinenum(reader, text, at + 1)
+    at = count.at
+    return [first.value, count.value]
+  }
+  const [oldFirst, ptrn] = range()
+  if (text[at] === ' ') at++
+  if (text[at] !== '+') malformed(reader, text)
+  at++
+  const [newFirst, repl] = range()
+  if (text[at] === ' ') at++
+  if (text[at++] !== '@') malformed(reader, text)
+  const fn = text[at++] === '@' && text[at] === ' ' ? text.slice(at).replace(/\n$/u, '') : null
+  return { oldFirst, ptrn, newFirst, repl, fn }
 }
 
 export function parseUnifiedHunk(scanner) {
-  const { lines } = scanner
-  let i = scanner.pos
-  const head = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: (.*))?\n$/u.exec(lines[i] ?? '')
-  if (!head) return null
-  const line = i
-  let newStart = Number(head[3]), oldStart = Number(head[1])
-  const ptrn = head[2] === undefined ? 1 : Number(head[2])
-  const repl = head[4] === undefined ? 1 : Number(head[4])
+  const reader = lineReader(scanner)
+  const head = reader.next()
+  // Anything that does not open a hunk ends this file's hunks, and is read
+  // again from where it starts.
+  if (head === null || head.length <= 4 || !head.startsWith('@@ -')) return null
+  const { oldFirst, ptrn, newFirst, repl, fn } = unifiedHeader(reader, head)
+  let newStart = newFirst, oldStart = oldFirst
   if (ptrn === 0) oldStart++
   if (repl === 0) newStart++
+  grow(scanner, ptrn + repl + 1)
+  const beg = scanner.hunkBeg = reader.line + 1
   const newLines = [], oldLines = []
-  let context = 0, last = i, prefix = -1
-  for (i++; oldLines.length < ptrn || newLines.length < repl; i += 1) {
-    const fromFile = lines[i] !== undefined
+  let context = 0, prefix = -1, raw = head
+  while (oldLines.length < ptrn || newLines.length < repl) {
+    raw = reader.next()
+    const fromFile = raw !== null
     // Up to three lines missing at the end are taken for chopped blanks.
-    if (!fromFile && repl - newLines.length > 3) throw new PatchFatal('unexpected end of file in patch')
-    const raw = fromFile ? lines[i] : ' \n'
-    if (fromFile) last = i
+    if (!fromFile) {
+      if (repl - newLines.length > 3) throw new PatchFatal('unexpected end of file in patch')
+      raw = ' \n'
+    }
     let ch = raw[0], text = raw
     if (ch === '\t' || ch === '\n') ch = ' '
     else text = raw.slice(1)
-    if (ch !== '-' && ch !== '+' && ch !== ' ') malformed(scanner, i, raw)
+    if (ch === '=') ch = ' '
+    if (ch !== '-' && ch !== '+' && ch !== ' ') malformed(reader, raw)
     // The marker after a side's last line takes that line's newline; a
-    // context line last on the old side loses it on the new side too.
-    let marker = false
+    // context line last on the old side loses it on the new side too, and
+    // is looked past for a second marker if it is last there as well.
     if (ch !== '+') {
-      if (oldLines.length >= ptrn) malformed(scanner, i, raw)
-      marker = fromFile && oldLines.length + 1 === ptrn && incomplete(scanner, i)
-      if (marker) text = text.replace(/\n$/u, '')
+      if (oldLines.length >= ptrn) malformed(reader, raw)
+      if (fromFile && oldLines.length + 1 === ptrn && reader.incomplete()) text = text.slice(0, -1)
       oldLines.push({ tag: ch, text })
       if (ch === ' ') context++
     }
     if (ch !== '-') {
-      if (newLines.length >= repl) malformed(scanner, i, raw)
-      if (!marker && fromFile && newLines.length + 1 === repl && incomplete(scanner, i)) { marker = true; text = text.replace(/\n$/u, '') }
+      if (newLines.length >= repl) malformed(reader, raw)
+      if (fromFile && newLines.length + 1 === repl && reader.incomplete()) text = text.slice(0, -1)
       newLines.push({ tag: ch, text })
     }
     if (ch !== ' ') { if (prefix === -1) prefix = context; context = 0 }
-    if (marker) i++
   }
-  if (prefix === -1) malformed(scanner, last, lines[last])
-  scanner.pos = i
-  return { oldStart, oldLines, newStart, newLines, prefix, suffix: context, fn: head[5] === undefined ? null : ' ' + head[5], marks: null, line }
-}
-
-// A context hunk's sides are separate lists, either of which may be left
-// out when it has no changes of its own; the missing one is the other's
-// context lines. `!` on both sides is a change, `-`/`+` a deletion or
-// insertion; both read as old-side and new-side lines here.
-export function parseContextHunk(scanner) {
-  const { lines } = scanner
-  let i = scanner.pos
-  if (!lines[i]?.startsWith('********')) return null
-  const line = i
-  const fn = /^\*+( .*)?\n$/u.exec(lines[i])?.[1] ?? null
-  const oldHead = /^\*\*\* (\d+)(?:,(\d+))?/u.exec(lines[++i] ?? '')
-  if (!oldHead) throw new PatchFatal(`unexpected '***' at line ${i + 1}: ${lines[i] ?? ''}`)
-  const oldRange = rangeOf(oldHead)
-  const oldSide = []
-  const newHeadAt = (k) => /^--- (\d+)(?:,(\d+))? ----/u.exec(lines[k] ?? '') ?? /^--- (\d+)(?:,(\d+))?/u.exec(lines[k] ?? '')
-  for (i++; !newHeadAt(i); i++) {
-    if (lines[i] === undefined || oldSide.length >= oldRange.count) throw new PatchFatal(`no '---' found in patch at line ${line + 1}`)
-    oldSide.push(sideLine(scanner, i, oldSide.length + 1 === oldRange.count))
-    if (oldSide.at(-1).skip) i++
-  }
-  const newRange = rangeOf(newHeadAt(i))
-  const newSide = []
-  for (i++; newSide.length < newRange.count; i++) {
-    const text = lines[i]
-    if (text === undefined || !/^[ !+\-\t\n]/u.test(text) || text.startsWith('***')) break
-    newSide.push(sideLine(scanner, i, newSide.length + 1 === newRange.count))
-    if (newSide.at(-1).skip) i++
-  }
-  if (newSide.length !== 0 && newSide.length < newRange.count) malformed(scanner, i, lines[i])
-  scanner.pos = i
-  return assembleContext({ oldRange, oldSide, newRange, newSide, fn, line })
-}
-
-// `*** 3,5 ****`: first and last, inclusive; a single number is one line;
-// `0` is an empty range before the first line.
-function rangeOf(match) {
-  const first = Number(match[1])
-  const last = match[2] === undefined ? first : Number(match[2])
-  if (first === 0 && match[2] === undefined) return { first: 1, count: 0 }
-  return { first, count: last - first + 1 }
-}
-
-function sideLine(scanner, i, last) {
-  let text = scanner.lines[i]
-  let mark = text[0]
-  if (mark === '\t' || mark === '\n') mark = ' '
-  else {
-    text = text.slice(1)
-    if (text[0] === ' ' || text[0] === '\t') text = text.slice(1)
-  }
-  const skip = last && incomplete(scanner, i)
-  return { mark, text: skip ? text.replace(/\n$/u, '') : text, skip }
-}
-
-function assembleContext({ oldRange, oldSide, newRange, newSide, fn, line }) {
-  let newMarks = newSide, oldMarks = oldSide
-  if (oldSide.length === 0 && oldRange.count) oldMarks = newSide.filter((l) => l.mark === ' ')
-  if (newSide.length === 0 && newRange.count) newMarks = oldSide.filter((l) => l.mark === ' ')
-  if (oldMarks.length !== oldRange.count || newMarks.length !== newRange.count) throw new PatchFatal(`replacement text or line numbers mangled in hunk at line ${line + 1}`)
-  const oldLines = oldMarks.map((l) => ({ tag: l.mark === ' ' ? ' ' : '-', text: l.text }))
-  const newLines = newMarks.map((l) => ({ tag: l.mark === ' ' ? ' ' : '+', text: l.text }))
-  const contextOf = (list) => { let n = 0; for (const l of list) { if (l.tag !== ' ') break; n++ } return n }
-  const prefix = Math.min(contextOf(oldLines), contextOf(newLines))
-  const suffix = Math.min(contextOf(oldLines.toReversed()), contextOf(newLines.toReversed()))
-  if (oldLines.every((l) => l.tag === ' ') && newLines.every((l) => l.tag === ' ')) throw new PatchFatal(`replacement text or line numbers mangled in hunk at line ${line + 1}`)
-  return { oldStart: oldRange.first, oldLines, newStart: newRange.first, newLines, prefix, suffix, fn, marks: { old: oldMarks.map((l) => l.mark), new: newMarks.map((l) => l.mark) }, line }
+  if (prefix === -1) malformed(reader, raw)
+  scanner.pos = reader.at
+  scanner.prefixContext = prefix
+  return { oldStart, oldLines, newStart, newLines, prefix, suffix: context, fn, marks: null, beg, blank: false }
 }
 
 // `3,4c3,5`: no context at all, so a normal hunk applies at its line or
-// wherever its old lines are found nearby.
+// wherever its old lines are found nearby. The command letter is read for
+// what it says about counts and nothing else, so any letter a hunk after
+// the first carries is taken; the rest of the line is not read at all.
 export function parseNormalHunk(scanner) {
-  const { lines } = scanner
-  let i = scanner.pos
-  const head = /^(\d+)(?:,(\d+))?([acd])(\d+)(?:,(\d+))?[ \t]*\r?\n$/u.exec(lines[i] ?? '')
-  if (!head) return null
-  const line = i
-  let oldStart = Number(head[1])
-  const oldCount = head[3] === 'a' ? 0 : head[2] === undefined ? 1 : Number(head[2]) - oldStart + 1
-  if (head[3] === 'a') oldStart++
-  let newStart = Number(head[4])
-  const newLast = head[5] === undefined ? newStart : Number(head[5])
-  if (head[3] === 'd') newStart++
+  const reader = lineReader(scanner)
+  const head = reader.next()
+  if (head === null || !isDigit(head[0])) return null
+  let scanned = scanLinenum(reader, head, 0)
+  let oldCount, oldStart = scanned.value
+  if (head[scanned.at] === ',') {
+    const last = scanLinenum(reader, head, scanned.at + 1)
+    oldCount = last.value + 1 - oldStart
+    scanned = last
+  } else oldCount = head[scanned.at] === 'a' ? 0 : 1
+  const type = head[scanned.at]
+  if (type === 'a') oldStart++
+  scanned = scanLinenum(reader, head, scanned.at + 1)
+  let newStart = scanned.value
+  const newLast = head[scanned.at] === ',' ? scanLinenum(reader, head, scanned.at + 1).value : newStart
+  if (newStart > newLast) malformed(reader, head)
+  if (type === 'd') newStart++
   const newCount = newLast - newStart + 1
-  if (oldCount < 0 || newCount < 0) malformed(scanner, i, lines[i])
-  const newLines = [], oldLines = []
-  i++
-  for (let n = 0; n < oldCount; n++, i++) {
-    if (lines[i] === undefined) throw new PatchFatal(`unexpected end of file in patch at line ${i}`)
-    if (!/^<[ \t]/u.test(lines[i])) throw new PatchFatal(`'<' followed by space or tab expected at line ${i + 1} of patch`)
-    const last = n + 1 === oldCount && incomplete(scanner, i)
-    oldLines.push({ tag: '-', text: last ? lines[i].slice(2).replace(/\n$/u, '') : lines[i].slice(2) })
-    if (last) i++
+  // A range that runs backwards is one GNU goes on with regardless.
+  if (oldCount < 0) throw new UnsupportedError('feature', 'malformed normal hunk', `a normal hunk whose range runs backwards (line ${reader.line}) is not supported`)
+  grow(scanner, oldCount + newCount + 1)
+  const side = (count, mark, tag) => {
+    const lines = []
+    for (let n = 0; n < count; n++) {
+      const text = reader.next()
+      if (text === null) throw new PatchFatal(`unexpected end of file in patch at line ${reader.line}`)
+      if (text[0] !== mark || (text[1] !== ' ' && text[1] !== '\t')) throw new PatchFatal(`'${mark}' followed by space or tab expected at line ${reader.line} of patch`)
+      lines.push({ tag, text: n + 1 === count && reader.incomplete() ? text.slice(2, -1) : text.slice(2) })
+    }
+    return lines
   }
-  if (head[3] === 'c') {
-    if (lines[i] === undefined) throw new PatchFatal(`unexpected end of file in patch at line ${i}`)
-    if (!lines[i].startsWith('-')) throw new PatchFatal(`'---' expected at line ${i + 1} of patch`)
-    i++
+  const oldLines = side(oldCount, '<', '-')
+  if (type === 'c') {
+    const text = reader.next()
+    if (text === null) throw new PatchFatal(`unexpected end of file in patch at line ${reader.line}`)
+    if (text[0] !== '-') throw new PatchFatal(`'---' expected at line ${reader.line} of patch`)
   }
-  for (let n = 0; n < newCount; n++, i++) {
-    if (lines[i] === undefined) throw new PatchFatal(`unexpected end of file in patch at line ${i}`)
-    if (!/^>[ \t]/u.test(lines[i])) throw new PatchFatal(`'>' followed by space or tab expected at line ${i + 1} of patch`)
-    const last = n + 1 === newCount && incomplete(scanner, i)
-    newLines.push({ tag: '+', text: last ? lines[i].slice(2).replace(/\n$/u, '') : lines[i].slice(2) })
-    if (last) i++
-  }
-  scanner.pos = i
-  return { oldStart, oldLines, newStart, newLines, prefix: 0, suffix: 0, fn: null, marks: null, line }
+  const newLines = side(newCount, '>', '+')
+  scanner.pos = reader.at
+  scanner.prefixContext = 0
+  return { oldStart, oldLines, newStart, newLines, prefix: 0, suffix: 0, fn: null, marks: null, beg: scanner.hunkBeg, blank: false }
 }
 
 // -R, or a hunk tried the other way round: old and new change places, and
