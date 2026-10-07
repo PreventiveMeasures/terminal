@@ -156,13 +156,16 @@ holds is a name already taken, which making a directory never follows; `-p`
 follows it, and passes over only a link that leads to a directory. `rm -r`
 takes a tree away again, emptying a directory before removing it, and naming
 each entry it cannot remove rather than the directories above it, which it
-does not try to remove once one of their entries is left. The sources are a
-read-only mount, so what is written there fails as `Read-only file system`;
-`/`, and any directory on the way down to the mount, is the root
-filesystem's, which the session's user cannot write, so a name made in or
-taken out of it fails as `Permission denied` — `rm -r /tmp` empties the
-overlay and then cannot remove `/tmp` itself, as GNU's cannot, and `rm -r /`
-is GNU's preserve-root refusal.
+does not try to remove once one of their entries is left. Where stdin is the
+terminal and `-f` was not given, it first asks, as GNU does, whether a name
+may be written at all, so a directory the read-only mount answers for is
+named itself and not gone into. The sources are a read-only mount, so what
+is written there fails as `Read-only file system`; `/`, and any directory on
+the way down to the mount, is the root filesystem's, which the session's
+user cannot write, so a name made in or taken out of it fails as
+`Permission denied` — `rm -r /tmp` empties the overlay and then cannot
+remove `/tmp` itself, as GNU's cannot, and `rm -r /` is GNU's preserve-root
+refusal.
 
 `touch` creates the empty files it names, and `-c` leaves an absent name alone;
 `touch -` touches what standard output is, which a terminal or a pipe takes
