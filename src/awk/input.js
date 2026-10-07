@@ -228,6 +228,9 @@ export class Input {
         throw new AwkError(`cannot open file \`${op}' for reading: ${error}`)
       }
       if (this.use(m, op, text, stdin)) return true
+      // An `exit` in BEGINFILE ends the reading there: gawk opens no other
+      // operand, and goes to END.
+      if (this.exitSignal !== undefined) return false
     }
     if (this.sawFile || this.exitSignal !== undefined) return false
     this.sawFile = true

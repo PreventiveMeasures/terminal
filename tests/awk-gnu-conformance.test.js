@@ -98,6 +98,8 @@ describe('awk as gawk — what gawk accepts, it runs', () => {
     ['echo \'BEGIN { print "dev stdin" }\' | awk -f /dev/stdin -f prog.awk', 'dev stdin\nfrom a file\n', '', 0],
     ["awk 'BEGIN { a = 1; b = 0; x = a && b = 5; print x, b; y = 0 || z = 2; print y, z; print 1 < w = 2, w }'", '1 5\n1 2\n1 2\n', '', 0],
     ["awk 'BEGIN { if (1) /x/ ? n++ : m++; print n + 0, m + 0 }'", '0 1\n', '', 0],
+    // An exit in BEGINFILE ends the reading: no later operand is opened.
+    ['awk \'BEGINFILE { print FILENAME; if (FILENAME == "a.txt") exit 3; print "AFTER" } END { print "end" }\' a.txt ab.txt', 'a.txt\nend\n', '', 3],
     ["echo 'foo bar' | awk '{ print $1 getline, $0 }'", 'foo0 foo bar\n', '', 0],
     ["awk 'BEGIN { $-x++; print x }'", '1\n', '', 0],
     ["awk 'BEGIN { x = 1 ; while (x < 3) x++; print x }'", '3\n', '', 0],

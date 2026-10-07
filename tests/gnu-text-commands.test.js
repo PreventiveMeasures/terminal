@@ -116,6 +116,12 @@ describe('which, xargs, tac, tee, date', () => {
     assert.deepEqual(await said("{ seq 65532 | sed 's/.*/x/'; echo xx; echo y; } | xargs | awk '{print NF}'"), ['65533\n1\n', '', 0])
     assert.deepEqual(await said("printf '%131066s' '' | tr ' ' a | xargs | wc -c"), ['131067\n', '', 0])
     assert.deepEqual(await said("{ echo a; printf '%131067s' '' | tr ' ' b; echo; echo c; } | xargs"), ['a\n', 'xargs: argument line too long\n', 1])
+    // A command line too long before any item is refused before input is
+    // read, input or none, and what was to be read is left for the next.
+    const base = `xargs echo ${'x'.repeat(131067)}`
+    assert.deepEqual(await said(`${base} < /dev/null`), ['', 'xargs: cannot fit single argument within argument list size limit\n', 1])
+    assert.deepEqual(await said(`{ ${base}; cat; } <<< hello`), ['hello\n', 'xargs: cannot fit single argument within argument list size limit\n', 0])
+    assert.equal((await said(`xargs echo ${'x'.repeat(131066)} < /dev/null`))[0].length, 131067)
   })
 
   it('xargs words -n as findutils does', async () => {

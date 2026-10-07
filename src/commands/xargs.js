@@ -16,6 +16,12 @@ export async function xargs(stdin, tokens, ctx) {
   // the command alone, or `command too long` beside an initial argument.
   if (replace === '') return unsupported('option', 'xargs', '-I', "xargs: -I '' (an empty replacement string) is not supported")
   if (replace !== undefined && n.value !== undefined) return unsupported('option', 'xargs', '-I -n', 'xargs: combining replacement and chunk limits is not supported')
+  const baseSize = [cmd, ...baseArgs].reduce((sum, word) => sum + argSize(word), 0)
+  // A command line that is too long before any item is added is one GNU
+  // will not build at all: it says so before reading its input, which it
+  // leaves where it was, and runs nothing — not even the run an empty input
+  // gets.
+  if (replace === undefined && baseSize > ARG_MAX) return { ...emptyOutput('xargs: cannot fit single argument within argument list size limit\n'), exitCode: 1 }
   consumeStdin(ctx)
   if (!flags.has('0') && stdin.includes('\0')) return unsupported('feature', 'xargs', 'NUL input', 'xargs: NUL input requires -0')
   // Where in the input each item ends, for what a run that stops early
@@ -38,7 +44,6 @@ export async function xargs(stdin, tokens, ctx) {
   // What every batch wrote, in the order it wrote it, the bytes a command
   // wrote as bytes among it: a pipe after xargs takes those as they are.
   const out = emptyOutput()
-  const baseSize = [cmd, ...baseArgs].reduce((sum, word) => sum + argSize(word), 0)
   let exitCode = 0
   let i = 0
   do {
