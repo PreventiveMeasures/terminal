@@ -85,7 +85,7 @@ describe('run().unsupported — what counts as a gap', () => {
       kind: 'option', command: 'tr', detail: '-d -s',
       message: 'tr: -d combined with -s is not supported',
     }])
-    assert.deepEqual(await details('find . -not -exec echo {} + '), ['-not -exec ... +'])
+    assert.deepEqual(await details('find . -type f,p'), ['-type f,p'])
   })
 
   it('kind `feature`: shell constructs the parser recognizes and refuses', async () => {

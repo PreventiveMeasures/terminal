@@ -33,7 +33,7 @@ export const FILESYSTEM_WORKFLOWS = [
   gap('Quote filenames so they can be reused in shell commands', 'ls --quoting-style=shell-escape src', 'ls', '--quoting-style'),
 
   gap('Exclude dependencies and build artifacts from a tree', "tree -I 'node_modules|dist' .", 'tree', '-I'),
-  gap('Honor gitignore while showing a shallow tree', 'tree -L2 --gitignore .', 'tree', '--gitignore'),
+  gap('Honor gitignore while showing a shallow tree', 'tree -L 2 --gitignore .', 'tree', '--gitignore'),
   gap('Measure the disk usage of source files with their times', 'du -sh --time src', 'du', '--time', 'option'),
   gap('Inspect the permissions of an entry point', "stat -c '%a %n' src/index.js", 'stat', '%a', 'feature'),
   unavailable('Inspect every component of a source path', 'namei -l src/index.js', 'namei'),

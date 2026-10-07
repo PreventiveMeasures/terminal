@@ -12,10 +12,13 @@ const identity = (result) => result.unsupported.map(({ kind, command, detail }) 
 // These builtins interpret option-like tokens as data, counts, or expressions.
 // Every other registered command must diagnose unavailable options.
 const NO_OPTIONS = new Set(['echo', 'true', 'false', ':', 'exit', 'break', 'continue', 'test', '['])
+// find reads a dashed word as a predicate, and one findutils 4.9 does not
+// have either is GNU's own error rather than something missing here.
+const GNU_UNKNOWN = new Set(['find'])
 const registered = { ...DEFAULT_REGISTRY.commands, ...DEFAULT_REGISTRY.hidden }
 
 describe('diagnostic completeness — command dispatch', () => {
-  for (const name of Object.keys(registered).filter((key) => !NO_OPTIONS.has(key))) {
+  for (const name of Object.keys(registered).filter((key) => !NO_OPTIONS.has(key) && !GNU_UNKNOWN.has(key))) {
     it(name + ': unavailable options survive redirects and nested dispatch', async () => {
       const command = name + ' --audit-missing-option'
       const direct = await run(command)
@@ -49,6 +52,10 @@ describe('diagnostic completeness — command dispatch', () => {
       assert.deepEqual(r.unsupported.map((u) => u.detail), [name])
     })
   }
+  it('find answers a predicate GNU does not have as GNU does', async () => {
+    const r = await run('find --audit-missing-option')
+    assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.unsupported], ['', "find: unknown predicate `--audit-missing-option'\n", 1, []])
+  })
   it('ignores arguments only where the real builtin does', async () => {
     for (const name of ['echo', 'true', 'false', ':']) {
       const r = await run(name + ' --audit-missing-option')
@@ -73,7 +80,7 @@ describe('diagnostic completeness — command dispatch', () => {
 const COMMAND_GAPS = [
   ['find . ! -mtime 1', '-mtime'],
   ['find . -not -newer f', '-newer'],
-  ['find . -type f , -print', 'comma operator'],
+  ['find . -type f -perm 644', '-perm'],
   ['find . -type f,p', '-type f,p'],
   ['grep --e a f', '--e'],
   [String.raw`grep -E 'a{z}' f`, 'GNU regex syntax'],

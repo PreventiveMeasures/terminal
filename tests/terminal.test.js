@@ -1236,15 +1236,17 @@ describe('createTerminal — pipelines', () => {
 })
 
 describe('createTerminal — find / tree / path', () => {
-  it('find walks the tree; --type and --name filter', async () => {
+  it('find walks the tree; a double-dash predicate is one GNU does not have', async () => {
     const t = createTerminal(SOURCES)
     const all = new Set((await t.run('find /')).stdout.split('\n').filter(Boolean))
     assert.ok(all.has('/src/foo.js'))
     assert.ok(all.has('/src/util'))
-    const filesOnly = new Set((await t.run('find / --type f')).stdout.split('\n').filter(Boolean))
-    assert.ok(!filesOnly.has('/src'))
-    const named = (await t.run('find / --name "*.js"')).stdout.split('\n').filter(Boolean)
-    assert.deepEqual(named.sort(), ['/src/bar.js', '/src/foo.js', '/src/util/log.js'])
+    // findutils 4.9 strips one dash from a predicate and looks up the rest,
+    // so `--type` is `-type` spelled wrong rather than its long form.
+    for (const [cmd, name] of [['find / --type f', '--type'], ['find / --name "*.js"', '--name']]) {
+      const r = await t.run(cmd)
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.unsupported], ['', `find: unknown predicate \`${name}'\n`, 1, []])
+    }
   })
 
   it('find accepts POSIX-style single-dash primaries (-name, -type)', async () => {
@@ -1260,16 +1262,11 @@ describe('createTerminal — find / tree / path', () => {
     assert.deepEqual(combined, ['/README.md'])
   })
 
-  it('find -type / --type with a bad value errors and mentions both forms', async () => {
+  it('find -type with a bad value errors as GNU does', async () => {
     const t = createTerminal(SOURCES)
-    // Whichever form the user typed, the error mentions both so it
-    // doesn't mislead callers who used the long form.
-    for (const cmd of ['find / -type x', 'find / --type x']) {
-      const r = await t.run(cmd)
-      assert.notEqual(r.exitCode, 0)
-      assert.match(r.stderr, /-type/u, `${cmd}: short form missing from error`)
-      assert.match(r.stderr, /--type/u, `${cmd}: long form missing from error`)
-    }
+    const r = await t.run('find / -type x')
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stderr, 'find: Unknown argument to -type: x\n')
   })
 
   it('find -maxdepth N caps walk depth (0 = start only, 1 = +direct children, …)', async () => {
@@ -1308,15 +1305,15 @@ describe('createTerminal — find / tree / path', () => {
     assert.ok(!m2.has('/README.md'))
     assert.ok(m2.has('/src/foo.js'))   // depth-2 entries kept
     assert.ok(m2.has('/src/util/log.js'))
-    // `--mindepth` long form; depth 3 leaves only the deepest file.
+    // Depth 3 leaves only the deepest file.
     assert.deepEqual(
-      (await t.run('find / --mindepth 3')).stdout.split('\n').filter(Boolean),
+      (await t.run('find / -mindepth 3')).stdout.split('\n').filter(Boolean),
       ['/src/util/log.js'],
     )
     // -mindepth 0 keeps the start point (the default).
     assert.ok(new Set((await t.run('find / -mindepth 0')).stdout.split('\n').filter(Boolean)).has('/'))
     // Shares the depth-option parser with -maxdepth, so it validates too.
-    assert.match((await t.run('find / -mindepth foo')).stderr, /-mindepth: invalid count/u)
+    assert.equal((await t.run('find / -mindepth foo')).stderr, 'find: Expected a positive decimal integer argument to -mindepth, but got ‘foo’\n')
   })
 
   it('find combines -mindepth and -maxdepth to select an exact depth band', async () => {
@@ -1335,8 +1332,7 @@ describe('createTerminal — find / tree / path', () => {
     const t = createTerminal(SOURCES)
     const r = (await t.run("find / -path '*/util/*'")).stdout.split('\n').filter(Boolean)
     assert.deepEqual(r, ['/src/util/log.js'])
-    // `--path` long form also works:
-    const r2 = new Set((await t.run("find / --path '*src*'")).stdout.split('\n').filter(Boolean))
+    const r2 = new Set((await t.run("find / -path '*src*'")).stdout.split('\n').filter(Boolean))
     assert.ok(r2.has('/src'))
     assert.ok(r2.has('/src/foo.js'))
   })
@@ -1386,7 +1382,7 @@ describe('createTerminal — find / tree / path', () => {
     const t = createTerminal(SOURCES)
     const incomplete = await t.run('find -- -name')
     assert.notEqual(incomplete.exitCode, 0)
-    assert.match(incomplete.stderr, /-name requires a value/u)
+    assert.equal(incomplete.stderr, "find: missing argument to `-name'\n")
     assert.deepEqual(await t.run('find -- -maxdepth 1'), await t.run('find -maxdepth 1'))
     assert.deepEqual(await t.run('find /src -not -not -name "*.js"'), await t.run('find /src -name "*.js"'))
   })
@@ -1401,14 +1397,13 @@ describe('createTerminal — find / tree / path', () => {
     assert.equal(r.stdout, '') // no basename equals literal `--`
   })
 
-  it('find -maxdepth surfaces "invalid count" when given `--` as value', async () => {
-    // Not "requires a value" — the value WAS supplied (`--`),
-    // it just doesn't parse as a non-negative integer.
+  it('find -maxdepth names `--` as the value it could not read', async () => {
+    // Not a missing argument — the value WAS supplied (`--`), it just
+    // doesn't parse as a non-negative integer.
     const t = createTerminal(SOURCES)
     const r = await t.run('find / -maxdepth --')
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /invalid count: --/u)
-    assert.doesNotMatch(r.stderr, /requires a value/u)
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stderr, 'find: Expected a positive decimal integer argument to -maxdepth, but got ‘--’\n')
   })
 
   it('find -name accepts a dash-prefixed value as the literal glob', async () => {
@@ -1430,11 +1425,8 @@ describe('createTerminal — find / tree / path', () => {
     const t = createTerminal(SOURCES)
     const implicit = (await t.run('find /')).stdout
     assert.equal((await t.run('find / -print')).stdout, implicit)
-    // `--print` is a local alias, NOT a GNU form — 4.9 answers every
-    // double-dash predicate with "unknown predicate", including the
-    // pre-existing `--name` / `--type` / `--exec`. Asserted here as
-    // our own extension, not as GNU-matching behavior.
-    assert.equal((await t.run('find / --print')).stdout, implicit)
+    // 4.9 answers every double-dash predicate with "unknown predicate".
+    assert.equal((await t.run('find / --print')).stderr, "find: unknown predicate `--print'\n")
     // And it composes with filters exactly like the implicit print.
     const named = (await t.run('find / -name "*.js" -print')).stdout.split('\n').filter(Boolean).sort()
     assert.deepEqual(named, ['/src/bar.js', '/src/foo.js', '/src/util/log.js'])
@@ -1619,7 +1611,7 @@ describe('createTerminal — find / tree / path', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('find src nope')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /find: 'nope': No such file or directory/u)
+    assert.match(r.stderr, /find: ‘nope’: No such file or directory/u)
     // src's entries must still appear despite nope's failure.
     const lines = r.stdout.split('\n').filter(Boolean).sort()
     assert.ok(lines.includes('src/foo.js'), `expected src/foo.js in stdout, got ${JSON.stringify(lines)}`)
@@ -1637,12 +1629,11 @@ describe('createTerminal — find / tree / path', () => {
     assert.match(r.stderr, /definitelynotacmd/u)
   })
 
-  it('find -exec without a terminator explains quoting or escaping it', async () => {
+  it('find -exec without a terminator is missing its argument, as GNU says', async () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('find src -exec echo {}')
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /missing terminator/u)
-    assert.match(r.stderr, /quote or escape/u)
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stderr, "find: missing argument to `-exec'\n")
   })
 
   it('find -exec ... + DOES bubble its exit code (unlike the `;` form)', async () => {
@@ -1740,15 +1731,15 @@ describe('createTerminal — find / tree / path', () => {
     // No `;` or `+` ever appears.
     const noTerm = await t.run('find src -type f -exec echo {}')
     assert.notEqual(noTerm.exitCode, 0)
-    assert.match(noTerm.stderr, /missing terminator/u)
+    assert.equal(noTerm.stderr, "find: missing argument to `-exec'\n")
     // `;` immediately after -exec — no command at all.
     const noCmd = await t.run('find src -type f -exec ";"')
     assert.notEqual(noCmd.exitCode, 0)
-    assert.match(noCmd.stderr, /requires a command/u)
-    // `+` form must end in `{}`.
+    assert.equal(noCmd.stderr, "find: invalid argument `;' to `-exec'\n")
+    // A `+` ends the command only straight after `{}`.
     const badPlus = await t.run('find src -type f -exec echo +')
     assert.notEqual(badPlus.exitCode, 0)
-    assert.match(badPlus.stderr, /missing terminator/u)
+    assert.equal(badPlus.stderr, "find: missing argument to `-exec'\n")
   })
 
   it('find -exec composes with -type / -name and runs only on the filtered set', async () => {
@@ -1766,18 +1757,19 @@ describe('createTerminal — find / tree / path', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('find src -exec echo {} {} +')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /only one instance of `\{\}`/u)
+    assert.equal(r.stderr, 'find: Only one instance of {} is supported with -exec ... +\n')
   })
 
-  it('find rejects `-not -exec ... +` (incoherent under always-true batching)', async () => {
-    // The `+` form is treated as always-true during the walk because
-    // it can't filter before the post-walk dispatch. Negating that
-    // would either silently drop every match or still run the batched
-    // command anyway — pick neither, surface the error.
+  it('find `-not -exec ... +` is false of every name, and still runs the batch', async () => {
+    // The `+` form is true of every name it collects, so its negation is
+    // false of each — GNU 4.9 collects them all the same and runs the
+    // command once after the walk.
     const t = createTerminal(SOURCES)
-    const r = await t.run('find src -not -exec echo {} +')
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /no meaningful negation/u)
+    const r = await t.run('find src -type f -not -exec echo {} + -o -print')
+    assert.equal(r.exitCode, 0)
+    const [batch, ...printed] = r.stdout.split('\n').filter(Boolean).toReversed()
+    assert.deepEqual(printed.sort(), ['src', 'src/bar.js', 'src/foo.js', 'src/util', 'src/util/log.js'])
+    assert.deepEqual(batch.split(' ').sort(), ['src/bar.js', 'src/foo.js', 'src/util/log.js'])
   })
 
   it('basename / dirname operate on path strings', async () => {
@@ -1914,8 +1906,6 @@ describe('createTerminal — strict option parsing', () => {
     'uniq -z',
     'ls -z',
     'ls -laz',
-    'find -z',
-    'find --bogus',
     'tree -z',
     'tree --bogus',
     'cd -z',
@@ -1933,6 +1923,15 @@ describe('createTerminal — strict option parsing', () => {
       const r = await t.run(line)
       assert.notEqual(r.exitCode, 0, 'expected non-zero exit')
       assert.match(r.stderr, /unknown option/u, 'expected "unknown option" in stderr')
+    })
+  }
+
+  // find reads a word it has no predicate for as GNU's own error rather than
+  // a gap: findutils 4.9 has no `-z` or `--bogus` either.
+  for (const [line, name] of [['find -z', '-z'], ['find --bogus', '--bogus']]) {
+    it(`rejects: ${line}`, async () => {
+      const r = await createTerminal(SOURCES).run(line)
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode, r.unsupported], ['', `find: unknown predicate \`${name}'\n`, 1, []])
     })
   }
 
@@ -2160,7 +2159,11 @@ describe('createTerminal — pathological inputs', () => {
     const depth = 5000
     const path = Array.from({ length: depth }, (_, i) => `d${i}`).join('/') + '/leaf.txt'
     const t = createTerminal({ [path]: 'hi' })
-    assert.equal((await t.run(`cat /${path}`)).stdout, 'hi')
+    // A name that long is past PATH_MAX, which Linux refuses whole, so the
+    // tree is asked about as far down as a name can reach.
+    assert.equal((await t.run(`cat /${path}`)).stderr, `cat: /${path}: File name too long\n`)
+    const reachable = path.split('/').slice(0, 500).join('/')
+    assert.equal((await t.run(`test -d /${reachable} && echo there`)).stdout, 'there\n')
   })
 
   it('a long run of `${` tokenizes in linear time', async () => {

@@ -193,10 +193,10 @@ describe('find names a link, and passes over what it points at', () => {
 
   it('keeps `-type l` apart from the types this filesystem cannot represent', async () => {
     const t = terminal()
-    await gap(t, 'find . -type p', '-type p', "find: -type/--type expects 'f', 'd' or 'l', got: p\n")
+    await gap(t, 'find . -type p', '-type p', 'find: -type p is not supported (devices, pipes and sockets are not among the entries this filesystem holds)\n')
     const bad = await t.run('find . -type q')
     assert.deepEqual(bad.unsupported, [])
-    assert.equal(bad.stderr, "find: -type/--type expects 'f', 'd' or 'l', got: q\n")
+    assert.equal(bad.stderr, 'find: Unknown argument to -type: q\n')
   })
 })
 
@@ -640,7 +640,7 @@ describe('what a link cannot change', () => {
     }
     const made = () => createTerminal(sources, { mount: '/repo', writable: '/tmp/' })
     const at = { cwd: '/repo' }
-    const taken = (name) => `mkdir: cannot create directory '${name}': File exists\n`
+    const taken = (name) => `mkdir: cannot create directory ‘${name}’: File exists\n`
     // The name is taken whatever the link leads to, which `mkdir` never
     // follows — `-p` follows it, and passes over a directory at the end of it.
     check(await made(), 'mkdir fresh', '', { stderr: taken('fresh'), exitCode: 1, ...at })
@@ -654,7 +654,7 @@ describe('what a link cannot change', () => {
     // leading through a file cannot hold the name below it.
     check(await made(), 'mkdir -p fresh/sub', '', { stderr: taken('fresh'), exitCode: 1, ...at })
     await check(await made(), 'mkdir -p through/sub', '', {
-      stderr: "mkdir: cannot create directory 'through': Not a directory\n", exitCode: 1, ...at,
+      stderr: "mkdir: cannot create directory ‘through’: Not a directory\n", exitCode: 1, ...at,
     })
   })
 
@@ -708,14 +708,17 @@ describe('what a link cannot change', () => {
     // `-n` answers from the destination before the source is opened, so a
     // name already there is left as it is and the copy neither fails nor
     // happens — the link it would have carried is never in question.
-    check(await made(), 'printf seed > /tmp/out; cp -rn out /tmp/out; cat /tmp/out', 'seed', at)
-    await check(await made(), kept + 'cp -rn e /tmp/dest; cat /tmp/dest/e/el /tmp/dest/e/f', 'keptkept', at)
-    await check(await made(), kept + 'cp -rn e/el /tmp/dest/e/el; cat /tmp/dest/e/el', 'kept', at)
+    check(await made(), 'printf seed > /tmp/out; cp -rn out /tmp/out 2>/dev/null; cat /tmp/out', 'seed', at)
+    await check(await made(), kept + 'cp -rn e /tmp/dest 2>/dev/null; cat /tmp/dest/e/el /tmp/dest/e/f', 'keptkept', at)
+    await check(await made(), kept + 'cp -rn e/el /tmp/dest/e/el 2>/dev/null; cat /tmp/dest/e/el', 'kept', at)
     // A name is taken whatever it leads to: nothing is written through a link,
     // so `-n` reads the destination as `lstat` reads it.
-    check(await made(), 'cp -rn e/el gone; find /tmp -type f', '', at)
+    check(await made(), 'cp -rn e/el gone 2>/dev/null; find /tmp -type f', '', at)
     // A link the copy would reach is refused as ever, and before it writes.
-    const refusal = 'cp: copying a symbolic link is not supported: e/el (a recursive copy keeps the link, which cp does not make here)\n'
+    // The warning the 9.4 that GNU/Linux distributions ship gives of every
+    // -n comes first, as it is read.
+    const refusal = 'cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead\n' +
+      'cp: copying a symbolic link is not supported: e/el (a recursive copy keeps the link, which cp does not make here)\n'
     await gap(await made(), 'cp -rn e /tmp/dest', 'symbolic link', refusal)
     const partial = await made()
     await partial.run('mkdir -p /tmp/dest/e; printf kept > /tmp/dest/e/f')

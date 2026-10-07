@@ -285,8 +285,8 @@ describe('GNU conformance — what a reader says it could not read', () => {
     // Reading a directory is the one failure coreutils does not name by its
     // reason: tac maps the whole file in one go, and that is what fails.
     ['tac d', 'tac: d: read error: Invalid argument\n', 1],
-    ['find missing', "find: 'missing': No such file or directory\n", 1],
-    ['find f/x', "find: 'f/x': Not a directory\n", 1],
+    ['find missing', "find: ‘missing’: No such file or directory\n", 1],
+    ['find f/x', "find: ‘f/x’: Not a directory\n", 1],
     ['sed -n p missing', "sed: can't read missing: No such file or directory\n", 2],
     ['sed -n p f/x', "sed: can't read f/x: Not a directory\n", 2],
     ['sed -i s/a/b/ missing', "sed: can't read missing: No such file or directory\n", 2],

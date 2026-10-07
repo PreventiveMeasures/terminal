@@ -37,18 +37,18 @@ async function check(command, paths, files = FILES, hidden = []) {
 
 describe('tree depth omission notes', () => {
   for (const [command, paths, hidden = []] of [
-    ['tree -L1', ['/a', '/c'], ['/.hidden']],
-    ['tree -L2', ['/a/one'], ['/.hidden', '/b/.hidden']],
-    ['tree -aL1', ['/.hidden', '/a', '/b', '/c']],
-    ['tree -dL1', ['/a'], ['/.hidden']],
-    ['tree -adL1', ['/.hidden', '/a']],
-    ['tree -dL2', [], ['/.hidden']],
-    ['tree -L99', [], ['/.hidden', '/b/.hidden']],
+    ['tree -L 1', ['/a', '/c'], ['/.hidden']],
+    ['tree -L 2', ['/a/one'], ['/.hidden', '/b/.hidden']],
+    ['tree -aL 1', ['/.hidden', '/a', '/b', '/c']],
+    ['tree -dL 1', ['/a'], ['/.hidden']],
+    ['tree -adL 1', ['/.hidden', '/a']],
+    ['tree -dL 2', [], ['/.hidden']],
+    ['tree -L 99', [], ['/.hidden', '/b/.hidden']],
     ['tree', [], ['/.hidden', '/b/.hidden']],
     ['tree -a', []],
-    ['tree -L1 a', ['/a/one']],
-    ['tree -L1 .hidden', ['/.hidden/inner']],
-    ['tree -FL1 --noreport', ['/a', '/c'], ['/.hidden']],
+    ['tree -L 1 a', ['/a/one']],
+    ['tree -L 1 .hidden', ['/.hidden/inner']],
+    ['tree -FL 1 --noreport', ['/a', '/c'], ['/.hidden']],
   ]) {
     it(command + ' reports only eligible omitted contents', () => check(command, paths, FILES, hidden))
   }
@@ -56,33 +56,33 @@ describe('tree depth omission notes', () => {
   it('does not claim a hidden entry the depth limit had already cut off', async () => {
     // `/dir` stops at the frontier, so its `.child` was never a name this
     // listing passed over for being hidden — the depth note covers it whole.
-    check('tree -L1', ['/dir'], { 'dir/.child': '', 'dir/shown': '' })
-    await check('tree -L2', [], { 'dir/.child': '', 'dir/shown': '' }, ['/dir/.child'])
+    check('tree -L 1', ['/dir'], { 'dir/.child': '', 'dir/shown': '' })
+    await check('tree -L 2', [], { 'dir/.child': '', 'dir/shown': '' }, ['/dir/.child'])
   })
 
   it('leaves output and report totals unchanged', async () => {
-    const result = await check('tree -L1', ['/a', '/c'], FILES, ['/.hidden'])
+    const result = await check('tree -L 1', ['/a', '/c'], FILES, ['/.hidden'])
     assert.equal(result.stdout, '.\n├── a\n├── b\n├── c\n└── root\n\n4 directories, 1 file\n')
   })
 
   it('does not report a frontier containing only hidden entries without -a', async () => {
-    await check('tree -L1', [], { 'dir/.child/file': '' })
-    await check('tree -aL1', ['/dir'], { 'dir/.child/file': '' })
+    await check('tree -L 1', [], { 'dir/.child/file': '' })
+    await check('tree -aL 1', ['/dir'], { 'dir/.child/file': '' })
   })
 
   it('does not attribute files filtered by -d to the depth limit', async () => {
-    await check('tree -dL1', [], { 'dir/file': '' })
-    await check('tree -dL1', [], { 'dir/.child/file': '' })
-    await check('tree -adL1', ['/dir'], { 'dir/.child/file': '' })
+    await check('tree -dL 1', [], { 'dir/file': '' })
+    await check('tree -dL 1', [], { 'dir/.child/file': '' })
+    await check('tree -adL 1', ['/dir'], { 'dir/.child/file': '' })
   })
 
   it('does not report empty directories at the frontier', async () => {
-    assert.deepEqual((await createTerminal({}, { mount: '/empty' }).run('tree -L1')).notes, [])
-    await check('tree -L1', [], {})
+    assert.deepEqual((await createTerminal({}, { mount: '/empty' }).run('tree -L 1')).notes, [])
+    await check('tree -L 1', [], {})
   })
 
   it('preserves an earlier omission when a later displayed name is unsupported', async () => {
-    const result = await createTerminal({ 'a/file': '', 'z\nname': '' }).run('tree -L1 2>/dev/null | true')
+    const result = await createTerminal({ 'a/file': '', 'z\nname': '' }).run('tree -L 1 2>/dev/null | true')
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)
     assert.deepEqual(result.notes, [note('tree', ['/a'])])
@@ -105,10 +105,10 @@ describe('tree depth omission notes', () => {
   }
 
   it('never inspects unsupported names below the displayed frontier', async () => {
-    await check('tree -L1', ['/dir'], { 'dir/name\nwith\nnewlines': '' })
+    await check('tree -L 1', ['/dir'], { 'dir/name\nwith\nnewlines': '' })
   })
 
-  for (const command of ['tree -L0', 'tree -Lnope', 'tree -L1 --unknown', 'tree -L1 a c', 'tree -L1 missing']) {
+  for (const command of ['tree -L 0', 'tree -L nope', 'tree -L 1 --unknown', 'tree -L 1 a c', 'tree -L 1 missing']) {
     it(command + ' emits no note when listing never starts', async () => {
       const result = await createTerminal(FILES).run(command)
       assert.notEqual(result.exitCode, 0)
@@ -158,7 +158,7 @@ describe('find depth omission notes', () => {
   it('retains omissions across later root errors and visits remaining roots', async () => {
     const result = await createTerminal(FILES).run('find a missing c -maxdepth 0')
     assert.equal(result.stdout, 'a\nc\n')
-    assert.equal(result.stderr, 'find: \'missing\': No such file or directory\n')
+    assert.equal(result.stderr, 'find: ‘missing’: No such file or directory\n')
     assert.equal(result.exitCode, 1)
     assert.deepEqual(result.unsupported, [])
     assert.deepEqual(result.notes, [note('find', ['a', 'c'])])
@@ -204,7 +204,7 @@ describe('depth notes retain full paths, bounded details, and shell channel sema
   // `tree` prints bare names under a heading, so an omitted directory has no
   // spelling of its own there and keeps the absolute one; `find . …` prints
   // every path from `.`, and its note follows.
-  for (const [command, named] of [['tree -L1', (paths) => paths], ['find . -maxdepth 1', (paths) => paths.map((path) => '.' + path)]]) {
+  for (const [command, named] of [['tree -L 1', (paths) => paths], ['find . -maxdepth 1', (paths) => paths.map((path) => '.' + path)]]) {
     for (const count of [9, 10]) {
       it(command + ' lists full paths only for ' + count + ' < 10 directories', async () => {
         const paths = Array.from({ length: count }, (_, i) => '/dir' + i)
@@ -228,12 +228,12 @@ describe('depth notes retain full paths, bounded details, and shell channel sema
   }
 
   for (const command of [
-    'tree -L1 a | wc -l',
-    'tree -L1 a >/dev/null',
-    'tree -L1 a 2>/dev/null | cat',
-    '(tree -L1 a)',
-    'value=$(tree -L1 a); true',
-    'tree -L1 a; tree -L1 a',
+    'tree -L 1 a | wc -l',
+    'tree -L 1 a >/dev/null',
+    'tree -L 1 a 2>/dev/null | cat',
+    '(tree -L 1 a)',
+    'value=$(tree -L 1 a); true',
+    'tree -L 1 a; tree -L 1 a',
     'find a -maxdepth 1 | wc -l',
     'find a -maxdepth 1 >/dev/null',
     'find a -maxdepth 1 2>/dev/null | cat',
@@ -252,13 +252,13 @@ describe('depth notes retain full paths, bounded details, and shell channel sema
 
   it('does not carry notes into later runs', async () => {
     const terminal = createTerminal(FILES)
-    assert.ok((await terminal.run('tree -L1; find . -maxdepth 0')).notes.length > 0)
+    assert.ok((await terminal.run('tree -L 1; find . -maxdepth 0')).notes.length > 0)
     assert.deepEqual((await terminal.run('tree -a; find .')).notes, [])
   })
 })
 
 describe('frontier inspection is bounded', () => {
-  for (const [command, tokens] of [[tree, ['-L1']], [find, ['.', '-maxdepth', '1']]]) {
+  for (const [command, tokens] of [[tree, ['-L', '1']], [find, ['.', '-maxdepth', '1']]]) {
     it(command.name + ' does not traverse below the immediate frontier children', async () => {
       const fs = createFs({ 'frontier/child/deep/file': '' })
       const listed = []

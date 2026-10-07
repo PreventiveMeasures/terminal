@@ -147,7 +147,7 @@ describe('broad audit — fields, names and traversal', () => {
     const files = { '.hidden': '', a: '', 'b/q': '', 'z/k': '' }
     await check('tree', '.\n├── a\n├── b\n│   └── q\n└── z\n    └── k\n\n3 directories, 3 files\n', files)
     await check('tree -d b', 'b\n\n0 directories\n', files)
-    await check('tree -FaL1 --noreport', './\n├── .hidden\n├── a\n├── b/\n└── z/\n', files)
+    await check('tree -FaL 1 --noreport', './\n├── .hidden\n├── a\n├── b/\n└── z/\n', files)
     await check('tree', '.\n\n0 directories, 0 files\n', {})
   })
   it('xargs discards a trailing escape and treats NUL separators literally with -0', async () => {

@@ -1,15 +1,17 @@
-// Predicates short-circuit in OR groups of AND terms; actions execute in place.
-// -exec ';' uses child status only as its predicate result. Batched -exec '+'
-// runs after traversal, is true as a predicate, and maps failures to find status 1.
-// Double-dash predicate spellings are local extensions, not GNU find syntax.
+// Predicates short-circuit as the tree the parser built them into has them;
+// actions execute in place. -exec ';' uses child status only as its predicate
+// result. Batched -exec '+' runs after traversal, is true as a predicate, and
+// maps failures to find status 1.
 
 import { relativeTo, walkTree } from '../fs.js'
 import { BLOCK } from './du-options.js'
 import { encodeUtf8 } from '../util.js'
 import { parseFindArgs } from './find-parse.js'
-import { unsupported } from '../unsupported.js'
+import { markUnsupported, unsupported } from '../unsupported.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { lookupWithNote, omissionNote } from '../notes.js'
+import { quoteLocale } from './mkdir.js'
+import { inOverlay } from '../writable.js'
 
 const TYPE_LETTERS = { file: 'f', dir: 'd', link: 'l' }
 
@@ -18,13 +20,26 @@ const TYPE_LETTERS = { file: 'f', dir: 'd', link: 'l' }
 const sizeOf = (entry, ctx) => (entry.kind === 'dir' ? BLOCK
   : ctx.fs.fileSize?.(entry.abs) ?? encodeUtf8(ctx.fs.readFile(entry.abs)).length)
 
+// A walk whose own -exec keeps making directories for it to go into goes on
+// for as long as there is room on the disk — `-exec mkdir -p {}/z \;` never
+// runs out of names, and `-exec mkdir {}/a {}/b \;` doubles at every level
+// long before PATH_MAX stops it — which no answer here can stand in for.
+// GNU's own walk into a tree it grows is followed this far, which is past
+// the deepest any one path can be built to: one directory a level until a
+// name reaches PATH_MAX is some two thousand of them.
+const GROWTH_LIMIT = 4096
+
 export async function find(stdin, tokens, ctx) {
-  const parsed = parseFindArgs(tokens)
+  const parsed = parseFindArgs(tokens, ctx)
   if (parsed.error) return parsed.error
-  if (stdin !== '' && tokens.some((t) => t === '-exec' || t === '--exec')) return unsupported('feature', 'find', '-exec stdin', 'find: passing shared standard input to -exec is not supported')
-  const { starts, minDepth, maxDepth, deepestFirst, groups, batches } = parsed
+  if (stdin !== '' && tokens.includes('-exec')) return unsupported('feature', 'find', '-exec stdin', 'find: passing shared standard input to -exec is not supported')
+  const { starts, minDepth, maxDepth, deepestFirst, tree, batches } = parsed
   const result = emptyOutput()
   const omitted = new Set()
+  // The newest inode before the walk began: a directory newer than it was
+  // made by the walk itself.
+  const before = ctx.fs.newestInode?.()
+  let grown = 0
   try {
     for (const start of starts) {
       // find walks the names it is given, not what they point at: `-P` is its
@@ -32,7 +47,7 @@ export async function find(stdin, tokens, ctx) {
       const { path: startAbs, error } = lookupWithNote(ctx, 'find', start, { follow: false })
       if (error) {
         // A bad root does not prevent traversal of the remaining roots.
-        collectOutput(result, ctx.flushOutput(emptyOutput(`find: '${start}': ${error}\n`)))
+        collectOutput(result, ctx.flushOutput(emptyOutput(`find: ${quoteLocale(start, ctx)}: ${error}\n`)))
         result.exitCode = 1
         continue
       }
@@ -41,11 +56,24 @@ export async function find(stdin, tokens, ctx) {
       const walk = walkTree(ctx.fs, startAbs, maxDepth, (path) => !pruned.has(path))
       for (const entry of deepestFirst ? deepestFirstOrder(walk) : walk) {
         const display = toDisplayPath(start, startAbs, entry.path)
+        // A directory gone, or no longer one, by the time the walk went into
+        // it is GNU's unreadable directory: said so, and passed over.
+        if (entry.kind === 'unreadable') {
+          collectOutput(result, ctx.flushOutput(emptyOutput(`find: ${quoteLocale(display, ctx)}: ${entry.error}\n`)))
+          result.exitCode = 1
+          continue
+        }
+        if (entry.kind === 'dir' && before !== undefined && inOverlay(entry.path) && ctx.fs.inode(entry.path) > before && ++grown > GROWTH_LIMIT) {
+          const message = `find: a walk into more than ${GROWTH_LIMIT} directories its own actions made is not supported`
+          appendOutput(result, ctx.flushOutput(emptyOutput(message + '\n')))
+          result.exitCode = 1
+          return markUnsupported(result, 'feature', 'find', 'self-growing walk', message)
+        }
         if (entry.depth >= minDepth) {
           // oxlint-disable-next-line no-await-in-loop -- an entry is tested after the one the walk reached before it.
-          await runPredicates(groups, { kind: entry.kind, path: display, abs: entry.path, prune: pruned }, ctx, result)
+          await evaluate(tree, { kind: entry.kind, path: display, abs: entry.path, prune: pruned }, ctx, result)
         }
-        if (entry.kind !== 'dir' || entry.depth !== maxDepth || pruned.has(entry.path)) continue
+        if (entry.kind !== 'dir' || entry.depth !== maxDepth || pruned.has(entry.path) || !ctx.fs.isDir(entry.path)) continue
         const { dirs, files, links } = ctx.fs.listDir(entry.path)
         // Named the way the walk that stopped there would have printed it: a
         // caller reading the note is reading it beside `find`'s own output, and
@@ -81,25 +109,26 @@ function* deepestFirstOrder(entries) {
   while (open.length > 0) yield open.pop()
 }
 
-// Preserve action output even when negation or a later predicate rejects
-// the entry. Stop at the first matching OR group to avoid repeating actions.
-async function runPredicates(groups, entry, ctx, result) {
-  for (const group of groups) {
-    let all = true
-    for (const p of group) {
-      // A predicate may run a command, which may wait; the one to its right
-      // is read only where this one let it be, so it waits for it.
-      // oxlint-disable-next-line no-await-in-loop -- a predicate is read only where the one to its left passed.
-      if (await evalPredicate(p, entry, ctx, result) === Boolean(p.negate)) { all = false; break }
-    }
-    if (all) return true
+// The operators as GNU evaluates them: `-a` and `-o` read their right side
+// only where the left side leaves the answer open, `,` reads both and answers
+// with the right, and `!` turns its operand's answer around. Action output
+// stays, whatever the entry finally answers.
+async function evaluate(node, entry, ctx, result) {
+  if (node.type === 'not') return !await evaluate(node.operand, entry, ctx, result)
+  if (node.type === 'binary') {
+    // A predicate may run a command, which may wait; the one to its right is
+    // read only where this one let it be, so it waits for it.
+    const left = await evaluate(node.left, entry, ctx, result)
+    if (node.op === 'and' && !left) return false
+    if (node.op === 'or' && left) return true
+    return evaluate(node.right, entry, ctx, result)
   }
-  return false
+  return evalPredicate(node, entry, ctx, result)
 }
 
 function evalPredicate(p, entry, ctx, result) {
-  if (p.kind === 'group') return runPredicates(p.groups, entry, ctx, result)
   if (p.kind === 'true') return true
+  if (p.kind === 'false') return false
   if (p.kind === 'type') return p.types.includes(TYPE_LETTERS[entry.kind])
   if (p.kind === 'name' || p.kind === 'iname') return p.re.test(entry.path.replace(/\/+$/u, '').split('/').at(-1) || '/')
   if (p.kind === 'prune') {
@@ -122,7 +151,8 @@ function evalPredicate(p, entry, ctx, result) {
   // asks about the second, and nothing that is not a link holds anything.
   if (p.kind === 'lname' || p.kind === 'ilname') return entry.kind === 'link' && p.re.test(ctx.fs.readLink?.(entry.abs) ?? '')
   if (p.kind === 'size') {
-    const units = Math.ceil(sizeOf(entry, ctx) / p.unit)
+    const size = BigInt(sizeOf(entry, ctx))
+    const units = (size + p.unit - 1n) / p.unit
     return p.sign === '+' ? units > p.count : p.sign === '-' ? units < p.count : units === p.count
   }
   if (p.kind === 'print' || p.kind === 'print0') {
