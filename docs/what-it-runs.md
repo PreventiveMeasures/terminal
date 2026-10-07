@@ -359,30 +359,33 @@ stores a whole archive or deflates what deflate makes smaller, so a file by
 one of those names that deflate would make smaller, beside another file it
 makes smaller, is refused. That deflate is the runtime's rather than
 Info-ZIP's, so the share a file reports saved is this archive's, and can be a
-few points away from what Info-ZIP's would be: 56% for the numbers 1 to 400,
-a line each, where Info-ZIP saves 53%. Adding to an archive already there, a
-file operand `-`, which Info-ZIP reads from stdin, a compression level and the
-rest are refused. `unzip` answers as Debian's UnZip 6.00 does: its usage
-where it is given no archive, the archive's comment under its name where it
-is not quiet, `-l`, dated year first, `-t`, `-p`, and extraction with `-q`,
-`-o`, `-n` — which wins over `-o`, with UnZip's caution, where both are
-given — `-j`, `-d` and `-x`, the
-overwrite question included — UnZip asks it on stdin, and a stdin with
-nothing on it answers with its end, which UnZip takes as "None". A link is
-made last, its name held until then by a placeholder of its target, as UnZip
-holds it, so a later entry of that name, which `-j` can make, meets it as it
-would there. A file keeps the mode it was stored with, less its set-id and
-sticky bits but with no umask taken from it, and its time; a directory UnZip
-made for an entry of its own takes the entry's once everything is written,
-and one made on the way, or for `-d`, is `drwxr-xr-x`, dated to when it was
-made, as a link is. A name stored with a `.` segment, which Info-ZIP never writes
-and other tools do, is refused as tar's is, since UnZip lists it as stored. The
-package does not say how an entry was stored, nor whether its time is an exact
-one or a DOS time, so an extraction that is not quiet — which names each file
-`extracting` or `inflating` by how it was stored — `-c`, and `-v` or the
-second `-l` that UnZip reads as one, are refused, and `-l` and an extraction
-answer where the two readings of every time agree, which they always do under
-`TZ=UTC`.
+few points away from what Info-ZIP's would be: 56% for the numbers 1 to 400, a
+line each, where Info-ZIP saves 53%. Its records are the package's too: they
+say the archive was made by Zip 2.0 rather than 3.0, mark no file as text, and
+carry a file's modification time alone, where Info-ZIP adds its access time
+and its owner's ids, which this terminal does not have — so an archive is a
+few bytes apart from Info-ZIP's even where nothing in it is deflated. Adding
+to an archive already there, a file operand `-`, which Info-ZIP reads from
+stdin, a compression level and the rest are refused. `unzip` answers as
+Debian's UnZip 6.00 does: its usage where it is given no archive, the
+archive's comment under its name where it is not quiet, `-l`, dated year
+first, `-t`, `-p`, and extraction with `-q`, `-o`, `-n` — which wins over
+`-o`, with UnZip's caution, where both are given — `-j`, `-d` and `-x`, the
+overwrite question included — UnZip asks it on stdin, and a stdin with nothing
+on it answers with its end, which UnZip takes as "None". A link is made last,
+its name held until then by a placeholder of its target, as UnZip holds it, so
+a later entry of that name, which `-j` can make, meets it as it would there. A
+file keeps the mode it was stored with, less its set-id and sticky bits but
+with no umask taken from it, and its time; a directory UnZip made for an entry
+of its own takes the entry's once everything is written, and one made on the
+way, or for `-d`, is `drwxr-xr-x`, dated to when it was made, as a link is. A
+name stored with a `.` segment, which Info-ZIP never writes and other tools
+do, is refused as tar's is, since UnZip lists it as stored. The package does
+not say how an entry was stored, nor whether its time is an exact one or a DOS
+time, so an extraction that is not quiet — which names each file `extracting`
+or `inflating` by how it was stored — `-c`, and `-v` or the second `-l` that
+UnZip reads as one, are refused, and `-l` and an extraction answer where the
+two readings of every time agree, which they always do under `TZ=UTC`.
 
 `curl` is the one command that reaches outside, and the one no terminal has
 unless it was asked for: `createTerminal` takes `network: true`, and without
