@@ -238,6 +238,33 @@ implemented. The other `LC_` categories also take `C` and `POSIX`, which
 read the same as C.UTF-8 in them. `createTerminal` takes `locale: 'C.UTF-8'`
 and nothing else.
 
+`sed` runs a script as GNU sed 4.9 does, with `-n`, `-e`, `-f`, `-E` and `-r`,
+`-s`, `-z`, `-l`, `--sandbox`, and `-i` with or without a backup suffix: every
+address — `0,/re/`, `first~step`, `addr,+N` and `addr,~N` among them — and
+every command but `e`, from `#n` on a script's first line to `l` wrapped at
+its width, `Q`, `F`, `z`, `v`, `r`, `R`, `w` and `W`, and in a replacement the
+`\U`, `\L`, `\u`, `\l` and `\E` case conversions and the `\x`, `\o`, `\d` and
+`\c` escapes. A script it cannot compile is wrong in GNU's words and at GNU's
+place — `-e expression #2, char 5:` or `file s.sed line 3:` ahead of the
+message, the character counted in bytes — and no script, or an option
+missing its argument, prints GNU's usage. A bracket takes a backslash for
+itself, as POSIX has it, so `[\]` and `[\.]` match what GNU's do, while `\n`,
+`\t` and the other escapes sed rewrites before its regex sees them stand for
+their characters there too. A directory handed to `-f` is a script with
+nothing in it, which is what GNU reads from one. Output to a pipe or a file is
+held in blocks of 4096 bytes as glibc's stdio holds it, and a line at a time
+on the terminal, so under `2>&1` a diagnostic lands where GNU's lands — ahead
+of whatever output was still held — and one that would land inside a
+character is refused. A closed stdout is `couldn't write N items to stdout`
+when a block fills and `couldn't close stdout` at the end, status 4, which is
+also the status of a `w` file that cannot be opened and of an `-i` backup that
+cannot be put in place. A loop that never reads input is stopped after a
+million commands; one that reads as it goes runs as long as its input does.
+What reports an unsupported diagnostic: `e` and the `M` flag, a backreference
+inside a regex, `-u`, `--posix`, `--debug`, `--follow-symlinks` and
+`--version`, an `l` width taken from `COLS`, `r` and `R` reading stdin or a
+file the same script writes, and `-i` outside the writable `/tmp/` overlay.
+
 `stat -c '%s %n' file` reports byte size and name; `%F` reports file type.
 `--printf` adds escape processing and controls line endings. Default `stat`
 output, directory byte sizes, and fields requiring ownership, permissions,
