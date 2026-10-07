@@ -12,11 +12,11 @@ importers:
         specifier: ^1.16.0
         version: 1.16.0
       '@preventive/archive':
-        specifier: ^1.0.0-beta.3
-        version: 1.0.0-beta.3
+        specifier: ^1.0.0-beta.4
+        version: 1.0.0-beta.4
       '@preventive/diff':
-        specifier: ^1.0.0
-        version: 1.0.0
+        specifier: ^1.0.1
+        version: 1.0.1
     devDependencies:
       oxlint:
         specifier: ^1.63.0
@@ -155,12 +155,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@preventive/archive@1.0.0-beta.3':
-    resolution: {integrity: sha512-2WLNnHNoUCJezrusJrA9QVIJTmo+34KF/6ODd+a8x6Ks5fk/GOWVaWTl8+A4DzOw5dO43Uf5fX1N6ga/gB7TIw==}
+  '@preventive/archive@1.0.0-beta.4':
+    resolution: {integrity: sha512-lJN3Wdt1pdsYXjAKJatYFn97N1l+0Kge6ixHIvHR1bdk5Zy/zDxigPbc3Rv1F13zObgV6X1TK7IvvHEaqFCvIA==}
     engines: {node: '>=24.14.0'}
 
-  '@preventive/diff@1.0.0':
-    resolution: {integrity: sha512-voZPhZLUkbM1R8N4TxZ1LjHYmAoy8/4cohXYq5gL5DXYag3MQ/XehTSGa+871V6ffsNptixV9iURVtqqMHLOHg==}
+  '@preventive/diff@1.0.1':
+    resolution: {integrity: sha512-e4c673eQKCuEPHP8IZdirOXdOYONAkIjb9FdLLKGZ4xkDZNLF19w9V9ETzQAR5Z3iOu/N5tgZBGuBCLZzNTz2A==}
     engines: {node: '>=24.14.0'}
 
   oxlint@1.64.0:
@@ -234,13 +234,13 @@ snapshots:
   '@oxlint/binding-win32-x64-msvc@1.64.0':
     optional: true
 
-  '@preventive/archive@1.0.0-beta.3':
+  '@preventive/archive@1.0.0-beta.4':
     dependencies:
       '@exodus/bytes': 1.16.0
     transitivePeerDependencies:
       - '@noble/hashes'
 
-  '@preventive/diff@1.0.0': {}
+  '@preventive/diff@1.0.1': {}
 
   oxlint@1.64.0:
     optionalDependencies:
