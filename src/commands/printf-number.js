@@ -3,68 +3,70 @@ import { UnsupportedError } from '../unsupported.js'
 import { decodeUtf8 } from '../bytes.js'
 import { encodeUtf8Loose } from '../util.js'
 import { INT64_MAX, INT64_MIN, UINT64_MAX } from '../numeric.js'
+import { quoteLocale } from './quote-name.js'
 
 // strtoimax reads a binary literal as well as the hexadecimal and octal ones,
 // and only for an integer: `%f` reads `0b1` as `0` and the rest left over.
 const INTEGER = /^[+-]?(?:0[bB][01]+|0[xX][\da-fA-F]+|0[0-7]*|[1-9]\d*)/u
 const FLOAT = /^[+-]?(?:0[xX](?:[\da-fA-F]+(?:\.[\da-fA-F]*)?|\.[\da-fA-F]+)(?:[pP][+-]?\d+)?|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf(?:inity)?|nan(?:\([\w]*\))?)/iu
 
-// A quote with nothing after it is no character constant, so it is read as
-// the number it is not. What follows the character is ignored, and said to be.
+// A quote with nothing after it is no character constant to coreutils, so it
+// is read as the number it is not; bash reads the character after it, which
+// is the string's end, and is zero. What follows the character coreutils
+// ignores and says so; bash ignores it without a word.
 function charConstant(arg, state) {
   if (arg?.[0] !== "'" && arg?.[0] !== '"') return null
   const body = arg.slice(1)
-  if (body === '') return null
+  const coreutils = state.program !== null
+  if (body === '') return coreutils ? null : 0
   const bytes = encodeUtf8Loose(body)
   const width = state.byteLocale ? 1 : encodeUtf8Loose(String.fromCodePoint(body.codePointAt(0))).length
-  if (bytes.length > width) {
-    state.stderr += `printf: warning: ${decodeUtf8(bytes.slice(width))}: character(s) following character constant have been ignored\n`
+  if (coreutils && bytes.length > width) {
+    state.stderr += `${state.program}: warning: ${decodeUtf8(bytes.slice(width))}: character(s) following character constant have been ignored\n`
   }
   return state.byteLocale ? bytes[0] : body.codePointAt(0)
 }
 
 // An operand with nothing in it is zero, which is what strtoimax makes of it.
-function numberPrefix(arg, pattern, state) {
-  if (arg === undefined || arg === '') return '0'
+// Either printf goes on with the prefix it could read.
+function numberPrefix(arg, pattern) {
+  if (arg === undefined || arg === '') return { parsed: '0', complete: true }
   const text = arg.replace(/^[ \t\n\r\f\v]+/u, '')
   const parsed = pattern.exec(text)?.[0] ?? ''
-  if (parsed.length !== text.length || parsed === '') {
-    state.stderr += `printf: ${quoted(arg, state)}: ${parsed ? 'value not completely converted' : 'expected a numeric value'}\n`
-    state.failed = true
-  }
-  return parsed || '0'
+  return { parsed: parsed || '0', complete: parsed !== '' && parsed.length === text.length, empty: parsed === '' }
 }
 
-const ESCAPES = { '\u0007': '\\a', '\b': '\\b', '\t': '\\t', '\n': '\\n', '\v': '\\v', '\f': '\\f', '\r': '\\r', '\\': '\\\\', "'": "\\'" }
-const octal = (byte) => '\\' + byte.toString(8).padStart(3, '0')
-
-// GNU names an operand it could not read the way it would have to be written
-// to be handed back: single-quoted, with what the quotes cannot carry spelled
-// out. A byte locale has no character above 127 to print, so those are octal.
-function quoted(text, state) {
-  let out = ''
-  for (const char of text) {
-    if (ESCAPES[char] !== undefined) { out += ESCAPES[char]; continue }
-    const code = char.codePointAt(0)
-    if (code < 0x20 || code === 0x7f) { out += octal(code); continue }
-    out += code > 0x7f && state.byteLocale ? encodeUtf8Loose(char).map(octal).join('') : char
+// What each printf says of an operand it could not wholly read, or read past
+// its type's end and clamped. coreutils names the operand as quote() does,
+// puts the range first, and fails the run either way. bash names it bare,
+// calls it an octal or a hex number where it begins like one and fails the
+// run for that, and only warns of the range.
+function badNumber(arg, read, overflow, state) {
+  if (state.program !== null) {
+    const what = overflow ? 'Numerical result out of range' : read.empty ? 'expected a numeric value' : 'value not completely converted'
+    if (overflow || !read.complete) {
+      state.stderr += `${state.program}: ${quoteLocale(arg, state.ctx)}: ${what}\n`
+      state.failed = true
+    }
+    return
   }
-  return `'${out}'`
+  if (!read.complete) {
+    state.stderr += `printf: ${arg}: invalid ${/^0\d/u.test(arg) ? 'octal ' : arg.startsWith('0x') ? 'hex ' : ''}number\n`
+    state.failed = true
+  } else if (overflow) state.stderr += `printf: warning: ${arg}: Numerical result out of range\n`
 }
 
 export function printfInteger(arg, unsigned, state) {
   const char = charConstant(arg, state)
   if (char !== null) return BigInt(char)
-  const parsed = numberPrefix(arg, INTEGER, state)
-  const negative = parsed[0] === '-'
-  const digits = parsed.replace(/^[+-]/u, '')
+  const read = numberPrefix(arg, INTEGER)
+  const negative = read.parsed[0] === '-'
+  const digits = read.parsed.replace(/^[+-]/u, '')
   const magnitude = BigInt(/^0[0-7]+$/u.test(digits) ? '0o' + digits : digits)
   const value = negative ? -magnitude : magnitude
-  if (unsigned ? magnitude > UINT64_MAX : value < INT64_MIN || value > INT64_MAX) {
-    state.stderr += `printf: ${quoted(arg, state)}: Numerical result out of range\n`
-    state.failed = true
-    return unsigned ? UINT64_MAX : negative ? INT64_MIN : INT64_MAX
-  }
+  const overflow = unsigned ? magnitude > UINT64_MAX : value < INT64_MIN || value > INT64_MAX
+  badNumber(arg, read, overflow, state)
+  if (overflow) return unsigned ? UINT64_MAX : negative ? INT64_MIN : INT64_MAX
   return unsigned ? BigInt.asUintN(64, value) : value
 }
 
@@ -87,7 +89,12 @@ export function printfIntegerField(value, spec) {
 
 export function printfFloatField(arg, spec, state) {
   const char = charConstant(arg, state)
-  const parsed = char === null ? numberPrefix(arg, FLOAT, state) : String(char)
+  let parsed = String(char)
+  if (char === null) {
+    const read = numberPrefix(arg, FLOAT)
+    badNumber(arg, read, false, state)
+    parsed = read.parsed
+  }
   const unsigned = parsed.replace(/^[+-]/u, '')
   if (/^(?:inf|nan)/iu.test(unsigned)) {
     const prefix = parsed.startsWith('-') ? '-' : spec.plus ? '+' : spec.space ? ' ' : ''

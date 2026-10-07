@@ -1,8 +1,8 @@
 // xargs parses its input using its own quoting rules, not shell expansion.
 import { parseArgs } from '../args.js'
-import { consumeStdin, err, ok, parseNonNegativeInt, splitLines } from '../util.js'
+import { consumeStdin, encodeUtf8Loose, ok, splitLines, usageError } from '../util.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
-import { unsupported } from '../unsupported.js'
+import { markUnsupported, unsupported } from '../unsupported.js'
 
 export async function xargs(stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, {
@@ -10,10 +10,11 @@ export async function xargs(stdin, tokens, ctx) {
   })
   const [cmd = 'echo', ...baseArgs] = positional
   const replace = values.get('I')
-  const n = values.has('n') ? parseNonNegativeInt(values.get('n'), 'xargs: -n') : { value: undefined }
+  const n = values.has('n') ? maxArgs(values.get('n')) : { value: undefined }
   if (n.error) return n.error
-  if (n.value === 0) return err('xargs: -n: must be at least 1')
-  if (replace === '') return err('xargs: -I: replacement string must not be empty')
+  // An empty replacement string GNU answers erratically: once a line with
+  // the command alone, or `command too long` beside an initial argument.
+  if (replace === '') return unsupported('option', 'xargs', '-I', "xargs: -I '' (an empty replacement string) is not supported")
   if (replace !== undefined && n.value !== undefined) return unsupported('option', 'xargs', '-I -n', 'xargs: combining replacement and chunk limits is not supported')
   consumeStdin(ctx)
   if (!flags.has('0') && stdin.includes('\0')) return unsupported('feature', 'xargs', 'NUL input', 'xargs: NUL input requires -0')
@@ -26,16 +27,32 @@ export async function xargs(stdin, tokens, ctx) {
   }
   if (items.length === 0 && (flags.has('r') || replace !== undefined)) return ok()
   // Build each batch only when it is reached; unavailable commands stop immediately.
-  const size = replace === undefined ? n.value ?? Math.max(1, items.length) : 1
   // What every batch wrote, in the order it wrote it, the bytes a command
   // wrote as bytes among it: a pipe after xargs takes those as they are.
   const out = emptyOutput()
+  const baseSize = [cmd, ...baseArgs].reduce((sum, word) => sum + argSize(word), 0)
   let exitCode = 0
-  for (let i = 0; i < Math.max(1, items.length); i += size) {
-    const item = items[i]
-    const args = replace === undefined
-      ? [...baseArgs, ...items.slice(i, i + size)]
-      : baseArgs.map((arg) => arg.replaceAll(replace, item))
+  let i = 0
+  do {
+    let args
+    if (replace === undefined) {
+      let end = i, size = baseSize
+      while (end < items.length && (n.value === undefined || end - i < n.value) && size + argSize(items[end]) <= ARG_MAX) size += argSize(items[end++])
+      if (end === i && i < items.length) {
+        appendOutput(out, { ...emptyOutput('xargs: argument line too long\n'), exitCode: 1 })
+        return out
+      }
+      args = [...baseArgs, ...items.slice(i, end)]
+      i = end
+    } else {
+      const item = items[i++]
+      args = baseArgs.map((arg) => arg.replaceAll(replace, item))
+      if (args.reduce((sum, word) => sum + argSize(word), argSize(cmd)) > ARG_MAX) {
+        const message = 'xargs: a replaced command line longer than 128 KiB is not supported'
+        appendOutput(out, { ...emptyOutput(message + '\n'), exitCode: 1 })
+        return markUnsupported(out, 'feature', 'xargs', 'command line limit', message)
+      }
+    }
     // oxlint-disable-next-line no-await-in-loop -- one batch after the last, as xargs runs them.
     const r = await ctx.dispatch(cmd, args, '', { devNull: true })
     appendOutput(out, r)
@@ -45,8 +62,24 @@ export async function xargs(stdin, tokens, ctx) {
     }
     if (r.exitCode === 127 && !ctx.hasCommand(ctx.registry.resolveCommand(cmd))) return { ...out, exitCode: 127 }
     if (r.exitCode !== 0) exitCode = 123
-  }
+  } while (i < items.length)
   return { ...out, exitCode, ignored: false }
+}
+
+// GNU's xargs builds a command line of at most 128 KiB — each word counted
+// with the NUL that ends it, the command's own words included — and runs
+// what it has whenever the next argument would not fit. An argument too long
+// for any command line ends the run there, with what went before it run.
+const ARG_MAX = 128 * 1024
+const argSize = (word) => encodeUtf8Loose(word).length + 1
+
+// -n reads its count with strtol: blanks, a sign and decimal digits, past
+// whose range it saturates, and at least 1. Recorded from findutils 4.9.
+function maxArgs(text) {
+  if (!/^[ \t\n\r\f\v]*[+-]?\d+$/u.test(text)) return { error: usageError('xargs', `invalid number "${text}" for -n option`) }
+  const value = BigInt(text.trim())
+  if (value < 1n) return { error: usageError('xargs', `value ${text} for -n option should be >= 1`) }
+  return { value: value > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(value) }
 }
 
 // Dispatch names the command, so the message says only what went wrong —

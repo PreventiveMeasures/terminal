@@ -37,7 +37,7 @@ describe('base32 writes what coreutils writes', () => {
     // The default is 76, so a line long enough to need it is broken there.
     const long = await t.run('printf "%s" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | base32')
     assert.deepEqual(long.stdout.split('\n').map((line) => line.length), [76, 4, 0])
-    assert.deepEqual(await t.run('base32 -w x hello'), result('', { stderr: 'base32: invalid wrap size: x\n', exitCode: 1 }))
+    assert.deepEqual(await t.run('base32 -w x hello'), result('', { stderr: 'base32: invalid wrap size: ‘x’\n', exitCode: 1 }))
   })
 
   it('encodes bytes that spell no text, which is what it is for', async () => {

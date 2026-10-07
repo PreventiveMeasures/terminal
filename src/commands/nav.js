@@ -6,7 +6,7 @@ import { tree } from './tree.js'
 import { find } from './find.js'
 import { homeOf } from '../shell/expand.js'
 import { parseArgs } from '../args.js'
-import { err, ok, usage } from '../util.js'
+import { err, ok, quoteLocale, usageError } from '../util.js'
 import { unsupported } from '../unsupported.js'
 import { hiddenEntryNotes, lookupWithNote } from '../notes.js'
 import { FS_TOOLS } from './fs-tools.js'
@@ -113,10 +113,10 @@ function ls(_stdin, tokens, ctx) {
 }
 
 // Strip a matching suffix only when it leaves part of the basename intact.
-function basenameCmd(_stdin, tokens) {
+function basenameCmd(_stdin, tokens, ctx) {
   const { positional } = parseArgs(tokens)
-  if (positional.length === 0) return usage('basename PATH [SUFFIX]')
-  if (positional.length > 2) return err(`basename: extra operand: ${positional[2]}`)
+  if (positional.length === 0) return usageError('basename', 'missing operand')
+  if (positional.length > 2) return usageError('basename', `extra operand ${quoteLocale(positional[2], ctx)}`)
   const path = positional[0].replace(/\/+$/u, '')
   const name = path === '' ? (positional[0] === '' ? '' : '/') : path.slice(path.lastIndexOf('/') + 1)
   return ok(stripSuffix(name, positional[1]) + '\n')
@@ -129,7 +129,7 @@ function stripSuffix(name, suffix) {
 
 function dirnameCmd(_stdin, tokens) {
   const { positional } = parseArgs(tokens)
-  if (positional.length === 0) return usage('dirname PATH')
+  if (positional.length === 0) return usageError('dirname', 'missing operand')
   return ok(positional.map((p) => {
     const path = p.replace(/\/+$/u, '')
     const i = path.lastIndexOf('/')

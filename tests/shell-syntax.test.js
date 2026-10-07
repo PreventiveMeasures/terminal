@@ -178,7 +178,7 @@ describe('shell syntax — parameters', () => {
     const t = term()
     await t.run('f="a.txt b.txt"')
     assert.equal(await out('cat $f', t), 'x y z\nhello world\nB\n')
-    assert.match((await t.run('cat "$f"')).stderr, /^cat: a.txt b.txt: No such file/u)
+    assert.match((await t.run('cat "$f"')).stderr, /^cat: 'a.txt b.txt': No such file/u)
     assert.equal(await out('f=" a  b "; echo [$f] ["$f"]', t), '[ a b ] [ a  b ]\n')
     assert.equal(await out('f=""; echo [$f] ["$f"] $f | wc -w', t), '2\n')
   })
@@ -264,7 +264,7 @@ describe('shell syntax — brace and pathname expansion', () => {
     assert.equal(await out('cat [a-c][!1].txt', t), 'c\n')
     assert.equal(await out('cat [[:alpha:]][[:digit:]].txt', t), 'a\nb\nc\n')
     assert.equal(await out('cat [', t), 'bracket\n')
-    assert.equal(await out('cat [x]1.txt 2>&1', t), 'cat: [x]1.txt: No such file or directory\n')
+    assert.equal(await out('cat [x]1.txt 2>&1', t), "cat: '[x]1.txt': No such file or directory\n")
     // find's -name uses the same glob language.
     assert.equal(await out("find src -name '[fb]oo.js' | sort", t), 'src/boo.js\nsrc/foo.js\n')
     assert.equal(await out("find src -name '[!f]oo.js'", t), 'src/boo.js\n')

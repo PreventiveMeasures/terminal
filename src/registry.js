@@ -8,7 +8,7 @@ import { sed } from './commands/sed.js'
 import { bracket, test } from './commands/test.js'
 import { markUnsupported, unsupported, unsupportedNote } from './unsupported.js'
 import { SHELL_BUILTINS, SHELL_GAPS } from './shell/builtins.js'
-import { TEXT_COMMANDS, TRIVIAL_COMMANDS } from './commands/text.js'
+import { PROGRAMS, TEXT_COMMANDS, TRIVIAL_COMMANDS, diagnosticName } from './commands/text.js'
 import { quietSearch } from './commands/grep.js'
 
 const VISIBLE_COMMANDS = { test, cat, ...TEXT_COMMANDS, ...NAV_COMMANDS, ...EXTRA_COMMANDS }
@@ -115,6 +115,13 @@ export function createRegistry(commands, network = false) {
     has,
     shellOnly: (name) => SHELL_ONLY.has(name),
     resolveCommand: (name) => resolveCommand(name, has),
+    // What a name runs where bash would run a program rather than its own
+    // builtin — given as a path, or by xargs or find -exec — where the two
+    // are different commands (commands/programs.js).
+    program: (name) => PROGRAMS[name],
+    // What renames a command's diagnostics where it was run by a path its
+    // GNU counterpart would name itself by (commands/programs.js).
+    diagnosticName: (name, resolved) => diagnosticName(name, resolved),
     chainRole: (argv) => chainRole(argv, has),
     // What the terminal says it has when a name is not one of them: the
     // commands it announces, which is not every command it answers to.

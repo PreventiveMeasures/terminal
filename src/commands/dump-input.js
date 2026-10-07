@@ -19,11 +19,15 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
   const piped = ctx.stdinBytes
   const chunks = []
   const r = { stderr: '', failed: false }
+  // Whether any operand opened at all, which is what decides whether the
+  // dump has anything to say once every one has been tried.
+  let opened = files.length === 0
   for (const file of files.length ? files : [null]) {
     // A dump is the bytes themselves, so a file this terminal cannot spell as
     // text is dumped as readily as one it can.
     const input = readInputs(cmd, file === null ? [] : [file], rest, ctx, { read: 'loose-bytes', noRead: remaining === 0 && skipping === 0 })
     const isDir = input.entries[0]?.kind === 'dir'
+    if (input.entries[0]?.kind !== 'missing') opened = true
     r.stderr += input.stderr
     r.failed ||= input.failed && !(cmd === 'hexdump' && isDir)
     if (skipping && isDir) return { error: unsupported('feature', cmd, 'skip across unreadable input', `${cmd}: skipping across a directory operand is not supported`) }
@@ -62,7 +66,7 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
   const bytes = new Uint8Array(chunks.reduce((n, chunk) => n + chunk.length, 0))
   let offset = 0
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length }
-  return { bytes, start, r }
+  return { bytes, start, r, opened }
 }
 
 function dumpCount(cmd, value, flag, fallback) {

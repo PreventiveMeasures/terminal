@@ -70,13 +70,13 @@ function context({ fs, io, mount, writable, registry, createdAt, lock }, session
   const ctx = {
     fs, io, mount, writable, registry, createdAt, lock, ...session, calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
     loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinTerminal: true, stdinOrigin: null, stdinHandle: null, stdinLeft: '', stdinBytes: null,
-    unsupported: createUnsupportedFeed(), notes: new Set(),
+    unsupported: createUnsupportedFeed(), notes: new Set(), rename: null,
   }
   // find -exec and xargs dispatch externally in isolated shell state. What
   // xargs runs reads /dev/null, as GNU's does, where find's reads find's own.
   ctx.dispatch = (name, tokens, stdin, { devNull = false } = {}) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinBytes: ctx.stdinBytes, stdinFile: false, stdinPiped: false, stdinTerminal: ctx.stdinTerminal && !devNull, stdinOrigin: null, stdinHandle: null },
     () => isolated(ctx, () => dispatch(name, tokens, stdin, ctx, true)))
-  ctx.flushOutput = (result) => routeExternalOutput(result, ctx)
+  ctx.flushOutput = (result) => routeExternalOutput(ctx.rename ? ctx.rename(result) : result, ctx)
   ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)
   ctx.invoke = (name, tokens, stdin) => dispatch(name, tokens, stdin, ctx)
   ctx.substitute = (command, backtick) => commandSubstitution(command, ctx, runSteps, backtick)
@@ -103,18 +103,21 @@ function terminal(ctx, label) {
 async function dispatch(name, tokens, stdin, ctx, external = false) {
   const reg = ctx.registry
   const resolved = reg.resolveCommand(name)
+  const rename = reg.diagnosticName(name, resolved)
   const run = () => {
-    if ((external || name !== resolved) && reg.shellOnly(resolved)) return unsupported('command', name, name, `${name}: shell builtin cannot be invoked as an external command`, 127)
-    const cmd = reg.commands[resolved]
-    return cmd ? cmd(stdin, tokens, ctx) : unknownCommand(name, reg)
+    const program = external || name !== resolved
+    if (program && reg.shellOnly(resolved)) return unsupported('command', name, name, `${name}: shell builtin cannot be invoked as an external command`, 127)
+    const cmd = (program && reg.program(resolved)) || reg.commands[resolved]
+    return cmd ? cmd(stdin, tokens, ctx, name) : unknownCommand(name, reg)
   }
-  const route = (r) => routeExternalOutput(record(ctx, commandWriteError(name, r, ctx), resolved), ctx)
+  const route = (r) => routeExternalOutput(record(ctx, commandWriteError(name, rename === null ? r : rename(r), ctx), resolved), ctx)
   try {
     // A command may answer with a promise — gzip waits on a stream the
     // runtime owns rather than on anything here — and what it then throws is
     // this call's to report, so the waiting happens here rather than in
-    // whoever reads the result.
-    return await ctx.io.run(resolved, async () => route(await run()))
+    // whoever reads the result. What it flushes as it goes is renamed as
+    // what it returns is.
+    return await withState(ctx, { rename }, () => ctx.io.run(resolved, async () => route(await run())))
   } catch (e) {
     missingPathNote(ctx, name, e?.path, e?.fsError)
     // A command line the command could not read is answered in its tool's

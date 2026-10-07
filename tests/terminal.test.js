@@ -2136,8 +2136,8 @@ describe('createTerminal — xargs', () => {
   it('-n 0 is rejected (would otherwise silently degrade to no chunking)', async () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('echo a b c | xargs -n 0 echo')
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /at least 1/u)
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stderr, "xargs: value 0 for -n option should be >= 1\nTry 'xargs --help' for more information.\n")
   })
 
   it('flags after the inner command name belong to the inner command, not xargs', async () => {
@@ -3211,18 +3211,19 @@ describe('createTerminal — count validation', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('head -n "" src/foo.js')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /invalid count/u)
+    assert.equal(r.stderr, 'head: invalid number of lines: ‘’\n')
   })
 
   it('`head -n --` consumes `--` as the count value (POSIX getopt)', async () => {
     // A value-taking short option immediately followed by `--`
     // consumes `--` as the value, not as the terminator. The value
-    // then fails parseNonNegativeInt with "invalid count", not
-    // "requires a value" (which would mean no value was supplied).
+    // then fails as an invalid number of lines — what is left of it once
+    // its leading `-` is read as eliding from the end — not as a missing
+    // argument (which would mean no value was supplied).
     const t = createTerminal(SOURCES)
     const r = await t.run('head -n -- src/foo.js')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /invalid count: --/u)
+    assert.equal(r.stderr, 'head: invalid number of lines: ‘-’\n')
   })
 
   it('non-decimal counts (whitespace, hex, scientific) are rejected', async () => {
@@ -3236,13 +3237,13 @@ describe('createTerminal — count validation', () => {
     }
   })
 
-  it('a rejected signed count is quoted as typed, sign included', async () => {
-    // The digits are validated after the sign is peeled off, but the
-    // message must still show what the user actually wrote.
+  it('a rejected signed count is quoted as GNU reads it: a `+` kept, a `-` taken off', async () => {
+    // The `-` is read as a direction before the count is, so GNU names the
+    // count without it; a `+` is part of the number to strtoumax.
     const t = createTerminal(SOURCES)
-    assert.match((await t.run('head -n +x src/foo.js')).stderr, /invalid count: \+x/u)
-    assert.match((await t.run('tail -n -x src/foo.js')).stderr, /invalid count: -x/u)
-    assert.match((await t.run('head -n +18446744073709551616 src/foo.js')).stderr, /out of range: \+18446744073709551616/u)
+    assert.equal((await t.run('head -n +x src/foo.js')).stderr, 'head: invalid number of lines: ‘+x’\n')
+    assert.equal((await t.run('tail -n -x src/foo.js')).stderr, 'tail: invalid number of lines: ‘x’\n')
+    assert.equal((await t.run('head -n +18446744073709551616 src/foo.js')).stderr, 'head: invalid number of lines: ‘+18446744073709551616’: Value too large for defined data type\n')
   })
 
   it('counts outside the unsigned 64-bit range are rejected', async () => {
@@ -3251,7 +3252,7 @@ describe('createTerminal — count validation', () => {
     // 2^64 is the first value GNU head rejects.
     const r = await t.run('head -n 18446744073709551616 src/foo.js')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /out of range/u)
+    assert.match(r.stderr, /Value too large for defined data type/u)
   })
 })
 
@@ -3494,7 +3495,7 @@ describe('createTerminal — shell-style glob expansion', () => {
     const t = createTerminal(SRC)
     const r = await t.run('wc -l dir/*.txt')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /dir\/\*\.txt: No such file/u)
+    assert.match(r.stderr, /'dir\/\*\.txt': No such file/u)
   })
 
   it('absolute glob — `/dir/*.js`', async () => {
@@ -3517,7 +3518,7 @@ describe('createTerminal — shell-style glob expansion', () => {
     // `cat` will report the unexpanded pattern as a missing file.
     const r = await t.run('cat *.js')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /\*\.js: No such file/u)
+    assert.match(r.stderr, /'\*\.js': No such file/u)
     // Explicit `.` matches the dotfile.
     const dot = await t.run('cat .*.js')
     assert.equal(dot.stdout, 'h\n')
@@ -3759,9 +3760,9 @@ describe('createTerminal — head/tail -N shorthand', () => {
     const t = createTerminal(SOURCES)
     const r = await t.run('head -n 1 -100 src/foo.js')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /unknown option/u)
+    assert.equal(r.stderr, "head: invalid trailing option -- 1\nTry 'head --help' for more information.\n")
     assert.equal(r.stdout, '')
-    assert.equal(r.unsupported.length, 1)
+    assert.deepEqual(r.unsupported, [])
   })
 
   it('redirect error messages use bare `>` / `>>` for stdout (fd=1) but `2>` for stderr', async () => {
@@ -3865,7 +3866,7 @@ describe('createTerminal — head -c (byte counts)', () => {
     const t = createTerminal(BYTES)
     const r = await t.run('head -c abc h.txt')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /head: -c: invalid count: abc/u)
+    assert.equal(r.stderr, 'head: invalid number of bytes: ‘abc’\n')
   })
 
   it('a leading `-NUM` still counts, and a later `-c` still overrides it', async () => {
@@ -3886,9 +3887,9 @@ describe('createTerminal — head -c (byte counts)', () => {
     const t = createTerminal(BYTES)
     const r = await t.run('head -c 3 -1 h.txt')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /unknown option: -1/u)
+    assert.equal(r.stderr, "head: invalid trailing option -- 1\nTry 'head --help' for more information.\n")
     assert.equal(r.stdout, '')
-    assert.equal(r.unsupported[0].detail, '-1')
+    assert.deepEqual(r.unsupported, [])
   })
 })
 
@@ -4200,7 +4201,7 @@ describe('createTerminal — grep -q/-m, cut -s, tr -c', () => {
     assert.equal((await t.run('cut -d, -f1 mixed.txt')).stdout, 'a\nNOCOMMA\nc\n')
     assert.equal((await t.run('cut -d, -f1 -s mixed.txt')).stdout, 'a\nc\n')
     // Byte mode has no delimiter to miss, so -s there is an error.
-    assert.match((await t.run('cut -c1 -s f.txt')).stderr, /-s is only valid with -f/u)
+    assert.match((await t.run('cut -c1 -s f.txt')).stderr, /suppressing non-delimited lines makes sense\n\tonly when operating on fields/u)
   })
 
   it('tr -c acts on everything OUTSIDE the set', async () => {
@@ -4878,7 +4879,7 @@ describe('createTerminal — seq', () => {
     const t = createTerminal({})
     assert.match((await t.run('seq 1.5')).stderr, /not supported/u)
     assert.match((await t.run('seq 1e3')).stderr, /not supported/u)
-    assert.match((await t.run('seq 1 0 5')).stderr, /non-zero/u)
+    assert.equal((await t.run('seq 1 0 5')).stderr, "seq: invalid Zero increment value: ‘0’\nTry 'seq --help' for more information.\n")
   })
 
   it('feeds xargs cleanly', async () => {
@@ -4948,13 +4949,16 @@ describe('createTerminal — nl', () => {
     assert.equal((await t.run('nl -b n f.txt')).stdout, '       a\n       \n       b\n')
   })
 
-  it('rejects unsupported -b styles with a message naming the valid options', async () => {
+  it('rejects -b styles: one GNU has not as GNU does, `pREGEX` naming the valid options', async () => {
     // Real nl also supports `-b pREGEX`, which is out of scope. The
-    // error should make the supported set clear.
+    // refusal should make the supported set clear.
     const t = createTerminal({ 'f.txt': 'a\n' })
     const r = await t.run('nl -b z f.txt')
-    assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /only `a`, `t` and `n`/u)
+    assert.equal(r.exitCode, 1)
+    assert.equal(r.stderr, "nl: invalid body numbering style: ‘z’\nTry 'nl --help' for more information.\n")
+    const p = await t.run('nl -b px f.txt')
+    assert.match(p.stderr, /only `a`, `t` and `n`/u)
+    assert.equal(p.unsupported.length, 1)
   })
 
   it('reads from stdin when no file is given', async () => {
@@ -5021,16 +5025,18 @@ describe('createTerminal — cut', () => {
 
   it('rejects malformed shapes with specific messages', async () => {
     const t = createTerminal({ 'f.txt': 'a,b\n' })
+    const usage = (line) => `cut: ${line}\nTry 'cut --help' for more information.\n`
     // Neither -f nor -c.
-    assert.match((await t.run('cut f.txt')).stderr, /usage:/u)
-    // Both -f and -c.
-    assert.match((await t.run('cut -f 1 -c 1 f.txt')).stderr, /usage:/u)
+    assert.equal((await t.run('cut f.txt')).stderr, usage('you must specify a list of bytes, characters, or fields'))
+    // Both -f and -c, or either twice.
+    assert.equal((await t.run('cut -f 1 -c 1 f.txt')).stderr, usage('only one list may be specified'))
+    assert.equal((await t.run('cut -f 1 -f 2 f.txt')).stderr, usage('only one list may be specified'))
     // -d with -c.
-    assert.match((await t.run('cut -d , -c 1 f.txt')).stderr, /-d is only valid with -f/u)
+    assert.equal((await t.run('cut -d , -c 1 f.txt')).stderr, usage('an input delimiter may be specified only when operating on fields'))
     // Reversed range.
-    assert.match((await t.run('cut -c 5-2 f.txt')).stderr, /invalid decreasing range/u)
+    assert.equal((await t.run('cut -c 5-2 f.txt')).stderr, usage('invalid decreasing range'))
     // Multi-char delim.
-    assert.match((await t.run('cut -d ,, -f 1 f.txt')).stderr, /single byte/u)
+    assert.equal((await t.run('cut -d ,, -f 1 f.txt')).stderr, usage('the delimiter must be a single character'))
   })
 
   it('composes naturally in a pipeline', async () => {
@@ -5073,8 +5079,8 @@ describe('createTerminal — tr', () => {
   it('rejects -d combined with -s and missing operands', async () => {
     const t = createTerminal({})
     assert.match((await t.run('echo x | tr -ds a b')).stderr, /-d combined with -s/u)
-    assert.match((await t.run('echo x | tr a')).stderr, /usage:/u)
-    assert.match((await t.run('tr')).stderr, /usage:/u)
+    assert.equal((await t.run('echo x | tr a')).stderr, "tr: missing operand after ‘a’\nTwo strings must be given when translating.\nTry 'tr --help' for more information.\n")
+    assert.equal((await t.run('tr')).stderr, "tr: missing operand\nTry 'tr --help' for more information.\n")
   })
 
   it('-d with an empty SET is a no-op (input passes through unchanged)', async () => {
@@ -5107,35 +5113,31 @@ describe('createTerminal — which', () => {
     assert.equal((await t.run('which which')).stdout, '/usr/bin/which\n')
   })
 
-  it('unknown command: prints `<name> not found` on stdout, exit 1', async () => {
-    // Matches the zsh `which` builtin shape: misses are reported
-    // inline (so a multi-arg call shows which ones failed) and the
-    // exit code bumps so callers can still detect "not all found".
+  it('unknown command: prints nothing, exit 1', async () => {
+    // Debian's which says nothing of a name it does not find; only the
+    // status says not all were found.
     const t = createTerminal({})
     const r = await t.run('which frobnicate')
     assert.equal(r.exitCode, 1)
-    assert.equal(r.stdout, 'frobnicate not found\n')
+    assert.equal(r.stdout, '')
     assert.equal(r.stderr, '')
+    assert.equal((await t.run('which cd')).exitCode, 1)
   })
 
-  it('mixed: paths and not-found interleave in argv order; exit 1 if any miss', async () => {
+  it('mixed: what it finds in argv order; exit 1 if any miss', async () => {
     const t = createTerminal({})
     const r = await t.run('which ls frobnicate cat')
     assert.equal(r.exitCode, 1)
-    assert.equal(r.stdout, '/usr/bin/ls\nfrobnicate not found\n/usr/bin/cat\n')
+    assert.equal(r.stdout, '/usr/bin/ls\n/usr/bin/cat\n')
   })
 
-  it('does NOT participate in the /bin prefix mapping', async () => {
-    // `dispatch` strips `/bin/` etc. when the bare name is known,
-    // but `which` checks registry membership directly. So
-    // `which /bin/ls` looks up the literal `/bin/ls` name (not
-    // registered) and reports it as missing. This keeps which's
-    // contract simple — strip the prefix yourself if you want the
-    // fake path.
+  it('prints a path to a command as it was given', async () => {
+    // A name with a slash in it is printed where it is an executable file,
+    // which in this tree is a command in /bin or /usr/bin and nothing else.
     const t = createTerminal({})
-    const r = await t.run('which /bin/ls')
-    assert.equal(r.exitCode, 1)
-    assert.equal(r.stdout, '/bin/ls not found\n')
+    assert.deepEqual([(await t.run('which /bin/ls')).stdout, (await t.run('which /bin/ls')).exitCode], ['/bin/ls\n', 0])
+    assert.deepEqual([(await t.run('which ./ls')).stdout, (await t.run('which ./ls')).exitCode], ['', 1])
+    assert.deepEqual([(await t.run('which')).stdout, (await t.run('which')).exitCode], ['', 1])
   })
 })
 
@@ -5158,7 +5160,7 @@ describe('createTerminal — whoami / date (hidden, chain-friendly)', () => {
     const t = createTerminal({})
     const r = await t.run('whoami foo')
     assert.notEqual(r.exitCode, 0)
-    assert.match(r.stderr, /extra operand: foo/u)
+    assert.equal(r.stderr, "whoami: extra operand ‘foo’\nTry 'whoami --help' for more information.\n")
   })
 
   it('date with no args emits the GNU default shape', async () => {
@@ -5201,10 +5203,10 @@ describe('createTerminal — whoami / date (hidden, chain-friendly)', () => {
     const t = createTerminal({})
     const bare = await t.run('date xxx')
     assert.notEqual(bare.exitCode, 0)
-    assert.match(bare.stderr, /usage: date/u)
+    assert.equal(bare.stderr, 'date: invalid date ‘xxx’\n')
     const dupe = await t.run('date +a +b')
     assert.notEqual(dupe.exitCode, 0)
-    assert.match(dupe.stderr, /at most one \+FORMAT/u)
+    assert.equal(dupe.stderr, "date: extra operand ‘+b’\nTry 'date --help' for more information.\n")
   })
 
   it('`pwd && whoami && date` chains cleanly (the originally-requested ritual)', async () => {
@@ -6914,12 +6916,12 @@ describe('createTerminal — GNU fidelity fixes (verified against the real binar
     assert.deepEqual(asc, ['.:', './node_modules:', './node_modules/p:', './src:', './src/sub:'])
   })
 
-  it('xargs -I rejects an empty placeholder instead of corrupting args', async () => {
+  it('xargs -I refuses an empty placeholder instead of corrupting args', async () => {
     // `replaceAll('', item)` splices the item between every character:
-    // `-I "" echo abc` emitted `xaxbxcx`.
+    // `-I "" echo abc` emitted `xaxbxcx`. GNU's own answer to it is erratic.
     const r = await t().run('echo x | xargs -I "" echo q')
     assert.equal(r.exitCode, 1)
-    assert.match(r.stderr, /must not be empty/u)
+    assert.equal(r.unsupported[0].detail, '-I')
   })
 })
 
