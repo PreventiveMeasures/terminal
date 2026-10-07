@@ -45,6 +45,25 @@ export function countMatches(input, res, invert, max) {
   return count
 }
 
+// Where a search that stops at its `max`-th selected line stops: just past
+// that line, in the input's own text, or -1 where it never selects that many
+// and reads on to the end. At -m0 it stops before its first line. Lines are
+// counted as grepbuf counts them, every NUL ending one in a file GNU calls
+// binary.
+export function selectionEnd(input, res, invert, max) {
+  if (max === 0) return 0
+  const tests = matchersFor(input, res)
+  const content = contentOf(input)
+  let count = 0
+  for (let start = 0; start < content.length;) {
+    const newline = content.indexOf('\n', start)
+    const lineEnd = newline < 0 ? content.length : newline
+    if (anyMatch(tests, content.slice(start, lineEnd)) !== invert && ++count === max) return newline < 0 ? lineEnd : lineEnd + 1
+    start = lineEnd + 1
+  }
+  return -1
+}
+
 // What a run writes, in the order GNU writes it: each file's lines, what it
 // has to say about that file after them, and a file it could not open where
 // that file came. Lines holding bytes that spell no text go out as the bytes.

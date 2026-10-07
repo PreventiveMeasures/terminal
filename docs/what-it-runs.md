@@ -93,6 +93,32 @@ unsupported diagnostic rather than mangling it — `head`, `sed`, `awk` and the
 rest, whether the bytes came from a file, a redirection or a pipe, and
 `diff -a`.
 
+A command that stops reading before the end of what the list shares leaves
+the rest to the next one, and where that rest begins is known only where GNU
+makes it exact. A redirected file is put back where the reader stopped by
+`head -n`, `sed`'s `q` and `Q`, `grep -m` and `hexdump -n`, so
+`{ head -n 1; cat; } < f` prints all of `f`; `head -c` and `od -N` read no
+more than they need, from a pipe too; and `tar` reads an archive a record at
+a time up to the record that ends it, so `cat a.tar notes | { tar tf -; cat; }`
+lists the archive and then prints the notes. A pipe — and a here-string or a
+here-document, which bash 5.2 hands over as one — is read a buffer at a time,
+and how far past its stop a reader's reads had taken it depends on how the
+writes before them fell: `seq 1 3000 | { head -n 1; cat; }` hands `cat` 1142
+lines on one run and could hand it none on another. `awk`, `xxd`, `grep -q`,
+`-l` and `-L`, and `rg` read even a file a block at a time and put nothing
+back, which takes a file no bigger than that block whole and leaves the rest
+of a larger one as uncertain as a pipe's; so do `base64 -d` giving up at
+what is not its alphabet and `xargs` giving up part way through its list.
+A pipeline whose later stage stops reading — `cat | head -n 1` — ends the
+stage writing to it wherever that one has got to, and so leaves uncertain
+how much of the list's input its first stage took. A command that then
+reads what such a reader left — `cat`, a substitution, the next turn of a
+loop, the same reader opening `-` again — is refused with an unsupported
+diagnostic naming the reader that stopped, rather than answered with one
+run's luck; a list that never reads it again runs as it would. `awk` reads
+`/dev/stdin` as gawk does, as the descriptor it is rather than the file
+opened again.
+
 `grep` searches a file that is not text as GNU grep does. A NUL in GNU's first
 read — 96 KiB of a file, 64 KiB of a pipe — makes the file binary: records end
 at each NUL as at a newline, nothing of the file is printed, and a selection

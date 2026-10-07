@@ -131,13 +131,19 @@ describe('AWK extraction — replacement text and capture groups', () => {
       await refused(`BEGIN {print gensub(/${pattern}/,"\\\\1","g","aba")}`, 'regex capture semantics')
     })
   }
-  it('named getline consumes shared input and keeps regular-file aliases independent', async () => {
+  it('named getline reads standard input where it stands, /dev/stdin as much as -', async () => {
+    // gawk reads ahead of its records a block at a time and puts nothing
+    // back: a file no bigger than a block it takes whole, and what it left
+    // of a pipe — for the next command, or for its own main input — is not
+    // known.
     for (const name of ['-', '/dev/stdin']) {
-      await check(`cat f | { awk 'BEGIN {getline x < "${name}";print x}'; cat; }`, 'one 1\n')
-      await check(`cat f | awk 'BEGIN {getline x < "${name}";print x} {print}'`, 'one 1\n')
+      await check(`{ awk 'BEGIN {getline x < "${name}";print x}'; cat; } < f`, 'one 1\n')
+      for (const command of [`cat f | { awk 'BEGIN {getline x < "${name}";print x}'; cat; }`, `cat f | awk 'BEGIN {getline x < "${name}";print x} {print}'`]) {
+        const r = await createTerminal(FILES).run(command)
+        assert.deepEqual([r.stdout, r.unsupported.map((gap) => gap.detail)], ['one 1\n', ['input after an early stop']], command)
+        assert.notEqual(r.exitCode, 0, command)
+      }
     }
-    await check(`{ awk 'BEGIN {getline x < "-";print x}'; cat; } < f`, 'one 1\n')
-    await check(`{ awk 'BEGIN {getline x < "/dev/stdin";print x}'; cat; } < f`, 'one 1\none 1\ntwo 2\n')
   })
 })
 
@@ -161,7 +167,9 @@ describe('grep extraction — combined modes and early exits', () => {
     for (const flags of ['', '-q', '-l', '-c', '-qL']) await check(`grep ${flags} -m0 x missing`, '', files, 1)
     await check('grep -L -m0 x f g binary', 'f\ng\nbinary\n', files, 1)
     await check('{ grep -m0 x; cat; } < f', files.f, files)
-    await check('{ grep -Lm0 x; cat; } < f', '(standard input)\n' + files.f, files)
+    // -L reads GNU's first read of it all the same, which takes this file
+    // whole, and puts nothing back.
+    await check('{ grep -Lm0 x; cat; } < f', '(standard input)\n', files)
   })
   it('a search that can select no line opens nothing either, as GNU does not run one', async () => {
     // Checked against GNU grep 3.11. Every line matches an empty pattern, so

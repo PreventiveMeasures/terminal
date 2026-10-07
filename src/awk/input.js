@@ -10,7 +10,7 @@ import { subscript } from './array.js'
 import { AwkRegex, compileRegex, splitByRegex, stepAt } from './regex.js'
 import { StrNum, checkText, ignoreCase, toNum, toStr } from './value.js'
 import { lookupWithNote } from '../notes.js'
-import { consumeStdin } from '../util.js'
+import { consumeStdin, encodeUtf8Loose, reopenStdin } from '../util.js'
 import { UINT32_MAX } from '../numeric.js'
 
 // `src` is `{ text, pos }`; advances `pos`. Returns { rec, rt } or null at
@@ -158,6 +158,7 @@ export function splitRecord(m, str) {
 }
 
 const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=([^]*)$/u
+const BLOCK = 4096
 const isExit = (sig) => sig !== undefined && sig.type === 'exit'
 
 export class Input {
@@ -171,6 +172,10 @@ export class Input {
     this.exitSignal = undefined
     // Files opened by `getline < file`, by name, each with its own cursor.
     this.readers = new Map()
+    // The source standard input was read into, wherever it is read from —
+    // the main input or a getline — which is what says where gawk stopped
+    // reading it (settleStdin).
+    this.stdinSrc = null
   }
 
   // The next main-input record, with NR / FNR / FILENAME / RT maintained,
@@ -210,7 +215,7 @@ export class Input {
       this.sawFile = true
       m.globals.set('FILENAME', op)
       m.globals.set('FNR', 0)
-      const { text, error } = this.readOperand(op)
+      const { text, error, stdin } = this.readOperand(op)
       if (error === 'Is a directory') {
         this.failFile(m, op, error)
         if (this.exitSignal === undefined) m.warn(`command line argument \`${op}' is a directory: skipped`)
@@ -222,34 +227,59 @@ export class Input {
         if (this.exitSignal !== undefined) return false
         throw new AwkError(`cannot open file \`${op}' for reading: ${error}`)
       }
-      if (this.use(m, op, text)) return true
+      if (this.use(m, op, text, stdin)) return true
     }
     if (this.sawFile || this.exitSignal !== undefined) return false
     this.sawFile = true
-    return this.use(m, '-', this.takeStdin())
+    return this.use(m, '-', this.takeStdin(), true)
   }
 
+  // gawk reads `/dev/stdin` as it reads `-`: descriptor 0 itself, where it
+  // stands, rather than the file it names opened again from its start.
   readOperand(name) {
     if (name === '/dev/null') return { text: '' }
-    if (name === '-' || name === '/dev/stdin') {
-      return { text: name === '/dev/stdin' && this.ctx.stdinFile ? this.ctx.stdinOrigin : this.takeStdin() }
-    }
+    if (name === '-' || name === '/dev/stdin') return { text: this.takeStdin(), stdin: true }
     const { path, error } = lookupWithNote(this.ctx, 'awk', name)
     if (this.ctx.fs.isDir(path)) return { error: 'Is a directory' }
     return error ? { error } : { text: this.ctx.fs.readFile(path) }
   }
 
+  // Standard input, all of what is left of it, which is what this reads
+  // records out of. Opened a second time, it is what the first opening left
+  // — nothing, where that one reached its end, and otherwise whatever
+  // gawk's reads had not yet taken of it, which is not known (settleStdin).
   takeStdin() {
+    if (this.stdinSrc !== null) {
+      this.settleStdin()
+      reopenStdin(this.ctx)
+    }
     const text = this.stdin
     this.stdin = ''
     consumeStdin(this.ctx)
     return text
   }
 
+  // What gawk leaves of standard input for whoever reads it next: what lies
+  // past the last record it read, where it stopped short of the end — an
+  // `exit`, a `nextfile`, a getline it did not repeat. gawk reads ahead of
+  // its records a block at a time, from a file as from a pipe, and never puts
+  // a file's offset back, so how much more than that it took is not known
+  // here (consumeStdin) — but for a file no bigger than a block, which its
+  // first read takes whole. A block is 4 KiB: what every Linux filesystem
+  // gives as its preferred size, and what Linux gives for a pipe.
+  settleStdin() {
+    const src = this.stdinSrc
+    if (src === null) return
+    const rest = src.text.slice(src.pos)
+    const whole = this.ctx.stdinFile && encodeUtf8Loose(src.text).length <= BLOCK
+    consumeStdin(this.ctx, whole ? '' : rest, false, null, false)
+  }
+
   // Open a readable operand and run BEGINFILE. Returns false when the
   // rule skipped the file (`nextfile`) or exited.
-  use(m, name, text) {
+  use(m, name, text, stdin = false) {
     this.src = { text, pos: 0 }
+    if (stdin) this.stdinSrc = this.src
     m.globals.set('FILENAME', name)
     m.globals.set('FNR', 0)
     m.globals.set('ERRNO', '')
@@ -285,10 +315,11 @@ export class Input {
     if (name === '') throw new AwkError("expression for `<' redirection has null string value")
     let src = this.readers.get(name)
     if (!src) {
-      const { text, error } = this.readOperand(name)
+      const { text, error, stdin } = this.readOperand(name)
       if (error) { m.globals.set('ERRNO', error); return { status: -1 } }
       src = { text: checkText(m, text), pos: 0 }
       this.readers.set(name, src)
+      if (stdin) this.stdinSrc = src
     }
     const r = readRecord(src, toStr(m.globals.get('RS'), m), ignoreCase(m))
     if (r === null) return { status: 0 }

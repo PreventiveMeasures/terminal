@@ -162,10 +162,11 @@ function conflict(path, shown, opts, run) {
 
 // UnZip asks on stdin, and a stdin with nothing on it answers the first
 // question with its end, which UnZip takes as "None" from then on. An
-// answer typed there is one this terminal does not take.
+// answer typed there is one this terminal does not take — nor one an
+// earlier reader may have left there, which it does not know (consumeStdin).
 function ask(shown, opts, run) {
   const { ctx } = run
-  if (ctx.stdinLeft !== '' || ctx.stdinBytes !== null) {
+  if (ctx.stdinLeft !== '' || ctx.stdinBytes !== null || ctx.stdinStop) {
     run.refuse('feature', 'overwrite prompt', 'answering the overwrite question from stdin is not supported (-o and -n answer it)')
     return
   }

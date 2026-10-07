@@ -98,7 +98,10 @@ describe('agent workflows — filesystem and find operands', () => {
       await check(`{ head -n1; ${alias}; cat; } < f`, 'first\nfirst\nsecond\nsecond\n', 0, files)
     }
     await check(`awk '{print} END {print NR}' /dev/null`, '0\n')
-    await check(`awk '{print}' /dev/stdin /dev/stdin < f`, files.f + files.f, 0, files)
+    // gawk reads /dev/stdin as descriptor 0 itself rather than reopening the
+    // file, so the second is read from where the first left it: the end.
+    await check(`awk '{print}' /dev/stdin /dev/stdin < f`, files.f, 0, files)
+    await check(`{ head -n1; awk '{print}' /dev/stdin; } < f`, files.f, 0, files)
   })
   it('AWK program files and getline cannot bypass path traversal checks', async () => {
     const r = await createTerminal(FILES).run('awk -f missing/../f')

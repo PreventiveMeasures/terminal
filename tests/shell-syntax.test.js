@@ -754,10 +754,12 @@ describe('shell syntax — command conventions', () => {
     assert.equal(await out('echo -n abc | head -qc 1 - -'), 'ab')
     assert.equal(await out('echo -n abc | head -c 5 - -'), banners('abc', ''))
     assert.equal(await out('echo -n abc | head -c 1 /dev/stdin -'), '==> /dev/stdin <==\na\n==> standard input <==\nb')
-    // `-n N` on a regular file seeks back to the end of line N; a pipe,
-    // a here-string or a here-document is read in whole buffers.
+    // `-n N` on a regular file seeks back to the end of line N. A pipe, a
+    // here-string or a here-document is read in whole buffers, and what the
+    // second `-` finds after them depends on how the pipe was written —
+    // unless the first read took it all.
     assert.equal(await out('head -n1 - - < a.txt'), banners('x y z\n', 'hello world\n'))
-    assert.equal(await out('cat a.txt | head -n1 - -'), banners('x y z\n', ''))
+    assert.deepEqual(await gaps('cat a.txt | head -n1 - -'), ['feature:input after an early stop'])
     assert.equal(await out('head -n1 - - <<< "x y z"'), banners('x y z\n', ''))
     assert.equal(await out('head -c 1 - - < a.txt'), banners('x', ' '))
     assert.equal(await out('head -n -1 - - < a.txt'), banners('x y z\n', ''))
@@ -766,7 +768,7 @@ describe('shell syntax — command conventions', () => {
     assert.equal(await out('{ head -n1 - -; } < a.txt'), banners('x y z\n', 'hello world\n'))
     assert.equal(await out('(head -n1 - -) < a.txt'), banners('x y z\n', 'hello world\n'))
     assert.equal(await out('for i in 1; do head -n1 - -; done < a.txt'), banners('x y z\n', 'hello world\n'))
-    assert.equal(await out('cat a.txt | { head -n1 - -; }'), banners('x y z\n', ''))
+    assert.deepEqual(await gaps('cat a.txt | { head -n1 - -; }'), ['feature:input after an early stop'])
     // tail reads to the end.
     assert.equal(await out('echo -n abc | tail -c 1 - -'), banners('c', ''))
   })

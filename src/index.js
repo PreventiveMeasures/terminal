@@ -65,16 +65,18 @@ function fork(parent, opts = {}) {
 // Stdin position, open descriptors and the two diagnostic feeds belong to
 // whoever is running a line, so every terminal starts with a set of its own.
 // stdinLeft tracks consumption within a command list; stdinOrigin allows
-// /dev/stdin to reopen a redirected file independently of that offset.
+// /dev/stdin to reopen a redirected file independently of that offset;
+// stdinStop names the reader whose early stop left that offset uncertain
+// (consumeStdin in ./util.js).
 function context({ fs, io, mount, writable, registry, createdAt, lock }, session) {
   const ctx = {
     fs, io, mount, writable, registry, createdAt, lock, ...session, calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
-    loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinTerminal: true, stdinOrigin: null, stdinHandle: null, stdinLeft: '', stdinBytes: null,
+    loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinTerminal: true, stdinOrigin: null, stdinHandle: null, stdinLeft: '', stdinBytes: null, stdinStop: null, invocation: null,
     unsupported: createUnsupportedFeed(), notes: new Set(), rename: null,
   }
   // find -exec and xargs dispatch externally in isolated shell state. What
   // xargs runs reads /dev/null, as GNU's does, where find's reads find's own.
-  ctx.dispatch = (name, tokens, stdin, { devNull = false } = {}) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinBytes: ctx.stdinBytes, stdinFile: false, stdinPiped: false, stdinTerminal: ctx.stdinTerminal && !devNull, stdinOrigin: null, stdinHandle: null },
+  ctx.dispatch = (name, tokens, stdin, { devNull = false } = {}) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinBytes: ctx.stdinBytes, stdinStop: ctx.stdinStop, stdinFile: false, stdinPiped: false, stdinTerminal: ctx.stdinTerminal && !devNull, stdinOrigin: null, stdinHandle: null },
     () => isolated(ctx, () => dispatch(name, tokens, stdin, ctx, true)))
   ctx.flushOutput = (result) => routeExternalOutput(ctx.rename ? ctx.rename(result) : result, ctx)
   ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)
@@ -134,8 +136,9 @@ async function dispatch(name, tokens, stdin, ctx, external = false) {
     // runtime owns rather than on anything here — and what it then throws is
     // this call's to report, so the waiting happens here rather than in
     // whoever reads the result. What it flushes as it goes is renamed as
-    // what it returns is.
-    return await withState(ctx, { rename }, () => ctx.io.run(resolved, async () => route(await run())))
+    // what it returns is. Each call is an invocation of its own, which is
+    // what an early stop on its stdin is keyed to (consumeStdin).
+    return await withState(ctx, { rename, invocation: { name } }, () => ctx.io.run(resolved, async () => route(await run())))
   } catch (e) {
     missingPathNote(ctx, name, e?.path, e?.fsError)
     // A command line the command could not read is answered in its tool's
@@ -182,7 +185,7 @@ function queued(ctx, line) {
 // Syntax errors exit 2; unsupported constructs exit 1.
 function safeRun(line, ctx) {
   const feed = createUnsupportedFeed()
-  return withState(ctx, { unsupported: feed, notes: new Set(), discarded: new Set(), stdinFile: false, stdinPiped: false, stdinTerminal: true, stdinOrigin: null, stdinHandle: null, stdinBytes: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, async () => {
+  return withState(ctx, { unsupported: feed, notes: new Set(), discarded: new Set(), stdinFile: false, stdinPiped: false, stdinTerminal: true, stdinOrigin: null, stdinHandle: null, stdinBytes: null, stdinStop: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, async () => {
     const result = { stdout: '', stderr: '', exitCode: 0 }
     const stream = { text: '' }
     try {

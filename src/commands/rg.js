@@ -11,7 +11,7 @@ import { markUnsupported, unsupported, unsupportedNote } from '../unsupported.js
 import { ARGS, rgOptions } from './rg-options.js'
 import { rgPattern } from './rg-regex.js'
 import { binaryStdin, cutFs, cutOutput, walkedBinaries } from './rg-binary.js'
-import { grep } from './grep.js'
+import { RIPGREP, search } from './grep.js'
 import { literalsMissing } from './grep-literal.js'
 
 const gap = (detail, message) => unsupported('feature', 'rg', detail, `rg: ${message}`, 2)
@@ -265,7 +265,7 @@ function runGrep(stdin, options, regex, operands, targets, ctx, cut) {
   // grep's ordered output is its own wording, which rg rewrites below; the
   // rewritten streams are what rg writes.
   let result
-  try { result = grep(stdin, grepArgv(options, regex, targets, operands), ctx) } finally { ctx.fs = fs }
+  try { result = search(stdin, grepArgv(options, regex, targets, operands), ctx, RIPGREP) } finally { ctx.fs = fs }
   delete result.events
   relabelNotes(ctx.notes, before, targets)
   if (cut.size && !unsupportedNote(result)) result.stdout = cutOutput(result.stdout, cut, options.mode, (path) => shownName(path, operands, ctx))
@@ -287,30 +287,37 @@ function shownName(path, operands, ctx) {
 // a count, a listing or a status over all of it with every NUL a line end,
 // and otherwise the lines selected before the read that brought the first
 // NUL, and the line saying the input is binary where anything was selected.
-// What context would print around that is not followed.
+// What context would print around that is not followed. A count and a
+// --files-without-match read all of it; anything else stops at a selected
+// line — -q and -l at the first, a search printing lines at the first in or
+// past the read that brought the NUL — and what it leaves after that is
+// uncertain (consumeStdin), however little of it there is, which is no more
+// than what the first selected line leaves.
 function binaryInput(read, options, regex, ctx) {
   if (options.after || options.before) return gap('binary input with context', 'context around binary standard input is not supported')
-  const search = (text, mode) => {
+  const grep = (text, mode) => {
     const bytes = ctx.stdinBytes
     ctx.stdinBytes = null
     const showName = mode === 'c' ? null : options.showName
-    try { return grep(text, grepArgv({ ...options, mode, showName, quiet: false }, regex, { stdin: true }, []), ctx) } finally { ctx.stdinBytes = bytes }
+    try { return search(text, grepArgv({ ...options, mode, showName, quiet: false }, regex, { stdin: true }, []), ctx, RIPGREP) } finally { ctx.stdinBytes = bytes }
   }
-  const counted = search(read.all, 'c')
+  const counted = grep(read.all, 'c')
   if (unsupportedNote(counted) || counted.exitCode === 2) return relabel(counted, [], { stdin: true })
   const count = Number(counted.stdout)
   const result = { stdout: '', stderr: '', exitCode: count > 0 ? 0 : 1 }
   const label = options.showName === 'H' ? '<stdin>' : null
-  if (options.quiet) return result
-  if (options.mode === 'c') result.stdout = count > 0 ? `${label ? label + ':' : ''}${count}\n` : ''
-  else if (options.mode === 'l' || options.mode === 'L') {
+  // -q answers with the status alone.
+  if (!options.quiet && options.mode === 'c') result.stdout = count > 0 ? `${label ? label + ':' : ''}${count}\n` : ''
+  else if (!options.quiet && (options.mode === 'l' || options.mode === 'L')) {
     const named = (count > 0) === (options.mode === 'l')
-    return { stdout: named ? '<stdin>\n' : '', stderr: '', exitCode: named ? 0 : 1 }
-  } else {
-    const printed = read.before ? search(read.before, null) : { stdout: '', stderr: '', exitCode: 1 }
+    Object.assign(result, { stdout: named ? '<stdin>\n' : '', exitCode: named ? 0 : 1 })
+  } else if (!options.quiet) {
+    const printed = read.before ? grep(read.before, null) : { stdout: '', stderr: '', exitCode: 1 }
     if (unsupportedNote(printed)) return relabel(printed, [], { stdin: true })
     result.stdout = relabel(printed, [], { stdin: true }).stdout + (count > 0 ? read.closing : '')
   }
+  // Last, since every search above takes standard input again.
+  if (count > 0 && (options.quiet || (options.mode !== 'c' && options.mode !== 'L'))) grep(read.all, 'l')
   return result
 }
 

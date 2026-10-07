@@ -65,12 +65,15 @@ describe('broad audit — readers preserve shared input', () => {
   for (const cmd of ['head -n0', 'head -c0', 'tail -n0', 'tail -c0']) {
     it(`${cmd} leaves shared input untouched`, async () => await check(`{ ${cmd}; cat; } < f`, FILES.f))
   }
-  for (const cmd of ['od -N1', 'xxd -l1', 'hexdump -n1']) {
-    it(`${cmd} leaves unread bytes for cat`, async () => {
+  // od reads no more than it dumps, and hexdump puts the file's offset back
+  // where it stopped; xxd reads a 4 KiB block and puts nothing back, which
+  // takes a file this small whole.
+  for (const [cmd, rest] of [['od -N1', FILES.f.slice(1)], ['xxd -l1', ''], ['hexdump -n1', FILES.f.slice(1)]]) {
+    it(`${cmd} leaves what GNU leaves for cat`, async () => {
       const t = createTerminal(FILES)
       const first = await t.run(`${cmd} < f`)
       const both = await t.run(`{ ${cmd}; cat; } < f`)
-      assert.deepEqual([both.stdout, both.stderr, both.unsupported], [first.stdout + FILES.f.slice(1), '', []])
+      assert.deepEqual([both.stdout, both.stderr, both.unsupported], [first.stdout + rest, '', []])
     })
   }
   for (const cmd of ['tr a', 'xargs -n0', 'sort missing', 'od -Nbad']) {
@@ -89,7 +92,7 @@ describe('broad audit — readers preserve shared input', () => {
   })
   it('distinguishes absolute xxd/hexdump seeks from relative od skips', async () => {
     const t = createTerminal(FILES)
-    for (const [cmd, rest] of [['xxd -s1 -l2', FILES.f.slice(3)], ['hexdump -s1 -n2', FILES.f.slice(3)]]) {
+    for (const [cmd, rest] of [['xxd -s1 -l2', ''], ['hexdump -s1 -n2', FILES.f.slice(3)]]) {
       const first = await t.run(`${cmd} f`)
       const both = await t.run(`{ head -c2; ${cmd}; cat; } < f`)
       assert.deepEqual([both.stdout, both.stderr, both.unsupported], ['01' + first.stdout + rest, '', []])

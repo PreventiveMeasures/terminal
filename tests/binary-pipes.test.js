@@ -103,8 +103,13 @@ describe('a pipe carries the bytes a stage wrote', () => {
     // A command that does not read stdin leaves the bytes where they were.
     assert.deepEqual(await t.run('cat img.png | { echo first; cat; } | hexdump -C'), result('00000000  66 69 72 73 74 0a 89 50  4e 47 ff 0a              |first..PNG..|\n0000000c\n'))
     // A dump that stops short hands back the bytes it stopped short of, as
-    // the bytes they are rather than the text they would spell.
-    assert.deepEqual(await t.run('cat img.png | { xxd -s 0 -l 2; base64; }'), result('00000000: 8950                                     .P\nTkf/Cg==\n'))
+    // the bytes they are rather than the text they would spell. od reads no
+    // more of a pipe than -N asks for; xxd reads it a buffer at a time, and
+    // what it leaves is not known.
+    assert.deepEqual(await t.run('cat img.png | { od -N 2; base64; }'), result('0000000 050211\n0000002\nTkf/Cg==\n'))
+    assert.deepEqual(await t.run('cat img.png | { od -j 1 -N 2; base64; }'), result('0000001 047120\n0000003\nR/8K\n'))
+    const xxd = await t.run('cat img.png | { xxd -s 0 -l 2; base64; }')
+    assert.deepEqual([xxd.stdout, xxd.exitCode, xxd.unsupported.map((gap) => gap.detail)], ['00000000: 8950                                     .P\n', 1, ['input after an early stop']])
     // A substitution reads that one input too, so what it takes is gone.
     assert.deepEqual(await t.run('cat a.txt | { echo "[$(cat)]"; cat; }'), result('[alpha]\n'))
   })

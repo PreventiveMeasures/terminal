@@ -4,7 +4,7 @@
 import { unsupported } from '../unsupported.js'
 import { parseArgs } from '../args.js'
 import { UINT64_MAX } from '../numeric.js'
-import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, ok, okWith, parseSignedCount, quoteLocale, readInputs, usageError } from '../util.js'
+import { consumeStdin, decodeUtf8, encodeUtf8Loose, err, inputLabel, ok, okWith, parseSignedCount, quoteLocale, readInputs, reopenStdin, usageError } from '../util.js'
 
 // head and tail share count syntax, byte/line slicing and operand presentation.
 export function headTail(cmd, stdin, tokens, ctx) {
@@ -26,9 +26,10 @@ export function headTail(cmd, stdin, tokens, ctx) {
     banner = header ? header.name === 'v' : null
   }
   const fromStart = count.sign === '+'
-  // head opens zero-count operands; tail's last-zero form opens nothing.
+  // head opens zero-count operands and reads none of them, stdin included;
+  // tail's last-zero form opens nothing.
   if (isHead && count.value === 0 && count.sign !== '-') {
-    return takeFrom(cmd, stdin, positional, ctx, () => '', { unit, banner, leftover: (content) => content, readOptions: { noRead: true } })
+    return takeFrom(cmd, stdin, positional, ctx, () => '', { unit, banner, readOptions: { noRead: true } })
   }
   if (!isHead && count.value === 0 && !fromStart) {
     // A file snapshot may be stale; only buffered pipes can be counted unread.
@@ -55,13 +56,24 @@ export function headTail(cmd, stdin, tokens, ctx) {
   // copies a whole input from its first line, and carries on past one where
   // it counts any other lines.
   const readOptions = !isHead && (unit === 'c' || (fromStart && count.value <= 1)) ? { stopOnDir: true } : undefined
-  return takeFrom(cmd, stdin, positional, ctx, pick, { unit, banner, leftover, readOptions })
+  return takeFrom(cmd, stdin, positional, ctx, pick, { unit, banner, leftover, exact: isHead && unit === 'c', readOptions })
 }
 
-// head -c leaves exactly the unread bytes. On file-backed stdin, -n also leaves
-// unread lines; pipe reads and negative counts consume the buffered input.
+// What head leaves of its stdin for the next reader. -c reads no more than it
+// prints, from a pipe as from a file, so it leaves exactly the bytes after
+// them (`exact`, above). -n leaves the lines after its last one: on a file
+// that is where GNU puts the offset back as it exits, and on a pipe it is
+// only where head stopped — it read the pipe a buffer at a time, 8 KiB in
+// GNU's, and how much past that line those reads had taken depends on how
+// the pipe was written (consumeStdin). A count from the end reads a pipe to
+// its end; a file GNU seeks back to just past what it printed, which leaves
+// what it held back for whoever reads next.
 function headLeftover(count, unit, ctx) {
-  if (count.sign === '-' || (unit === 'n' && !ctx.stdinFile)) return () => ''
+  if (count.sign === '-') {
+    if (!ctx.stdinFile) return () => ''
+    if (unit === 'c') return (content) => sliceBytes(content, (total) => [Math.max(0, total - count.value), total])
+    return (content) => content.slice(lineBoundary(content, count.value, true))
+  }
   if (unit === 'c') return (content) => sliceBytes(content, (total) => [Math.min(count.value, total), total])
   return (content) => content.slice(lineBoundary(content, count.value))
 }
@@ -155,8 +167,11 @@ function sliceBytes(content, range) {
 
 // Banner presence depends on named operands, including missing ones. Only opened
 // operands get banners; directories get an empty body. A later banner terminates
-// the preceding body if needed. Shared stdin operands consume sequentially.
-function takeFrom(cmd, stdin, files, ctx, pick, { unit, banner, leftover = () => '', readOptions }) {
+// the preceding body if needed. Shared stdin operands consume sequentially, and
+// one that reads none of them leaves stdin as it found it. A second `-` reads
+// on from where the first stopped, which is only known where that stop was
+// exact.
+function takeFrom(cmd, stdin, files, ctx, pick, { unit, banner, leftover = () => '', exact, readOptions }) {
   const r = readInputs(cmd, files, stdin, ctx, readOptions)
   // `-q` / `-v` override the operand-count rule outright; `banner` is
   // null when neither was given.
@@ -167,10 +182,10 @@ function takeFrom(cmd, stdin, files, ctx, pick, { unit, banner, leftover = () =>
   for (let i = 0; i < opened.length; i++) {
     const { name, kind, shared } = opened[i]
     let { content } = opened[i]
-    if (shared || name === null) {
-      if (rest !== null) content = rest
+    if ((shared || name === null) && !readOptions?.noRead) {
+      if (rest !== null) { reopenStdin(ctx); content = rest }
       rest = leftover(content)
-      consumeStdin(ctx, rest)
+      consumeStdin(ctx, rest, false, null, exact || undefined)
     }
     // A directory yields no body at all — not even the newline an empty
     // line-pick would append — so `pick` is skipped for it entirely.

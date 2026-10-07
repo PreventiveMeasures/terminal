@@ -90,7 +90,11 @@ describe('correctness audit — text, filenames and traversal', () => {
     await check('echo hi | { head -n 0; cat; }', 'hi\n')
     await check('{ head -n 1; cat; } < a', FILES.a)
     await check('cat /dev/null', '')
-    await gap('grep -m1 alpha < a', 'partial stdin reads')
+    // GNU grep puts a file's offset back past the line -m stopped at; a pipe
+    // it cannot, and what it read past there is not known.
+    await check('grep -m1 alpha < a', 'alpha\n')
+    await check('{ grep -m1 alpha; cat; } < a', 'alpha\nbeta\nalpha\n')
+    await gap('cat a | { grep -m1 alpha; cat; }', 'input after an early stop')
   })
   it('retains record boundaries in tac, sed and sort', async () => {
     await check('tac b', 'yx\n')

@@ -1,7 +1,7 @@
 // Preserve command order when a surrounding group merges its streams.
 // A handler returning both streams has not specified their relative order.
 import { markUnsupported, unsupported, unsupportedNote } from '../unsupported.js'
-import { decodeUtf8 } from '../bytes.js'
+import { decodeUtf8, encodeUtf8, joinBytes } from '../bytes.js'
 import { discardedStderr } from '../notes.js'
 
 // An event carries text, or the bytes a command wrote where no text spells
@@ -102,4 +102,23 @@ export function writeError(name, r, ctx) {
   const result = { ...r, stdout: '', stderr: r.stderr + message, exitCode: status || r.exitCode, events, unordered: false }
   const note = unsupportedNote(r)
   return note ? markUnsupported(result, note.kind, note.command, note.detail, note.message) : result
+}
+
+// A pipe holds text until a stage writes bytes into it, and holds bytes from
+// then on: one `cat` reading a file of text and a file of bytes writes both,
+// in that order, and the stage after it reads what was written.
+export function pipeSink() {
+  let text = ''
+  let parts = null
+  return {
+    write(chunk) {
+      if (parts === null) text += chunk
+      else if (chunk !== '') parts.push(encodeUtf8(chunk))
+    },
+    writeBytes(chunk) {
+      if (parts === null) { parts = text === '' ? [] : [encodeUtf8(text)]; text = '' }
+      parts.push(chunk)
+    },
+    carried: () => (parts === null ? { text } : { bytes: joinBytes([...parts, new Uint8Array()]) }),
+  }
 }
