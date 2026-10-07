@@ -80,6 +80,9 @@ function run(m, opts) {
     if (note) gap = { detail: note.detail, message: `awk: ${e.message}` }
     m.errOut.push(gap === null ? `awk: ${where(m)}fatal: ${e.message}\n` : `awk: ${e.message}\n`)
   }
+  // Standard input was taken whole as it was opened; what gawk had not read
+  // of it by the time it was done goes back for whoever reads it next.
+  m.input.settleStdin()
   const result = { stdout: m.out.join(''), stderr: m.errOut.join(''), exitCode }
   return gap === null ? result : markUnsupported(result, 'feature', 'awk', gap.detail, gap.message)
 }

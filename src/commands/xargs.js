@@ -18,13 +18,21 @@ export async function xargs(stdin, tokens, ctx) {
   if (replace !== undefined && n.value !== undefined) return unsupported('option', 'xargs', '-I -n', 'xargs: combining replacement and chunk limits is not supported')
   consumeStdin(ctx)
   if (!flags.has('0') && stdin.includes('\0')) return unsupported('feature', 'xargs', 'NUL input', 'xargs: NUL input requires -0')
+  // Where in the input each item ends, for what a run that stops early
+  // leaves of it (`stop`, below).
+  const ends = []
   let items
-  if (flags.has('0')) items = splitLines(stdin, '\0')
-  else if (replace === undefined) items = inputWords(stdin)
+  if (flags.has('0')) items = recordsOf(stdin, '\0', ends)
+  else if (replace === undefined) items = inputWords(stdin, ends)
   else {
     if (/["'\\]/u.test(stdin)) return unsupported('feature', 'xargs', '-I input quoting', 'xargs: quoted or escaped replacement lines are not supported')
-    items = splitLines(stdin).map((line) => line.replace(/^[ \t\r\f\v]+/u, '')).filter(Boolean)
+    items = recordsOf(stdin, '\n', ends).map((line) => line.replace(/^[ \t\r\f\v]+/u, ''))
+    for (let k = items.length - 1; k >= 0; k--) if (items[k] === '') { items.splice(k, 1); ends.splice(k, 1) }
   }
+  // GNU reads its input as it goes, a buffer at a time, and a run that ends
+  // before the last item leaves the rest wherever those reads had got to,
+  // which is not known (consumeStdin) — past the items it had taken, at least.
+  const stop = (taken) => { if (taken < items.length) consumeStdin(ctx, stdin.slice(ends[taken - 1] ?? 0), false, null, false) }
   if (items.length === 0 && (flags.has('r') || replace !== undefined)) return ok()
   // Build each batch only when it is reached; unavailable commands stop immediately.
   // What every batch wrote, in the order it wrote it, the bytes a command
@@ -40,6 +48,7 @@ export async function xargs(stdin, tokens, ctx) {
       while (end < items.length && (n.value === undefined || end - i < n.value) && size + argSize(items[end]) <= ARG_MAX) size += argSize(items[end++])
       if (end === i && i < items.length) {
         appendOutput(out, { ...emptyOutput('xargs: argument line too long\n'), exitCode: 1 })
+        stop(i + 1)
         return out
       }
       args = [...baseArgs, ...items.slice(i, end)]
@@ -58,9 +67,13 @@ export async function xargs(stdin, tokens, ctx) {
     appendOutput(out, r)
     if (r.exitCode === 255) {
       appendOutput(out, { ...emptyOutput(`xargs: ${cmd}: exited with status 255; aborting\n`), exitCode: 124 })
+      stop(i)
       return out
     }
-    if (r.exitCode === 127 && !ctx.hasCommand(ctx.registry.resolveCommand(cmd))) return { ...out, exitCode: 127 }
+    if (r.exitCode === 127 && !ctx.hasCommand(ctx.registry.resolveCommand(cmd))) {
+      stop(i)
+      return { ...out, exitCode: 127 }
+    }
     if (r.exitCode !== 0) exitCode = 123
   } while (i < items.length)
   return { ...out, exitCode, ignored: false }
@@ -87,7 +100,7 @@ function maxArgs(text) {
 const unmatched = (quote) =>
   new Error(`unmatched ${quote === "'" ? 'single' : 'double'} quote; by default quotes are special to xargs unless you use the -0 option`)
 
-function inputWords(input) {
+function inputWords(input, ends) {
   const words = []
   let quote = null, started = false, word = ''
   for (let i = 0; i < input.length; i++) {
@@ -104,11 +117,19 @@ function inputWords(input) {
       if (i + 1 >= input.length) break
       word += input[++i]; started = true
     } else if (c === ' ' || c === '\t' || c === '\n') {
-      if (started) words.push(word)
+      if (started) { words.push(word); ends.push(i + 1) }
       word = ''; started = false
     } else { word += c; started = true }
   }
   if (quote) throw unmatched(quote)
-  if (started) words.push(word)
+  if (started) { words.push(word); ends.push(input.length) }
   return words
+}
+
+// The records a delimiter ends, as splitLines reads them, and where each ends.
+function recordsOf(input, delimiter, ends) {
+  const records = splitLines(input, delimiter)
+  let at = 0
+  for (const record of records) ends.push(at = Math.min(input.length, at + record.length + 1))
+  return records
 }

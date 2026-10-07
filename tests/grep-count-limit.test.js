@@ -70,18 +70,27 @@ describe('grep count and attached match limits', () => {
     await check('grep -m1 hit missing src/a.js', 'src/a.js:hit hit\n', 2, stderr)
   })
 
-  it('mirrors unsupported combinations and shared-file early reads even when stderr is hidden', async () => {
-    const earlyRead = 'grep: early termination on shared file input is not supported'
-    const unsupportedCases = [
-      ['grep -m1 hit < src/a.js', 'feature', 'partial stdin reads', earlyRead],
-      ['grep -cm1 hit - < src/a.js', 'feature', 'partial stdin reads', earlyRead],
-    ]
-    for (const [command, kind, detail, message] of unsupportedCases) {
-      const result = await createTerminal(FILES).run(command + ' 2>/dev/null | cat')
-      assert.deepEqual(result, {
-        stdout: '', stderr: '', exitCode: 0, cwd: '/',
-        notes: [], unsupported: [{ kind, command: 'grep', detail, message }],
-      }, command)
-    }
+  // GNU puts a file's offset back to just past the line -m stopped at, with
+  // or without the context it went on to print; a pipe it cannot.
+  it('leaves a redirected file just past the last selected line', async () => {
+    await check('grep -m1 hit < src/a.js', 'hit hit\n')
+    await check('grep -cm1 hit - < src/a.js', '1\n')
+    await check('{ grep -m1 hit; cat; } < src/a.js', 'hit hit\nskip\nhit\ntrailing\n')
+    await check('{ grep -m1 -A1 hit; cat; } < src/a.js', 'hit hit\nskip\nskip\nhit\ntrailing\n')
+    await check('{ grep -cm1 hit; cat; } < src/a.js', '1\nskip\nhit\ntrailing\n')
+    await check('{ grep -m2 hit; cat; } < src/a.js', 'hit hit\nhit\ntrailing\n')
+    await check('{ grep -m3 hit; cat; } < src/a.js', 'hit hit\nhit\n')
+    // The second `-` would search on from there, which is not modelled.
+    const twice = await createTerminal(FILES).run('grep -m1 hit - - < src/a.js')
+    assert.deepEqual(twice.unsupported.map((gap) => gap.detail), ['standard input searched twice'])
+  })
+
+  it('mirrors what a pipe leaves uncertain even when stderr is hidden', async () => {
+    const message = 'cat: reading standard input after grep stopped part way through it is not supported: grep reads ahead of where it stops, and how far is not known'
+    const result = await createTerminal(FILES).run('cat src/a.js | { grep -m1 hit; cat; } 2>/dev/null | cat')
+    assert.deepEqual(result, {
+      stdout: 'hit hit\n', stderr: '', exitCode: 0, cwd: '/',
+      notes: [], unsupported: [{ kind: 'feature', command: 'cat', detail: 'input after an early stop', message }],
+    })
   })
 })

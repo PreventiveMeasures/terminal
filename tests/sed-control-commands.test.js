@@ -64,15 +64,30 @@ describe('sed q reads files and shared stdin only when needed', () => {
     ['an unreached last-line address does not trigger lookahead', sed('q;$p', 'single missing'), 'item\n'],
     ['last-line lookahead stays in a nonexhausted file', sed('$p;q', 'input missing'), 'one\n'],
     ['separate-file last-line checks do not open later files', sed('$p;q', 'single missing', '-s'), 'item\nitem\n'],
-    ['quiet quit leaves unread pipeline records', "cat input | { sed -n '2q'; cat; }", 'three\nfour\n'],
     ['quiet quit leaves unread redirected file records', "{ sed -n '2q'; cat; } <input", 'three\nfour\n'],
     ['quit does not consume a later stdin operand', "printf 'unread\\n' | { sed -n q single -; cat; }", 'unread\n'],
-    ['last-line lookahead does not consume the next stdin operand', "printf 'unread\\n' | { sed -n '$p;q' single -; cat; }", 'unread\n'],
-    ['quit leaves an unterminated remaining stdin record', "printf 'a\\nb' | { sed -n q; cat; }", 'b'],
-    ['NUL mode quit leaves unread NUL-delimited stdin', "cat zero | { sed -zn q; cat; }", 'b\0'],
-    ['NUL mode quit leaves an unterminated remaining stdin record', "cat zeroLast | { sed -zn q; cat; }", 'b'],
+    ['last-line lookahead puts a redirected file back where it was', "{ sed -n '$p;q' single -; cat; } <input", 'one\ntwo\nthree\nfour\n'],
+    ['quit leaves an unterminated remaining file record', '{ sed -n q; cat; } <left', 'b'],
+    ['NUL mode quit leaves unread NUL-delimited file records', '{ sed -zn q; cat; } <zero', 'b\0'],
+    ['NUL mode quit leaves an unterminated remaining file record', '{ sed -zn q; cat; } <zeroLast', 'b'],
     ['an unselected quit consumes the complete input', "cat input | { sed -n '20q'; cat; }", ''],
+    ['a quit on the last record leaves nothing to argue about', "cat input | { sed -n '4q'; cat; }", ''],
   ])
+
+  // GNU sed reads a pipe a buffer at a time and cannot give back what it
+  // read past its quit — nor what its last-line lookahead read of the next
+  // operand — so what it leaves there depends on how the pipe was written.
+  // `printf 'a\nb' | { sed -n q; cat; }` prints nothing in GNU, but only
+  // because printf's one write came before sed's first read.
+  for (const command of ["cat input | { sed -n '2q'; cat; }", "printf 'unread\\n' | { sed -n '$p;q' single -; cat; }",
+    "printf 'a\\nb' | { sed -n q; cat; }", 'cat zero | { sed -zn q; cat; }', 'cat zeroLast | { sed -zn q; cat; }']) {
+    it(`refuses to read on where a quit left a pipe: ${command}`, async () => {
+      const result = await createTerminal(FILES).run(command)
+      assert.deepEqual([result.stdout, result.exitCode], ['', 1], command)
+      assert.match(result.stderr, /^cat: reading standard input after sed stopped part way through it is not supported/u)
+      assert.deepEqual(result.unsupported.map(({ command: name, detail }) => [name, detail]), [['cat', 'input after an early stop']])
+    })
+  }
 
   for (const [command, stdout] of [
     [sed('q7', 'missing single later'), 'item\n'],

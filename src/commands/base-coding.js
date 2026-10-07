@@ -4,7 +4,7 @@
 
 import { parseArgs } from '../args.js'
 import { INT64_MAX } from '../numeric.js'
-import { decodeUtf8Loose, decodeUtf8Maybe, encodeUtf8, err, ok, quoteLocale, readInputs, usageError } from '../util.js'
+import { consumeStdin, decodeUtf8Loose, decodeUtf8Maybe, encodeUtf8, encodeUtf8Loose, err, ok, quoteLocale, readInputs, usageError } from '../util.js'
 
 const DEFAULT_WRAP = 76
 
@@ -31,10 +31,26 @@ export function baseCommand(name, { encode, decode }) {
     // character spells none of its alphabet either, which is the invalid input
     // GNU reports.
     if (flags.has('d') || flags.has('decode')) {
-      return decoded(name, decode(content ?? decodeUtf8Loose(bytes), flags.has('i') || flags.has('ignore-garbage')))
+      const result = decode(content ?? decodeUtf8Loose(bytes), flags.has('i') || flags.has('ignore-garbage'))
+      if (!result.valid) gaveUp(input.inputs[0], ctx)
+      return decoded(name, result)
     }
     return wrapped(encode(bytes ?? encodeUtf8(content)), wrap)
   }
+}
+
+// GNU decodes a block at a time, reading until one is full or the input ends,
+// and gives up at the first block holding what is not its alphabet — leaving
+// a shared stdin wherever its reads had got to. Its first block, 4 KiB at
+// least, takes a smaller input whole; past that, where it stopped is not
+// known (consumeStdin).
+const BLOCK = 4096
+function gaveUp(input, ctx) {
+  if (input.name !== null && !input.shared) return
+  const held = input.bytes ?? encodeUtf8Loose(input.content)
+  if (held.length <= BLOCK) return
+  const left = held.subarray(BLOCK)
+  consumeStdin(ctx, decodeUtf8Maybe(left) ?? '', true, left, false)
 }
 
 function wrapped(encoded, wrap) {

@@ -2,12 +2,12 @@
 
 import { basename, lookup, relativeTo, resolve, walkTree } from '../fs.js'
 import { lookupWithNote, omissionNote } from '../notes.js'
-import { consumeStdin, countNewlines, decodeUtf8Marked, encodeUtf8Loose, err, readFilesFor, readInputs, readTextOrBytes, splitLines } from '../util.js'
+import { consumeStdin, countNewlines, decodeUtf8Marked, decodeUtf8Maybe, encodeUtf8Loose, encodeUtf8Marked, err, readFilesFor, readInputs, readTextOrBytes, splitLines } from '../util.js'
 import { UnsupportedError, markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { AwkError } from '../awk/common.js'
 import { cannotHoldMatch, compilePatterns, inputGap } from './grep-pattern.js'
 import { compileGlob } from '../glob.js'
-import { anyMatch, countMatches, grepRun, grepSummary, isFailure, matchersFor, noMatch } from './grep-output.js'
+import { anyMatch, countMatches, grepRun, grepSummary, isFailure, matchersFor, noMatch, selectionEnd } from './grep-output.js'
 import { GREP_USAGE, grepPatterns } from './grep-pattern-files.js'
 import { argumentError, colourGap, optionDeath, parseCounts, parseGrepArgs } from './grep-options.js'
 
@@ -19,6 +19,33 @@ export function quietSearch(tokens) {
 }
 
 export function grep(stdin, tokens, ctx) {
+  return search(stdin, tokens, ctx, GNU_GREP)
+}
+
+// How a search takes standard input, which is what it leaves of it for the
+// next reader (consumeStdin). GNU grep reads an input to its end unless it
+// stops early, and how it then leaves the input depends on why it stopped.
+// -q exits at its first selected line, there and then, and -l and -L stop
+// at theirs to name the file and go on to the next: neither puts anything
+// back. Otherwise grep finishes with an input it stopped in (finalize_input):
+// where -m ran out it puts a file's offset back to just past the last line it
+// selected, and where it stopped at a first selected line with -m to spare —
+// as it does in a file it calls binary, unless counting, and wherever its
+// output goes to /dev/null, which it takes as asking for a status alone and
+// for which it drops -l and -L — it reads on to the end, or seeks to it in a
+// file. A pipe is never put back, and how much of it a read had taken past
+// where grep stopped is not known; nor is a file's where nothing puts it
+// back, but for one no bigger than GNU's first read of it, 96 KiB, which
+// takes it whole.
+const GNU_GREP = { lists: (mode) => mode === 'l' || mode === 'L', finishes: true, firstRead: 96 * 1024 }
+
+// ripgrep stops at a first selected line for -q and -l alone, reading on to
+// the end for -L and -c, and puts nothing back.
+export const RIPGREP = { lists: (mode) => mode === 'l', finishes: false, firstRead: 0 }
+
+// grep's search, run for grep itself or, with ripgrep's way of reading
+// standard input, for rg (./rg.js).
+export function search(stdin, tokens, ctx, reader) {
   // Repeatable patterns and filename filters retain their own argument values.
   let parsed
   try { parsed = parseGrepArgs(tokens) }
@@ -43,13 +70,13 @@ export function grep(stdin, tokens, ctx) {
   let re
   try { re = compilePatterns(patterns, flags, ctx.locale, source.origins) } catch (e) { return unsupportedFrom(e, 'grep', `grep: ${e.message}`, 2) }
   if (re.error) return re.error
-  if (counts.max !== 0 && ctx.stdinFile && (flags.has('q') || mode === 'l' || mode === 'L' || counts.max !== undefined) && (rest.length === 0 || rest.includes('-'))) return unsupported('feature', 'grep', 'partial stdin reads', 'grep: early termination on shared file input is not supported', 2)
   const recursive = flags.has('r') || flags.has('R')
   const filters = compileFilters(parsed, ctx)
   const binaryMode = order.findLast((o) => o.name === 'a' || o.name === 'I')?.name
   filters.binaryFiles = binaryMode === 'a' ? 'text' : binaryMode === 'I' ? 'without-match' : 'binary'
   filters.silent = flags.has('s')
   filters.follow = flags.has('R')
+  filters.reader = reader
   try { return warned(filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts, mode, order), re.warnings) }
   finally { filterNotes(filters, ctx.notes) }
 }
@@ -65,7 +92,6 @@ function warned(result, warnings) {
 function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts, mode, order) {
   if (flags.has('q')) return grepQuiet(stdin, rest, ctx, recursive, filters, re.res, flags.has('v'))
   const r = grepInputs(recursive, stdin, rest, ctx, filters)
-  if (counts.max === 0) consumeStdin(ctx, stdin)
   const invert = flags.has('v')
   // Filename filters apply to named and recursively discovered files, but not stdin.
   let items = r.items
@@ -86,6 +112,7 @@ function filteredGrep(stdin, rest, ctx, recursive, filters, re, flags, counts, m
     })
     if (gap && items.every(isFailure)) return gap
   }
+  leaveStdin(items, re.res, { invert, max: counts.max, mode, quiet: false, binaryFiles: filters.binaryFiles }, filters.reader, ctx)
   const showName = pickShowName(order, rest.length)
   const opts = { showName, invert, showLine: flags.has('n'), only: flags.has('o'), binaryFiles: filters.binaryFiles, ...counts }
   let result
@@ -120,10 +147,52 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
       const inp = textInput(item, filters, res, invert, ctx)
       const gap = inputGap(inp, res, ctx.locale)
       if (gap) { gap.stderr = stderr + gap.stderr; return gap }
-      if (countMatches(inp, res, invert, 1) > 0) return { stdout: '', stderr, exitCode: 0 }
+      if (countMatches(inp, res, invert, 1) > 0) {
+        leaveStdin([inp], res, { invert, quiet: true, binaryFiles: filters.binaryFiles }, filters.reader, ctx)
+        return { stdout: '', stderr, exitCode: 0 }
+      }
     }
   }
   return { stdout: '', stderr, exitCode: failed ? 2 : 1 }
+}
+
+// What the search leaves of standard input, by `reader`'s rules (above):
+// the text past where it stopped, or nothing where it read on to the end,
+// which is what taking it already left. Bytes that came in go back as the
+// bytes past that place. Standard input named twice is read on from where
+// the first one stopped, which is not modelled.
+function leaveStdin(items, res, { invert, max, mode, quiet, binaryFiles }, reader, ctx) {
+  const shared = items.filter((item) => !isFailure(item) && (item.name === null || item.shared))
+  if (shared.length === 0) return
+  const input = shared[0]
+  const status = reader.finishes && devNull(ctx)
+  const untouched = quiet || (reader.lists(mode) && !status)
+  const binary = reader.finishes && input.binaryLine === 0 && binaryFiles !== 'text' && mode !== 'c'
+  const first = untouched || status || binary
+  const limit = first ? Math.min(1, max ?? 1) : max ?? Infinity
+  const end = limit === Infinity ? -1 : selectionEnd(input, res, invert, limit)
+  // Read on to the end, either because nothing stopped it or to finish.
+  if (end < 0 || (!untouched && first && max !== 1)) return
+  // A NUL past the first read, or a line of bytes that spell no character,
+  // changes how GNU goes on partway, which is not followed: where it stops
+  // then is left uncertain.
+  const late = input.marked || input.binaryLine > 0
+  const whole = untouched && ctx.stdinFile && sizeOf(input) <= reader.firstRead
+  const left = whole ? { text: '', bytes: null } : restOf(input, end)
+  if (shared.length > 1 && (left.text !== '' || left.bytes)) throw new UnsupportedError('feature', 'standard input searched twice', 'grep: searching standard input again after stopping part way through it is not supported')
+  consumeStdin(ctx, left.text, true, left.bytes, untouched || late ? false : undefined)
+}
+
+const devNull = (ctx) => ctx.outputFds?.[1] === 'null'
+const sizeOf = (input) => input.bytes?.length ?? encodeUtf8Loose(input.content).length
+
+// The input past `end`, a place in its text: as text, and as the bytes past
+// it where bytes came in.
+function restOf(input, end) {
+  if (end === 0) return { text: input.content ?? '', bytes: input.bytes ?? null }
+  if (input.bytes === undefined) return { text: input.content.slice(end), bytes: null }
+  const bytes = input.bytes.subarray(encodeUtf8Marked(input.content.slice(0, end)).length)
+  return { text: decodeUtf8Maybe(bytes) ?? '', bytes: bytes.length ? bytes : null }
 }
 
 // What a search reads a file as. Text is read as it is, and bytes that spell

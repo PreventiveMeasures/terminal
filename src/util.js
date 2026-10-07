@@ -4,6 +4,7 @@ import { decodeUtf8Maybe, encodeUtf8, encodeUtf8Loose } from './bytes.js'
 import { lookup, textOfFile } from './fs.js'
 import { UINT64_MAX } from './numeric.js'
 import { err } from './result.js'
+import { UnsupportedError } from './unsupported.js'
 import { lookupWithNote } from './notes.js'
 import { quoteFile, quoteLocale, quoteName } from './commands/quote-name.js'
 
@@ -67,7 +68,32 @@ export const stdoutIsTerminal = (ctx) => (ctx.outputFds?.[1] === 'out' || ctx.ou
 // no text, a command reading it as text is told which input it is, the way it
 // is told which file a file of such bytes is; a command working in bytes says
 // so here and reads them.
-export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null) {
+//
+// A reader that stops part way hands back what it left after the place it
+// stopped, and says whether that is where the next reader really starts —
+// `exact`. On a regular file it is, unless the reader says otherwise: GNU's
+// tools put the file's offset back where they stopped (head, sed, grep -m,
+// hexdump) as they exit. On a pipe it is not, unless the reader says so: a
+// tool reads a pipe a buffer at a time, takes whatever the writer had written
+// by then, and cannot give back what it took past its stop. How much that is
+// depends on how the writer's writes fell between the reader's reads — a race,
+// not an answer — so `seq 1 3000 | { head -n 1; cat; }` hands cat 1142 lines
+// on one run and could hand it none on another. Some readers take exactly what
+// they need even from a pipe (head -c, od -N), and some read ahead even from a
+// file and never move its offset back (awk, xxd), and those say so. A reader
+// that took everything left nothing to argue about, whatever it is.
+//
+// What a reader left uncertain is marked on the input (`stdinStop`, which
+// travels with what is left of it, ../shell/run.js), naming that reader and
+// the call of it that stopped: a reader handing back what it left one record
+// at a time (sed) is the same reader each time, and reads on from where it
+// knows it is. Any other reader taking from that input would take what the
+// first one did not happen to read, which is no answer this terminal can give,
+// so it is refused as it starts — and an input nobody reads again is no
+// trouble at all.
+export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null, exact = ctx.stdinFile) {
+  const stop = ctx.stdinStop
+  if (stop && stop.invocation !== ctx.invocation) throw readAhead(stop)
   ctx.io?.read(ctx.stdinHandle?.identity)
   if (!asBytes && ctx.stdinBytes) textOfFile(ctx.stdinBytes, inputLabel(null, ctx))
   ctx.stdinLeft = rest
@@ -76,7 +102,19 @@ export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null) 
   // more. A reader that took the lot leaves none, so there are none to read
   // twice — which is what a shared input is.
   ctx.stdinBytes = bytesLeft
+  const left = rest !== '' || bytesLeft?.length > 0
+  ctx.stdinStop = left && !exact ? { reader: ctx.invocation?.name ?? 'a command', invocation: ctx.invocation } : null
 }
+
+// A reader opening its stdin again after it stopped part way through it —
+// `head -n 1 - -`, `awk '{ nextfile }' - -` — reads on from where it really
+// stopped, which it knows no better than the next command would.
+export function reopenStdin(ctx) {
+  if (ctx.stdinStop) throw readAhead(ctx.stdinStop)
+}
+
+const readAhead = ({ reader, why = `${reader} reads ahead of where it stops, and how far is not known` }) =>
+  new UnsupportedError('feature', 'input after an early stop', `reading standard input after ${reader} stopped part way through it is not supported: ${why}`)
 
 // Keep operand order and partial read failures; head/tail need directory entries
 // for banners even though they cannot read them. Repeated '-' shares one stream;
@@ -94,6 +132,13 @@ export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null) 
 // to say about a file whose bytes spell none.
 // Nothing is converted either way, so a command that can work in either pays
 // for neither.
+//
+// `noRead` is a command that opens its operands and reads none of them —
+// `head -n 0`, `xxd -l 0`: a directory is no error to it, and its stdin is
+// left where it was, which is not the same as taken and handed back whole
+// (consumeStdin): what an earlier reader left uncertain is no trouble to a
+// command that does not read it, and stays uncertain for the next one that
+// does.
 export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   const entries = []
   let stderr = ''
@@ -127,7 +172,7 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
       Object.assign(entry, piped === null ? textInput(pipe, read, bytes) : bytesInput(piped, read, bytes, cmd, ctx))
       entry.shared = true
       pipe = ''
-      consumeStdin(ctx, '', true)
+      if (!options.noRead) consumeStdin(ctx, '', true)
     } else if (name !== '/dev/null') {
       const found = lookupWithNote(ctx, cmd, name)
       if (found.error) { entry.kind = 'missing'; error = found.error }
@@ -202,7 +247,7 @@ export function readInputs(cmd, files, stdin, ctx, options) {
   if (files.length === 0) {
     const piped = ctx.stdinBytes ?? null
     // The question this reader answers for itself, just below.
-    consumeStdin(ctx, '', true)
+    if (!options?.noRead) consumeStdin(ctx, '', true)
     // Stdin is text unless a stage upstream wrote bytes into the pipe, and
     // then it is those bytes: read as they are where a reader works in them,
     // as the text they spell where one does not, and refused where they spell
