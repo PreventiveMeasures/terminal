@@ -206,7 +206,7 @@ export function compilePatterns(patterns, flags, locale = LOCALE, origins = []) 
       patterns = fixed
       flags = new Set([...flags].filter((flag) => flag !== 'E' && flag !== 'G')).add('F')
     } else {
-      const said = gnuDiagnostics(patterns, origins, { extended: flags.has('E'), icase: flags.has('i'), lines: whole, words: flags.has('w'), multibyte: tables.multibyte })
+      const said = gnuDiagnostics(patterns, origins, { extended: flags.has('E'), icase: flags.has('i'), lines: whole, words: flags.has('w'), multibyte: tables.multibyte, up: tables.up })
       if (said.error) return { error: err(said.error, 2) }
       warnings = said.warnings
     }

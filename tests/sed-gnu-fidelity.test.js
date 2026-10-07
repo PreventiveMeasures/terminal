@@ -37,6 +37,27 @@ describe('sed brackets read a backslash as GNU does', () => {
   })
 })
 
+describe('sed reads a collating name under I upper-cased, as glibc does', () => {
+  // Under I regcomp reads the pattern through towupper, the name of a
+  // collating symbol or an equivalence class with it: `[.ı.]` is `[.I.]`,
+  // one byte and so a member, which as written it is not. The name's 31
+  // bytes are counted upper-cased too.
+  const cases = [
+    ['', 's/[[.ı.]]/x/I', result('x\nx\nx\nS\ns\nſ\n')],
+    ['', 's/[[=ſ=]]/x/I', result('I\ni\nı\nx\nx\nx\n')],
+    ['-E', 's/[[=ı=]S]+/<&>/I', result('<I>\n<i>\n<ı>\n<S>\n<s>\n<ſ>\n')],
+    ['', 's/[[.ı.]]/x/', result('', 'sed: -e expression #1, char 13: Invalid collation character\n', 1)],
+    ['', `s/[[.${'ı'.repeat(16)}.]]/x/I`, result('', 'sed: -e expression #1, char 44: Invalid collation character\n', 1)],
+    ['', `s/[[.${'ȿ'.repeat(11)}.]]/x/I`, result('', 'sed: -e expression #1, char 34: Unmatched [, [^, [:, [., or [=\n', 1)],
+    ['', `s/[[:${'ı'.repeat(16)}:]]/x/I`, result('', 'sed: -e expression #1, char 44: Invalid character class name\n', 1)],
+  ]
+  for (const [options, script, expected] of cases) {
+    it(`${options} ${script}`, async () => {
+      assert.deepEqual(await terminal().run(`cd /src; printf 'I\\ni\\nı\\nS\\ns\\nſ\\n' | sed ${options} '${script}'`), expected)
+    })
+  }
+})
+
 describe('sed stdout reaches a shared destination in stdio order', () => {
   it('lands a diagnostic ahead of output still held for a pipe', async () => {
     assert.deepEqual(await terminal().run('cd /src; sed p input nofile 2>&1 | cat'),

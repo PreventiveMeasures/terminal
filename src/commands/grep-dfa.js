@@ -2,7 +2,14 @@
 // has taken every one of them (./grep-syntax.js): dfa.c's lex, followed as it
 // is written as far as it warns or stops, and building nothing.
 import { encodeUtf8Loose } from '../util.js'
-import { DUP_MAX, regError, utf8Width } from './grep-regcomp.js'
+import { RE_DUP_MAX, utf8Width } from '../regcomp.js'
+
+// An error of the dfa's, which grep reports as the dfa words it.
+function regError(message) {
+  const e = new Error(message)
+  e.gnuRegex = true
+  return e
+}
 
 const WRAP = {
   ere: { line: ['^(', ')$'], word: ['(^|[^[:alnum:]_])(', ')([^[:alnum:]_]|$)'] },
@@ -94,7 +101,7 @@ function interval(l, backslash) {
   let minrep = -1
   let maxrep = -1
   const digit = () => p < s.length && s[p] >= 0x30 && s[p] <= 0x39
-  const more = (n) => (n < 0 ? s[p] - 0x30 : Math.min(DUP_MAX + 1, n * 10 + s[p] - 0x30))
+  const more = (n) => (n < 0 ? s[p] - 0x30 : Math.min(RE_DUP_MAX + 1, n * 10 + s[p] - 0x30))
   for (; digit(); p++) minrep = more(minrep)
   if (p < s.length && s[p] === 0x2c) {
     if (minrep < 0) minrep = 0
@@ -108,7 +115,7 @@ function interval(l, backslash) {
     l.warn('{...} at start of expression')
   }
   if (!valid) throw regError('invalid content of \\{\\}')
-  if (DUP_MAX < maxrep) throw regError('regular expression too big')
+  if (RE_DUP_MAX < maxrep) throw regError('regular expression too big')
   l.i = p
   l.laststart = false
   return true
