@@ -1,5 +1,5 @@
 import { VfsError } from '@preventive/vfs'
-import { dirname, lookup, walkPath, writeTarget } from './fs.js'
+import { dirname, lookup, sameBytes, walkPath, writeTarget } from './fs.js'
 import { decodeUtf8, encodeUtf8 } from './util.js'
 
 // The overlay is mounted at /tmp, so what may be written is what falls inside
@@ -29,7 +29,14 @@ export function writableFs(base) {
     ...base,
     observeIo: (value) => { overlay.observer = value },
     fileIdentity: overlay.identity,
-    readIdentity: (cell) => { overlay.observer?.read(cell); return decodeUtf8(cellBytes(base.vfs, cell)) },
+    // The text a file holds — or, for one read as the bytes it is, those same
+    // bytes back while it still holds them, and what it holds once it does not.
+    readIdentity: (cell, held) => {
+      overlay.observer?.read(cell)
+      const bytes = cellBytes(base.vfs, cell)
+      if (held === undefined) return decodeUtf8(bytes)
+      return sameBytes(bytes, held) ? held : bytes
+    },
     readFile: (path) => { observe(path); return base.readFile(path) },
     readBytes: (path) => { observe(path); return base.readBytes(path) },
     openWritable: (cwd, path, append = false) => openFile(fs, overlay, cwd, path, append),
