@@ -33,14 +33,14 @@ export const TEXT_WORKFLOWS = [
     expected: [{ kind: 'feature', command: 'sed', detail: 'address regex flags' }],
   },
   {
-    purpose: 'Append one metric record after each README line',
-    command: String.raw`sed 'R data/metrics.tsv' README.md`,
-    expected: [{ kind: 'feature', command: 'sed', detail: 'script' }],
+    purpose: 'Find doubled words with a backreference',
+    command: String.raw`sed -n '/\(\w\+\) \1/p' README.md`,
+    expected: [{ kind: 'feature', command: 'sed', detail: 'regex backreferences' }],
   },
   {
-    purpose: 'List records with control characters escaped',
-    command: "sed -n 'l' data/names.txt",
-    expected: [{ kind: 'feature', command: 'sed', detail: 'script' }],
+    purpose: 'Stamp the current date above the first README line',
+    command: "sed '1e date' README.md",
+    expected: [{ kind: 'feature', command: 'sed', detail: 'e command' }],
   },
   {
     purpose: 'Normalize import and export prefixes with multiline matching',
@@ -53,9 +53,9 @@ export const TEXT_WORKFLOWS = [
     expected: [{ kind: 'feature', command: 'sed', detail: 'substitution flag m' }],
   },
   {
-    purpose: 'Uppercase selected names in a report without editing its input',
-    command: String.raw`sed 's/alpha/\U&/' data/names.txt`,
-    expected: [{ kind: 'feature', command: 'sed', detail: 'replacement escape' }],
+    purpose: 'Prefix streamed log lines without output buffering',
+    command: "sed -u 's/^/[app] /' README.md",
+    expected: [{ kind: 'option', command: 'sed', detail: '-u' }],
   },
   {
     purpose: 'Sort collected metric values inside an AWK report',

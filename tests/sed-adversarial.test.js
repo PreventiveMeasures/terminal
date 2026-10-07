@@ -55,7 +55,7 @@ describe('sed compile-time failures cannot truncate later write targets', () => 
       assert.equal(actual.exitCode, 1)
       assert.equal(actual.stdout, '')
       assert.deepEqual(actual.unsupported, [])
-      assert.match(actual.stderr, /unexpected '\}'/u)
+      assert.match(actual.stderr, /unexpected `\}'/u)
       assert.deepEqual(await t.run('cat /tmp/out'), result('KEEP'))
     })
   }

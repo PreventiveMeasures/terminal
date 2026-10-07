@@ -5,7 +5,8 @@ import { createTerminal } from '@preventive/terminal'
 const result = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
 // A writable overlay needs a mount away from `/`, and cwd follows the mount.
 const mounted = (...args) => ({ ...result(...args), cwd: '/src' })
-const writeError = (name) => `${name}: write error: Bad file descriptor\n`
+// sed buffers its output and finds the descriptor closed only as it closes it.
+const writeError = (name) => (name === 'sed' ? "sed: couldn't close stdout: Bad file descriptor\n" : `${name}: write error: Bad file descriptor\n`)
 const setup = () => createTerminal({ input: 'a\nb\n' })
 
 describe('closed stdout is validated for commands entering any dispatch path', () => {

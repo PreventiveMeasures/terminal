@@ -3410,8 +3410,7 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     const t = createTerminal(SRC)
     // Unmodeled scripts retain the subset diagnostic.
     const unsupportedCases = [
-      'sed',                                // no args
-      "sed -n '/foo/l' big.txt",            // escaped record listing
+      "sed -n '/foo/e' big.txt",            // runs the pattern space as a command
     ]
     for (const cmd of unsupportedCases) {
       const r = await t.run(cmd)
@@ -3421,7 +3420,8 @@ describe('createTerminal — sed line-range slice (narrow subset)', () => {
     // These hit specific (non-canonical) errors that name the
     // actual problem — they don't get the generic unsupported text.
     const specific = [
-      ["sed -n '0,5p' big.txt", /line numbers must be >= 1/u],
+      ['sed', /^Usage: sed /u],                // no args: GNU's usage
+      ["sed -n '0,5p' big.txt", /invalid usage of line address 0/u],
       ["sed -i -n '1,2p' big.txt", /file system is read-only/u],
     ]
     for (const [cmd, re] of specific) {

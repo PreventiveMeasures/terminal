@@ -18,7 +18,7 @@ const FILES = {
   'scripts/print': '1p\n$p\n',
   'scripts/empty': '',
   'scripts/broken': 's/a',
-  'scripts/unsupported': 'F\n',
+  'scripts/unsupported': 'e echo\n',
   'scripts/dialect': 's/a+/X/',
   dialect: 'a+\naa\n',
   '-z': 's/a/A/',
@@ -63,11 +63,11 @@ describe('sed script files preserve source order and script boundaries', () => {
   ]
   for (const [command, stdout] of cases) it(command, () => check(command, stdout))
 
-  for (const path of ['missing-script', 'scripts']) {
-    it(`script read failure aborts before processing input: ${path}`, async () => {
-      await ordinaryError(`sed -f scripts/replace -f ${path} input`, 4, new RegExp(path, 'u'))
-    })
-  }
+  it('script read failure aborts before processing input', async () => {
+    await ordinaryError('sed -f scripts/replace -f missing-script input', 4, /^sed: couldn't open file missing-script: No such file or directory\n$/u)
+  })
+  // fopen opens a directory, and getc reads nothing from it: an empty script.
+  it('a directory is an empty script', () => check('sed -f scripts/replace -f scripts input', 'A\nb\nA\n'))
   it('keeps malformed script contents an ordinary syntax error', async () => {
     await ordinaryError('sed -f scripts/broken input', 1, /unterminated/u)
   })
@@ -90,7 +90,7 @@ describe('sed script files preserve source order and script boundaries', () => {
     assert.equal(actual.exitCode, 1)
     assert.equal(actual.stdout, '')
     assert.deepEqual(actual.unsupported.map(({ kind, command, detail }) => ({ kind, command, detail })), [
-      { kind: 'feature', command: 'sed', detail: 'script' },
+      { kind: 'feature', command: 'sed', detail: 'e command' },
     ])
     assert.equal(actual.stderr, actual.unsupported[0].message + '\n')
     const hidden = await terminal.run('sed -f scripts/unsupported input 2>/dev/null | cat')

@@ -87,7 +87,7 @@ describe('sed regex flag errors and engine limitations', () => {
   for (const flag of ['i', 'I', 'm', 'M']) {
     for (const input of ['', 'a\n']) {
       it(`empty regex with ${flag} fails before processing ${JSON.stringify(input)}`, async () => {
-        assert.deepEqual(await run(`s/a/A/;s//X/${flag}`, input), expected('', 1, 'sed: cannot specify modifiers on empty regexp\n'))
+        assert.deepEqual(await run(`s/a/A/;s//X/${flag}`, input), expected('', 1, 'sed: -e expression #1, char 13: cannot specify modifiers on empty regexp\n'))
       })
     }
   }
@@ -95,12 +95,12 @@ describe('sed regex flag errors and engine limitations', () => {
   it('opens w targets before rejecting modifiers on an empty regex', async () => {
     const t = createTerminal({ input: 'a\n' }, { mount: '/src/', writable: '/tmp/' })
     assert.deepEqual(await t.run('printf old >/tmp/out'), mounted())
-    assert.deepEqual(await t.run("sed 's//X/Iw /tmp/out' /src/input"), mounted('', 1, 'sed: cannot specify modifiers on empty regexp\n'))
+    assert.deepEqual(await t.run("sed 's//X/Iw /tmp/out' /src/input"), mounted('', 1, 'sed: -e expression #1, char 16: cannot specify modifiers on empty regexp\n'))
     assert.deepEqual(await t.run('cat /tmp/out'), mounted())
   })
 
   it('reports invalid flags before checking whether the regex is empty', async () => {
-    assert.deepEqual(await run('s//X/iQ', ''), expected('', 1, "sed: unknown option to substitute command: 'Q'\n"))
+    assert.deepEqual(await run('s//X/iQ', ''), expected('', 1, "sed: -e expression #1, char 7: unknown option to `s'\n"))
   })
 
   for (const flag of ['m', 'M', 'e']) {

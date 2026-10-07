@@ -77,13 +77,9 @@ describe('sed distinguishes malformed multiline syntax from unsupported features
       assert.deepEqual(actual.unsupported, [])
     }
   })
-  it('reports remaining unsupported replacement modes after a valid continuation', async () => {
-    const command = `sed ${quote(`s/a/b${continued}\\U&/`)} input 2>/dev/null | cat`
-    const actual = await createTerminal({ input: 'a\n' }).run(command)
-    assert.equal(actual.exitCode, 0)
-    assert.equal(actual.stderr, '')
-    assert.equal(actual.unsupported.length, 1)
-    assert.equal(actual.unsupported[0].detail, 'replacement escape')
+  it('applies case conversion after a valid continuation', async () => {
+    const command = `sed ${quote(`s/a/b${continued}\\U&/`)} input`
+    assert.deepEqual(await createTerminal({ input: 'a\n' }).run(command), result('b\nA\n'))
   })
 })
 
@@ -112,11 +108,8 @@ describe('sed zero escapes have distinct regex and replacement meanings', () => 
       assert.deepEqual(await createTerminal({ input }).run(`sed ${flags} ${quote(script)} input`), result(stdout))
     })
   }
-  it('keeps unsupported zero escapes inside bracket expressions on diagnostics', async () => {
-    const actual = await createTerminal({ input: '0\\\n' }).run(String.raw`sed 's/[\0]/X/g' input 2>/dev/null | cat`)
-    assert.equal(actual.exitCode, 0)
-    assert.equal(actual.stderr, '')
-    assert.equal(actual.unsupported.length, 1)
-    assert.equal(actual.unsupported[0].detail, 'regex escape')
+  // Inside a bracket a backslash is a member, as glibc reads one.
+  it('reads a backslash and a zero inside a bracket expression as members', async () => {
+    assert.deepEqual(await createTerminal({ input: '0\\\n' }).run(String.raw`sed 's/[\0]/X/g' input`), result('XX\n'))
   })
 })

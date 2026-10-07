@@ -46,7 +46,7 @@ const cases = [
   ['grep -f file keep', 'grep', 'file', 2, 'grep: file: No such file or directory\n'],
   ["sed 's/x/y/' file", 'sed', 'file', 2, 'sed: can\'t read file: No such file or directory\n'],
   ["sed -i 's/x/y/' file", 'sed', 'file', 2, 'sed: can\'t read file: No such file or directory\n'],
-  ['sed -f file keep', 'sed', 'file', 4, 'sed: can\'t read file: No such file or directory\n'],
+  ['sed -f file keep', 'sed', 'file', 4, 'sed: couldn\'t open file file: No such file or directory\n'],
   ["awk '{print}' file", 'awk', 'file', 2, 'awk: file: No such file or directory\n'],
   ['awk -f file', 'awk', 'file', 2, 'awk: cannot open program file `file`: No such file or directory\n'],
   ['cp file /tmp/file', 'cp', 'file', 1, "cp: cannot stat 'file': No such file or directory\n"],

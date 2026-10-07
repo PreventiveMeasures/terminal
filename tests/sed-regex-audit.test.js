@@ -21,7 +21,7 @@ describe('sed write filenames in script files', () => {
 
     it(`rejects an empty C-string filename for ${prefix}`, async () => {
       const t = terminal(`${prefix} \0/tmp/out`)
-      assert.deepEqual(await t.run('sed -f /src/program /src/input'), expected('', 'sed: missing filename in r/R/w/W commands\n', 1))
+      assert.deepEqual(await t.run('sed -f /src/program /src/input'), expected('', 'sed: file /src/program line 1: missing filename in r/R/w/W commands\n', 1))
       assert.deepEqual(await t.run('test -e /tmp/out'), expected('', '', 1))
     })
   }
@@ -56,7 +56,7 @@ describe('sed case-insensitive previous-regex state', () => {
 
   it('checks unavailable captures on the first substitution reuse of an address', async () => {
     const t = terminal('/a/Is//\\1/')
-    assert.deepEqual(await t.run('sed -f /src/program /src/input'), expected('', 'sed: invalid reference \\1 in replacement\n', 1))
+    assert.deepEqual(await t.run('sed -f /src/program /src/input'), expected('', "sed: file /src/program line 1: invalid reference \\1 on `s' command's RHS\n", 1))
   })
 
   it('does not validate a previous regex on a skipped substitution', async () => {
