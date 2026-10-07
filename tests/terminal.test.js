@@ -4786,6 +4786,8 @@ describe('createTerminal — od (hidden hexdump variant)', () => {
     assert.deepEqual(await t.run('od missing'), { stdout: '', stderr: 'od: missing: No such file or directory\n', exitCode: 1, cwd: '/', notes: [], unsupported: [] })
     // Satisfied by the first input that opens, it opens no more.
     assert.deepEqual(await t.run('od -N 0 hello.txt missing'), { stdout: '0000000\n', stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] })
+    // Nor has it skipped past the end of anything.
+    assert.deepEqual(await t.run('od -j 2 missing'), { stdout: '', stderr: 'od: missing: No such file or directory\n', exitCode: 1, cwd: '/', notes: [], unsupported: [] })
   })
 
   it('names what it cannot read in a count as coreutils does', async () => {

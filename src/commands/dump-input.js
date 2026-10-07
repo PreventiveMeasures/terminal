@@ -72,7 +72,9 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
     if (rewind && skipping) { start = skip.value; skipping = 0 }
     if (remaining === 0 && skipping === 0) break
   }
-  if (skipping && opt.skipPastEofErrors) return { error: err(r.stderr + `${cmd}: cannot skip past end of combined input`) }
+  // od skips through what it opened, and with nothing opened has nothing to
+  // have skipped past the end of.
+  if (skipping && opt.skipPastEofErrors && opened) return { error: err(r.stderr + `${cmd}: cannot skip past end of combined input`) }
   // hexdump goes on to stdin where no operand opened, which a failed reopen
   // has closed: it says so where it has a skip to make there, and that every
   // operand failed otherwise.
