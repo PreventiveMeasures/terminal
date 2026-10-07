@@ -1,6 +1,6 @@
 // What GNU grep says of a -G or -E pattern before it reads a line. It asks
 // twice. glibc's regcomp is given each pattern line on its own, and every line
-// it rejects is named in turn before grep gives up (./grep-regcomp.js); only
+// it rejects is named in turn before grep gives up (../regcomp.js); only
 // when all of them pass does the dfa matcher parse them together, which warns
 // of a repetition with nothing before it and rejects `[:space:]` spelt
 // without its outer bracket. Both are followed as they are written
@@ -11,17 +11,20 @@
 // POSIX stacks repetitions, which ECMAScript does not (posixQuantifiers).
 import { UnsupportedError } from '../unsupported.js'
 import { MAX_INTERVAL, validateBracket } from '../charclass.js'
-import { regcompError } from './grep-regcomp.js'
+import { RE_ICASE, RE_SYNTAX_EGREP, RE_SYNTAX_GREP, regcomp } from '../regcomp.js'
 import { dfaDiagnostics } from './grep-dfa.js'
 
 // Everything GNU says of the patterns before it reads a line: `error` is the
 // whole of what a run that stops there writes, and `warnings` what one that
 // goes on writes first. `origins` names where each pattern came from, which
-// glibc's complaint about it carries in front (grepPatterns).
-export function gnuDiagnostics(patterns, origins, { extended, icase = false, lines = false, words = false, multibyte = true }) {
+// glibc's complaint about it carries in front (grepPatterns). `multibyte` and
+// `up` are the locale's, as regcomp reads a pattern by them: whether a
+// character can take more than one byte, and towupper, for -i.
+export function gnuDiagnostics(patterns, origins, { extended, icase = false, lines = false, words = false, multibyte = true, up }) {
+  const syntax = (extended ? RE_SYNTAX_EGREP : RE_SYNTAX_GREP) | (icase ? RE_ICASE : 0)
   const errors = patterns.flatMap((pattern, k) => {
-    const message = regcompError(pattern, extended, multibyte, icase)
-    return message ? [`grep: ${origins[k] ?? ''}${message}\n`] : []
+    const { error } = regcomp(pattern, syntax, { multibyte, up, foldRangeNames: false })
+    return error ? [`grep: ${origins[k] ?? ''}${error}\n`] : []
   })
   if (errors.length) return { error: errors.join('') }
   const said = dfaDiagnostics(patterns, { extended, lines, words })

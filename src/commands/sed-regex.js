@@ -2,9 +2,8 @@ import { AwkRegex } from '../awk/regex.js'
 import { decodeUtf8, encodeUtf8 } from '../util.js'
 import { UnsupportedError } from '../unsupported.js'
 import { EXTENDED_C, LOCALE, classTables, isByteLocale } from '../locale.js'
+import { RE_ICASE, RE_SYNTAX_POSIX_BASIC, RE_SYNTAX_POSIX_EXTENDED, RE_UNMATCHED_RIGHT_PAREN_ORD, regcomp } from '../regcomp.js'
 import { scriptGap } from './sed-common.js'
-import { confusingBracket } from './sed-bracket.js'
-import { emitRegex, parseGnuRegex } from './sed-regcomp.js'
 
 // normalize_text's three readings of an escape: text (a, i, c and y) drops
 // the backslash of one it does not know, a replacement or a regex passes it
@@ -76,6 +75,12 @@ function control(input, at, type, out, recursive) {
   return i + 1
 }
 
+// The syntax sed 4.9 hands regcomp: POSIX's, less the `)` an ERE could take
+// as a character, which sed's default POSIXLY_EXTENDED takes away. (The
+// bits it adds and removes besides steer only the matcher.)
+const SYNTAX_BASIC = RE_SYNTAX_POSIX_BASIC
+const SYNTAX_EXTENDED = RE_SYNTAX_POSIX_EXTENDED & ~RE_UNMATCHED_RIGHT_PAREN_ORD
+
 // compile_regex: the pattern as match_slash collected it, which is not
 // empty. A fault comes back as `error` (regcomp's, which sed reports where
 // its reader stands) or `panic` (the DFA's, which it does not).
@@ -85,11 +90,15 @@ export function compileRegex(raw, { extended, icase, locale = LOCALE, neededSub,
     throw new UnsupportedError('feature', 'locale', `matching non-ASCII text in the ${locale} locale is not supported`)
   }
   const tables = classTables(locale)
-  const parsed = parseGnuRegex(pattern, { extended, icase, up: tables.up })
+  const syntax = (extended ? SYNTAX_EXTENDED : SYNTAX_BASIC) | (icase ? RE_ICASE : 0)
+  const parsed = regcomp(pattern, syntax, { multibyte: tables.multibyte, up: tables.up })
   if (parsed.error) return { error: parsed.error }
   if (neededSub && parsed.nsub < neededSub - 1) return { error: invalidReference(neededSub - 1) }
-  if (confusingBracket(pattern, parsed.brackets)) return { panic: 'character class syntax is [[:space:]], not [:space:]' }
-  if (parsed.gap) scriptGap(parsed.gap)
+  if (parsed.brackets.some(confusingBracket)) return { panic: 'character class syntax is [[:space:]], not [:space:]' }
+  // Under I, regcomp takes an escaped character as written but matches it
+  // against upper-cased text, so an escaped lower-case letter matches
+  // nothing — a quirk the matcher here does not share.
+  if (icase && parsed.escapes.some((code) => code > 0x7f || tables.up(code) !== code)) scriptGap('case-insensitive escaped letter')
   const source = emitRegex(parsed.tree)
   let re
   try { re = new AwkRegex(source, icase, null, tables) } catch (e) {
@@ -100,6 +109,56 @@ export function compileRegex(raw, { extended, icase, locale = LOCALE, neededSub,
 }
 
 export const invalidReference = (n) => `invalid reference \\${n} on \`s' command's RHS`
+
+// GNU's DFA, which compiles the pattern after regcomp has accepted it,
+// rejects a bracket spelt like a class name without its own brackets —
+// `[:space:]`: one that opens and closes on a colon, holds something else
+// besides, and holds no class, range or collating element — and sed dies
+// of it. regcomp lists every bracket, one an interval of `{0}` drops from
+// its tree among them, which the DFA still reads.
+const confusingBracket = ({ items }) => items.every((item) => item.k === 'char' && !item.coll)
+  && items[0].code === 0x3a && items.at(-1).code === 0x3a && items.some((item) => item.code !== 0x3a)
+
+// regcomp's tree as the AWK matcher's ERE, so that nothing between the two
+// reads the pattern a second time by other rules: `\` escapes only its
+// syntax, a bracket spells its members so that none reads as syntax — a
+// backslash in one is a member, as it is to glibc — and GNU's `\b` is its
+// `\y`. Backreferences have no matcher here.
+const SYNTAX = '^$.[]|()*+?{}\\/"'
+const ANCHORS = { '^': '^', $: '$', '<': '\\<', '>': '\\>', b: '\\y', B: '\\B', '`': '\\`', "'": "\\'" }
+
+function emitRegex(tree) {
+  if (tree === null) return ''
+  switch (tree.t) {
+    case 'char': return SYNTAX.includes(tree.c) ? '\\' + tree.c : tree.c
+    case 'any': return '.'
+    case 'anchor': return ANCHORS[tree.kind]
+    case 'escape': return '\\' + tree.c
+    case 'group': return '(' + emitRegex(tree.node) + ')'
+    case 'cat': return tree.nodes.map(emitRegex).join('')
+    case 'alt': return emitRegex(tree.a) + '|' + emitRegex(tree.b)
+    case 'rep': return emitRegex(tree.node) + quantifier(tree.min, tree.max)
+    case 'set': return '[' + (tree.negate ? '^' : '') + tree.items.map(emitItem).join('') + ']'
+    default: return scriptGap('regex backreferences')
+  }
+}
+
+function quantifier(min, max) {
+  if (max === null) return min === 0 ? '*' : min === 1 ? '+' : `{${min},}`
+  if (min === 0 && max === 1) return '?'
+  return min === max ? `{${min}}` : `{${min},${max}}`
+}
+
+const member = (code) => {
+  const c = String.fromCodePoint(code)
+  return '\\]^-['.includes(c) ? '\\' + c : c
+}
+
+function emitItem(item) {
+  if (item.k === 'class') return `[:${item.name}:]`
+  if (item.k === 'range') return `${member(item.lo)}-${member(item.hi)}`
+  return member(item.code)
+}
 
 export function checkRegexText(text, regex) {
   if (!/[\u0080-\u{10FFFF}]/u.test(text + regex.re.src)) return
