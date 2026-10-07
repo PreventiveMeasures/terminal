@@ -450,23 +450,25 @@ describe('tar extracts into the writable overlay', () => {
 
   it('keeps the mode and the time each entry was stored with, as GNU does for anyone but root', async () => {
     const t = await terminal()
-    // The umask, 022, is taken off each mode, and a directory made on the way
+    // The umask, 077, is taken off each mode, and a directory made on the way
     // to an entry is what it leaves of 0777, dated to when it was made.
     assert.deepEqual(await t.run('cd /tmp && tar -xf /repo/pkg.tar pkg/bin pkg/README.md pkg/link && ls -l pkg/README.md pkg/link pkg/bin/run.sh && ls -ld pkg pkg/bin | cut -c 1-10'), result(
-      '-rw-r--r-- 1 user user  6 May  6  2024 pkg/README.md\n-rwxr-xr-x 1 user user 19 May  6  2024 pkg/bin/run.sh\nlrwxrwxrwx 1 user user  9 May  6  2024 pkg/link -> README.md\n'
-      + 'drwxr-xr-x\ndrwxr-xr-x\n',
+      '-rw------- 1 user user  6 May  6  2024 pkg/README.md\n-rwx------ 1 user user 19 May  6  2024 pkg/bin/run.sh\nlrwxrwxrwx 1 user user  9 May  6  2024 pkg/link -> README.md\n'
+      + 'drwx------\ndrwx------\n',
       { cwd: '/tmp' },
     ))
-    // An archive made of them stores what they keep.
-    assert.deepEqual(await t.run('tar -cf x.tar --owner=dev:1000 --group=staff:50 pkg/bin pkg/link && tar -tvf x.tar'), result(lines(LONG[2], LONG[3], LONG[5]), { cwd: '/tmp' }))
+    // An archive made of them stores what they keep: the umask's share of
+    // each mode is gone, and the link's is a link's.
+    const kept = (line) => line.replace(/^([d-])rw[x-]r-[x-]r-[x-]/u, (mode, kind) => `${kind}rw${mode[3]}------`)
+    assert.deepEqual(await t.run('tar -cf x.tar --owner=dev:1000 --group=staff:50 pkg/bin pkg/link && tar -tvf x.tar'), result(lines(kept(LONG[2]), kept(LONG[3]), LONG[5]), { cwd: '/tmp' }))
     // gzip carries both over to the file it writes, as GNU's copy_stat does.
-    assert.deepEqual(await t.run('gzip pkg/bin/run.sh && ls -l pkg/bin/run.sh.gz | cut -c 1-10,26-'), result('-rwxr-xr-x May  6  2024 pkg/bin/run.sh.gz\n', { cwd: '/tmp' }))
+    assert.deepEqual(await t.run('gzip pkg/bin/run.sh && ls -l pkg/bin/run.sh.gz | cut -c 1-10,26-'), result('-rwx------ May  6  2024 pkg/bin/run.sh.gz\n', { cwd: '/tmp' }))
   })
 
   it('names at -vv each directory it made on the way to an entry', async () => {
     const t = await terminal()
-    // In the mode GNU makes one with: what the umask, 022, leaves of 0777.
-    const made = (name) => `drwxr-xr-x                  Creating directory: ${name}\n`
+    // In the mode GNU makes one with: what the umask, 077, leaves of 0777.
+    const made = (name) => `drwx------                  Creating directory: ${name}\n`
     assert.deepEqual(await t.run('cd /tmp && mkdir v && tar -xvvf /repo/pkg.tar -C v pkg/src/lib/util.js pkg/bin'), result(
       lines(LONG[2]) + made('pkg') + lines(LONG[3], LONG[10]) + made('pkg/src') + made('pkg/src/lib'),
       { cwd: '/tmp' },

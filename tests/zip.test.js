@@ -246,26 +246,26 @@ describe('unzip extracts into the writable overlay', () => {
   it('gives what a DOS maker stored the mode UnZip gives it', async () => {
     // Two files marked by DOS's attributes alone, one of them read-only:
     // UnZip expands that bit into no write permission, and takes the umask,
-    // 022, off what is left.
+    // 077, off what is left.
     const DOS = bytesOf(`
 UEsDBBQAAAAAAIAYIlh+8EwyBAAAAAQAAAAGAAAAcm8udHh0ZG9zClBLAwQUAAAAAACAGCJYfvBMMgQAAAAEAAAABgAAAHJ3LnR4dGRvcwpQSwECFAAUAAAAAACAGCJYfvBM
 MgQAAAAEAAAABgAAAAAAAAAAACEAAAAAAAAAcm8udHh0UEsBAhQAFAAAAAAAgBgiWH7wTDIEAAAABAAAAAYAAAAAAAAAAAAgAAAAKAAAAHJ3LnR4dFBLBQYAAAAAAgACAGgA
 AABQAAAAAAA=`)
     const t = createTerminal({ 'dos.zip': DOS }, { mount: '/repo', writable: '/tmp/' })
-    assert.deepEqual(await t.run('cd /tmp && unzip -q /repo/dos.zip && ls -l | cut -c 1-10'), result('total 8\n-r--r--r--\n-rw-r--r--\n', { cwd: '/tmp' }))
+    assert.deepEqual(await t.run('cd /tmp && unzip -q /repo/dos.zip && ls -l | cut -c 1-10'), result('total 8\n-r--------\n-rw-------\n', { cwd: '/tmp' }))
   })
 
   it('keeps the mode and the time each entry was stored with, as UnZip does', async () => {
     const t = await terminal()
     // No umask is taken from an entry's own mode; a directory made for -d is
-    // what the umask, 022, leaves of 0777, dated to when it was made, and a
+    // what the umask, 077, leaves of 0777, dated to when it was made, and a
     // link is dated to when it was made too.
     assert.deepEqual(await t.run('cd /tmp && unzip -q /repo/pkg.zip -d out && ls -l out/pkg/README.md out/pkg/bin/run.sh && ls -ld out/pkg out/pkg/src'), result(
       '-rw-r--r-- 1 user user  6 May  6  2024 out/pkg/README.md\n-rwxr-xr-x 1 user user 19 May  6  2024 out/pkg/bin/run.sh\n'
       + 'drwxr-xr-x 5 user user 4096 May  6  2024 out/pkg\ndrwxr-xr-x 3 user user 4096 May  6  2024 out/pkg/src\n',
       { cwd: '/tmp' },
     ))
-    assert.deepEqual(await t.run('ls -ld out | cut -c 1-10'), result('drwxr-xr-x\n', { cwd: '/tmp' }))
+    assert.deepEqual(await t.run('ls -ld out | cut -c 1-10'), result('drwx------\n', { cwd: '/tmp' }))
     // An archive made of them stores the times they keep.
     assert.deepEqual(await t.run('cd out && zip -qr ../again.zip pkg/bin && unzip -l ../again.zip'), result(
       `Archive:  ../again.zip\n${HEAD}        0  2024-05-06 07:08   pkg/bin/\n       19  2024-05-06 07:08   pkg/bin/run.sh\n---------                     -------\n       19                     2 files\n`,

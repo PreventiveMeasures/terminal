@@ -113,7 +113,7 @@ describe('ls -l lists what the filesystem does not keep as this terminal’s def
 
 // What an entry extracted from an archive keeps of its own — the mode it was
 // stored with, less what GNU tar takes off as anyone but root under umask
-// 022, and the time — is what its row says, until a write dates it to now.
+// 077, and the time — is what its row says, until a write dates it to now.
 describe('ls -l lists an entry that keeps a mode and a time of its own with them', () => {
   const STORED = Date.UTC(2024, 0, 2, 3, 4) / 1000
   const owner = { uid: 1000, gid: 50, uname: 'dev', gname: 'staff' }
@@ -133,11 +133,11 @@ describe('ls -l lists an entry that keeps a mode and a time of its own with them
     const t = await extracted()
     assert.deepEqual(await run(t, 'ls -la pkg'), expected(lines(
       'total 16',
-      'drwxr-xr-x 2 user user 4096 Jan  2  2024 .',
+      'drwx------ 2 user user 4096 Jan  2  2024 .',
       'drwx------ 3 user user 4096 Sep 18 05:52 ..',
       'lrwxrwxrwx 1 user user    5 Jan  2  2024 link -> notes',
-      '-rw-r--r-- 1 user user    2 Jan  2  2024 notes',
-      '-rwxr-xr-x 1 user user    5 Jan  2  2024 run.sh',
+      '-rw------- 1 user user    2 Jan  2  2024 notes',
+      '-rwx------ 1 user user    5 Jan  2  2024 run.sh',
     ), [], { cwd: '/tmp' }))
     // -F marks what a mode makes executable, beside a link and after it.
     assert.deepEqual(await run(t, 'ls -F pkg && ls -lF pkg/link'), expected('link@\nnotes\nrun.sh*\nlrwxrwxrwx 1 user user 5 Jan  2  2024 pkg/link -> notes\n', [], { cwd: '/tmp' }))
@@ -145,10 +145,10 @@ describe('ls -l lists an entry that keeps a mode and a time of its own with them
 
   it('dates a file written to, and a directory a name is made in, to now', async () => {
     const t = await extracted()
-    assert.deepEqual(await run(t, 'echo more >> pkg/notes && ls -l pkg/notes'), expected('-rw-r--r-- 1 user user 7 Sep 18 05:52 pkg/notes\n', [], { cwd: '/tmp' }))
-    assert.deepEqual(await run(t, 'touch pkg/new && ls -ld pkg'), expected('drwxr-xr-x 2 user user 4096 Sep 18 05:52 pkg\n', [], { cwd: '/tmp' }))
+    assert.deepEqual(await run(t, 'echo more >> pkg/notes && ls -l pkg/notes'), expected('-rw------- 1 user user 7 Sep 18 05:52 pkg/notes\n', [], { cwd: '/tmp' }))
+    assert.deepEqual(await run(t, 'touch pkg/new && ls -ld pkg'), expected('drwx------ 2 user user 4096 Sep 18 05:52 pkg\n', [], { cwd: '/tmp' }))
     // A copy is a new file, made in the mode of what it copies.
-    assert.deepEqual(await run(t, 'cp pkg/run.sh copy && ls -l copy'), expected('-rwxr-xr-x 1 user user 5 Sep 18 05:52 copy\n', [], { cwd: '/tmp' }))
+    assert.deepEqual(await run(t, 'cp pkg/run.sh copy && ls -l copy'), expected('-rwx------ 1 user user 5 Sep 18 05:52 copy\n', [], { cwd: '/tmp' }))
   })
 
   it('refuses what a kept mode keeps its owner from, and rm asks before it', async () => {

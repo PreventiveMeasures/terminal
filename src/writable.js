@@ -21,12 +21,14 @@ export function writeRefusal(ctx, absolute) {
 
 const EMPTY = new Uint8Array()
 
-// The umask the tools that carry a mode over run under here: an archive's
-// entry is extracted, and a file holding such a mode copied, as GNU tar and
-// cp write them under the common default, 022. Everything else is made in
-// this tree's one mode (ls-long.js) — but for a directory one of those tools
-// makes on the way to a name, which has what the umask leaves of 0777.
-export const UMASK = 0o022
+// The session's umask, 077: the one that makes every file it creates
+// `-rw-------` and every directory `drwx------`, the modes this tree's model
+// gives everything (ls-long.js). A tool that carries a mode over — an
+// archive's entry extracted, a file copied — takes it off that mode as GNU
+// tar and cp do, and a directory one of them makes on the way to a name has
+// what it leaves of 0777. One umask, so a name made here reads the same
+// whichever command made it.
+export const UMASK = 0o077
 export const MADE_MODE = 0o777 & ~UMASK
 
 // What a mode an entry keeps denies its owner, who is the one user here:
