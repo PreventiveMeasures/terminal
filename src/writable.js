@@ -320,8 +320,12 @@ function replaceFile(fs, overlay, cwd, path, content, backupPath) {
   if (backup !== null) naming(overlay, backup)
   const bytes = encodeUtf8(content)
   const { vfs } = overlay
-  // The file written in its place takes its mode, as GNU gives it.
-  const mode = overlay.metadataOf(absolute)?.mode
+  // The file written in its place takes the mode of the file that was read,
+  // as GNU sed gives it the mode fstat(2) reads from what it opened — for a
+  // link, what the link leads to, and not the link's own. (GNU patch refuses
+  // a link outright, so it only ever reads the file at the name itself.)
+  const read = lookup(cwd, path, fs).path
+  const mode = read === null ? undefined : overlay.metadataOf(read)?.mode
   overlay.change(path, () => {
     // GNU renames the name aside for the backup and the new file over it, so
     // a link's backup is the link itself, and the name is a regular file

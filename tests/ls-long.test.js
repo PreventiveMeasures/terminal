@@ -236,6 +236,31 @@ describe('ls -l lists an entry that keeps a mode and a time of its own with them
     assert.deepEqual(await run(t, 'cd xonly && cat file'), expected('x\n', [], { cwd: '/tmp/xonly' }))
   })
 
+  // GNU sed -i writes a new file and renames it over the name, replacing a
+  // link with a regular file, and gives it the mode fstat(2) read from the
+  // file it opened: for a link, the one the link leads to.
+  it('gives the file sed -i writes over a link the mode of what the link leads to', async () => {
+    const t = await made({
+      'bin.tar': pack([
+        { name: 'bin/', type: 'directory', mode: 0o755, mtime: STORED, ...owner },
+        { name: 'bin/run', mode: 0o755, mtime: STORED, data: Buffer.from('a\n'), ...owner },
+        { name: 'bin/ro', mode: 0o444, mtime: STORED, data: Buffer.from('a\n'), ...owner },
+      ]),
+    }, { mount: '/repo', writable: '/tmp/' })
+    await run(t, 'cd /tmp && tar -xf /repo/bin.tar && ln -s bin/run l && ln -s bin/ro m && ln -s run bin/n')
+    assert.deepEqual(await run(t, 'sed -i s/a/b/ l m && sed -i.bak s/a/b/ bin/n && ls -l l m bin && cat l m bin/n bin/run bin/ro'), expected(lines(
+      '-rwx------ 1 user user    2 Sep 18 05:52 l',
+      '-r-------- 1 user user    2 Sep 18 05:52 m',
+      '',
+      'bin:',
+      'total 12',
+      '-rwx------ 1 user user 2 Sep 18 05:52 n',
+      'lrwxrwxrwx 1 user user 3 Sep 18 05:52 n.bak -> run',
+      '-r-------- 1 user user 2 Jan  2  2024 ro',
+      '-rwx------ 1 user user 2 Jan  2  2024 run',
+      'b', 'b', 'b', 'a', 'a',
+    ), [], { cwd: '/tmp' }))
+  })
 })
 
 describe('ls -l ownership and time', () => {

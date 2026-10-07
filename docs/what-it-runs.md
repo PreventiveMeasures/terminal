@@ -196,17 +196,18 @@ under the session's umask, 077 — the one that makes everything else here
 `-rw-------` and `drwx------` — and is listed with them — marked `*` by `-F`
 where they make it executable — until a write dates it to now, as making or
 removing a name in a directory dates the directory; `cp` makes a file in the
-mode of one it copies, `gzip` carries both over to what it writes, and
-`tar -c` and `zip` store them. What such a mode keeps its owner from —
-reading a file, writing one, making or removing a name in a directory,
-listing a directory, and looking up any name in one without its search bit,
-on the way to whatever is under it or to change into it — GNU is told
-"Permission denied" of, in words each command has its own way of saying, so
-that is refused with an unsupported diagnostic, while the directory itself
-is still listed by `ls -ld` and found by `test -d` as GNU finds it; `rm` asks
-before
-it takes away a write-protected entry, as GNU asks where stdin is the
-terminal, and the terminal's empty stdin answers no. Link counts, directory sizes and
+mode of one it copies, `gzip` carries both over to what it writes, `sed -i`
+gives the file it writes the mode of the one it read — through a link, the
+one the link leads to — and `tar -c` and `zip` store them. What such a mode
+keeps its owner from — reading a file, writing one, making or removing a
+name in a directory, listing a directory, and looking up any name in one
+without its search bit, on the way to whatever is under it or to change into
+it — GNU is told "Permission denied" of, in words each command has its own
+way of saying, so that is refused with an unsupported diagnostic, while the
+directory itself is still listed by `ls -ld` and found by `test -d` as GNU
+finds it; `rm` asks before it takes away a write-protected entry, as GNU asks
+where stdin is the terminal, and the terminal's empty stdin answers no. Link
+counts, directory sizes and
 the `total` line are what ext4 would report for the same tree, and `-h`
 rounds sizes as `du -h` does. A symbolic link — one a source entry declares,
 or one `ln -s` made — is the row the model has nothing to guess at:
