@@ -486,15 +486,16 @@ describe('searching a tree that holds files of bytes', () => {
   })
 
   it('is passed over by an rg walk where ripgrep calls it binary', async () => {
-    // A NUL is what ripgrep calls binary: it stops there, prints nothing for
-    // the file, and searches the rest of the tree, which is what a walk does
+    // A NUL is what ripgrep calls binary: it stops reading there, and what
+    // it read of the PNG before the NUL holds no line it finds, so it prints
+    // nothing for the file and searches the rest of the tree, as a walk does
     // here. `--text` asks for those bytes instead, and a named one draws the
     // line ripgrep prints about a binary match.
     const files = { 'img.png': PNG, 'text.txt': 'spelled by a string\n' }
     const t = terminal(files)
-    const skipped = ['grep: skipped 1 binary file: "/repo/img.png". Binary input is treated as text with -a.']
     await check(t, 'rg spelled .', './text.txt:spelled by a string\n')
-    await check(t, 'rg IHDR .', '', { exitCode: 1, notes: skipped })
+    await check(t, 'rg IHDR .', '', { exitCode: 1 })
+    await check(t, 'rg PNG .', '', { exitCode: 1 })
     await check(t, 'rg -l spelled .', './text.txt\n')
     await check(t, 'rg -c spelled .', './text.txt:1\n')
     // `--text` reads it as text, where a literal that is in its bytes is a

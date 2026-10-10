@@ -140,11 +140,17 @@ describe('grep — pattern file errors and diagnostics', () => {
   })
 
   it('rejects missing option arguments and invalid patterns without unsupported notes', async () => {
-    for (const command of ['grep -f', 'grep --file', 'grep -sf patterns/bad data']) {
+    const usage = "Usage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n"
+    for (const [command, stderr] of [
+      ['grep -f', "grep: option requires an argument -- 'f'\n" + usage],
+      ['grep --file', "grep: option '--file' requires an argument\n" + usage],
+      // glibc names the file and line of each pattern it rejects.
+      ['grep -sf patterns/bad data', 'grep: patterns/bad:1: Invalid regular expression\n'],
+    ]) {
       const result = await createTerminal(FILES).run(command)
       assert.equal(result.stdout, '', command)
       assert.equal(result.exitCode, 2, command)
-      assert.match(result.stderr, /^grep: .+\n$/u, command)
+      assert.equal(result.stderr, stderr, command)
       assert.deepEqual(result.unsupported, [], command)
     }
   })

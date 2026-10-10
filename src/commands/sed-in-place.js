@@ -1,51 +1,16 @@
 import { lookupWithNote, missingPathNote } from '../notes.js'
-import { lookup } from '../fs.js'
+import { dirname, lookup } from '../fs.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { err, readFailure } from '../util.js'
+import { runSed } from './sed-run.js'
 
-// GNU -i has an optional attached suffix; the next token is still a script
-// or operand. Required -e/-f values take precedence over option scanning.
-export function preprocessInPlace(tokens) {
-  const out = []
-  let inPlace = null
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]
-    if (token === '--') { out.push(...tokens.slice(i)); break }
-    if (token === '--in-place' || token.startsWith('--in-place=')) {
-      inPlace = token === '--in-place' ? '' : token.slice('--in-place='.length)
-      continue
-    }
-    if (token.startsWith('--') || !token.startsWith('-')) {
-      out.push(token)
-      if ((token === '--expression' || token === '--file') && i + 1 < tokens.length) out.push(tokens[++i])
-      continue
-    }
-    let kept = token
-    for (let j = 1; j < token.length; j++) {
-      const option = token[j]
-      if (option === 'i') {
-        inPlace = token.slice(j + 1)
-        kept = token.slice(0, j)
-        break
-      }
-      if (option === 'e' || option === 'f') {
-        out.push(token)
-        if (j + 1 === token.length && i + 1 < tokens.length) out.push(tokens[++i])
-        kept = ''
-        break
-      }
-      if (!'nErsz'.includes(option)) break
-    }
-    if (kept && (kept !== '-' || token === '-')) out.push(kept)
-  }
-  return { tokens: out, inPlace }
-}
-
-export function runInPlace(program, flags, ctx, suffix, run) {
-  if (program.files.length === 0) return err('sed: no input files', 4)
+// Each input is edited on its own: GNU writes it to a temporary file beside
+// it, renames the input to its backup, if a suffix asks for one, and the
+// temporary file over the input. A failure of any of that is a panic, which
+// ends the run with status 4.
+export function runInPlace(program, ctx, suffix) {
   const result = emptyOutput()
-  const separate = new Set([...flags, 's'])
   let badInput = false
   for (const name of program.files) {
     const found = inPlaceInput(name, ctx)
@@ -56,7 +21,8 @@ export function runInPlace(program, flags, ctx, suffix, run) {
       badInput = true
       continue
     }
-    const next = run({ ...program, files: [found.path] }, separate)
+    // F names the input as it was given.
+    const next = runSed({ ...program, files: [found.path], labels: [name], separate: true }, ctx, true)
     const { content, ...output } = next
     appendOutput(result, output)
     if (next.failed || unsupportedNote(next)) return copyNote(result, next)
@@ -64,7 +30,8 @@ export function runInPlace(program, flags, ctx, suffix, run) {
     let replaced
     try { replaced = ctx.fs.replaceWritable(ctx.cwd, name, content, backup) } catch (e) {
       missingPathNote(ctx, 'sed', e?.path, e?.fsError)
-      const failed = unsupportedFrom(e, 'sed', `sed: ${e.message}`, 4)
+      const reason = backup !== undefined && e.message.startsWith(`${backup}: `) ? renameError(ctx, backup, e.message.slice(backup.length + 2)) : null
+      const failed = reason ? err(`sed: cannot rename ${name}: ${reason}`, 4) : unsupportedFrom(e, 'sed', `sed: ${e.message}`, 4)
       appendOutput(result, failed)
       return copyNote(result, failed)
     }
@@ -76,7 +43,17 @@ export function runInPlace(program, flags, ctx, suffix, run) {
     if (next.quit) break
   }
   if (badInput) result.exitCode = 2
+  // sed closes stdout as it finishes, whatever it wrote there.
+  if (ctx.outputFds?.[1] === 'closed') appendOutput(result, err("sed: couldn't close stdout: Bad file descriptor", 4))
   return result
+}
+
+// What rename(2) says of the backup name: a name with a trailing slash in
+// a directory that is there asks for a directory the input is not.
+function renameError(ctx, backup, reason) {
+  if (reason !== 'No such file or directory' || !backup.endsWith('/')) return reason
+  const parent = lookup(ctx.cwd, dirname(backup.replace(/\/+$/u, '')), ctx.fs)
+  return !parent.error && ctx.fs.isDir(parent.path) ? 'Not a directory' : reason
 }
 
 function inPlaceInput(name, ctx) {
@@ -100,8 +77,10 @@ function backupName(name, suffix) {
   return suffix.includes('*') ? suffix.replaceAll('*', () => name) : name + suffix
 }
 
+// GNU makes its temporary file, under a random name, beside the input and
+// would say it could not where that is read-only; it panics, status 4.
 function refused(name) {
-  return unsupported('feature', 'sed', '-i', `sed: ${name}: file system is read-only`)
+  return unsupported('feature', 'sed', '-i', `sed: ${name}: file system is read-only`, 4)
 }
 
 function copyNote(result, next) {

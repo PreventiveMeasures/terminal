@@ -1,26 +1,28 @@
-import { MAX_INTERVAL, checkInterval, readPosixClass, validateBracket } from '../charclass.js'
-import { UnsupportedError, unsupported } from '../unsupported.js'
+import { checkInterval, readPosixClass, validateBracket } from '../charclass.js'
+import { UnsupportedError, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { MARKER_RANGE, err } from '../util.js'
 import { AwkRegex } from '../awk/regex.js'
-import { parseEre } from '../awk/re-parse.js'
 import { breToEs, validateBackreferences } from '../bre.js'
 import { EXTENDED_C, LOCALE, classTables } from '../locale.js'
 import { foldFixed, foldPattern } from '../regex-fold.js'
 import { glibcDiffers, glibcRuns, literalText, markedAssertions, markedClass, outsideWords, patternShape, wholeCharacters } from './grep-literal.js'
-import { pcreSource } from './grep-pcre.js'
+import { pcreRejection, pcreSource } from './grep-pcre.js'
+import { ERE_INTERVAL, caselessEscape, classEnd, ereLiterals, fixedStrings, gnuDiagnostics, posixQuantifiers } from './grep-syntax.js'
 
 export { cannotHoldMatch } from './grep-literal.js'
+export { posixQuantifiers } from './grep-syntax.js'
 
 // POSIX named classes come from the locale's table. Collating and
 // equivalence expressions need collation semantics that we do not model.
+// A backslash in a bracket is a member, which the JS class spells `\\`.
 export function ereClasses(pattern, tables) {
   let out = ''
   let inClass = false
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i]
     if (c === '\\') {
-      const next = pattern[++i] ?? ''
-      out += inClass ? c + next : gnuEscape(next)
+      if (inClass) { out += '\\\\'; continue }
+      out += gnuEscape(pattern[++i] ?? '')
       continue
     }
     if (inClass && c === '[') {
@@ -49,12 +51,14 @@ function gnuEscape(next) {
 // What PCRE reads by its own Unicode tables rather than the locale's: its
 // word and space escapes, boundaries, and everything a dot, a bracket or a
 // repetition spans. None of that is modelled past ASCII, so a `-P` pattern
-// carrying any of it is refused over non-ASCII input.
+// carrying any of it is refused over non-ASCII input. The `?` opening a
+// group's syntax — `(?:`, `(?<name>` — repeats nothing.
 export function localeSensitive(source) {
   for (let i = 0; i < source.length; i++) {
     if (source[i] === '\\') {
       if ('bBsSwW<>'.includes(source[++i] ?? '')) return true
-    } else if ('.[*+?{'.includes(source[i])) return true
+    } else if (source[i] === '(' && source[i + 1] === '?') i++
+    else if ('.[*+?{'.includes(source[i])) return true
   }
   return false
 }
@@ -113,7 +117,6 @@ export function markedRegex(re) {
   return re.marked
 }
 
-const ERE_INTERVAL = /^\{(?=\d|,)(\d*)(?:,(\d*))?\}/u
 const BRE_INTERVAL = /^\\\{(?=\d|,)(\d*)(?:,(\d*))?\\\}/u
 
 // GNU rejects an interval bound above RE_DUP_MAX outright. ECMAScript
@@ -124,130 +127,15 @@ function intervalBounds(pattern, i, extended) {
   if (m) checkInterval(Number(m[1]), m[2] === undefined || m[2] === '' ? undefined : Number(m[2]))
 }
 
-// POSIX stacks quantifiers: `a+?` is `(a+)?`, which matches the empty
-// string, and `a+*` is `(a+)*`. ECMAScript reads `+?` as a lazy `+` and
-// rejects `+*` outright, so the pair has to be rewritten for the JS
-// matcher. Wrapping it as `(?:a+)*` would be correct and catastrophic —
-// nested unbounded repetition backtracks exponentially on input that
-// fails to match — so the pair is folded into one quantifier instead.
-const QUANTS = { __proto__: null, '*': { min: 0, max: Infinity }, '+': { min: 1, max: Infinity }, '?': { min: 0, max: 1 } }
-
-function quantBounds(text) {
-  if (QUANTS[text]) return QUANTS[text]
-  const m = ERE_INTERVAL.exec(text)
-  const min = Number(m[1])
-  return { min, max: m[2] === undefined ? min : m[2] === '' ? Infinity : Number(m[2]) }
-}
-
-const times = (a, b) => (a === 0 || b === 0 ? 0 : a === Infinity || b === Infinity ? Infinity : a * b)
-
-// `(X{m1,n1}){m2,n2}` matches k copies of X for every k that is a sum of
-// between m2 and n2 numbers drawn from [m1,n1]. When those k form one
-// unbroken range the pair is a single quantifier — `a+*` is just `a*` —
-// and the nesting disappears with them. Returns null when the reachable
-// counts have a hole, as `(a{2,}){0,1}` does between 0 and 2.
-function collapse(inner, outer) {
-  const first = Math.max(outer.min, 1)
-  if (first > outer.max) return { min: 0, max: 0 }
-  if (inner.min > 0) {
-    if (outer.min === 0 && inner.min > 1) return null
-    if (inner.max !== Infinity && outer.max > first && (first + 1) * inner.min > first * inner.max + 1) return null
-  }
-  const max = times(outer.max, inner.max)
-  return max !== Infinity && max > MAX_INTERVAL ? null : { min: times(outer.min, inner.min), max }
-}
-
-function quantText(b) {
-  if (b.max === Infinity) return b.min === 0 ? '*' : b.min === 1 ? '+' : `{${b.min},}`
-  if (b.min === 0 && b.max === 1) return '?'
-  return b.min === b.max ? `{${b.min}}` : `{${b.min},${b.max}}`
-}
-
-// A repetition consumes a fixed width only when the atom does: a single
-// character, escape or bracket expression matches exactly one. A group
-// can match several lengths — `(a|aa){3}` covers 3 to 6 characters — and
-// repeating that under an unbounded count is the ambiguity the fold
-// exists to avoid, so groups and backreferences do not qualify.
-const fixedWidth = (atom) => !atom.startsWith('(') && !/^\\[1-9]/u.test(atom)
-
-// Fold a chain of quantifiers applied to one atom. A pair that will not
-// collapse may still nest safely when every repetition consumes a fixed
-// width, or when the outer one repeats at most once; anything else would
-// reintroduce the ambiguity, so it is refused and reported as a GNU form
-// the JavaScript matcher cannot represent.
-function stackQuantifiers(atom, chain) {
-  if (chain.length === 1) return atom + quantText(chain[0].bounds)
-  let bounds = chain[0].bounds
-  let nested = null
-  for (let i = 1; i < chain.length; i++) {
-    const { bounds: outer, text } = chain[i]
-    const merged = nested === null ? collapse(bounds, outer) : null
-    if (merged) { bounds = merged; continue }
-    const fixed = nested === null && bounds.min === bounds.max && fixedWidth(atom)
-    if (!fixed && outer.max > 1) throw new Error('stacked quantifier needs ambiguous nesting')
-    nested = `(?:${nested ?? atom + quantText(bounds)})${text}`
-  }
-  return nested ?? atom + quantText(bounds)
-}
-
-// End of the bracket expression opening at `start`, honouring the escapes
-// the translators emit inside a class.
-function classEnd(source, start) {
-  let i = start + 1
-  if (source[i] === '^') i++
-  for (; i < source.length; i++) {
-    if (source[i] === '\\') { i++; continue }
-    if (source[i] === ']') return i
-  }
-  return source.length - 1
-}
-
-// Rewrite each atom together with every quantifier stacked on it. Groups
-// carry their whole text as the atom, so `(ab)+?` becomes `(ab)*`.
-export function posixQuantifiers(source) {
-  let out = ''
-  let unitStart = -1   // where the bare atom starts in `out`, -1 if none
-  let unitEnd = -1     // where its first quantifier began
-  let chain = []
-  const flush = () => {
-    if (chain.length > 0) out = out.slice(0, unitStart) + stackQuantifiers(out.slice(unitStart, unitEnd), chain)
-    chain = []
-  }
-  const atom = (text) => { flush(); unitStart = out.length; unitEnd = -1; out += text }
-  const groups = []
-  for (let i = 0; i < source.length; i++) {
-    const c = source[i]
-    if (c === '\\') { atom(c + (source[++i] ?? '')); continue }
-    if (c === '[') {
-      const end = classEnd(source, i)
-      atom(source.slice(i, end + 1))
-      i = end
-      continue
-    }
-    if (c === '(') { flush(); groups.push(out.length); unitStart = -1; out += c; continue }
-    if (c === ')') { flush(); out += c; unitStart = groups.pop() ?? -1; unitEnd = -1; continue }
-    // Nothing quantifiable precedes an alternation branch or an anchor.
-    if (c === '|' || c === '^' || c === '$') { flush(); out += c; unitStart = -1; continue }
-    const interval = c === '{' ? ERE_INTERVAL.exec(source.slice(i)) : null
-    if (c === '*' || c === '+' || c === '?' || interval) {
-      const text = interval ? interval[0] : c
-      i += text.length - 1
-      if (unitStart < 0) { out += text; continue }   // nothing to quantify; JS reports it
-      if (chain.length === 0) unitEnd = out.length
-      chain.push({ bounds: quantBounds(text), text })
-      continue
-    }
-    atom(c)
-  }
-  flush()
-  return out
-}
-
 // These constructs have different meanings in ECMAScript and GNU grep.
 // Refuse them rather than letting the JS engine silently pick a dialect.
 // Bracket expressions and interval bounds are checked here, on the
-// pattern as written, so BRE and ERE get the same diagnostics.
-export function validateRegex(pattern, extended, multibyte = false) {
+// pattern as written, so BRE and ERE get the same diagnostics — the
+// bounds and an ERE `(?` unless `checked`, as grep's patterns are, which
+// glibc and the dfa have already read (gnuDiagnostics): there a BRE `\{`
+// with nothing before it is the character, and so is the `?` after `(`.
+// `checked` also takes a backslash in a bracket for the member it is.
+export function validateRegex(pattern, extended, multibyte = false, checked = false) {
   // Membership is by position, not by the next `]`: a class ends where
   // validateBracket says it does, so the `]` closing `[:alpha:]` inside it
   // — or a literal `]` in first position — does not end it early. Members
@@ -255,25 +143,32 @@ export function validateRegex(pattern, extended, multibyte = false) {
   // are, so `[[:alpha:]{40000}]` and `[(?]` stay the classes GNU sees.
   let bracketEnd = -1
   for (let i = 0; i < pattern.length; i++) {
-    const bracket = i <= bracketEnd
+    // A backslash in a bracket is one of its members (validateBracket) —
+    // to grep. sed reads some of them as escapes first, which a bracket
+    // here would not, so for it one is refused.
+    if (i <= bracketEnd) {
+      if (!checked && pattern[i] === '\\') throw new UnsupportedError('feature', 'regex escape', 'grep: this regex escape is not supported with GNU semantics')
+      continue
+    }
     const c = pattern[i]
     if (c === '\\') {
       const next = pattern[++i]
       if (next === undefined) throw new Error('trailing backslash')
-      if (bracket || (next && 'dDxXuUpPkKcC'.includes(next))) throw new UnsupportedError('feature', 'regex escape', 'grep: this regex escape is not supported with GNU semantics')
-      if (!extended && next === '{') intervalBounds(pattern, i - 1, false)
-    } else if (c === '[' && !bracket) bracketEnd = validateBracket(pattern, i, multibyte)
-    else if (bracket) continue
-    else if (extended && c === '{') intervalBounds(pattern, i, true)
-    else if (extended && c === '(' && pattern[i + 1] === '?') throw new UnsupportedError('feature', 'regex extension', 'grep: ECMAScript group extensions are not supported in ERE')
+      if (next && 'dDxXuUpPkKcC'.includes(next)) throw new UnsupportedError('feature', 'regex escape', 'grep: this regex escape is not supported with GNU semantics')
+      if (!checked && !extended && next === '{') intervalBounds(pattern, i - 1, false)
+    } else if (c === '[') bracketEnd = validateBracket(pattern, i, multibyte)
+    else if (!checked && extended && c === '{') intervalBounds(pattern, i, true)
+    else if (!checked && extended && c === '(' && pattern[i + 1] === '?') throw new UnsupportedError('feature', 'regex extension', 'grep: ECMAScript group extensions are not supported in ERE')
   }
 }
 
-// A backreference outside a bracket, where a backslash is an escape.
+// A backreference outside a bracket, where a backslash is an escape. The
+// pattern has passed validateRegex, so every bracket ends where
+// validateBracket says.
 function hasBackreference(pattern) {
   for (let i = 0; i < pattern.length; i++) {
-    if (pattern[i] !== '\\') continue
-    if (/[1-9]/u.test(pattern[++i] ?? '')) return true
+    if (pattern[i] === '[') i = validateBracket(pattern, i)
+    else if (pattern[i] === '\\' && /[1-9]/u.test(pattern[++i] ?? '')) return true
   }
   return false
 }
@@ -293,102 +188,118 @@ function readsAnyCharacter(source) {
   return false
 }
 
-export function compilePatterns(patterns, flags, locale = LOCALE) {
+export function compilePatterns(patterns, flags, locale = LOCALE, origins = []) {
   // Compile -e patterns separately: combining them would shift backreference
   // numbers across patterns. A line matches if any pattern selects it.
   const tables = classTables(locale)
   const res = []
   const whole = flags.has('x'), word = flags.has('w') && !whole
-  if (flags.has('P') && new Set(patterns).size > 1) return { error: err('grep: -P only supports a single pattern', 2) }
-  for (const pattern of patterns) {
-    const gnu = !flags.has('F') && !flags.has('P')
-    if (gnu) validateRegex(pattern, flags.has('E'), tables.multibyte)
-    // -i is spelt into the pattern from the locale's tables (../regex-fold.js)
-    // and the matchers run case-sensitively, as GNU's do. A backreference
-    // has to see the text as written, so a pattern with one keeps the JS
-    // flag instead, which agrees with GNU over ASCII and is refused past it
-    // (inputGap); -P reads case by PCRE's own tables and is refused the same.
-    const backrefs = gnu && hasBackreference(pattern)
-    const folded = flags.has('i') && !flags.has('P') && !backrefs
-    const reFlags = flags.has('i') && !folded ? 'isu' : 'su'
-    let source
-    if (flags.has('F')) source = folded ? foldFixed(pattern, tables) : RegExp.escape(pattern)
-    else if (flags.has('P')) source = pcreSource(pattern)
-    else if (flags.has('E')) source = ereClasses(folded ? foldPattern(pattern, tables) : pattern, tables)
-    else {
-      const r = breToEs(folded ? foldPattern(pattern, tables) : pattern, tables)
-      if (r.error) return { error: err(`grep: ${r.error}`, 2) }
-      source = r.source
-    }
-    const canonical = source
-    if (gnu && validateBackreferences(canonical)) return { error: unsupported('feature', 'grep', 'conditional backreference', 'grep: backreferences with conditional or repeated-empty captures are not supported', 2) }
-    if (word) source = `(?<!${tables.assertions().word})(?:${source})(?!${tables.assertions().word})`
-    if (whole) source = `^(?:${source})$`
-    try {
-      // The boolean matcher needs POSIX quantifier stacking spelled out
-      // for ECMAScript; the extent matcher below parses ERE itself and
-      // already reads those the way GNU does, so it takes `source` as is.
-      // `-P` selects the ECMAScript reading, where `a+?` really is lazy,
-      // so the rewrite is ERE's alone.
-      const quantified = gnu ? posixQuantifiers(source) : source
-      const re = new RegExp(wholeCharacters(gnu ? grepSource(quantified, 'js', tables) : source), reFlags)
-      // What a line holding bytes that spell no character is matched with,
-      // and what the pattern asks of a character, which says whether glibc
-      // reads some such bytes as GNU's own matcher does not (inputGap).
-      if (gnu) Object.assign(re, { markedSource: quantified, tables, shape: patternShape(pattern, backrefs) })
-      re.pcre = flags.has('P')
-      // What still reads text by rules other than the locale's tables:
-      // PCRE's own, and the JS case flag a backreference pattern keeps.
-      re.localeSensitive = re.pcre ? flags.has('i') || word || localeSensitive(canonical) || /\\[dD]/u.test(canonical) : flags.has('i') && backrefs
-      re.folded = folded
-      re.extendedC = folded && EXTENDED_C.test(pattern)
-      re.unicodePattern = /[\u0080-\u{10FFFF}]/u.test(pattern)
-      re.wellFormed = pattern.isWellFormed()
-      // Whether -w meets a pattern that can match nothing at all (inputGap).
-      re.emptyWord = word && !re.pcre && new RegExp(gnu ? grepSource(posixQuantifiers(canonical), 'js', tables) : canonical, reFlags).test('')
-      // Whether the pattern reads a character at a time rather than a byte: a
-      // wildcard and a set spelt by what it excludes both reach past ASCII,
-      // and a locale's own classes name ASCII alone outside C.UTF-8 — so a set
-      // spelt by what it holds reads the same either way, and a literal does.
-      re.anyCharacter = readsAnyCharacter(canonical)
-      const literal = literalText(pattern, flags)
-      // Whether the bytes alone can say that a file this terminal cannot read
-      // as text holds no match — which only a plain literal answers, and only
-      // one read as written or folded by the locale's own tables, never by
-      // PCRE's. `-w` and `-x` narrow what the bytes being there would select,
-      // so they answer here too, and a pattern holding a lone surrogate spells
-      // no bytes at all. What that literal can be is spelled out on the first
-      // such file, since most runs never meet one.
-      if (literal?.isWellFormed() && (folded || !flags.has('i'))) re.literal = { pattern: literal, tables }
-      if (flags.has('o') && gnu && !whole) {
-        if (word || /\\[1-9]|\(\?/u.test(source)) return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: only-matching with backreferences, lookarounds or word constraints is not supported', 2) }
-        try { re.extent = new AwkRegex(grepSource(source, 'extent', tables), false, null, tables) } catch {
-          return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: POSIX match extent for this pattern is not supported', 2) }
-        }
-      }
-      res.push(re)
-    } catch (e) {
-      if (!flags.has('P') && gnuSyntaxGap(canonical, flags)) return { error: unsupported('feature', 'grep', 'GNU regex syntax', 'grep: this GNU regular expression cannot be represented by the JavaScript matcher', 2) }
-      // Pattern errors use exit 2; retain the selected dialect in the error message.
-      const dialect = flags.has('F') ? `fixed-string /${reFlags}`
-        : flags.has('P') ? `PCRE subset /${reFlags}`
-        : flags.has('E') ? `ERE / ECMAScript /${reFlags}`
-        : `BRE /${reFlags}`
-      return { error: err(`grep: invalid pattern (${dialect}): ${e.message}`, 2) }
+  if (flags.has('P') && new Set(patterns).size > 1) return { error: err('grep: the -P option only supports a single pattern', 2) }
+  // GNU has said what it will of a -G or -E pattern before this compiles
+  // one, so anything the translation below cannot take is its own gap, not
+  // a mistake in the pattern. Two or more that all read as fixed strings
+  // are searched as those, as GNU does, and never asked about at all.
+  let warnings = ''
+  if (!flags.has('F') && !flags.has('P')) {
+    const fixed = patterns.length > 1 ? fixedStrings(patterns, flags.has('E'), flags.has('i') ? tables : null) : null
+    if (fixed) {
+      patterns = fixed
+      flags = new Set([...flags].filter((flag) => flag !== 'E' && flag !== 'G')).add('F')
+    } else {
+      const said = gnuDiagnostics(patterns, origins, { extended: flags.has('E'), icase: flags.has('i'), lines: whole, words: flags.has('w'), multibyte: tables.multibyte, up: tables.up })
+      if (said.error) return { error: err(said.error, 2) }
+      warnings = said.warnings
     }
   }
-  return { res }
+  const gnu = !flags.has('F') && !flags.has('P')
+  for (const pattern of patterns) {
+    // What PCRE2 rejects is said here (pcreRejection); one it takes is
+    // matched as the pattern alone, with the JS matcher's -w wrapping, which
+    // reads the same unless the pattern reaches into GNU's — an unbalanced
+    // `)` or an unended \Q — which this then refuses.
+    const rejected = flags.has('P') ? pcreRejection(pattern, word) : null
+    if (rejected) return { error: rejected }
+    let re
+    try { re = compileOne(pattern, flags, tables, gnu, whole, word) } catch (e) {
+      if (unsupportedNote(e)) return { error: unsupportedFrom(e, 'grep', e.message.startsWith('grep: ') ? e.message : `grep: ${e.message}`, 2) }
+      const dialect = gnu ? 'GNU regular expression' : 'PCRE pattern'
+      return { error: unsupported('feature', 'grep', gnu ? 'GNU regex syntax' : 'PCRE syntax', `grep: this ${dialect} cannot be represented by the JavaScript matcher`, 2) }
+    }
+    if (re.error) return re
+    res.push(re)
+  }
+  return { res, warnings }
 }
 
-// JS rejects several valid GNU forms: omitted interval minima, stacked
-// quantifiers and literal unmatched braces/closing brackets. Do not label
-// those failures as mistakes in the user's regex. Invalid references and
-// malformed BRE intervals remain ordinary errors.
-function gnuSyntaxGap(source, flags) {
-  if (!flags.has('E') && /(?<!\\)\{(?!\d*(?:,\d*)?\})/u.test(source)) return false
-  // References were validated before compilation. Their ERE-parser escape
-  // reading is only a syntax proof here; it is never used to match input.
-  try { parseEre(grepSource(source, 'extent')); return true } catch (e) { return Boolean(e.gap) }
+function compileOne(pattern, flags, tables, gnu, whole, word) {
+  if (gnu) validateRegex(pattern, flags.has('E'), tables.multibyte, true)
+  if (gnu && flags.has('i') && caselessEscape(pattern)) throw new UnsupportedError('feature', 'regex escape', 'grep: a backslash before a lower-case letter is not supported with -i')
+  // -i is spelt into the pattern from the locale's tables (../regex-fold.js)
+  // and the matchers run case-sensitively, as GNU's do. A backreference
+  // has to see the text as written, so a pattern with one keeps the JS
+  // flag instead, which agrees with GNU over ASCII and is refused past it
+  // (inputGap); -P reads case by PCRE's own tables and is refused the same.
+  const backrefs = gnu && hasBackreference(pattern)
+  const folded = flags.has('i') && !flags.has('P') && !backrefs
+  const reFlags = flags.has('i') && !folded ? 'isu' : 'su'
+  let source
+  if (flags.has('F')) source = folded ? foldFixed(pattern, tables) : RegExp.escape(pattern)
+  else if (flags.has('P')) source = pcreSource(pattern)
+  else if (flags.has('E')) {
+    const literals = ereLiterals(pattern, whole || word)
+    source = ereClasses(folded ? foldPattern(literals, tables) : literals, tables)
+  }
+  else {
+    const r = breToEs(folded ? foldPattern(pattern, tables) : pattern, tables, true)
+    if (r.error) throw new Error(r.error)
+    source = r.source
+  }
+  const canonical = source
+  if (gnu && validateBackreferences(canonical)) return { error: unsupported('feature', 'grep', 'conditional backreference', 'grep: backreferences with conditional or repeated-empty captures are not supported', 2) }
+  if (word) source = `(?<!${tables.assertions().word})(?:${source})(?!${tables.assertions().word})`
+  if (whole) source = `^(?:${source})$`
+  // The boolean matcher needs POSIX quantifier stacking spelled out for
+  // ECMAScript; the extent matcher below parses ERE itself and already
+  // reads those the way GNU does, so it takes `source` as is. `-P` selects
+  // the ECMAScript reading, where `a+?` really is lazy, so the rewrite is
+  // ERE's alone.
+  const quantified = gnu ? posixQuantifiers(source) : source
+  const re = new RegExp(wholeCharacters(gnu ? grepSource(quantified, 'js', tables) : source), reFlags)
+  // What a line holding bytes that spell no character is matched with,
+  // and what the pattern asks of a character, which says whether glibc
+  // reads some such bytes as GNU's own matcher does not (inputGap).
+  if (gnu) Object.assign(re, { markedSource: quantified, tables, shape: patternShape(pattern, backrefs) })
+  re.pcre = flags.has('P')
+  // What still reads text by rules other than the locale's tables:
+  // PCRE's own, and the JS case flag a backreference pattern keeps.
+  re.localeSensitive = re.pcre ? flags.has('i') || word || localeSensitive(canonical) || /\\[dD]/u.test(canonical) : flags.has('i') && backrefs
+  re.folded = folded
+  re.extendedC = folded && EXTENDED_C.test(pattern)
+  re.unicodePattern = /[\u0080-\u{10FFFF}]/u.test(pattern)
+  re.wellFormed = pattern.isWellFormed()
+  // Whether -w meets a pattern that can match nothing at all (inputGap).
+  re.emptyWord = word && !re.pcre && new RegExp(gnu ? grepSource(posixQuantifiers(canonical), 'js', tables) : canonical, reFlags).test('')
+  // Whether the pattern reads a character at a time rather than a byte: a
+  // wildcard and a set spelt by what it excludes both reach past ASCII,
+  // and a locale's own classes name ASCII alone outside C.UTF-8 — so a set
+  // spelt by what it holds reads the same either way, and a literal does.
+  re.anyCharacter = readsAnyCharacter(canonical)
+  const literal = literalText(pattern, flags)
+  // Whether the bytes alone can say that a file this terminal cannot read
+  // as text holds no match — which only a plain literal answers, and only
+  // one read as written or folded by the locale's own tables, never by
+  // PCRE's. `-w` and `-x` narrow what the bytes being there would select,
+  // so they answer here too, and a pattern holding a lone surrogate spells
+  // no bytes at all. What that literal can be is spelled out on the first
+  // such file, since most runs never meet one.
+  if (literal?.isWellFormed() && (folded || !flags.has('i'))) re.literal = { pattern: literal, tables }
+  if (flags.has('o') && gnu && !whole) {
+    if (word || /\\[1-9]|\(\?/u.test(source)) return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: only-matching with backreferences, lookarounds or word constraints is not supported', 2) }
+    try { re.extent = new AwkRegex(grepSource(source, 'extent', tables), false, null, tables) } catch {
+      return { error: unsupported('feature', 'grep', '-o regex extent', 'grep: POSIX match extent for this pattern is not supported', 2) }
+    }
+  }
+  return re
 }
 
 // What a search cannot answer of one file as GNU would, refused before any of

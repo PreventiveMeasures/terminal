@@ -339,40 +339,41 @@ describe('GNU conformance — what a tool says it could not read on the command 
   // them exit 2. This said `invalid key specification: <spec>` for most of
   // them and exited 1, and rejected two specs GNU accepts: a field count is
   // read the way strtoul reads one, so a leading blank or `+` belongs to the
-  // number. Every line below is what coreutils 9.4 printed in the C locale.
+  // number. Every line below is what coreutils 9.4 printed in C.UTF-8, which
+  // quotes the spec in the locale's curly quotes.
   const rows = { pairs: 'b 2\na 1\n' }
   const key = async (spec) => await createTerminal(rows).run(`sort -k'${spec}' pairs`)
 
   const SPECS = [
-    ['0', "sort: field number is zero: invalid field specification '0'\n"],
-    ['0,1', "sort: field number is zero: invalid field specification '0,1'\n"],
-    ['1,0', "sort: field number is zero: invalid field specification '1,0'\n"],
-    ['0,0', "sort: field number is zero: invalid field specification '0,0'\n"],
-    ['+0', "sort: field number is zero: invalid field specification '+0'\n"],
-    [' 0', "sort: field number is zero: invalid field specification ' 0'\n"],
+    ['0', "sort: field number is zero: invalid field specification ‘0’\n"],
+    ['0,1', "sort: field number is zero: invalid field specification ‘0,1’\n"],
+    ['1,0', "sort: field number is zero: invalid field specification ‘1,0’\n"],
+    ['0,0', "sort: field number is zero: invalid field specification ‘0,0’\n"],
+    ['+0', "sort: field number is zero: invalid field specification ‘+0’\n"],
+    [' 0', "sort: field number is zero: invalid field specification ‘ 0’\n"],
     // A zero is read before a letter that has no business being there.
-    ['0q', "sort: field number is zero: invalid field specification '0q'\n"],
-    ['0.1', "sort: field number is zero: invalid field specification '0.1'\n"],
-    ['1,0q', "sort: field number is zero: invalid field specification '1,0q'\n"],
-    ['1.0', "sort: character offset is zero: invalid field specification '1.0'\n"],
-    ['1.0q', "sort: character offset is zero: invalid field specification '1.0q'\n"],
-    ['1.0,2', "sort: character offset is zero: invalid field specification '1.0,2'\n"],
-    ['x', "sort: invalid number at field start: invalid count at start of 'x'\n"],
-    ['.1', "sort: invalid number at field start: invalid count at start of '.1'\n"],
-    [',1', "sort: invalid number at field start: invalid count at start of ',1'\n"],
-    ['-1', "sort: invalid number at field start: invalid count at start of '-1'\n"],
-    ['1,x', "sort: invalid number after ',': invalid count at start of 'x'\n"],
-    ['1,', "sort: invalid number after ',': invalid count at start of ''\n"],
-    ['1.x', "sort: invalid number after '.': invalid count at start of 'x'\n"],
-    ['1.-1', "sort: invalid number after '.': invalid count at start of '-1'\n"],
-    ['1.', "sort: invalid number after '.': invalid count at start of ''\n"],
-    ['1x', "sort: stray character in field spec: invalid field specification '1x'\n"],
-    ['1z', "sort: stray character in field spec: invalid field specification '1z'\n"],
-    ['1q', "sort: stray character in field spec: invalid field specification '1q'\n"],
-    ['1,2q', "sort: stray character in field spec: invalid field specification '1,2q'\n"],
-    ['1 ', "sort: stray character in field spec: invalid field specification '1 '\n"],
-    ['1,2,3', "sort: stray character in field spec: invalid field specification '1,2,3'\n"],
-    ['1.1.1', "sort: stray character in field spec: invalid field specification '1.1.1'\n"],
+    ['0q', "sort: field number is zero: invalid field specification ‘0q’\n"],
+    ['0.1', "sort: field number is zero: invalid field specification ‘0.1’\n"],
+    ['1,0q', "sort: field number is zero: invalid field specification ‘1,0q’\n"],
+    ['1.0', "sort: character offset is zero: invalid field specification ‘1.0’\n"],
+    ['1.0q', "sort: character offset is zero: invalid field specification ‘1.0q’\n"],
+    ['1.0,2', "sort: character offset is zero: invalid field specification ‘1.0,2’\n"],
+    ['x', "sort: invalid number at field start: invalid count at start of ‘x’\n"],
+    ['.1', "sort: invalid number at field start: invalid count at start of ‘.1’\n"],
+    [',1', "sort: invalid number at field start: invalid count at start of ‘,1’\n"],
+    ['-1', "sort: invalid number at field start: invalid count at start of ‘-1’\n"],
+    ['1,x', "sort: invalid number after ',': invalid count at start of ‘x’\n"],
+    ['1,', "sort: invalid number after ',': invalid count at start of ‘’\n"],
+    ['1.x', "sort: invalid number after '.': invalid count at start of ‘x’\n"],
+    ['1.-1', "sort: invalid number after '.': invalid count at start of ‘-1’\n"],
+    ['1.', "sort: invalid number after '.': invalid count at start of ‘’\n"],
+    ['1x', "sort: stray character in field spec: invalid field specification ‘1x’\n"],
+    ['1z', "sort: stray character in field spec: invalid field specification ‘1z’\n"],
+    ['1q', "sort: stray character in field spec: invalid field specification ‘1q’\n"],
+    ['1,2q', "sort: stray character in field spec: invalid field specification ‘1,2q’\n"],
+    ['1 ', "sort: stray character in field spec: invalid field specification ‘1 ’\n"],
+    ['1,2,3', "sort: stray character in field spec: invalid field specification ‘1,2,3’\n"],
+    ['1.1.1', "sort: stray character in field spec: invalid field specification ‘1.1.1’\n"],
   ]
   for (const [spec, stderr] of SPECS) {
     it(`sort -k${JSON.stringify(spec)}`, async () => {
@@ -402,84 +403,108 @@ describe('GNU conformance — what a tool says it could not read on the command 
       assert.equal(r.exitCode, 2, gap)
     }
     assert.equal((await key('1z')).exitCode, 2)
-    assert.equal((await createTerminal(rows).run("sort -t'ab' pairs")).stderr, "sort: multi-character tab 'ab'\n")
+    assert.equal((await createTerminal(rows).run("sort -t'ab' pairs")).stderr, 'sort: multi-character tab ‘ab’\n')
     assert.equal((await createTerminal(rows).run("sort -t'ab' pairs")).exitCode, 2)
   })
 
-  // coreutils exits 1 when it cannot read the command line at all. `grep`
-  // exits 2, and so does awk. This exited 2 for every one of them.
+  // coreutils exits 1 when it cannot read the command line at all, and so
+  // does gawk, which prints its usage. `grep` exits 2, and so does bash's
+  // printf builtin. This exited 2 for every one of them. Debian's which,
+  // given nothing, says nothing and exits 1.
   it('exits the way the tool does when the command line will not read', async () => {
     const files = { f: 'hi\n', pairs: 'a 1\n' }
     for (const [command, exitCode] of [
-      ['seq', 1], ['cut pairs', 1], ['cut -c1 -f1 pairs', 1], ['tr a', 1], ['which', 1],
-      ['basename', 1], ['dirname', 1], ['printf', 1], ['cp f', 1], ['rm', 1], ['realpath', 1],
-      ['grep', 2], ['awk', 2],
+      ['seq', 1], ['cut pairs', 1], ['cut -c1 -f1 pairs', 1], ['tr a', 1],
+      ['basename', 1], ['dirname', 1], ['printf', 2], ['cp f', 1], ['rm', 1], ['realpath', 1],
+      ['grep', 2], ['awk', 1],
     ]) {
       const r = await createTerminal(files).run(command)
       assert.equal(r.exitCode, exitCode, command)
       assert.notEqual(r.stderr, '', command)
     }
-    // The synopsis stands in for GNU's `Try '<tool> --help'`, which this
-    // terminal has no --help to offer.
-    assert.match((await createTerminal(files).run('seq')).stderr, /^usage: seq /u)
+    assert.deepEqual(await createTerminal(files).run('which'), { stdout: '', stderr: '', exitCode: 1, cwd: '/', notes: [], unsupported: [] })
+    // coreutils follows what it says with a pointer at --help.
+    assert.equal((await createTerminal(files).run('seq')).stderr, "seq: missing operand\nTry 'seq --help' for more information.\n")
   })
 })
 
 describe('GNU conformance — printf reads its operands the way GNU does', () => {
-  // Every diagnostic named the operand bare where GNU names it the way it
-  // would have to be written to be handed back — single-quoted, with a quote
-  // or a backslash spelled out — and said `invalid number` where GNU says
-  // `expected a numeric value`. An operand with nothing in it is zero to
-  // strtoimax and was an error here; a binary literal is a number to it and
-  // was not; and what follows a character constant is a warning GNU gives and
-  // this passed over in silence. Recorded from coreutils 9.4 in the C locale.
-  const OPERANDS = [
-    ["printf '%d' x", '0', "printf: 'x': expected a numeric value\n", 1],
-    ["printf '%d' 3.7", '3', "printf: '3.7': value not completely converted\n", 1],
-    ["printf '%d' ''", '0', '', 0],
-    ["printf '%f' ''", '0.000000', '', 0],
-    ["printf '%d' '   '", '0', "printf: '   ': expected a numeric value\n", 1],
-    ["printf '%d' 0b1", '1', '', 0],
-    ["printf '%d' 0B11", '3', '', 0],
-    ["printf '%d' 0b", '0', "printf: '0b': value not completely converted\n", 1],
-    ["printf '%d' 0b12", '1', "printf: '0b12': value not completely converted\n", 1],
+  // Two printfs answer to the name. coreutils' — the one a path, xargs or
+  // find -exec runs — names an operand it could not read as quote() does, in
+  // C.UTF-8's curly quotes, and says `expected a numeric value` or `value not
+  // completely converted`; what follows a character constant is a warning.
+  // An operand with nothing in it is zero to strtoimax, and a binary literal
+  // is a number to it. Recorded from coreutils 9.4 in C.UTF-8.
+  const PROGRAM = [
+    ["/usr/bin/printf '%d' x", '0', '/usr/bin/printf: ‘x’: expected a numeric value\n', 1],
+    ["/usr/bin/printf '%d' 3.7", '3', '/usr/bin/printf: ‘3.7’: value not completely converted\n', 1],
+    ["/usr/bin/printf '%d' ''", '0', '', 0],
+    ["/usr/bin/printf '%f' ''", '0.000000', '', 0],
+    ["/usr/bin/printf '%d' '   '", '0', '/usr/bin/printf: ‘   ’: expected a numeric value\n', 1],
+    ["/usr/bin/printf '%d' 0b1", '1', '', 0],
+    ["/usr/bin/printf '%d' 0B11", '3', '', 0],
+    ["/usr/bin/printf '%d' 0b", '0', '/usr/bin/printf: ‘0b’: value not completely converted\n', 1],
+    ["/usr/bin/printf '%d' 0b12", '1', '/usr/bin/printf: ‘0b12’: value not completely converted\n', 1],
     // A binary literal is an integer to strtoimax and nothing to strtod.
-    ["printf '%f' 0b1", '0.000000', "printf: '0b1': value not completely converted\n", 1],
-    ["printf '%d' 99999999999999999999999", '9223372036854775807', "printf: '99999999999999999999999': Numerical result out of range\n", 1],
-    ["printf '%d' \"'ab\"", '97', 'printf: warning: b: character(s) following character constant have been ignored\n', 0],
-    ["printf '%d' \"'\"", '0', "printf: '\\'': expected a numeric value\n", 1],
-    ["printf '%d' '\"'", '0', 'printf: \'"\': expected a numeric value\n', 1],
-    ["printf '%d' \"a'b\"", '0', "printf: 'a\\'b': expected a numeric value\n", 1],
+    ["/usr/bin/printf '%f' 0b1", '0.000000', '/usr/bin/printf: ‘0b1’: value not completely converted\n', 1],
+    ["/usr/bin/printf '%d' 99999999999999999999999", '9223372036854775807', '/usr/bin/printf: ‘99999999999999999999999’: Numerical result out of range\n', 1],
+    ["/usr/bin/printf '%d' \"'ab\"", '97', '/usr/bin/printf: warning: b: character(s) following character constant have been ignored\n', 0],
+    ["/usr/bin/printf '%d' \"'\"", '0', "/usr/bin/printf: ‘'’: expected a numeric value\n", 1],
+    ["/usr/bin/printf '%d' '\"'", '0', '/usr/bin/printf: ‘"’: expected a numeric value\n', 1],
+    ["/usr/bin/printf '%d' \"a'b\"", '0', "/usr/bin/printf: ‘a'b’: expected a numeric value\n", 1],
   ]
-  for (const [command, stdout, stderr, exitCode] of OPERANDS) {
+  // bash's builtin, which a plain `printf` runs, names it bare and calls it an
+  // invalid number, fails the run for that but only warns of a value out of
+  // range, and reads a quote with nothing after it as zero. Recorded from
+  // bash 5.2.
+  const BUILTIN = [
+    ["printf '%d' x", '0', 'terminal: printf: x: invalid number\n', 1],
+    ["printf '%d' 3.7", '3', 'terminal: printf: 3.7: invalid number\n', 1],
+    ["printf '%d' ''", '0', '', 0],
+    ["printf '%d' '   '", '0', 'terminal: printf:    : invalid number\n', 1],
+    ["printf '%d' 08", '0', 'terminal: printf: 08: invalid octal number\n', 1],
+    ["printf '%d' 0xg", '0', 'terminal: printf: 0xg: invalid hex number\n', 1],
+    ["printf '%d' 0b", '0', 'terminal: printf: 0b: invalid number\n', 1],
+    ["printf '%f' 0b1", '0.000000', 'terminal: printf: 0b1: invalid number\n', 1],
+    ["printf '%d' 99999999999999999999999", '9223372036854775807', 'terminal: printf: warning: 99999999999999999999999: Numerical result out of range\n', 0],
+    ["printf '%d' \"'ab\"", '97', '', 0],
+    ["printf '%d' \"'\"", '0', '', 0],
+    ["printf '%d' '\"'", '0', '', 0],
+    ["printf '%d' \"a'b\"", '0', "terminal: printf: a'b: invalid number\n", 1],
+  ]
+  for (const [command, stdout, stderr, exitCode] of [...PROGRAM, ...BUILTIN]) {
     it(JSON.stringify(command), async () => {
       assert.deepEqual(await createTerminal({}).run(command), { stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
     })
   }
 
-  // `\x` takes up to two hexadecimal digits, `\u` exactly four and `\U`
-  // exactly eight. Short of that GNU writes nothing for the escape and stops
-  // where it stands, keeping what it had already written — this wrote the
-  // text back out and carried on.
+  // coreutils' `\x` takes up to two hexadecimal digits, `\u` exactly four
+  // and `\U` exactly eight. Short of that it writes nothing for the escape
+  // and stops where it stands, keeping what it had already written. bash's
+  // takes as many digits as there are up to those counts, and with none at
+  // all warns, writes the escape back out and carries on.
   const ESCAPES = [
-    ['a\\x41b', 'aAb', '', 0],
-    ['a\\x4g', 'a\u0004g', '', 0],
-    ['a\\u0041b', 'aAb', '', 0],
-    ['a\\U00000041b', 'aAb', '', 0],
-    ['a\\z', 'a\\z', '', 0],
-    ['a\\', 'a\\', '', 0],
-    ['a\\xg', 'a', 'printf: missing hexadecimal number in escape\n', 1],
-    ['a\\x', 'a', 'printf: missing hexadecimal number in escape\n', 1],
-    ['a\\ug', 'a', 'printf: missing hexadecimal number in escape\n', 1],
-    ['a\\u12', 'a', 'printf: missing hexadecimal number in escape\n', 1],
-    ['a\\U0000', 'a', 'printf: missing hexadecimal number in escape\n', 1],
-    ['a\\xgZZZ', 'a', 'printf: missing hexadecimal number in escape\n', 1],
-    ['b\\u0041\\ugX', 'bA', 'printf: missing hexadecimal number in escape\n', 1],
+    ['a\\x41b', 'aAb', '', 0, 'aAb', '', 0],
+    ['a\\x4g', 'a\u0004g', '', 0, 'a\u0004g', '', 0],
+    ['a\\u0041b', 'aAb', '', 0, 'aAb', '', 0],
+    ['a\\U00000041b', 'aAb', '', 0, 'aAb', '', 0],
+    ['a\\z', 'a\\z', '', 0, 'a\\z', '', 0],
+    ['a\\', 'a\\', '', 0, 'a\\', '', 0],
+    ['a\\xg', 'a', 'missing hexadecimal number in escape', 1, 'a\\xg', 'missing hex digit for \\x', 0],
+    ['a\\x', 'a', 'missing hexadecimal number in escape', 1, 'a\\x', 'missing hex digit for \\x', 0],
+    ['a\\ug', 'a', 'missing hexadecimal number in escape', 1, 'a\\ug', 'missing unicode digit for \\u', 0],
+    ['a\\u12', 'a', 'missing hexadecimal number in escape', 1, 'a\u0012', '', 0],
+    ['a\\U0000', 'a', 'missing hexadecimal number in escape', 1, 'a\u0000', '', 0],
+    ['a\\xgZZZ', 'a', 'missing hexadecimal number in escape', 1, 'a\\xgZZZ', 'missing hex digit for \\x', 0],
+    ['b\\u0041\\ugX', 'bA', 'missing hexadecimal number in escape', 1, 'bA\\ugX', 'missing unicode digit for \\u', 0],
   ]
-  for (const [format, stdout, stderr, exitCode] of ESCAPES) {
+  const said = (name, message) => (message ? `${name}: ${message}\n` : '')
+  for (const [format, stdout, stderr, exitCode, bashStdout, bashStderr, bashExit] of ESCAPES) {
     it(`printf ${JSON.stringify(format)}`, async () => {
-      const r = await createTerminal({}).run(`printf ${JSON.stringify(format)}`)
-      assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout, stderr, exitCode })
+      const r = await createTerminal({}).run(`/usr/bin/printf ${JSON.stringify(format)}`)
+      assert.deepEqual({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }, { stdout, stderr: said('/usr/bin/printf', stderr), exitCode })
+      const b = await createTerminal({}).run(`printf ${JSON.stringify(format)}`)
+      assert.deepEqual({ stdout: b.stdout, stderr: b.stderr, exitCode: b.exitCode }, { stdout: bashStdout, stderr: said('terminal: printf', bashStderr), exitCode: bashExit })
     })
   }
 })
@@ -488,8 +513,8 @@ describe('GNU conformance — what cut and tr say about a list they cannot read'
   // `cut` names a bad list by what the list is of — fields, or bytes and
   // characters — and by what it could not read in it. This said one thing for
   // all of them, in wording of its own. `tr` named a reversed range its own
-  // way too. Recorded from coreutils 9.4 in the C locale; GNU adds a
-  // `Try 'cut --help'` line, which this terminal has no --help to back.
+  // way too. Recorded from coreutils 9.4 in C.UTF-8, which quotes in curly
+  // quotes; cut follows each with a line pointing at --help.
   const rows = { pairs: 'a 1\n' }
   const list = async (option, spec) => await createTerminal(rows).run(`cut -${option} '${spec}' pairs`)
 
@@ -500,16 +525,20 @@ describe('GNU conformance — what cut and tr say about a list they cannot read'
     ['0-2', 'cut: byte/character positions are numbered from 1', 'cut: fields are numbered from 1'],
     ['', 'cut: byte/character positions are numbered from 1', 'cut: fields are numbered from 1'],
     ['1,,', 'cut: byte/character positions are numbered from 1', 'cut: fields are numbered from 1'],
-    ['a', "cut: invalid byte/character position 'a'", "cut: invalid field value 'a'"],
-    ['a-b', "cut: invalid byte/character position 'a-b'", "cut: invalid field value 'a-b'"],
-    // A number that will not read is named from the first character of it
-    // that would not, so `1x` is `x`.
-    ['1x', "cut: invalid byte/character position 'x'", "cut: invalid field value 'x'"],
+    ['a', 'cut: invalid byte/character position ‘a’', 'cut: invalid field value ‘a’'],
+    ['a-b', 'cut: invalid byte/character position ‘a-b’', 'cut: invalid field value ‘a-b’'],
+    // What will not read is named from its first character to the end of the
+    // list, so `1x,2` is `x,2`.
+    ['1x', 'cut: invalid byte/character position ‘x’', 'cut: invalid field value ‘x’'],
+    ['1x,2', 'cut: invalid byte/character position ‘x,2’', 'cut: invalid field value ‘x,2’'],
     ['1-2-3', 'cut: invalid byte or character range', 'cut: invalid field range'],
     ['-1-2', 'cut: invalid byte or character range', 'cut: invalid field range'],
-    ['99999999999999999999', "cut: byte/character offset '99999999999999999999' is too large", "cut: field number '99999999999999999999' is too large"],
-    ['1-99999999999999999999', "cut: byte/character offset '99999999999999999999' is too large", "cut: field number '99999999999999999999' is too large"],
-  ]
+    ['-', 'cut: invalid range with no endpoint: -', 'cut: invalid range with no endpoint: -'],
+    ['99999999999999999999', 'cut: byte/character offset ‘99999999999999999999’ is too large', 'cut: field number ‘99999999999999999999’ is too large'],
+    ['1-99999999999999999999', 'cut: byte/character offset ‘99999999999999999999’ is too large', 'cut: field number ‘99999999999999999999’ is too large'],
+    // The largest value is as much too large as any past it.
+    ['18446744073709551615', 'cut: byte/character offset ‘18446744073709551615’ is too large', 'cut: field number ‘18446744073709551615’ is too large'],
+  ].map((row) => [row[0], ...row.slice(1).map((line) => `${line}\nTry 'cut --help' for more information.`)])
   for (const [spec, positions, fields] of LISTS) {
     it(`cut ${JSON.stringify(spec)}`, async () => {
       assert.deepEqual([(await list('c', spec)).stderr, (await list('c', spec)).exitCode], [positions + '\n', 1], spec)
@@ -544,7 +573,7 @@ describe('GNU conformance — a call awk finds when it runs one', () => {
   it('runs everything up to the call, then fails on it', async () => {
     const r = await awked('BEGIN {print "a"; print foo(1)}')
     assert.deepEqual([r.stdout, r.exitCode], ['a\n', 2])
-    assert.equal(r.stderr, 'awk: function `foo` not defined\n')
+    assert.equal(r.stderr, "awk: cmd. line:1: fatal: function `foo' not defined\n")
   })
 
   it('runs a program whose call is never reached', async () => {
@@ -558,7 +587,7 @@ describe('GNU conformance — a call awk finds when it runs one', () => {
   it('looks a call up in the program and nowhere else', async () => {
     for (const name of ['eval', 'Function', 'require', 'constructor', '__proto__', 'toString']) {
       const r = await awked(`BEGIN { print ${name}("1+1") }`)
-      assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', `awk: function \`${name}\` not defined\n`, 2], name)
+      assert.deepEqual([r.stdout, r.stderr, r.exitCode], ['', `awk: cmd. line:1: fatal: function \`${name}' not defined\n`, 2], name)
     }
   })
 })

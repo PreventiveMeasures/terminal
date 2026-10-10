@@ -5,8 +5,11 @@
 // stopAtFirstPositional leaves the remaining tokens untouched for commands
 // such as xargs. numericOperands permits undeclared negative-number operands.
 // The order array preserves cross-option precedence that values alone loses.
+// An option short of its value, or a flag handed one, is an OptionError,
+// which the command answers in its own tool's words (optionFailure below).
 
-import { UnsupportedError } from './unsupported.js'
+import { err } from './result.js'
+import { UnsupportedError, unsupported } from './unsupported.js'
 
 export function parseArgs(tokens, schema = {}) {
   const short = asSet(schema.short)
@@ -27,7 +30,7 @@ export function parseArgs(tokens, schema = {}) {
     const takesValue = (isLong ? valueLong : valueShort).has(name) || (repeatable.has(name) && (!isLong || name.length > 1))
     if (takesValue) {
       const value = inline ?? tokens[++i]
-      if (inline === null && i >= tokens.length) throw new Error(label + ' requires an argument')
+      if (inline === null && i >= tokens.length) throw new OptionError(label, true)
       if (repeatable.has(name)) {
         const previous = values.get(name)
         if (previous) previous.push(value)
@@ -36,7 +39,7 @@ export function parseArgs(tokens, schema = {}) {
       order.push({ name, value })
     } else {
       if (!(isLong ? long : short).has(name)) throw new UnsupportedError('option', label, 'unknown option: ' + label)
-      if (isLong && inline !== null) throw new Error('option ' + label + " doesn't allow an argument")
+      if (isLong && inline !== null) throw new OptionError(label, false)
       flags.add(name)
       order.push({ name })
     }
@@ -77,4 +80,54 @@ function isNumericPositional(token, short, valueShort, repeatable) {
 function asSet(v) {
   if (v instanceof Set) return v
   return new Set(v ?? [])
+}
+
+// glibc getopt's own words for a command line it could not finish reading,
+// which every tool built on it prints after the name it was run by: an
+// option with nothing left to take as its value, or a long flag handed one
+// with `=`. What follows that line is the tool's own business.
+export class OptionError extends Error {
+  constructor(label, missing) {
+    const requires = label.startsWith('--') ? `option '${label}' requires an argument` : `option requires an argument -- '${label.slice(1)}'`
+    super(missing ? requires : `option '${label}' doesn't allow an argument`)
+    this.name = 'OptionError'
+    this.option = label
+    this.missing = missing
+  }
+}
+
+const tryHelp = (name) => `Try '${name} --help' for more information.`
+const shortMissing = (e) => e.missing && !e.option.startsWith('--')
+
+// coreutils follows getopt's line with one pointing at --help, both naming
+// the program by what it was run as, and exits 1 — sort and ls exit 2, as
+// they do for every usage error. The tools that part ways from that are
+// named here, recorded from grep 3.11, gzip 1.12, curl 8.5, perl's shasum
+// and tree 2.1.1; gawk, sed and xxd go on to print their whole usage text,
+// which this does not carry, so they refuse, as the others do where what
+// they say is not recorded. gzip's front ends are scripts that run gzip
+// itself, which is the name they all answer by.
+const gzipFailure = (name, e) => err(`${name}: ${e.message}\nTry \`gzip --help' for more information.`)
+const OPTION_FAILURES = {
+  __proto__: null,
+  sort: (name, e) => err(`${name}: ${e.message}\n${tryHelp(name)}`, 2),
+  ls: (name, e) => err(`${name}: ${e.message}\n${tryHelp(name)}`, 2),
+  grep: (name, e) => err(`${name}: ${e.message}\nUsage: ${name} [OPTION]... PATTERNS [FILE]...\n${tryHelp(name)}`, 2),
+  gzip: gzipFailure,
+  gunzip: (_, e) => gzipFailure('gzip', e),
+  zcat: (_, e) => gzipFailure('gzip', e),
+  gzcat: (_, e) => gzipFailure('gzip', e),
+  curl: (_, e) => (e.missing ? err(`curl: option ${e.option}: requires parameter\ncurl: try 'curl --help' or 'curl --manual' for more information`, 2) : null),
+  shasum: (_, e) => (shortMissing(e) ? err(`Option ${e.option.slice(1)} requires an argument\nType shasum -h for help`) : null),
+  tree: (_, e) => (shortMissing(e) ? err(`tree: Missing argument to ${e.option} option.`) : null),
+  awk: () => null,
+  sed: () => null,
+  xxd: () => null,
+}
+
+// What `cmd`, run as `name`, says of an OptionError.
+export function optionFailure(name, e, cmd = name) {
+  const answer = OPTION_FAILURES[cmd]
+  const result = answer === undefined ? err(`${name}: ${e.message}\n${tryHelp(name)}`) : answer(name, e)
+  return result ?? unsupported('option', cmd, e.option, `${name}: ${e.message} (what ${cmd} says after this is not supported)`)
 }

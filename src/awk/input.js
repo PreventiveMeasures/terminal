@@ -6,10 +6,11 @@
 
 import { AwkError, MAX_STEPS } from './common.js'
 import { unescapeAwkString } from './lex.js'
-import { AwkRegex, compileRegex, nonEmptyMatch, splitByRegex, stepAt } from './regex.js'
+import { subscript } from './array.js'
+import { AwkRegex, compileRegex, splitByRegex, stepAt } from './regex.js'
 import { StrNum, checkText, ignoreCase, toNum, toStr } from './value.js'
 import { lookupWithNote } from '../notes.js'
-import { consumeStdin } from '../util.js'
+import { consumeStdin, encodeUtf8Loose, reopenStdin } from '../util.js'
 import { UINT32_MAX } from '../numeric.js'
 
 // `src` is `{ text, pos }`; advances `pos`. Returns { rec, rt } or null at
@@ -25,9 +26,23 @@ export function readRecord(src, rs, ic) {
     start = at === -1 ? text.length : at
     end = at === -1 ? text.length : at + 1
   } else {
-    const match = nonEmptyMatch(text, compileRegex(rs, ic), src.pos)
-    start = match?.start ?? text.length
-    end = match?.end ?? text.length
+    // gawk searches the rest of its buffer for the next match, as text of
+    // its own: a word boundary where the record starts is read as if
+    // nothing preceded it, which differs from reading it here only after a
+    // word character. A match that is empty before the end gawk then steps
+    // over in a way that drops text from the record; at the end it is no
+    // terminator, as here.
+    const re = compileRegex(rs, ic)
+    if (re.wordAnchored && src.pos > 0 && re.tables.has('word', text.codePointAt(src.pos - 1))) {
+      throw new AwkError('a regex RS with word-boundary operators after a word character is not supported', null, 'word-boundary RS')
+    }
+    const match = re.search(text, src.pos)
+    if (match && match.start === match.end && match.start < text.length) {
+      throw new AwkError('a regex RS that matches the empty string inside a record is not supported', null, 'empty-matching RS')
+    }
+    const found = match && match.start !== match.end ? match : null
+    start = found?.start ?? text.length
+    end = found?.end ?? text.length
   }
   const rec = text.slice(src.pos, start)
   src.pos = end
@@ -53,19 +68,41 @@ function readParagraph(src) {
 
 // Split with an FS-style separator: a string under the FS rules, or a
 // compiled regex (a regex literal handed to split()). Backs split() and
-// the FS mode of record splitting.
-export function splitOn(str, sep, paragraph, ic) {
+// the FS mode of record splitting. `seps`, when given, collects split()'s
+// fourth array as [index, separator] pairs.
+export function splitOn(str, sep, paragraph, ic, seps = null) {
   if (str === '') return []
-  if (sep instanceof AwkRegex) return splitByRegex(str, sep)
+  if (sep instanceof AwkRegex) return splitByRegex(str, sep, seps)
   if (sep === ' ') {
+    if (seps !== null) return splitBlanks(str, seps)
     const trimmed = str.replace(/^[ \t\n]+|[ \t\n]+$/gu, '')
     return trimmed === '' ? [] : trimmed.split(/[ \t\n]+/u)
   }
-  if (sep === '') return [...str]
-  if (sep.length === 1 && (!paragraph || sep === '\n')) return str.split(sep)
+  if (sep === '') {
+    const chars = [...str]
+    for (let i = 1; i < chars.length; i++) seps?.push([i, ''])
+    return chars
+  }
+  if (sep.length === 1 && (!paragraph || sep === '\n')) {
+    const parts = str.split(sep)
+    for (let i = 1; i < parts.length; i++) seps?.push([i, sep])
+    return parts
+  }
   if (paragraph && sep === '^') throw new AwkError('paragraph splitting with FS="^" is not supported', null, 'paragraph FS caret')
   const source = sep.length === 1 ? `[${'^$.[]|()*+?{}\\'.includes(sep) ? '\\' + sep : sep}\n]` : sep
-  return splitByRegex(str, compileRegex(source, ic))
+  return splitByRegex(str, compileRegex(source, ic), seps)
+}
+
+// Default splitting, keeping the blanks: seps[0] holds any before the
+// first field, seps[n] any after the last.
+function splitBlanks(str, seps) {
+  const pieces = str.split(/([ \t\n]+)/u)
+  const parts = []
+  for (let i = 0; i < pieces.length; i += 2) {
+    if (pieces[i] !== '') parts.push(pieces[i])
+    if (i + 1 < pieces.length) seps.push([parts.length, pieces[i + 1]])
+  }
+  return parts
 }
 
 // FIELDWIDTHS: blank-separated column widths, each `width` or
@@ -116,11 +153,12 @@ function splitPattern(str, re) {
 export function splitRecord(m, str) {
   const ic = ignoreCase(m)
   if (m.fieldMode === 'FIELDWIDTHS') return splitWidths(str, m.widths)
-  if (m.fieldMode === 'FPAT') return splitPattern(str, compileRegex(toStr(m.globals.get('FPAT'), m), ic, m.warn))
+  if (m.fieldMode === 'FPAT') return splitPattern(str, compileRegex(toStr(m.globals.get('FPAT'), m), ic))
   return splitOn(str, toStr(m.globals.get('FS'), m), toStr(m.globals.get('RS'), m) === '', ic)
 }
 
 const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=([^]*)$/u
+const BLOCK = 4096
 const isExit = (sig) => sig !== undefined && sig.type === 'exit'
 
 export class Input {
@@ -134,6 +172,10 @@ export class Input {
     this.exitSignal = undefined
     // Files opened by `getline < file`, by name, each with its own cursor.
     this.readers = new Map()
+    // The source standard input was read into, wherever it is read from —
+    // the main input or a getline — which is what says where gawk stopped
+    // reading it (settleStdin).
+    this.stdinSrc = null
   }
 
   // The next main-input record, with NR / FNR / FILENAME / RT maintained,
@@ -162,13 +204,18 @@ export class Input {
   open(m) {
     while (this.idx < Math.trunc(toNum(m.globals.get('ARGC')))) {
       if (++m.steps > MAX_STEPS) throw new AwkError('input operand scan exceeded execution limit', null, 'execution limit')
-      const op = toStr(m.globals.get('ARGV').get(String(this.idx++)), m)
+      const index = this.idx++
+      const op = toStr(m.globals.get('ARGV').get(subscript(index, String(index)))?.value, m)
       if (op === '') continue
       m.globals.set('ARGIND', this.idx - 1)
       const asg = ASSIGNMENT.exec(op)
-      if (asg) { m.assign(asg[1], new StrNum(unescapeAwkString(asg[2], m.warn))); continue }
+      // gawk reads an assignment as it does -v, naming no place in its
+      // warnings; a file it names in FILENAME, with FNR 0, before opening.
+      if (asg) { m.assign(asg[1], new StrNum(unescapeAwkString(asg[2], (msg, key) => m.warnAt('', msg, key)))); continue }
       this.sawFile = true
-      const { text, error } = this.readOperand(op)
+      m.globals.set('FILENAME', op)
+      m.globals.set('FNR', 0)
+      const { text, error, stdin } = this.readOperand(op)
       if (error === 'Is a directory') {
         this.failFile(m, op, error)
         if (this.exitSignal === undefined) m.warn(`command line argument \`${op}' is a directory: skipped`)
@@ -178,36 +225,64 @@ export class Input {
         const sig = this.failFile(m, op, error)
         if (sig !== undefined && sig.type === 'nextfile') continue
         if (this.exitSignal !== undefined) return false
-        throw new AwkError(`${op}: ${error}`)
+        throw new AwkError(`cannot open file \`${op}' for reading: ${error}`)
       }
-      if (this.use(m, op, text)) return true
+      if (this.use(m, op, text, stdin)) return true
+      // An `exit` in BEGINFILE ends the reading there: gawk opens no other
+      // operand, and goes to END.
+      if (this.exitSignal !== undefined) return false
     }
     if (this.sawFile || this.exitSignal !== undefined) return false
     this.sawFile = true
-    return this.use(m, '-', this.takeStdin())
+    return this.use(m, '-', this.takeStdin(), true)
   }
 
+  // gawk reads `/dev/stdin` as it reads `-`: descriptor 0 itself, where it
+  // stands, rather than the file it names opened again from its start.
   readOperand(name) {
     if (name === '/dev/null') return { text: '' }
-    if (name === '-' || name === '/dev/stdin') {
-      return { text: name === '/dev/stdin' && this.ctx.stdinFile ? this.ctx.stdinOrigin : this.takeStdin() }
-    }
+    if (name === '-' || name === '/dev/stdin') return { text: this.takeStdin(), stdin: true }
     const { path, error } = lookupWithNote(this.ctx, 'awk', name)
     if (this.ctx.fs.isDir(path)) return { error: 'Is a directory' }
     return error ? { error } : { text: this.ctx.fs.readFile(path) }
   }
 
+  // Standard input, all of what is left of it, which is what this reads
+  // records out of. Opened a second time, it is what the first opening left
+  // — nothing, where that one reached its end, and otherwise whatever
+  // gawk's reads had not yet taken of it, which is not known (settleStdin).
   takeStdin() {
+    if (this.stdinSrc !== null) {
+      this.settleStdin()
+      reopenStdin(this.ctx)
+    }
     const text = this.stdin
     this.stdin = ''
     consumeStdin(this.ctx)
     return text
   }
 
+  // What gawk leaves of standard input for whoever reads it next: what lies
+  // past the last record it read, where it stopped short of the end — an
+  // `exit`, a `nextfile`, a getline it did not repeat. gawk reads ahead of
+  // its records a block at a time, from a file as from a pipe, and never puts
+  // a file's offset back, so how much more than that it took is not known
+  // here (consumeStdin) — but for a file no bigger than a block, which its
+  // first read takes whole. A block is 4 KiB: what every Linux filesystem
+  // gives as its preferred size, and what Linux gives for a pipe.
+  settleStdin() {
+    const src = this.stdinSrc
+    if (src === null) return
+    const rest = src.text.slice(src.pos)
+    const whole = this.ctx.stdinFile && encodeUtf8Loose(src.text).length <= BLOCK
+    consumeStdin(this.ctx, whole ? '' : rest, false, null, false)
+  }
+
   // Open a readable operand and run BEGINFILE. Returns false when the
   // rule skipped the file (`nextfile`) or exited.
-  use(m, name, text) {
+  use(m, name, text, stdin = false) {
     this.src = { text, pos: 0 }
+    if (stdin) this.stdinSrc = this.src
     m.globals.set('FILENAME', name)
     m.globals.set('FNR', 0)
     m.globals.set('ERRNO', '')
@@ -240,12 +315,14 @@ export class Input {
   // `getline < name`: 1 with a record, 0 at end of file, -1 when the
   // file cannot be opened. Each name keeps its cursor until close().
   readNamed(m, name) {
+    if (name === '') throw new AwkError("expression for `<' redirection has null string value")
     let src = this.readers.get(name)
     if (!src) {
-      const { text, error } = this.readOperand(name)
+      const { text, error, stdin } = this.readOperand(name)
       if (error) { m.globals.set('ERRNO', error); return { status: -1 } }
       src = { text: checkText(m, text), pos: 0 }
       this.readers.set(name, src)
+      if (stdin) this.stdinSrc = src
     }
     const r = readRecord(src, toStr(m.globals.get('RS'), m), ignoreCase(m))
     if (r === null) return { status: 0 }

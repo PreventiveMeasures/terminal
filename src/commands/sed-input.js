@@ -4,14 +4,14 @@ import { refreshSedStdin } from './sed-output.js'
 
 // Open operands only as records or an evaluated $ address require them.
 // q leaves later operands unopened and preserves the rest of shared stdin.
-export function sedInput(files, stdin, ctx, delimiter, separate, report) {
+export function sedInput(files, stdin, ctx, delimiter, separate, report, labels = files) {
   const names = files.length ? files : ['-']
   const status = { stderr: '', failed: false }
-  let index = 0, line = 0, pipe = stdin, source = null
+  let ended = false, index = 0, line = 0, pipe = stdin, source = null
 
   function available() {
     while (source === null || source.pos === source.content.length) {
-      if (index === names.length) return false
+      if (index === names.length) { ended = true; return false }
       source = null
       const name = names[index++]
       if (name === '-') pipe = refreshSedStdin(pipe, ctx)
@@ -19,7 +19,7 @@ export function sedInput(files, stdin, ctx, delimiter, separate, report) {
       const r = readFilesFor('sed', [name], ctx, pipe)
       status.stderr += r.stderr
       status.failed ||= r.failed
-      source = r.inputs.length ? { ...r.inputs[0], identity: inputIdentity(name, ctx), pos: 0, first: true } : null
+      source = r.inputs.length ? { ...r.inputs[0], identity: inputIdentity(name, ctx), pos: 0, first: true, label: labels[index - 1] ?? name } : null
       if (r.stderr && report) report(r.stderr)
       // A directory is where GNU sed stops: it opens no later operand, and
       // says so with a status of its own rather than the 2 a miss gets.
@@ -47,12 +47,14 @@ export function sedInput(files, stdin, ctx, delimiter, separate, report) {
     source.first = false
     let last
     return {
-      text, terminator, line: ++line, reset, identity: source.identity,
+      text, terminator, line: ++line, reset, identity: source.identity, name: source.label,
       last: () => last ??= source.pos < source.content.length ? false : separate || !available(),
     }
   }
 
-  return { next, status, get identity() { return source?.identity } }
+  // A named operand is open from when it is first read until its end is
+  // found, which is what takes a closed stdout's descriptor meanwhile.
+  return { next, status, get identity() { return source?.identity }, get operandOpen() { return source !== null && !ended && source.name !== '-' } }
 }
 
 // The guard is about the file, not the name it was opened by: a link naming

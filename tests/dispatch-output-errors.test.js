@@ -5,12 +5,16 @@ import { createTerminal } from '@preventive/terminal'
 const result = (stdout = '', exitCode = 0, stderr = '') => ({ stdout, stderr, exitCode, cwd: '/', notes: [], unsupported: [] })
 // A writable overlay needs a mount away from `/`, and cwd follows the mount.
 const mounted = (...args) => ({ ...result(...args), cwd: '/src' })
-const writeError = (name) => `${name}: write error: Bad file descriptor\n`
+// sed buffers its output and finds the descriptor closed only as it closes it.
+// bash's own echo signs its write error as the shell signs its messages; the
+// coreutils echo a path, find -exec or xargs runs does not.
+const writeError = (name) => (name === 'sed' ? "sed: couldn't close stdout: Bad file descriptor\n" : `${name}: write error: Bad file descriptor\n`)
+const BUILTIN_ECHO = 'terminal: echo'
 const setup = () => createTerminal({ input: 'a\nb\n' })
 
 describe('closed stdout is validated for commands entering any dispatch path', () => {
   for (const [command, name, status] of [
-    ['echo value', 'echo', 1], ['cat /input', 'cat', 1], ['ls /input', 'ls', 2],
+    ['echo value', BUILTIN_ECHO, 1], ['cat /input', 'cat', 1], ['ls /input', 'ls', 2],
     ['grep a /input', 'grep', 2], ['egrep a /input', 'egrep', 2], ['fgrep a /input', 'fgrep', 2],
     ['sort /input', 'sort', 2], ['xxd /input', 'xxd', 3], ["sed -e 's/^/ /' /input", 'sed', 4],
     ['/bin/echo value', '/bin/echo', 1], ['/usr/bin/ls /input', '/usr/bin/ls', 2],
@@ -51,10 +55,10 @@ describe('closed stdout is validated for commands entering any dispatch path', (
   })
 
   it('handles inherited closure without duplicated errors', async () => {
-    assert.deepEqual(await setup().run('{ echo one; /bin/echo two; } 1>&-'), result('', 1, writeError('echo') + writeError('/bin/echo')))
+    assert.deepEqual(await setup().run('{ echo one; /bin/echo two; } 1>&-'), result('', 1, writeError(BUILTIN_ECHO) + writeError('/bin/echo')))
   })
   it('keeps substitution capture usable under a closed enclosing descriptor', async () => {
-    assert.deepEqual(await setup().run('echo "$(echo inner)" 1>&-'), result('', 1, writeError('echo')))
+    assert.deepEqual(await setup().run('echo "$(echo inner)" 1>&-'), result('', 1, writeError(BUILTIN_ECHO)))
   })
 })
 

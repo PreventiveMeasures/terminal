@@ -10,8 +10,8 @@ import { forkSettings, mountSources } from './mount.js'
 import { parseUnits } from './shell/parse.js'
 import { createRegistry, defaultRegistry, unknownCommand } from './registry.js'
 import { networkOption } from './net.js'
-import { createUnsupportedFeed, unsupported, unsupportedNote } from './unsupported.js'
-import { discardedNotes, err, missingPathNote, reason } from './util.js'
+import { createUnsupportedFeed, shellMessage, unsupported, unsupportedNote } from './unsupported.js'
+import { OptionError, discardedNotes, err, missingPathNote, optionFailure, reason } from './util.js'
 import { complete } from './complete.js'
 import { commandSubstitution } from './shell/capture.js'
 import { BindingMap, isolated, withState } from './shell/state.js'
@@ -65,18 +65,20 @@ function fork(parent, opts = {}) {
 // Stdin position, open descriptors and the two diagnostic feeds belong to
 // whoever is running a line, so every terminal starts with a set of its own.
 // stdinLeft tracks consumption within a command list; stdinOrigin allows
-// /dev/stdin to reopen a redirected file independently of that offset.
+// /dev/stdin to reopen a redirected file independently of that offset;
+// stdinStop names the reader whose early stop left that offset uncertain
+// (consumeStdin in ./util.js).
 function context({ fs, io, mount, writable, registry, createdAt, lock }, session) {
   const ctx = {
     fs, io, mount, writable, registry, createdAt, lock, ...session, calling: new Set(), outputFds: { 1: 'out', 2: 'err' },
-    loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinTerminal: true, stdinOrigin: null, stdinHandle: null, stdinLeft: '', stdinBytes: null,
-    unsupported: createUnsupportedFeed(), notes: new Set(),
+    loopDepth: 0, closed: { out: false, err: false }, stdinFile: false, stdinPiped: false, stdinTerminal: true, stdinOrigin: null, stdinHandle: null, stdinLeft: '', stdinBytes: null, stdinStop: null, invocation: null,
+    unsupported: createUnsupportedFeed(), notes: new Set(), rename: null,
   }
   // find -exec and xargs dispatch externally in isolated shell state. What
   // xargs runs reads /dev/null, as GNU's does, where find's reads find's own.
-  ctx.dispatch = (name, tokens, stdin, { devNull = false } = {}) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinBytes: ctx.stdinBytes, stdinFile: false, stdinPiped: false, stdinTerminal: ctx.stdinTerminal && !devNull, stdinOrigin: null, stdinHandle: null },
+  ctx.dispatch = (name, tokens, stdin, { devNull = false } = {}) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinBytes: ctx.stdinBytes, stdinStop: ctx.stdinStop, stdinFile: false, stdinPiped: false, stdinTerminal: ctx.stdinTerminal && !devNull, stdinOrigin: null, stdinHandle: null },
     () => isolated(ctx, () => dispatch(name, tokens, stdin, ctx, true)))
-  ctx.flushOutput = (result) => routeExternalOutput(result, ctx)
+  ctx.flushOutput = (result) => routeExternalOutput(ctx.rename ? ctx.rename(result) : result, ctx)
   ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)
   ctx.invoke = (name, tokens, stdin) => dispatch(name, tokens, stdin, ctx)
   ctx.substitute = (command, backtick) => commandSubstitution(command, ctx, runSteps, backtick)
@@ -100,28 +102,54 @@ function terminal(ctx, label) {
   }
 }
 
+// The commands bash runs as builtins of its own, which sign what they say as
+// the shell signs its own messages: each message, which opens with the
+// builtin's name — not a line an operand carried into one, and not a usage
+// line, which bash's builtin_usage prints bare. Run as the coreutils programs
+// (programs.js), they say it unsigned, as GNU's do. A refusal is this
+// terminal's to word.
+const SIGNED_BUILTINS = new Set(['echo', 'printf', 'test', '[', 'pwd'])
+const signBuiltin = (name, text) => text.split(/(?<=\n)/u)
+  .map((line) => (line.startsWith(`${name}: `) && !line.startsWith(`${name}: usage: `) ? shellMessage(line) : line)).join('')
+function signedBy(name) {
+  return (r) => {
+    if (!r.stderr || unsupportedNote(r)) return r
+    const events = r.events?.map((e) => (e.fd === 2 && e.text !== undefined ? { ...e, text: signBuiltin(name, e.text) } : e))
+    return { ...r, stderr: signBuiltin(name, r.stderr), ...(events ? { events } : {}) }
+  }
+}
+
 async function dispatch(name, tokens, stdin, ctx, external = false) {
   const reg = ctx.registry
   const resolved = reg.resolveCommand(name)
+  const rename = reg.diagnosticName(name, resolved)
+  const program = external || name !== resolved
+  const sign = !program && SIGNED_BUILTINS.has(resolved) ? signedBy(resolved) : (r) => r
   const run = () => {
-    if ((external || name !== resolved) && reg.shellOnly(resolved)) return unsupported('command', name, name, `${name}: shell builtin cannot be invoked as an external command`, 127)
-    const cmd = reg.commands[resolved]
-    return cmd ? cmd(stdin, tokens, ctx) : unknownCommand(name, reg)
+    if (program && reg.shellOnly(resolved)) return unsupported('command', name, name, `${name}: shell builtin cannot be invoked as an external command`, 127)
+    const cmd = (program && reg.program(resolved)) || reg.commands[resolved]
+    return cmd ? cmd(stdin, tokens, ctx, name) : unknownCommand(name, reg)
   }
-  const route = (r) => routeExternalOutput(record(ctx, commandWriteError(name, r, ctx), resolved), ctx)
+  const route = (r, signs = sign) => routeExternalOutput(record(ctx, signs(commandWriteError(name, rename === null ? r : rename(r), ctx)), resolved), ctx)
   try {
     // A command may answer with a promise — gzip waits on a stream the
     // runtime owns rather than on anything here — and what it then throws is
     // this call's to report, so the waiting happens here rather than in
-    // whoever reads the result.
-    return await ctx.io.run(resolved, async () => route(await run()))
+    // whoever reads the result. What it flushes as it goes is renamed as
+    // what it returns is. Each call is an invocation of its own, which is
+    // what an early stop on its stdin is keyed to (consumeStdin).
+    return await withState(ctx, { rename, invocation: { name } }, () => ctx.io.run(resolved, async () => route(await run())))
   } catch (e) {
     missingPathNote(ctx, name, e?.path, e?.fsError)
+    // A command line the command could not read is answered in its tool's
+    // own words, which name it by what it was run as.
+    if (e instanceof OptionError) return route(optionFailure(name, e, resolved))
     const message = `${name}: ${reason(e)}`
     const note = unsupportedNote(e)
     // Shared parsers cannot name the command; complete their notes here.
     if (note) ctx.unsupported.add({ ...note, command: note.command ?? name, message }, note.command ?? resolved)
-    return route(err(message))
+    // A refusal is worded as this terminal's own, and goes unsigned.
+    return route(err(message), note ? (r) => r : sign)
   }
 }
 
@@ -157,7 +185,7 @@ function queued(ctx, line) {
 // Syntax errors exit 2; unsupported constructs exit 1.
 function safeRun(line, ctx) {
   const feed = createUnsupportedFeed()
-  return withState(ctx, { unsupported: feed, notes: new Set(), discarded: new Set(), stdinFile: false, stdinPiped: false, stdinTerminal: true, stdinOrigin: null, stdinHandle: null, stdinBytes: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, async () => {
+  return withState(ctx, { unsupported: feed, notes: new Set(), discarded: new Set(), stdinFile: false, stdinPiped: false, stdinTerminal: true, stdinOrigin: null, stdinHandle: null, stdinBytes: null, stdinStop: null, closed: { out: false, err: false }, outputFds: { 1: 'out', 2: 'err' } }, async () => {
     const result = { stdout: '', stderr: '', exitCode: 0 }
     const stream = { text: '' }
     try {

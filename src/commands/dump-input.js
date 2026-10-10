@@ -1,5 +1,15 @@
 // Dump readers open operands lazily: a byte limit must neither consume the
 // next reader's input nor report errors from files it never opens.
+//
+// What a dump leaves of a shared stdin it stopped short in is the bytes past
+// its limit, and how sure that is depends on the reader (consumeStdin). od
+// reads no more than -N asks for, unbuffered, from a pipe as from a file.
+// hexdump reads through a buffer and puts a file's offset back as it exits,
+// which a pipe's it cannot. xxd reads through a buffer and puts nothing back,
+// from a file or a pipe — though its first read of a file, the 4 KiB stdio
+// asks for, takes one no bigger than that whole.
+const EXACT = { od: true, hexdump: undefined, xxd: false }
+const XXD_READ = 4096
 import { consumeStdin, decodeUtf8, decodeUtf8Maybe, encodeUtf8Loose, err, readInputs, scaledCount } from '../util.js'
 import { unsupported } from '../unsupported.js'
 
@@ -19,11 +29,16 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
   const piped = ctx.stdinBytes
   const chunks = []
   const r = { stderr: '', failed: false }
+  // Whether any operand opened at all, which is what decides whether the
+  // dump has anything to say once every one has been tried.
+  let opened = files.length === 0
   for (const file of files.length ? files : [null]) {
+    const noRead = remaining === 0 && skipping === 0
     // A dump is the bytes themselves, so a file this terminal cannot spell as
     // text is dumped as readily as one it can.
-    const input = readInputs(cmd, file === null ? [] : [file], rest, ctx, { read: 'loose-bytes', noRead: remaining === 0 && skipping === 0 })
+    const input = readInputs(cmd, file === null ? [] : [file], rest, ctx, { read: 'loose-bytes', noRead })
     const isDir = input.entries[0]?.kind === 'dir'
+    if (input.entries[0]?.kind !== 'missing') opened = true
     r.stderr += input.stderr
     r.failed ||= input.failed && !(cmd === 'hexdump' && isDir)
     if (skipping && isDir) return { error: unsupported('feature', cmd, 'skip across unreadable input', `${cmd}: skipping across a directory operand is not supported`) }
@@ -31,8 +46,9 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
     if (!input.inputs.length && !isDir) continue
     const entry = input.inputs[0]
     const shared = entry && (entry.shared || entry.name === null)
+    // hexdump seeks to skip, which a pipe refuses before anything is read.
     if (cmd === 'hexdump' && skipping && shared && !ctx.stdinFile) {
-      consumeStdin(ctx, rest, true, piped)
+      consumeStdin(ctx, rest, true, piped, true)
       return { error: err('hexdump: standard input: Illegal seek') }
     }
     // xxd seeks from the beginning unless +OFFSET was specified. Linux
@@ -44,16 +60,19 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
     const taken = Math.min(remaining, all.length - skipped)
     chunks.push(all.subarray(skipped, skipped + taken))
     remaining -= taken
-    if (shared) {
+    // A dump of nothing opened stdin and read none of it, which leaves it
+    // where it was.
+    if (shared && !noRead) {
       const left = all.subarray(skipped + taken)
       // Bytes came in, so bytes are what is left: handed back as they are,
       // and as the text they spell for a reader of text, which may be none.
       // Where text came in, text is what is left — and a read that stopped
       // inside a character has half of one to hand on, which is the same
       // limitation it was before any input here was bytes.
-      const handed = piped !== null && !rewind && left.length > 0 ? left : null
-      rest = handed === null ? decodeUtf8(left) : decodeUtf8Maybe(left) ?? ''
-      consumeStdin(ctx, rest, true, handed)
+      const whole = cmd === 'xxd' && ctx.stdinFile && all.length <= XXD_READ
+      const handed = piped !== null && !rewind && left.length > 0 && !whole ? left : null
+      rest = whole ? '' : handed === null ? decodeUtf8(left) : decodeUtf8Maybe(left) ?? ''
+      consumeStdin(ctx, rest, true, handed, EXACT[cmd])
     }
     if (rewind && skipping) { start = skip.value; skipping = 0 }
     if (remaining === 0 && skipping === 0) break
@@ -62,7 +81,7 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
   const bytes = new Uint8Array(chunks.reduce((n, chunk) => n + chunk.length, 0))
   let offset = 0
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length }
-  return { bytes, start, r }
+  return { bytes, start, r, opened }
 }
 
 function dumpCount(cmd, value, flag, fallback) {

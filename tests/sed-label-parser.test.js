@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { finishSedProgram, parseSedScript } from '../src/commands/sed-script.js'
+import { compileString, createCompiler, finishProgram } from '../src/commands/sed-script.js'
 import { unsupportedNote } from '../src/unsupported.js'
 
 // GNU read_label preserves literal bytes until a blank, LF, ;, } or #.
 // check_final_program resolves jumps against the last matching definition.
 // https://github.com/mirror/sed/blob/v4.9/sed/compile.c
 const compile = (...sources) => {
-  const state = {}
-  return finishSedProgram(sources.flatMap((source) => parseSedScript(source, false, 'C.UTF-8', state)), state)
+  const compiler = createCompiler()
+  for (const source of sources) compileString(compiler, source)
+  return finishProgram(compiler).commands
 }
 
 describe('sed label grammar and program linking', () => {
@@ -37,14 +38,14 @@ describe('sed label grammar and program linking', () => {
   })
   it('retains addresses, ranges and inversion on branch and input commands', () => {
     const commands = compile('1,2!b end;/a/!t end;$T end;2N;1,3n;/x/!P;:end')
-    assert.equal(commands[0].start.value, 1)
-    assert.equal(commands[0].end.value, 2)
-    assert.equal(commands[0].negated, true)
-    assert.equal(commands[1].start.type, 'regex')
-    assert.equal(commands[2].start.type, 'last')
-    assert.equal(commands[3].start.value, 2)
-    assert.equal(commands[4].end.value, 3)
-    assert.equal(commands[5].negated, true)
+    assert.equal(commands[0].a1.n, 1)
+    assert.equal(commands[0].a2.n, 2)
+    assert.equal(commands[0].bang, true)
+    assert.equal(commands[1].a1.type, 'regex')
+    assert.equal(commands[2].a1.type, 'last')
+    assert.equal(commands[3].a1.n, 2)
+    assert.equal(commands[4].a2.n, 3)
+    assert.equal(commands[5].bang, true)
     for (const index of [0, 1, 2]) assert.equal(commands[index].jump, 6)
   })
   it('uses the prefix before NUL as the label name without reinterpreting the suffix as commands', () => {
@@ -63,7 +64,7 @@ describe('sed label grammar and program linking', () => {
 describe('sed label errors are ordinary compile failures', () => {
   for (const script of [':', ': ', ':\n', ':;', ':\0ignored', '1:x', '1,2:x', '/a/:x', '$:x']) {
     it(`rejects ${JSON.stringify(script)}`, () => {
-      assert.throws(() => compile(script), (error) => !unsupportedNote(error) && error.exitCode === undefined && /label|addresses/u.test(error.message))
+      assert.throws(() => compile(script), (error) => !unsupportedNote(error) && error.exitCode === 1 && /label|addresses/u.test(error.message))
     })
   }
   for (const command of ['b', 't', 'T']) {
@@ -74,8 +75,8 @@ describe('sed label errors are ordinary compile failures', () => {
   it('reports the last unresolved branch first, following GNU final-program validation', () => {
     assert.throws(() => compile('b first;t second;T third'), /jump to `third'/u)
   })
-  it('keeps comments diagnosed when a label stops before the comment marker', () => {
-    assert.throws(() => compile(':label#comment'), (error) => unsupportedNote(error)?.detail === 'comments')
+  it('ends a label at a comment marker, which starts a comment', () => {
+    assert.deepEqual(compile(':label#comment').map(({ kind, label }) => [kind, label]), [[':', 'label']])
   })
   for (const command of ['N', 'n', 'P']) {
     it(`rejects operands and missing separators after ${command}`, () => {

@@ -4,109 +4,119 @@
 // diagnosed at parse time when possible, and at runtime otherwise.
 //
 // File operands can include assignments (applied when reached) and `-` for
-// stdin. Parse errors exit 1, fatal errors exit 2, and warnings keep status.
+// stdin. What goes wrong is reported in gawk's words and form — a program
+// gawk would not run exits 1, a fatal error at run time 2, and warnings
+// keep the status — and where that form cannot be known to be gawk's, the
+// report is also an unsupported one.
 //
-// Deliberate limits include signed NaN formatting, arrays of arrays, and
-// unavailable environment/process metadata.
-// Array iteration uses insertion order; rand() uses a deterministic generator
-// different from gawk's. split()/RS ignore empty separators, including gawk's
-// exceptional cases, and sub() refuses substitution into a temporary value.
+// The program is read with gawk's grammar (./parse.js), so what it accepts
+// and what it says of a program it rejects are gawk's. Deliberate limits
+// include signed NaN formatting, arrays of arrays, and unavailable
+// environment/process metadata; split() and FS take an empty match as no
+// separator, as gawk does, and a regex RS that could match empty before
+// the end of its input is refused.
 
-import { AwkError } from './common.js'
+import { AwkError, createParseLog } from './common.js'
 import { markUnsupported, unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { unescapeAwkString } from './lex.js'
 import { parseProgram } from './parse.js'
-import { createMachine, runProgram } from './run.js'
+import { createMachine, runProgram, where } from './run.js'
 import { StrNum, byteLocale, checkText } from './value.js'
 import { lookupWithNote } from '../notes.js'
-import { parseArgs } from '../args.js'
-import { err, usage } from '../util.js'
-
-const USAGE = "awk [-F fs] [-v var=value] 'program' [file ...]  |  awk [-F fs] [-v var=value] -f progfile [file ...]"
-const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=([^]*)$/u
+import { consumeStdin } from '../util.js'
+import { err } from '../result.js'
+import { USAGE, gawkOptions, illegalName } from './options.js'
 
 export function awk(stdin, tokens, ctx) {
-  // Option parsing stops at the program text (as gawk's does), so a
-  // later `-x` is an operand, not a flag the program cannot see.
-  const { values, positional } = parseArgs(splitGluedValues(tokens), { valueShort: ['F'], repeatable: ['v', 'f'], stopAtFirstPositional: true })
-  const source = programSource(values.get('f') ?? [], positional, ctx)
-  if (source.error) return source.error
+  const opts = gawkOptions(tokens)
+  if (opts.result) return opts.result
+  const source = programSources(opts, stdin, ctx)
+  if (source.result) return source.result
+  const { sources, operands } = source
+  const vars = []
+  for (const item of opts.assigns) {
+    if (item.kind !== 'v') continue
+    const eq = item.value.indexOf('=')
+    if (eq === -1) return err(`awk: \`${item.value}' argument to \`-v' not in \`var=value' form\n\n${USAGE}`, 1)
+    const bad = illegalName(item.value.slice(0, eq))
+    if (bad) return err(`awk: fatal: ${bad}`, 2)
+    vars.push(item.value.slice(0, eq))
+  }
+  const once = new Set()
+  const log = createParseLog(once)
   let program
   try {
-    checkText({ byteLocale: byteLocale(ctx) }, source.text)
-    program = parseProgram(source.text)
+    for (const s of sources) checkText({ byteLocale: byteLocale(ctx) }, s.text)
+    program = parseProgram(sources, log, vars)
   } catch (e) {
-    // A RangeError here is the parser's own recursion giving out on a
-    // pathologically nested expression: a program we cannot compile.
-    if (e instanceof RangeError) return unsupported('feature', 'awk', 'parser depth limit', `awk: program too deeply nested (${e.message})`)
-    if (unsupportedNote(e)) return unsupportedFrom(e, 'awk', `awk: ${e.message}`)
-    if (!(e instanceof AwkError)) throw e
-    const message = e.line === null ? `awk: ${e.message}` : `awk: ${e.kind} at line ${e.line}: ${e.message}`
-    // Unsupported constructs also reach diagnostics when stderr is redirected.
-    return e.gap === null ? err(message) : unsupported('feature', 'awk', e.gap, message)
+    return parseFailure(e, log, sources)
   }
-  const m = createMachine(program, ctx, stdin, source.operands)
-  for (const w of program.warnings) m.warn(w)
+  if (log.errors > 0) return err(log.render(sources), 1)
+  const m = createMachine(program, ctx, source.stdin, operands, once)
+  m.errOut.push(log.render(sources))
+  return run(m, opts)
+}
+
+// The run, with -F and -v applied first in command-line order (their
+// warnings name no place in the program, as gawk's do not).
+function run(m, opts) {
   let exitCode
   let gap = null
   try {
-    if (values.has('F')) m.assign('FS', unescapeAwkString(values.get('F'), m.warn))
-    for (const asg of values.get('v') ?? []) {
-      const match = ASSIGNMENT.exec(asg)
-      if (!match) return err(`awk: -v: expected var=value but got \`${asg}\``)
-      m.assign(match[1], new StrNum(unescapeAwkString(match[2], m.warn)))
+    for (const { kind, value } of opts.assigns) {
+      const warn = (msg, key) => m.warnAt('', msg, key)
+      if (kind === 'F') m.assign('FS', unescapeAwkString(value, warn, true))
+      else m.assign(value.slice(0, value.indexOf('=')), new StrNum(unescapeAwkString(value.slice(value.indexOf('=') + 1), warn)))
     }
     exitCode = runProgram(m)
   } catch (e) {
     // Report engine stack/string limits without crashing the terminal.
     const note = unsupportedNote(e)
     if (!(e instanceof AwkError) && !(e instanceof RangeError) && !note) throw e
-    m.errOut.push(`awk: ${e.message}\n`)
     exitCode = 2
     // Preserve output already produced when attaching a runtime diagnostic.
     if (e instanceof RangeError) gap = { detail: 'runtime limit', message: `awk: ${e.message}` }
     if (e.gap) gap = { detail: e.gap, message: `awk: ${e.message}` }
     if (note) gap = { detail: note.detail, message: `awk: ${e.message}` }
+    m.errOut.push(gap === null ? `awk: ${where(m)}fatal: ${e.message}\n` : `awk: ${e.message}\n`)
   }
+  // Standard input was taken whole as it was opened; what gawk had not read
+  // of it by the time it was done goes back for whoever reads it next.
+  m.input.settleStdin()
   const result = { stdout: m.out.join(''), stderr: m.errOut.join(''), exitCode }
   return gap === null ? result : markUnsupported(result, 'feature', 'awk', gap.detail, gap.message)
 }
 
-// `-F', *'` reaches us as the single token `-F, *`: the shell glues a
-// quoted value to its flag, and parseArgs treats any token carrying
-// whitespace as positional — which here would make it the program.
-// Peel the flag off such tokens, up to the first real positional. A
-// bare `-F` / `-v` / `-f` keeps its next token as the value untouched.
-const GLUED = /^-[Fvf]\S*\s/su
-
-function splitGluedValues(tokens) {
-  const out = []
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i]
-    if (t === '-F' || t === '-v' || t === '-f') {
-      out.push(t)
-      if (i + 1 < tokens.length) out.push(tokens[++i])
-      continue
-    }
-    if (GLUED.test(t)) { out.push(t.slice(0, 2), t.slice(2)); continue }
-    if (!t.startsWith('-') || t === '-' || t === '--') { out.push(...tokens.slice(i)); break }
-    out.push(t)
-  }
-  return out
+// What gawk prints when it gives up reading the program: the messages so
+// far, then what stopped it — a syntax error as yyerror() shows one (exit
+// 1), a fatal error (exit 2), or an error already among the messages.
+function parseFailure(e, log, sources) {
+  if (unsupportedNote(e)) return unsupportedFrom(e, 'awk', `awk: ${e.message}`)
+  if (!(e instanceof AwkError)) throw e
+  if (e.gap !== null) return unsupported('feature', 'awk', e.gap, `awk: ${e.message}`)
+  return err(log.render(sources) + (e.text ?? ''), e.kind === 'fatal' ? 2 : 1)
 }
 
-// The program comes from `-f progfile` (several concatenate) or, failing
-// that, the first operand.
-function programSource(progFiles, positional, ctx) {
-  if (progFiles.length === 0) {
-    if (positional.length === 0) return { error: usage(USAGE, 2) }
-    return { text: positional[0], operands: positional.slice(1) }
+// The program comes from `-f progfile` (several concatenate; `-` and
+// /dev/stdin read standard input) or, failing that, the first operand.
+function programSources(opts, stdin, ctx) {
+  if (opts.files.length === 0) {
+    if (opts.operands.length === 0) return { result: err(USAGE, 1) }
+    return { sources: [{ name: null, text: opts.operands[0] }], operands: opts.operands.slice(1), stdin }
   }
-  const parts = []
-  for (const f of progFiles) {
+  const sources = []
+  let input = stdin
+  for (const f of opts.files) {
+    if (f === '-' || f === '/dev/stdin') {
+      sources.push({ name: f, text: f === '/dev/stdin' && ctx.stdinFile ? ctx.stdinOrigin : input })
+      input = ''
+      consumeStdin(ctx)
+      continue
+    }
     const { path: abs, error } = lookupWithNote(ctx, 'awk', f)
-    if (error || !ctx.fs.isFile(abs)) return { error: err(`awk: cannot open program file \`${f}\`: ${error ?? 'Is a directory'}`, 2) }
-    parts.push(ctx.fs.readFile(abs))
+    if (!error && ctx.fs.isDir(abs)) return { result: err(`awk: ${f}:1: error: cannot read source file \`${f}': Is a directory`, 1) }
+    if (error) return { result: err(`awk: fatal: cannot open source file \`${f}' for reading: ${error}`, 2) }
+    sources.push({ name: f, text: ctx.fs.readFile(abs) })
   }
-  return { text: parts.join('\n'), operands: positional }
+  return { sources, operands: opts.operands, stdin: input }
 }

@@ -54,16 +54,17 @@ describe('sed replacement control escapes', () => {
   })
 })
 
-describe('sed unsupported replacement escapes remain diagnostic', () => {
-  for (const escape of ['U', 'L', 'u', 'l', 'E', 'x0d', 'o15', 'd13', 'cM']) {
-    it(`reports \\${escape} even with hidden stderr and pipeline success`, async () => {
-      const command = `sed ${quote(`s/r/\\${escape}/`)} input 2>/dev/null | cat`
-      const actual = await createTerminal({ input: 'r\n' }).run(command)
-      assert.equal(actual.exitCode, 0)
-      assert.equal(actual.stdout, '')
-      assert.equal(actual.stderr, '')
-      assert.equal(actual.unsupported.length, 1)
-      assert.equal(actual.unsupported[0].detail, 'replacement escape')
+// Recorded from GNU sed 4.9: case conversion and numeric escapes.
+describe('sed case conversion and numeric replacement escapes', () => {
+  for (const [script, input, stdout] of [
+    ['s/r/\\U/', 'r\n', '\n'], ['s/r/\\L/', 'r\n', '\n'], ['s/r/\\u/', 'r\n', '\n'],
+    ['s/r/\\l/', 'r\n', '\n'], ['s/r/\\E/', 'r\n', '\n'],
+    ['s/r/\\x0d/', 'r\n', '\r\n'], ['s/r/\\o15/', 'r\n', '\r\n'], ['s/r/\\d13/', 'r\n', '\r\n'], ['s/r/\\cM/', 'r\n', '\r\n'],
+    ['s/r/\\U&x\\Ey/', 'r\n', 'RXy\n'], ['s/r/\\u&r/', 'rr\n', 'Rrr\n'],
+    ['s/\\(r\\)\\(r\\)/\\U\\1\\l\\2X/', 'rr\n', 'RrX\n'],
+  ]) {
+    it(script, async () => {
+      assert.deepEqual(await createTerminal({ input }).run(`sed ${quote(script)} input`), result(stdout))
     })
   }
 })

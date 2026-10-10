@@ -9,9 +9,12 @@ const FILES = { f: 'a 1\nb 2\na 1\n', u: 'é😀\n', 'src/a.js': 'const a = 1\n'
 const run = (command) => createTerminal(FILES).run(command)
 const identity = (result) => result.unsupported.map(({ kind, command, detail }) => ({ kind, command, detail }))
 
-// These builtins interpret option-like tokens as data, counts, or expressions.
-// Every other registered command must diagnose unavailable options.
-const NO_OPTIONS = new Set(['echo', 'true', 'false', ':', 'exit', 'break', 'continue', 'test', '['])
+// These builtins interpret option-like tokens as data, counts, or expressions;
+// bash's printf calls one an invalid option, as bash does, and coreutils'
+// prints it as a format. awk rejects an option gawk does not know exactly as
+// gawk does, with its usage text and status 1, which is no gap. Every other
+// registered command must diagnose unavailable options.
+const NO_OPTIONS = new Set(['echo', 'printf', 'true', 'false', ':', 'exit', 'break', 'continue', 'test', '[', 'awk'])
 const registered = { ...DEFAULT_REGISTRY.commands, ...DEFAULT_REGISTRY.hidden }
 
 describe('diagnostic completeness — command dispatch', () => {
@@ -76,7 +79,7 @@ const COMMAND_GAPS = [
   ['find . -type f , -print', 'comma operator'],
   ['find . -type f,p', '-type f,p'],
   ['grep --e a f', '--e'],
-  [String.raw`grep -E 'a{z}' f`, 'GNU regex syntax'],
+  [String.raw`grep -E '^*' f`, 'GNU regex syntax'],
   [String.raw`grep -E '{1}' f`, 'GNU regex syntax'],
   [String.raw`awk 'BEGIN {print "\😀"}'`, 'non-ASCII string escape'],
   ['seq inf', 'non-integer operands'],
@@ -85,8 +88,6 @@ const COMMAND_GAPS = [
   [String.raw`awk 'BEGIN {x="out";printf "%s", "lost" >> x}'`, 'output redirection'],
   [String.raw`awk 'BEGIN {a[1][2]=3}'`, 'arrays of arrays'],
   [String.raw`awk 'BEGIN {delete a[1][2]}'`, 'arrays of arrays'],
-  [String.raw`awk 'BEGIN {print sub(/a/,"b","a")}'`, 'substitution into temporary value'],
-  [String.raw`awk 'BEGIN {print gsub(/a/,"b",42)}'`, 'substitution into temporary value'],
   [String.raw`awk 'BEGIN {x=@/a/}'`, '@ extensions'],
   [String.raw`awk '@include "f"'`, '@ extensions'],
   [String.raw`awk 'BEGIN {print audit::value}'`, 'namespaces'],
@@ -107,9 +108,6 @@ const COMMAND_GAPS = [
   [String.raw`awk 'BEGIN {print "é" ~ /\303\251/}'`, 'regex byte escapes'],
   [String.raw`awk 'BEGIN {print "é" ~ /[\x80-\xff]/}'`, 'regex byte escapes'],
   [String.raw`awk 'BEGIN {IGNORECASE=1; print "ᲀ" ~ /в/}'`, 'locale-sensitive regex'],
-  [String.raw`awk 'BEGIN {print toupper("ß")}'`, 'Unicode case mapping'],
-  [String.raw`awk 'BEGIN {print tolower("İ")}'`, 'Unicode case mapping'],
-  [String.raw`awk 'BEGIN {IGNORECASE=1; print index("İ","i")}'`, 'Unicode case mapping'],
   [String.raw`awk 'BEGIN {print "a" ~ /a{1001}/}'`, 'regex interval limit'],
   [String.raw`awk 'BEGIN {r="a{1001}";print "a" ~ r}'`, 'regex interval limit'],
   [String.raw`awk 'BEGIN {print match("",/(a{1000}){1000}/)}'`, 'regex state limit'],

@@ -92,7 +92,8 @@ describe('awk runtime optimization regressions', () => {
     `, 'zero safe large\nzero safe large\nfirst second\nspelled numeric 1\n', { numbers: '01\n' }, 'numbers')
   })
 
-  it('creates missing array entries without reordering repeated undefined reads', async () => {
+  // The walk is gawk's hash-table order, which repeated reads leave alone.
+  it('creates missing array entries once, without reordering repeated undefined reads', async () => {
     await check(`
       BEGIN {
         values["first"]; values["second"]; values["third"] = 3
@@ -101,7 +102,7 @@ describe('awk runtime optimization regressions', () => {
         for (key in values) order = order "[" key "]"
         print length(values), order, ("absent" in values), length(values)
       }
-    `, '4 [first][second][third][new] 0 4\n')
+    `, '4 [first][new][third][second] 0 4\n')
   })
 
   it('rebuilds records after compound field and NF updates', async () => {

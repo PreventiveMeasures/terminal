@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
-import { preprocessInPlace } from '../src/commands/sed-in-place.js'
+import { readOptions } from '../src/commands/sed.js'
 
 // GNU sed 4.9 sed.c handles -i's attached optional suffix; execute.c
 // open_next_file/closedown/process_files define per-file replacement and q.
@@ -21,28 +21,35 @@ async function contents(t, path, text, cwd = '/src') {
 }
 
 describe('sed in-place optional arguments respect option boundaries', () => {
+  // getopt: -i takes only an attached suffix, and an option that requires an
+  // argument takes the next token whatever it looks like.
   const cases = [
-    [['-i', 's/a/A/', 'input'], ['s/a/A/', 'input'], ''],
-    [['--in-place', 's/a/A/', 'input'], ['s/a/A/', 'input'], ''],
-    [['--in-place=', 's/a/A/', 'input'], ['s/a/A/', 'input'], ''],
-    [['-i.bak', 's/a/A/', 'input'], ['s/a/A/', 'input'], '.bak'],
-    [['--in-place=.bak', 's/a/A/', 'input'], ['s/a/A/', 'input'], '.bak'],
-    [['-ni', '-e', 'p', 'input'], ['-n', '-e', 'p', 'input'], ''],
-    [['-Ei', 's/a/A/', 'input'], ['-E', 's/a/A/', 'input'], ''],
-    [['-iE', 's/a/A/', 'input'], ['s/a/A/', 'input'], 'E'],
-    [['-i.bak', '-i', 'p', 'input'], ['p', 'input'], ''],
-    [['-e', '-i', 'input'], ['-e', '-i', 'input'], null],
-    [['-f', '--in-place', 'input'], ['-f', '--in-place', 'input'], null],
-    [['--expression', '-i', 'input'], ['--expression', '-i', 'input'], null],
-    [['--file', '--in-place=.bak', 'input'], ['--file', '--in-place=.bak', 'input'], null],
-    [['-nei', 'input'], ['-nei', 'input'], null],
-    [['-e-i', 'input'], ['-e-i', 'input'], null],
-    [['--', '-i', 'input'], ['--', '-i', 'input'], null],
-    [['-i', '-e', '--', 'input'], ['-e', '--', 'input'], ''],
-    [['-i', '', '-'], ['', '-'], ''],
+    [['-i', 's/a/A/', 'input'], [], ['s/a/A/', 'input'], ''],
+    [['--in-place', 's/a/A/', 'input'], [], ['s/a/A/', 'input'], ''],
+    [['--in-place=', 's/a/A/', 'input'], [], ['s/a/A/', 'input'], ''],
+    [['-i.bak', 's/a/A/', 'input'], [], ['s/a/A/', 'input'], '.bak'],
+    [['--in-place=.bak', 's/a/A/', 'input'], [], ['s/a/A/', 'input'], '.bak'],
+    [['-ni', '-e', 'p', 'input'], ['p'], ['input'], ''],
+    [['-Ei', 's/a/A/', 'input'], [], ['s/a/A/', 'input'], ''],
+    [['-iE', 's/a/A/', 'input'], [], ['s/a/A/', 'input'], 'E'],
+    [['-i.bak', '-i', 'p', 'input'], [], ['p', 'input'], ''],
+    [['-e', '-i', 'input'], ['-i'], ['input'], null],
+    [['-f', '--in-place', 'input'], ['--in-place'], ['input'], null],
+    [['--expression', '-i', 'input'], ['-i'], ['input'], null],
+    [['--file', '--in-place=.bak', 'input'], ['--in-place=.bak'], ['input'], null],
+    [['-nei', 'input'], ['i'], ['input'], null],
+    [['-e-i', 'input'], ['-i'], ['input'], null],
+    [['--', '-i', 'input'], [], ['-i', 'input'], null],
+    [['-i', '-e', '--', 'input'], ['--'], ['input'], ''],
+    [['-i', '', '-'], [], ['', '-'], ''],
   ]
-  for (const [tokens, remaining, inPlace] of cases) {
-    it(JSON.stringify(tokens), () => assert.deepEqual(preprocessInPlace(tokens), { tokens: remaining, inPlace }))
+  for (const [tokens, scripts, positional, inPlace] of cases) {
+    it(JSON.stringify(tokens), () => {
+      const { actions, positional: operands } = readOptions(tokens)
+      const suffix = actions.reduce((found, { name, value }) => (name === 'i' ? value ?? '' : found), null)
+      const given = actions.filter(({ name }) => name === 'e' || name === 'f').map(({ value }) => value)
+      assert.deepEqual({ scripts: given, positional: operands, inPlace: suffix }, { scripts, positional, inPlace })
+    })
   }
 })
 
@@ -241,7 +248,7 @@ describe('sed in-place permissions remain visible on the diagnostic channel', ()
       const t = createTerminal(FILES, { mount: '/src/', writable })
       const message = 'sed: /src/input: file system is read-only'
       const unsupported = [{ kind: 'feature', command: 'sed', detail: '-i', message }]
-      assert.deepEqual(await t.run('sed -i s/a/A/ /src/input'), expected('', 1, message + '\n', unsupported))
+      assert.deepEqual(await t.run('sed -i s/a/A/ /src/input'), expected('', 4, message + '\n', unsupported))
       assert.deepEqual(await t.run('sed -i s/a/A/ /src/input 2>/dev/null | cat'), expected('', 0, '', unsupported))
       await contents(t, '/src/input', FILES.input)
     })
@@ -249,7 +256,7 @@ describe('sed in-place permissions remain visible on the diagnostic channel', ()
   it('refuses a backup outside the writable area without modifying either file', async () => {
     const t = await terminal()
     const result = await t.run("sed --in-place='/src/*' s/a/A/ /tmp/input")
-    assert.equal(result.exitCode, 1)
+    assert.equal(result.exitCode, 4)
     assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['-i'])
     await contents(t, '/tmp/input', FILES.input)
     await contents(t, '/src/input', FILES.input)

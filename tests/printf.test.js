@@ -44,7 +44,6 @@ describe('printf string and character fields', () => {
     ["printf '[%*s]' 3", '[   ]'],
     ["printf '[%*s]' 3 a 4 b", '[  a][   b]'],
     ["printf '[%*s]' 010 x", '[       x]'],
-    ["printf '[%.-3s]' abc", '[abc]'],
     ["printf '[%4s][%.2s][%.4s]' é élan 😀x", '[  é][é][😀]'],
     ["printf '%c%c%c' abc 65 Z", 'a6Z'],
     ["printf '[%3c][%-3c]' abc def", '[  a][d  ]'],
@@ -102,7 +101,6 @@ describe('printf integer conversions', () => {
     ["printf '[%#.0x][%#.0X]' 0 0", '[][]'],
     ["printf '[%*.*d]' 7 4 12", '[   0012]'],
     ["printf '[%.*d]' -1 12", '[12]'],
-    ["printf '[%.-3d]' 12", '[12]'],
   ]) {
     it(line, () => check(line, stdout))
   }
@@ -185,6 +183,23 @@ describe('printf ordinary failures preserve numeric prefix conversions', () => {
     assert.match(result.stderr, /invalid format/u)
     assert.deepEqual(result.unsupported, [])
   })
+
+  // Neither printf reads a positional argument, a `%` after a flag or a
+  // width, or `%p`: bash names the character it stopped at, and coreutils
+  // the directive up to it. Recorded from bash 5.2 and coreutils 9.4.
+  for (const [format, bash, coreutils] of [
+    ['%2$s', "`$': invalid format character", '%2$: invalid conversion specification'],
+    ['%5%', "`%': invalid format character", '%5%: invalid conversion specification'],
+    ['%p', "`p': invalid format character", '%p: invalid conversion specification'],
+    ['%5', "`%5': missing format character", '%5: invalid conversion specification'],
+  ]) {
+    it(`printf '${format}' is the error each printf gives`, async () => {
+      const ran = await createTerminal(FILES).run(`printf '${format}' a b`)
+      assert.deepEqual([ran.stdout, ran.stderr, ran.exitCode, ran.unsupported], ['', `terminal: printf: ${bash}\n`, 1, []])
+      const program = await createTerminal(FILES).run(`/usr/bin/printf '${format}' a b`)
+      assert.deepEqual([program.stdout, program.stderr, program.exitCode, program.unsupported], ['', `/usr/bin/printf: ${coreutils}\n`, 1, []])
+    })
+  }
 })
 
 describe('printf unsupported diagnostics', () => {
@@ -193,7 +208,6 @@ describe('printf unsupported diagnostics', () => {
     "printf '%q' 'a b'",
     "printf '%a' 1.5",
     "printf '%A' 1.5",
-    "printf '%2$s' a b",
     "printf '%n' target",
     "printf '%(Y)T' 0",
     "printf '%lc' é",
@@ -202,8 +216,10 @@ describe('printf unsupported diagnostics', () => {
     "printf '%.1000001s' a",
     "printf '%*s' 1000001 a",
     "printf '%.*s' -2147483649 a",
-    "printf '%5%'",
-    "printf '%p' value",
+    // bash hands a precision spelt with a minus to a C printf that prints
+    // the directive back out, `[%.0-3s]`, which this does not.
+    "printf '[%.-3s]' abc",
+    "printf '[%.-3d]' 12",
     "printf '%c' é",
     "printf '%.1s' é",
     String.raw`printf '\xff'`,

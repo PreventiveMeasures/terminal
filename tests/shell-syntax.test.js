@@ -178,7 +178,7 @@ describe('shell syntax — parameters', () => {
     const t = term()
     await t.run('f="a.txt b.txt"')
     assert.equal(await out('cat $f', t), 'x y z\nhello world\nB\n')
-    assert.match((await t.run('cat "$f"')).stderr, /^cat: a.txt b.txt: No such file/u)
+    assert.match((await t.run('cat "$f"')).stderr, /^cat: 'a.txt b.txt': No such file/u)
     assert.equal(await out('f=" a  b "; echo [$f] ["$f"]', t), '[ a b ] [ a  b ]\n')
     assert.equal(await out('f=""; echo [$f] ["$f"] $f | wc -w', t), '2\n')
   })
@@ -264,7 +264,7 @@ describe('shell syntax — brace and pathname expansion', () => {
     assert.equal(await out('cat [a-c][!1].txt', t), 'c\n')
     assert.equal(await out('cat [[:alpha:]][[:digit:]].txt', t), 'a\nb\nc\n')
     assert.equal(await out('cat [', t), 'bracket\n')
-    assert.equal(await out('cat [x]1.txt 2>&1', t), 'cat: [x]1.txt: No such file or directory\n')
+    assert.equal(await out('cat [x]1.txt 2>&1', t), "cat: '[x]1.txt': No such file or directory\n")
     // find's -name uses the same glob language.
     assert.equal(await out("find src -name '[fb]oo.js' | sort", t), 'src/boo.js\nsrc/foo.js\n')
     assert.equal(await out("find src -name '[!f]oo.js'", t), 'src/boo.js\n')
@@ -415,14 +415,14 @@ describe('shell syntax — redirects', () => {
   it('a write into a closed stdout fails as each real command fails; a closed stderr is silent', async () => {
     assert.equal(await out('echo hi >&- || echo fallback'), 'fallback\n')
     const e = await term().run('echo hi >&-')
-    assert.deepEqual([e.stdout, e.stderr, e.exitCode], ['', 'echo: write error: Bad file descriptor\n', 1])
+    assert.deepEqual([e.stdout, e.stderr, e.exitCode], ['', 'terminal: echo: write error: Bad file descriptor\n', 1])
     assert.equal((await term().run('cat a.txt >&-')).exitCode, 1)
     assert.equal((await term().run('ls >&-')).exitCode, 2)
     assert.equal((await term().run('grep x a.txt >&-')).exitCode, 2)
     assert.equal((await term().run('echo hi | cat >&-')).exitCode, 1)
     assert.equal((await term().run('for i in 1 2; do echo $i; done >&-')).exitCode, 1)
     const group = await term().run('{ echo a; echo b; } >&-')
-    assert.deepEqual([group.stderr, group.exitCode], ['echo: write error: Bad file descriptor\n'.repeat(2), 1])
+    assert.deepEqual([group.stderr, group.exitCode], ['terminal: echo: write error: Bad file descriptor\n'.repeat(2), 1])
     assert.equal((await term().run('{ echo a >&2; } 2>&-')).exitCode, 1)
     // Nothing written, or written elsewhere: no error.
     for (const line of ['true >&-', 'echo -n "" >&-', 'echo hi >&- >/dev/null', 'cd src >&-', 'cat a.txt 2>&-']) {
@@ -754,10 +754,12 @@ describe('shell syntax — command conventions', () => {
     assert.equal(await out('echo -n abc | head -qc 1 - -'), 'ab')
     assert.equal(await out('echo -n abc | head -c 5 - -'), banners('abc', ''))
     assert.equal(await out('echo -n abc | head -c 1 /dev/stdin -'), '==> /dev/stdin <==\na\n==> standard input <==\nb')
-    // `-n N` on a regular file seeks back to the end of line N; a pipe,
-    // a here-string or a here-document is read in whole buffers.
+    // `-n N` on a regular file seeks back to the end of line N. A pipe, a
+    // here-string or a here-document is read in whole buffers, and what the
+    // second `-` finds after them depends on how the pipe was written —
+    // unless the first read took it all.
     assert.equal(await out('head -n1 - - < a.txt'), banners('x y z\n', 'hello world\n'))
-    assert.equal(await out('cat a.txt | head -n1 - -'), banners('x y z\n', ''))
+    assert.deepEqual(await gaps('cat a.txt | head -n1 - -'), ['feature:input after an early stop'])
     assert.equal(await out('head -n1 - - <<< "x y z"'), banners('x y z\n', ''))
     assert.equal(await out('head -c 1 - - < a.txt'), banners('x', ' '))
     assert.equal(await out('head -n -1 - - < a.txt'), banners('x y z\n', ''))
@@ -766,7 +768,7 @@ describe('shell syntax — command conventions', () => {
     assert.equal(await out('{ head -n1 - -; } < a.txt'), banners('x y z\n', 'hello world\n'))
     assert.equal(await out('(head -n1 - -) < a.txt'), banners('x y z\n', 'hello world\n'))
     assert.equal(await out('for i in 1; do head -n1 - -; done < a.txt'), banners('x y z\n', 'hello world\n'))
-    assert.equal(await out('cat a.txt | { head -n1 - -; }'), banners('x y z\n', ''))
+    assert.deepEqual(await gaps('cat a.txt | { head -n1 - -; }'), ['feature:input after an early stop'])
     // tail reads to the end.
     assert.equal(await out('echo -n abc | tail -c 1 - -'), banners('c', ''))
   })

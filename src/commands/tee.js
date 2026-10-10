@@ -9,6 +9,7 @@
 // was written all the same, the files it could write having been written.
 
 import { parseArgs } from '../args.js'
+import { lookup } from '../fs.js'
 import { consumeStdin, encodeUtf8 } from '../util.js'
 import { markUnsupported, unsupported, unsupportedNote } from '../unsupported.js'
 
@@ -21,6 +22,13 @@ export function tee(stdin, tokens, ctx) {
   consumeStdin(ctx, '', true)
   const bytes = piped ?? encodeUtf8(stdin)
   const state = { stderr: '', status: 0, gap: null }
+  // GNU writes each block it reads to stdout before the files, so a file
+  // that is stdout as well ends up as those writes interleave — which this,
+  // writing the files first and stdout after, would not reproduce.
+  const output = ctx.outputFds[1]
+  if (output?.path && positional.some((name) => isOutput(lookup(ctx.cwd, name, ctx.fs).path, output, ctx))) {
+    return unsupported('feature', 'tee', 'file also stdout', 'tee: writing a file that is also its standard output is not supported')
+  }
   for (const name of positional) write(name, bytes, append, state, ctx)
   const events = [{ fd: 1, bytes }, ...(state.stderr ? [{ fd: 2, text: state.stderr }] : [])]
   // Bytes that spell text are that text, so only what no text spells travels
@@ -31,6 +39,12 @@ export function tee(stdin, tokens, ctx) {
   if (!state.gap) return out
   const note = unsupportedNote(state.gap)
   return markUnsupported({ ...out, exitCode: 1 }, note.kind, note.command, note.detail, note.message)
+}
+
+function isOutput(path, output, ctx) {
+  if (!path) return false
+  const identity = ctx.fs.fileIdentity?.(path)
+  return identity !== undefined && output.identity !== undefined ? identity === output.identity : path === output.path
 }
 
 function write(name, bytes, append, state, ctx) {

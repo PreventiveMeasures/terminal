@@ -4,15 +4,19 @@ import { decodeUtf8Maybe, encodeUtf8, encodeUtf8Loose } from './bytes.js'
 import { lookup, textOfFile } from './fs.js'
 import { UINT64_MAX } from './numeric.js'
 import { err } from './result.js'
+import { UnsupportedError } from './unsupported.js'
 import { lookupWithNote } from './notes.js'
+import { quoteFile, quoteLocale, quoteName } from './commands/quote-name.js'
 
 // Commands reach the byte codec and the result shape through here, where the
 // rest of their shared helpers already live.
 export { MARKER, MARKER_RANGE, encodeUtf8, encodeUtf8Loose, encodeUtf8Marked, decodeUtf8, decodeUtf8Loose, decodeUtf8Marked, decodeUtf8Maybe, isMarker, joinBytes, utf8CodePoints } from './bytes.js'
-export { textOfFile } from './fs.js'
+export { resolve, textOfFile } from './fs.js'
 export { err, ok, usage } from './result.js'
 export { discardedNotes, missingPathNote } from './notes.js'
 export { byteLocale, classTables } from './locale.js'
+export { OptionError, optionFailure } from './args.js'
+export { quoteFile, quoteLocale, quoteName } from './commands/quote-name.js'
 
 // Empty input has no lines; a trailing newline terminates the preceding line.
 export function splitLines(s, delimiter = '\n') {
@@ -64,7 +68,32 @@ export const stdoutIsTerminal = (ctx) => (ctx.outputFds?.[1] === 'out' || ctx.ou
 // no text, a command reading it as text is told which input it is, the way it
 // is told which file a file of such bytes is; a command working in bytes says
 // so here and reads them.
-export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null) {
+//
+// A reader that stops part way hands back what it left after the place it
+// stopped, and says whether that is where the next reader really starts —
+// `exact`. On a regular file it is, unless the reader says otherwise: GNU's
+// tools put the file's offset back where they stopped (head, sed, grep -m,
+// hexdump) as they exit. On a pipe it is not, unless the reader says so: a
+// tool reads a pipe a buffer at a time, takes whatever the writer had written
+// by then, and cannot give back what it took past its stop. How much that is
+// depends on how the writer's writes fell between the reader's reads — a race,
+// not an answer — so `seq 1 3000 | { head -n 1; cat; }` hands cat 1142 lines
+// on one run and could hand it none on another. Some readers take exactly what
+// they need even from a pipe (head -c, od -N), and some read ahead even from a
+// file and never move its offset back (awk, xxd), and those say so. A reader
+// that took everything left nothing to argue about, whatever it is.
+//
+// What a reader left uncertain is marked on the input (`stdinStop`, which
+// travels with what is left of it, ../shell/run.js), naming that reader and
+// the call of it that stopped: a reader handing back what it left one record
+// at a time (sed) is the same reader each time, and reads on from where it
+// knows it is. Any other reader taking from that input would take what the
+// first one did not happen to read, which is no answer this terminal can give,
+// so it is refused as it starts — and an input nobody reads again is no
+// trouble at all.
+export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null, exact = ctx.stdinFile) {
+  const stop = ctx.stdinStop
+  if (stop && stop.invocation !== ctx.invocation) throw readAhead(stop)
   ctx.io?.read(ctx.stdinHandle?.identity)
   if (!asBytes && ctx.stdinBytes) textOfFile(ctx.stdinBytes, inputLabel(null, ctx))
   ctx.stdinLeft = rest
@@ -73,7 +102,19 @@ export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null) 
   // more. A reader that took the lot leaves none, so there are none to read
   // twice — which is what a shared input is.
   ctx.stdinBytes = bytesLeft
+  const left = rest !== '' || bytesLeft?.length > 0
+  ctx.stdinStop = left && !exact ? { reader: ctx.invocation?.name ?? 'a command', invocation: ctx.invocation } : null
 }
+
+// A reader opening its stdin again after it stopped part way through it —
+// `head -n 1 - -`, `awk '{ nextfile }' - -` — reads on from where it really
+// stopped, which it knows no better than the next command would.
+export function reopenStdin(ctx) {
+  if (ctx.stdinStop) throw readAhead(ctx.stdinStop)
+}
+
+const readAhead = ({ reader, why = `${reader} reads ahead of where it stops, and how far is not known` }) =>
+  new UnsupportedError('feature', 'input after an early stop', `reading standard input after ${reader} stopped part way through it is not supported: ${why}`)
 
 // Keep operand order and partial read failures; head/tail need directory entries
 // for banners even though they cannot read them. Repeated '-' shares one stream;
@@ -91,6 +132,13 @@ export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null) 
 // to say about a file whose bytes spell none.
 // Nothing is converted either way, so a command that can work in either pays
 // for neither.
+//
+// `noRead` is a command that opens its operands and reads none of them —
+// `head -n 0`, `xxd -l 0`: a directory is no error to it, and its stdin is
+// left where it was, which is not the same as taken and handed back whole
+// (consumeStdin): what an earlier reader left uncertain is no trouble to a
+// command that does not read it, and stays uncertain for the next one that
+// does.
 export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
   const entries = []
   let stderr = ''
@@ -124,7 +172,7 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
       Object.assign(entry, piped === null ? textInput(pipe, read, bytes) : bytesInput(piped, read, bytes, cmd, ctx))
       entry.shared = true
       pipe = ''
-      consumeStdin(ctx, '', true)
+      if (!options.noRead) consumeStdin(ctx, '', true)
     } else if (name !== '/dev/null') {
       const found = lookupWithNote(ctx, cmd, name)
       if (found.error) { entry.kind = 'missing'; error = found.error }
@@ -136,31 +184,43 @@ export function readFilesFor(cmd, files, ctx, stdin = '', options = {}) {
     entries.push(entry)
     // Each failure keeps its own words too, for a command that writes them
     // where that operand came rather than all together.
-    if (error) stderr += entry.failure = readFailure(cmd, name, error, entry.kind === 'dir')
+    if (error) stderr += entry.failure = readFailure(cmd, name, error, entry.kind === 'dir', ctx)
     if (entry.kind !== 'file' && (options.stopOnError || (entry.kind === 'dir' && options.stopOnDir))) break
   }
   return { inputs: entries.filter((e) => e.kind === 'file'), entries, stderr, failed: stderr !== '' }
 }
 
 // GNU words a failed read per command, and several word a directory
-// differently from a path they could not open at all. `%s` is the operand as
-// typed and `%r` the reason the filesystem gave; a command not named here
-// says `<command>: <operand>: <reason>`, which is what most of them say.
-// Recorded from coreutils 9.4 and GNU sed 4.9.
+// differently from a path they could not open at all. `%r` is the reason the
+// filesystem gave, and the operand is `%s` as typed — grep, sed and the tools
+// outside coreutils name it bare — `%q` as quoteaf quotes it, always, and
+// `%f` as quotef does, only where it needs it, which is how most of coreutils
+// names a file. A command not named here says `<command>: <operand>: <reason>`
+// with the operand as typed; a third shape is what one says of an operand
+// with nothing in it. Recorded from coreutils 9.4, GNU sed 4.9, util-linux's
+// hexdump, xxd and perl's shasum.
+const QUOTEF = ['%f: %r', '%f: Is a directory']
 const READ_FAILURES = {
-  head: ["cannot open '%s' for reading: %r", "error reading '%s': Is a directory"],
-  tail: ["cannot open '%s' for reading: %r", "error reading '%s': Is a directory"],
-  sort: ['cannot read: %s: %r', 'read failed: %s: Is a directory'],
+  __proto__: null,
+  head: ['cannot open %q for reading: %r', 'error reading %q: Is a directory'],
+  tail: ['cannot open %q for reading: %r', 'error reading %q: Is a directory'],
+  sort: ['cannot read: %f: %r', 'read failed: %f: Is a directory'],
   sed: ["can't read %s: %r", 'read error on %s: Is a directory'],
-  tac: ["failed to open '%s' for reading: %r", '%s: read error: Invalid argument'],
-  base32: [null, 'read error: Is a directory'],
-  base64: [null, 'read error: Is a directory'],
-  uniq: [null, "error reading '%s': Is a directory"],
+  tac: ['failed to open %q for reading: %r', '%f: read error: Invalid argument'],
+  base32: ['%f: %r', 'read error: Is a directory'],
+  base64: ['%f: %r', 'read error: Is a directory'],
+  uniq: ['%f: %r', 'error reading %q: Is a directory'],
+  wc: [...QUOTEF, 'invalid zero-length file name'],
+  xxd: [null, 'Is a directory'],
+  cat: QUOTEF, nl: QUOTEF, cut: QUOTEF, od: QUOTEF,
+  sha1sum: QUOTEF, sha256sum: QUOTEF, sha384sum: QUOTEF, sha512sum: QUOTEF,
 }
 
-export function readFailure(cmd, name, why, directory = false) {
-  const shape = READ_FAILURES[cmd]?.[directory ? 1 : 0]
-  const text = shape ? shape.replace(/%[sr]/gu, (mark) => (mark === '%s' ? name : why)) : `${name}: ${why}`
+export function readFailure(cmd, name, why, directory = false, ctx) {
+  const shapes = READ_FAILURES[cmd]
+  const shape = (name === '' && shapes?.[2]) || shapes?.[directory ? 1 : 0]
+  const marks = { '%s': () => name, '%q': () => quoteName(name, ctx), '%f': () => quoteFile(name, ctx), '%r': () => why }
+  const text = shape ? shape.replace(/%[sqfr]/gu, (mark) => marks[mark]()) : `${name}: ${why}`
   return `${cmd}: ${text}\n`
 }
 
@@ -187,7 +247,7 @@ export function readInputs(cmd, files, stdin, ctx, options) {
   if (files.length === 0) {
     const piped = ctx.stdinBytes ?? null
     // The question this reader answers for itself, just below.
-    consumeStdin(ctx, '', true)
+    if (!options?.noRead) consumeStdin(ctx, '', true)
     // Stdin is text unless a stage upstream wrote bytes into the pipe, and
     // then it is those bytes: read as they are where a reader works in them,
     // as the text they spell where one does not, and refused where they spell
@@ -234,18 +294,26 @@ export function parseNonNegativeInt(str, label, shown = str, { max = Infinity, d
 }
 
 // Retain the sign for head/tail: '-5' means omit the last five lines to head,
-// while '+5' means start at line five to tail. Preserve the operand in errors.
-export function parseSignedCount(str, label) {
-  if (typeof str !== 'string') return { error: err(`${label}: invalid count: ${str}`) }
+// while '+5' means start at line five to tail. The count is read as GNU's
+// xstrtoumax reads it — blanks and a `+` before the digits, and a multiplier
+// after them, `m` among them and `B`, `iB` or `D` after one, or the
+// multiplier alone for one of it — once the `-` is off it, and a count it
+// cannot read is named by what it counts, as quote() names it.
+export function parseSignedCount(str, cmd, unit, ctx) {
   const sign = str[0] === '+' || str[0] === '-' ? str[0] : ''
   const part = sign === '-' ? str.slice(1) : str
-  const m = /^[ \t\n\r\v\f]*\+?(\d+)(b|[kKMGTPEZYRQ](?:i?B)?)?$/u.exec(part)
-  const bare = !sign && /^(?:b|[kKMGTPEZYRQ](?:i?B)?)$/u.test(part)
-  if (!m && !bare) return { error: err(`${label}: invalid count: ${str}`) }
-  const suffix = m?.[2] ?? (bare ? part : '')
-  const count = scaledCount(BigInt(m?.[1] ?? '1'), suffix, label, str)
-  return count.error ? count : { ...count, sign }
+  const invalid = (why = '') => ({ error: err(`${cmd}: invalid number of ${unit === 'c' ? 'bytes' : 'lines'}: ${quoteLocale(part, ctx)}${why}`) })
+  const m = /^(?:[ \t\n\r\v\f]*\+?(\d+))?(?:(b|[kKmMGTPEZYRQ])(iB|B|D)?)?$/u.exec(part)
+  if (m === null || (m[1] === undefined && m[2] === undefined)) return invalid()
+  const [, digits = '1', letter, second] = m
+  const suffix = letter === undefined || letter === 'b' ? letter ?? '' : letter + (second === 'iB' ? 'iB' : second ? 'B' : '')
+  const count = scaledCount(BigInt(digits), suffix, cmd, str)
+  return count.error ? invalid(': Value too large for defined data type') : { ...count, sign }
 }
+
+// coreutils' answer to a command line it can read but not act on: the
+// diagnostic, then the line pointing at --help, and status 1.
+export const usageError = (cmd, message, code = 1) => err(`${cmd}: ${message}\nTry '${cmd} --help' for more information.`, code)
 
 // Shared GNU byte-count suffixes and unsigned 64-bit range checking.
 export function scaledCount(digits, suffix, label, shown) {

@@ -5,6 +5,7 @@
 // ./format.js.
 
 import { AwkError, MAX_FIELD_WIDTH } from './common.js'
+import { encodeUtf8Loose } from '../util.js'
 import { isUnicodeScalar } from '../unicode.js'
 import { formatNumeric, padField, parseFormat } from './format.js'
 import { StrNum, checkText, looksNumeric, toNum, toStr } from './value.js'
@@ -21,10 +22,15 @@ function pieces(fmt) {
   return p
 }
 
+// Running out of arguments is gawk's fatal error, which shows the format
+// with a caret under the character (by its byte) that wanted one.
 export function awkSprintf(m, fmt, args) {
   let ai = 0
-  const take = () => {
-    if (ai >= args.length) throw new AwkError('printf: not enough arguments to satisfy format string')
+  const take = (at) => {
+    if (ai >= args.length) {
+      const spaces = ' '.repeat(encodeUtf8Loose(fmt.slice(0, at)).length)
+      throw new AwkError(`not enough arguments to satisfy format string\n\t\`${fmt}'\n\t${spaces}^ ran out for this one`)
+    }
     return args[ai++]
   }
   let out = ''
@@ -32,18 +38,18 @@ export function awkSprintf(m, fmt, args) {
     if (typeof piece === 'string') { out += piece; continue }
     const spec = { ...piece }
     if (piece.width === '*') {
-      const w = Math.trunc(toNum(take()))
+      const w = Math.trunc(toNum(take(piece.at.width)))
       // A negative `*` width means left-justify, as in C.
       if (w < 0) { spec.minus = true; spec.width = -w } else spec.width = w
     }
     if (piece.precision === '*') {
-      const p = Math.trunc(toNum(take()))
+      const p = Math.trunc(toNum(take(piece.at.precision)))
       spec.precision = p < 0 ? null : p
     }
     if (spec.width > MAX_FIELD_WIDTH || spec.precision > MAX_FIELD_WIDTH) {
       throw new AwkError(`printf: field width or precision above ${MAX_FIELD_WIDTH} is not supported`, null, 'format size limit')
     }
-    out += formatOne(m, spec, take())
+    out += formatOne(m, spec, take(piece.at.conv))
   }
   return out
 }
@@ -68,6 +74,6 @@ function charOf(arg) {
     if (!isUnicodeScalar(code)) throw new AwkError('printf: character code outside Unicode scalar values is not supported', null, 'character code')
     return String.fromCodePoint(code)
   }
-  const s = arg instanceof StrNum ? arg.s : arg ?? ''
+  const s = arg instanceof StrNum ? arg.s : typeof arg === 'string' ? arg : ''
   return s === '' ? '\0' : String.fromCodePoint(s.codePointAt(0))
 }

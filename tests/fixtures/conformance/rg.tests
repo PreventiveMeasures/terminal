@@ -65,11 +65,11 @@
 "rg --sort path oak" => ! --sort 2
 "rg -uuu oak" => ! -uuu 2
 "rg -h oak" => ! -h 2
-"rg '(a)\\1' a.txt" => ! backreference 2
-"rg 'oak(?=x)' a.txt" => ! look-around 2
-"rg -- 'oak\\n' a.txt" => ! newline in a pattern 2
+"rg '(a)\\1' a.txt" => % 2
+"rg 'oak(?=x)' a.txt" => % 2
+"rg -- 'oak\\n' a.txt" => % 2
 "rg -A abc oak a.txt" => ! -A value 2
-"rg '[' a.txt" => ! regex parse error 2
+"rg '[' a.txt" => % 2
 "rg oak .hidden sub" => ! named hidden path 2
 
 # The same commands where one file in the tree is not ASCII.

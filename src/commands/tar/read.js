@@ -23,7 +23,7 @@ import { supports } from '@preventive/archive/compression.js'
 import { ArchiveError, unpack } from '@preventive/archive/tar.js'
 import { decompressMembers } from '../../compression.js'
 import { lookupWithNote } from '../../notes.js'
-import { consumeStdin, encodeUtf8, readBytesOf, stdinIsTerminal } from '../../util.js'
+import { consumeStdin, decodeUtf8Maybe, encodeUtf8, readBytesOf, stdinIsTerminal } from '../../util.js'
 import { gzipTrouble, looksCompressed } from '../gzip.js'
 import { quoteColon } from './names.js'
 import { tarNotes } from './pax.js'
@@ -104,8 +104,8 @@ function openArchive(opts, state) {
 export function readArchive(opts, state) {
   const source = openArchive(opts, state)
   if (!source) return null
-  const data = source.bytes
-  if (opts.gzip) return gunzipped(data, state)
+  if (opts.gzip) return gunzipped(source.bytes, state)
+  const data = source.stdin ? archiveOnStdin(source.bytes, opts.blocking, state.ctx) : source.bytes
   // A block's worth the reader takes is an archive, whatever its name says.
   const read = data.length >= BLOCK ? unpacked(data) : null
   if (read?.entries !== undefined) return named(read.entries, state, 0)
@@ -122,6 +122,56 @@ export function readArchive(opts, state) {
   // A block's worth that the reader refused may still open with a header
   // GNU would have taken, and then it never runs gzip over it at all.
   return refused(read.error, state)
+}
+
+// GNU reads an archive a record at a time — 20 blocks, or what -b says — and
+// from a pipe waits for each record to fill, so what it takes of standard
+// input is exact: every record up to the one holding the block after its
+// first zero block, which it reads to see whether that is the end. What
+// follows is the next reader's, and none of it is the archive's, which ends
+// at the second zero block whatever the rest of its record holds. Where the
+// walk to the end cannot be made — a size it cannot read, a lone zero block,
+// no end at all — the archive is all of it, and the reader judges it whole.
+// gzip, which -z puts between the two, reads to the end of what it is given.
+function archiveOnStdin(data, blocking, ctx) {
+  const end = archiveEnd(data)
+  if (end === null) return data
+  const record = blocking * BLOCK
+  const left = data.subarray(Math.min(data.length, Math.ceil(end / record) * record))
+  consumeStdin(ctx, decodeUtf8Maybe(left) ?? '', true, left.length ? left : null, true)
+  return data.subarray(0, end)
+}
+
+// Past the second zero block where every entry before it says, in its
+// header's size field, how many blocks of data follow it — or null.
+function archiveEnd(data) {
+  for (let at = 0; at + 2 * BLOCK <= data.length;) {
+    const header = data.subarray(at, at + BLOCK)
+    if (isZero(header)) return isZero(data.subarray(at + BLOCK, at + 2 * BLOCK)) ? at + 2 * BLOCK : null
+    const size = entrySize(header)
+    if (size === null) return null
+    at += BLOCK + Math.ceil(size / BLOCK) * BLOCK
+  }
+  return null
+}
+
+const isZero = (block) => block.every((byte) => byte === 0)
+
+// The size field as octal digits, which blanks may lead and a NUL or a blank
+// ends; the base-256 form only an entry past 8 GiB needs, like anything else,
+// is left to the reader.
+function entrySize(header) {
+  let digits = 0, size = 0
+  for (const byte of header.subarray(124, 136)) {
+    if (byte === 0 || byte === 0x20) {
+      if (digits > 0) break
+      continue
+    }
+    if (byte < 0x30 || byte > 0x37) return null
+    size = size * 8 + byte - 0x30
+    digits++
+  }
+  return size
 }
 
 // What gzip hands tar, and what it says of it.

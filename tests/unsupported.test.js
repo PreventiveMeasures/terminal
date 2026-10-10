@@ -81,7 +81,7 @@ describe('run().unsupported — what counts as a gap', () => {
   })
 
   it('kind `option`: an option a command parses and then explicitly rejects', async () => {
-    assert.deepEqual(await gaps('tr -d -s a'), [{
+    assert.deepEqual(await gaps('tr -d -s a b'), [{
       kind: 'option', command: 'tr', detail: '-d -s',
       message: 'tr: -d combined with -s is not supported',
     }])
@@ -99,8 +99,8 @@ describe('run().unsupported — what counts as a gap', () => {
   })
 
   it('kind `feature`: sed reports unsupported scripts', async () => {
-    for (const line of ["sed -n '/a/F' f.txt", "sed -n 'l' f.txt"]) {
-      assert.deepEqual(await details(line), ['script'], line)
+    for (const line of ["sed -n '/a/e' f.txt", "sed -n 'e date' f.txt"]) {
+      assert.deepEqual(await details(line), ['e command'], line)
       assert.equal((await gaps(line))[0].command, 'sed')
     }
     assert.deepEqual(await gaps("sed -i -e s/a/b/ f.txt"), [{

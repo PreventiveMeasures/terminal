@@ -74,11 +74,18 @@ describe('sed input commands preserve range and shared-input state', () => {
     ['ranges use the line number after N', sed('N;2,4p', 'even', '-n'), FILES.even],
     ['N keeps shared stdin after an explicit quit', "{ sed -n 'N;q'; cat; } <input", 'three\nfour\nfive\n'],
     ['n keeps shared stdin after an explicit quit', "{ sed -n 'n;q'; cat; } <input", 'three\nfour\nfive\n'],
-    ['N keeps pipe input after an explicit quit', "cat input | { sed -n 'N;q'; cat; }", 'three\nfour\nfive\n'],
-    ['n keeps pipe input after an explicit quit', "cat input | { sed -n 'n;q'; cat; }", 'three\nfour\nfive\n'],
     ['N preserves empty input without executing P', sed('N;P', 'empty', '-n'), ''],
     ['n preserves empty input without executing p', sed('n;p', 'empty', '-n'), ''],
   ])
+
+  // A pipe GNU sed read a buffer at a time, past its quit, and what it left
+  // there depends on how the pipe was written.
+  for (const operation of ['N', 'n']) {
+    it(`${operation} leaves a pipe uncertain after an explicit quit`, async () => {
+      const result = await createTerminal(FILES).run(`cat input | { sed -n '${operation};q'; cat; }`)
+      assert.deepEqual([result.stdout, result.exitCode, result.unsupported.map((gap) => gap.detail)], ['', 1, ['input after an early stop']])
+    })
+  }
 
   for (const operation of ['n', 'N']) {
     it(`${operation} reports errors encountered while looking for the next record`, async () => {

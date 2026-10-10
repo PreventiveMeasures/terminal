@@ -45,6 +45,27 @@ The only names it does not complete are the shell's own — `:`, `export`,
 something a terminal hands out, and a wired command given `hidden: true`,
 which is what that flag is for.
 
+A command named by a path — `/bin/echo`, `/usr/bin/printf`, `/usr/bin/[` — or
+run by `xargs` or `find -exec` is the program of that name rather than bash's
+builtin, as it is under bash: `echo`, `printf`, `test` and `[`, `true`, `false`
+and `pwd` then answer as coreutils' do, which read escapes, report a number
+they cannot read and word their errors differently from the builtins, and
+`--help` or `--version` alone, which the programs answer and this does not
+carry, is refused. The builtins sign what they say as bash signs its own
+messages, with this shell's name, `terminal: `, where bash's is `bash: ` —
+`terminal: printf: x: invalid number`, `terminal: [: missing `]'` — but for
+a usage line, which bash prints bare; the programs sign nothing. A GNU tool
+run by its path names itself by that path in what it says, as it does
+there. The command lines themselves are read as
+GNU's tools read them: `tail +N` and `tail -N` where at most one operand
+follows, `head -5c`, `seq` and `tr` taking options only before their
+operands, a missing option argument or a flag handed one in getopt's words
+followed by the tool's own pointer at `--help`, and file names and other
+operands quoted the way coreutils quotes them in C.UTF-8 — `cat: '*.log': No
+such file or directory`, `head: invalid number of lines: ‘1x’`. `xargs`
+builds command lines of at most 128 KiB, GNU's default, and starts another
+where the next argument would not fit.
+
 A file may be bytes rather than text: a source entry that is a `Uint8Array` is
 the file's own bytes, for what no JS string can spell — an image, a compiled
 object, an archive — and `{ format: 'base64', data }` is the same file spelt
@@ -72,6 +93,32 @@ unsupported diagnostic rather than mangling it — `head`, `sed`, `awk` and the
 rest, whether the bytes came from a file, a redirection or a pipe, and
 `diff -a`.
 
+A command that stops reading before the end of what the list shares leaves
+the rest to the next one, and where that rest begins is known only where GNU
+makes it exact. A redirected file is put back where the reader stopped by
+`head -n`, `sed`'s `q` and `Q`, `grep -m` and `hexdump -n`, so
+`{ head -n 1; cat; } < f` prints all of `f`; `head -c` and `od -N` read no
+more than they need, from a pipe too; and `tar` reads an archive a record at
+a time up to the record that ends it, so `cat a.tar notes | { tar tf -; cat; }`
+lists the archive and then prints the notes. A pipe — and a here-string or a
+here-document, which bash 5.2 hands over as one — is read a buffer at a time,
+and how far past its stop a reader's reads had taken it depends on how the
+writes before them fell: `seq 1 3000 | { head -n 1; cat; }` hands `cat` 1142
+lines on one run and could hand it none on another. `awk`, `xxd`, `grep -q`,
+`-l` and `-L`, and `rg` read even a file a block at a time and put nothing
+back, which takes a file no bigger than that block whole and leaves the rest
+of a larger one as uncertain as a pipe's; so do `base64 -d` giving up at
+what is not its alphabet and `xargs` giving up part way through its list.
+A pipeline whose later stage stops reading — `cat | head -n 1` — ends the
+stage writing to it wherever that one has got to, and so leaves uncertain
+how much of the list's input its first stage took. A command that then
+reads what such a reader left — `cat`, a substitution, the next turn of a
+loop, the same reader opening `-` again — is refused with an unsupported
+diagnostic naming the reader that stopped, rather than answered with one
+run's luck; a list that never reads it again runs as it would. `awk` reads
+`/dev/stdin` as gawk does, as the descriptor it is rather than the file
+opened again.
+
 `grep` searches a file that is not text as GNU grep does. A NUL in GNU's first
 read — 96 KiB of a file, 64 KiB of a pipe — makes the file binary: records end
 at each NUL as at a newline, nothing of the file is printed, and a selection
@@ -93,8 +140,19 @@ bytes spell; and, beside a character glibc reads past U+10FFFF or a surrogate
 spelt in UTF-8, a pattern GNU's two matchers would answer differently. `rg`
 passes over a file of bytes that spell no text where a plain literal is
 nowhere in it and refuses it by name where one could be, and does the same
-for such bytes piped into it; an `rg` walk passes over what ripgrep itself
-calls binary: a file holding a NUL, which it never reads past.
+for such bytes piped into it. A NUL is what ripgrep calls binary, and it reads
+as ripgrep does: in 64 KiB fills after a first one of three bytes, so a walked
+file holding one is searched up to the fill that brings it, what it selected
+there is printed, and `PATH: WARNING: stopped searching binary file after
+match (found "\0" byte around offset N)` follows; a count says nothing of the
+file, and `--files-without-match` neither lists it nor exits 1 over it.
+Standard input holding a NUL is read to its end with each NUL a line end, a
+count counting every line, and closes with `binary file matches (found "\0"
+byte around offset N)`. Refused: context around, or `-h` lines from, a binary
+file read in part; a named binary file; and, beside a line over 64 KiB long,
+a search that prints from a binary file whose NUL is past its first 64 KiB,
+since the buffer ripgrep grew for that line is kept for the files its thread
+searches next, and which those are turns on thread order.
 
 The terminal's own stdin and stdout are a terminal's: nothing can be typed
 into it, and it shows text. A command reads the terminal where nothing was
@@ -189,19 +247,24 @@ is what `-P` asks for and what `du` does without being asked; `-D` and `-H`
 measure what an operand points at, and `-L`, which would measure what every
 link in a walk points at, reports an unsupported diagnostic where it meets one.
 
-`rg` covers the search itself: recursion, `-n -N -i -s -w -v -F -a -l -c -e -q
--H -I -A -B -C -u`, and skipping hidden entries unless `--hidden`. Options are
-last-one-wins and `-u` escalates, as in ripgrep. Its regex is checked against
-ripgrep's own engine, so backreferences and look-around are refused rather than
-answered. `.gitignore` in a repository, `.ignore` and `.rgignore` change which
-files are searched -- from any directory above the starting point as well as
-below it -- so a tree carrying one is refused unless `--no-ignore`;
-binary files are left out of a walk but a named one is refused, and `-t`, `-g`,
-`--files` and the other output modes report an unsupported diagnostic. A
-pattern spelling out a newline, and a file starting with a byte-order mark, are
-refused rather than answered differently from ripgrep. Literal matching crosses
-scripts, but Unicode-aware matching does not: `-i`, `-w`, `.` and `\w` over a
-tree holding any non-ASCII file report an unsupported diagnostic.
+`rg` covers the search itself: recursion, `-n -N -i -s -w -x -v -F -a -l -c -e
+-q -H -I -A -B -C -u`, and skipping hidden entries unless `--hidden`. Options
+are last-one-wins and `-u` escalates, as in ripgrep, and standard input is
+named `<stdin>`. A pattern is read as Rust's regex syntax, joined to the others
+as ripgrep shows them, `(?:p1)|(?:p2)`: one Rust rejects gets ripgrep's own
+`regex parse error` report, carets and all — a backreference, look-around, an
+unclosed class or group, a stray repetition, a range out of order, an escape
+Rust does not know, a newline spelt out — and what Rust reads but this does
+not follow is refused: nested classes and class set operations, inline flags,
+`\p`, a repetition of an assertion or of a repetition, and counts over 1000.
+A count or a `--files-without-match` exits 0 where it printed anything, as
+ripgrep's do. `.gitignore` in a repository, `.ignore` and `.rgignore` change
+which files are searched -- from any directory above the starting point as
+well as below it -- so a tree carrying one is refused unless `--no-ignore`;
+`-t`, `-g`, `--files` and the other output modes report an unsupported
+diagnostic, as does a file starting with a byte-order mark. Literal matching
+crosses scripts, but Unicode-aware matching does not: `-i`, `-w`, `.` and `\w`
+over a tree holding any non-ASCII file report an unsupported diagnostic.
 
 A walk stops at a symbolic link rather than crossing it, which is where `find`,
 `rg` and `grep -r` all stop: `find` reports the link as the entry it is, and
@@ -231,12 +294,90 @@ differently; and `-w` with a pattern that can match nothing, over a character
 past ASCII that is no word character, inside which GNU, reading bytes, finds
 an empty match.
 
+`grep` checks a pattern as GNU grep 3.11 does, with glibc's regex and then
+its dfa, and says what they say: each pattern line glibc rejects is reported in
+glibc's words (`grep: Unmatched [, [^, [:, [., or [=`, `Invalid content of
+\{\}`, `Trailing backslash`), after `FILE:LINE: ` for a line read by `-f`; the
+dfa's own errors and warnings follow (`character class syntax is
+[[:space:]], not [:space:]`, `warning: * at start of expression`). A
+backslash inside a bracket is a member of it, and a BRE `\{` with nothing
+before it is a `{`. `-P` reports in PCRE2's words, takes one pattern, and
+reads `\x` with no digits as NUL. The options die where GNU's do and as
+GNU's do — `invalid context length argument`, `invalid max count`,
+`conflicting matchers specified`, an option missing its argument, the
+two-line usage — `-m` below zero is no limit, the long spellings and `-y`
+are accepted, and `-h`/`-H` and `-l`/`-L` go to the last given, either of
+the latter outranking `-c`. `--include` and `--exclude` match a named file by
+its whole name or any part of it after a `/`, and a walked one by its base
+name; `--exclude-dir` drops trailing slashes and also passes over a named
+directory, never the `.` a bare `-r` starts from. Where the two matchers read
+a stray operator apart — a repetition right after an anchor, an ERE interval
+with nothing before it, a BRE `$` before a bare `)` or `|` mid-pattern — which of them answers
+depends on the search, and the pattern is refused.
+
 The locale is C.UTF-8 and nothing else: `$LANG` answers it, and a `LANG`,
 `LC_ALL` or `LC_CTYPE` set to any other value, or a `LANG` unset, is refused,
 since every command would read text differently there and none of that is
 implemented. The other `LC_` categories also take `C` and `POSIX`, which
 read the same as C.UTF-8 in them. `createTerminal` takes `locale: 'C.UTF-8'`
 and nothing else.
+
+`sed` runs a script as GNU sed 4.9 does, with `-n`, `-e`, `-f`, `-E` and `-r`,
+`-s`, `-z`, `-l`, `--sandbox`, and `-i` with or without a backup suffix: every
+address — `0,/re/`, `first~step`, `addr,+N` and `addr,~N` among them — and
+every command but `e`, from `#n` on a script's first line to `l` wrapped at
+its width, `Q`, `F`, `z`, `v`, `r`, `R`, `w` and `W`, and in a replacement the
+`\U`, `\L`, `\u`, `\l` and `\E` case conversions and the `\x`, `\o`, `\d` and
+`\c` escapes. A script it cannot compile is wrong in GNU's words and at GNU's
+place — `-e expression #2, char 5:` or `file s.sed line 3:` ahead of the
+message, the character counted in bytes — and no script, or an option
+missing its argument, prints GNU's usage. A bracket takes a backslash for
+itself, as POSIX has it, so `[\]` and `[\.]` match what GNU's do, while `\n`,
+`\t` and the other escapes sed rewrites before its regex sees them stand for
+their characters there too. A directory handed to `-f` is a script with
+nothing in it, which is what GNU reads from one. Output to a pipe or a file is
+held in blocks of 4096 bytes as glibc's stdio holds it, and a line at a time
+on the terminal, so under `2>&1` a diagnostic lands where GNU's lands — ahead
+of whatever output was still held — and one that would land inside a
+character is refused. A closed stdout is `couldn't write N items to stdout`
+when a block fills and `couldn't close stdout` at the end, status 4, which is
+also the status of a `w` file that cannot be opened and of an `-i` backup that
+cannot be put in place. A loop that never reads input is stopped after a
+million commands; one that reads as it goes runs as long as its input does.
+What reports an unsupported diagnostic: `e` and the `M` flag, a backreference
+inside a regex, `-u`, `--posix`, `--debug`, `--follow-symlinks` and
+`--version`, an `l` width taken from `COLS`, `r` and `R` reading stdin or a
+file the same script writes, and `-i` outside the writable `/tmp/` overlay.
+
+`awk` is gawk 5.2.1. It reads a program with gawk's own grammar, through
+parse tables built the way Bison builds gawk's and a lexer that reads as
+gawk's does, so a program gawk runs is read the same, and one gawk rejects is
+rejected at the token gawk stops at, with all gawk has printed by then: the
+line, a caret under the token and gawk's message — down to a program that
+opens with an empty line, or a `-f` file that ends inside a rule. Every
+message is gawk's, placed where gawk places it: `awk: cmd. line:3:` or the
+`-f` file's name, `(FILENAME=… FNR=…)` once input has been read, `fatal:`
+with exit 2, `error:` with exit 1, a `warning:` and the run goes on, and a
+command line gawk cannot read answered with gawk's usage and exit 1. `for (k
+in a)` walks an array in gawk's order, from the same three hash tables gawk
+keeps; `rand()` is gawk's random(3)-based generator, seed for seed, and
+`srand()` with no argument seeds from the clock as gawk does. Values are
+gawk's: a field past `NF` is unassigned, `$0 = 30` keeps a number, `NF = 2.7`
+keeps 2.7, a record is rebuilt with the `CONVFMT` in force when it is next
+read, the right side of an assignment is evaluated before its target, and `^`
+with an integer exponent multiplies as gawk's does. What is refused, by name:
+writing to a file other than `/dev/stdout`, `/dev/stderr` and `/dev/null`
+(a target only the run knows is refused when it is reached); everything that
+runs a process — `system()`, `cmd | getline`, `print | cmd`, `|&`; `@` and
+what it begins (indirect calls, typed regexes, `@include`); namespaces;
+arrays of arrays; `asort`, `asorti`, `patsplit`, `strftime`, `mktime`,
+`mkbool`, the gettext functions and `typeof()`'s second argument; `ENVIRON`
+and the parts of `PROCINFO` that describe a process; options other than
+`-f`, `-F` and `-v`; calls nested deeper than 100; a regex `RS` that can
+match the empty string before the end of its input, or one with a word
+boundary after a word character; an interval count above 1000; a NaN printed
+with its sign; and a backslash before a character outside ASCII in a string
+or a regex, whose warning gawk prints as a lone byte.
 
 `stat -c '%s %n' file` reports byte size and name; `%F` reports file type.
 `--printf` adds escape processing and controls line endings. Default `stat`

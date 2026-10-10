@@ -134,11 +134,11 @@ describe('sed final text EOF retains pending raw bytes and NULL text', () => {
 
 describe('sed continuation syntax and normalization failures remain precise', () => {
   it('a closing brace absorbed as text cannot close a command block', async () => {
-    assert.deepEqual(await createTerminal(FILES).run(command(expressions('{a\\', '}'))), expected('', 1, "sed: unmatched '{'\n"))
+    assert.deepEqual(await createTerminal(FILES).run(command(expressions('{a\\', '}'))), expected('', 1, "sed: -e expression #1, char 0: unmatched `{'\n"))
   })
   it('a later source triggers ordinary recursive control escape validation', async () => {
     const args = expressions('a\\', String.raw`\c\x` + '\\', '')
-    assert.deepEqual(await createTerminal(FILES).run(command(args)), expected('', 1, 'sed: recursive escaping after \\c not allowed\n'))
+    assert.deepEqual(await createTerminal(FILES).run(command(args)), expected('', 1, 'sed: -e expression #3, char 0: recursive escaping after \\c not allowed\n'))
   })
   it('unrepresentable completed byte text still reaches diagnostics', async () => {
     const run = command(expressions('a\\', String.raw`\x80` + '\\', ''))
@@ -149,12 +149,12 @@ describe('sed continuation syntax and normalization failures remain precise', ()
     assert.deepEqual(await terminal.run(run + ' 2>/dev/null | cat'), expected('', 0, '', unsupported))
   })
   it('unsupported commands after completed text retain their diagnostic', async () => {
-    const run = command(expressions('a\\', 'tail\nF'))
+    const run = command(expressions('a\\', 'tail\ne echo'))
     const terminal = createTerminal(FILES)
     const result = await terminal.run(run)
     assert.equal(result.stdout, '')
     assert.equal(result.exitCode, 1)
-    assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['script'])
+    assert.deepEqual(result.unsupported.map(({ detail }) => detail), ['e command'])
     assert.deepEqual(await terminal.run(run + ' 2>/dev/null | cat'), expected('', 0, '', result.unsupported))
   })
   it('zero escapes remain literal zero in transliteration text', async () => {

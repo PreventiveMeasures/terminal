@@ -62,11 +62,11 @@ describe('sed text errors and unsupported byte output preserve diagnostics', () 
       assert.deepEqual(await terminal.run(command + ' 2>/dev/null | cat'), expected('', 0, '', unsupported))
     })
   }
-  for (const text of [String.raw`\c\x`, String.raw`\c\n`, '\\c\\']) {
+  for (const [text, char] of [[String.raw`\c\x`, 8], [String.raw`\c\n`, 8], ['\\c\\', 7]]) {
     it(`invalid recursive control escaping is an ordinary syntax error: ${text}`, async () => {
       // A physical LF follows the last case so the command text is complete.
       const command = `sed ${quote('a\\\n' + text + '\n')} input`
-      assert.deepEqual(await createTerminal({ input: 'line\n' }).run(command), expected('', 1, 'sed: recursive escaping after \\c not allowed\n'))
+      assert.deepEqual(await createTerminal({ input: 'line\n' }).run(command), expected('', 1, `sed: -e expression #1, char ${char}: recursive escaping after \\c not allowed\n`))
     })
   }
 })

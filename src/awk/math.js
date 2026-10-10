@@ -4,57 +4,122 @@
 
 import { AwkError } from './common.js'
 import { evalExpr } from './eval.js'
+import { formatNumeric, parseFormat } from './format.js'
 import { StrNum, toNum, toStr } from './value.js'
 
 const num = (m, node) => toNum(evalExpr(m, node))
 
-// A small deterministic generator (mulberry32) so that, as in awk, the
-// sequence repeats from run to run until srand() is called. The state is
-// an unsigned 32-bit value; gawk's initial seed is 1, and that is what
-// the first srand() reports as the previous seed.
-const TWO_32 = 2 ** 32
+// gawk's own random(3), so that rand() gives gawk's numbers: the BSD
+// additive feedback generator in the form gawk's 256-byte state selects
+// (x^63 + x + 1, the state seeded by a Park-Miller LCG and stirred 630
+// times), read through a 512-entry shuffle buffer. As in gawk, the
+// generator starts out seeded with 1 — which is what the first srand()
+// reports as the previous seed — and srand() with no argument seeds it with
+// the time of day, as systime() reads it.
+const DEG = 63
+const SEP = 1
+const SHUFFLE = 512
 
-function seedState(seed) {
-  return Number(BigInt.asUintN(32, BigInt(Math.trunc(seed))))
+export const initialRng = () => ({ seed: 1, g: null })
+
+function generator(m) {
+  if (m.rng.g === null) {
+    const state = new Uint32Array(DEG)
+    // The state seen as signed, as good_rand() takes each word.
+    m.rng.g = { state, signed: new Int32Array(state.buffer), f: 0, r: 0, buffer: new Int32Array(SHUFFLE), s: 0, fill: true }
+    srandom(m.rng.g, 1)
+  }
+  return m.rng.g
 }
 
-export const initialRng = () => ({ seed: 1, state: seedState(1) })
+function goodRand(x) {
+  if (x === 0) x = 123459876
+  const hi = Math.trunc(x / 127773)
+  const lo = x % 127773
+  let next = 16807 * lo - 2836 * hi
+  if (next < 0) next += 0x7fffffff
+  return next
+}
 
+function srandom(g, seed) {
+  g.fill = true
+  g.state[0] = seed
+  for (let i = 1; i < DEG; i++) g.state[i] = goodRand(g.signed[i - 1])
+  g.f = SEP
+  g.r = 0
+  for (let i = 0; i < 10 * DEG; i++) random(g)
+}
+
+function randomOld(g) {
+  const { state } = g
+  state[g.f] += state[g.r]
+  const i = state[g.f] >>> 1
+  if (++g.f >= DEG) { g.f = 0; ++g.r } else if (++g.r >= DEG) g.r = 0
+  return i
+}
+
+function random(g) {
+  if (g.fill) {
+    for (let k = 0; k < SHUFFLE; k++) g.buffer[k] = randomOld(g)
+    g.s = randomOld(g)
+    g.fill = false
+  }
+  const r = randomOld(g)
+  const k = g.s & (SHUFFLE - 1)
+  g.s = g.buffer[k]
+  g.buffer[k] = r
+  return g.s
+}
+
+// Two draws make one double, as gawk builds it, never 1.
 function rand(m) {
-  m.rng.state = (m.rng.state + 0x6D2B79F5) % TWO_32
-  let t = m.rng.state
-  t = Math.imul(t ^ (t >>> 15), t | 1)
-  t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-  const r = t ^ (t >>> 14)
-  return (r < 0 ? r + TWO_32 : r) / TWO_32
+  const g = generator(m)
+  let value
+  do {
+    const d1 = random(g)
+    const d2 = random(g)
+    value = 0.5 + ((d1 / 2147483648 + d2) / 2147483648)
+    value -= 0.5
+  } while (value === 1)
+  return value
 }
+
+// The seed is the argument converted as C converts a double to a long
+// (a value out of range, or NaN, is the most negative one), which the
+// generator then takes as an unsigned int.
+const LONG_MIN = -(2 ** 63)
 
 function srand(m, args) {
+  const g = generator(m)
   const previous = m.rng.seed
-  const seed = args.length > 0 ? num(m, args[0]) : Math.floor(Date.now() / 1000)
+  const x = args.length > 0 ? num(m, args[0]) : Math.floor(Date.now() / 1000)
+  const seed = Number.isFinite(x) && Math.abs(x) < 2 ** 63 ? Math.trunc(x) : LONG_MIN
   m.rng.seed = seed
-  m.rng.state = seedState(seed)
+  srandom(g, Number(BigInt.asUintN(32, BigInt(seed))))
   return previous
 }
 
 // gawk warns (and returns the IEEE result) where C's math functions
-// leave the domain: a negative log or sqrt, an exp that overflows.
+// leave the domain: a negative log or sqrt, an exp that overflows. The
+// argument is shown as C's %g shows it.
+const G = parseFormat('%g')[0]
+const formatG = (x) => formatNumeric(x, G)
 function log(m, args) {
   const x = num(m, args[0])
-  if (x < 0) m.warn(`log: received negative argument ${toStr(x, m)}`)
+  if (x < 0) m.warn(`log: received negative argument ${formatG(x)}`)
   return Math.log(x)
 }
 
 function sqrt(m, args) {
   const x = num(m, args[0])
-  if (x < 0) m.warn(`sqrt: called with negative argument ${toStr(x, m)}`)
+  if (x < 0) m.warn(`sqrt: received negative argument ${formatG(x)}`)
   return Math.sqrt(x)
 }
 
 function exp(m, args) {
   const x = num(m, args[0])
   const r = Math.exp(x)
-  if (Number.isFinite(x) && !Number.isFinite(r)) m.warn(`exp: argument ${toStr(x, m)} is out of range`)
+  if (Number.isFinite(x) && !Number.isFinite(r)) m.warn(`exp: argument ${formatG(x)} is out of range`)
   return r
 }
 

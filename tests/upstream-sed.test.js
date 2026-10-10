@@ -98,11 +98,7 @@ describe('GNU sed audit — hold space and first-line deletion', () => {
 
 describe('GNU sed audit — unavailable features remain observable', () => {
   const scripts = [
-    's/oak/elm/M', 's/oak/elm/e', 's/oak/elm/w output',
-    String.raw`s/oak/\U&/`, String.raw`s/oak/\x41/`,
-    String.raw`s/oak/\o101/`, String.raw`s/oak/\d65/`, String.raw`s/oak/\Q/`,
-    '1~2p', '2,~3p', '/oak/Mp', 's/oak/elm/ # comment',
-    'r input', 'w output',
+    's/oak/elm/M', 's/oak/elm/e', 's/oak/elm/w output', '/oak/Mp', 'w output',
     String.raw`s/\(oak\)\1/elm/`,
   ]
   for (const script of scripts) {
@@ -132,6 +128,18 @@ describe('GNU sed audit — extended commands', () => {
     ['s/oak/elm/;s//fir/', 'elmfir\n'],
     ['y/oak/elm/', 'elmelm\n'],
     ['q', 'oakoak\n'],
+    [String.raw`s/oak/\U&/`, 'OAKoak\n'],
+    [String.raw`s/oak/\x41/`, 'Aoak\n'],
+    [String.raw`s/oak/\o101/`, 'Aoak\n'],
+    [String.raw`s/oak/\d65/`, 'Aoak\n'],
+    [String.raw`s/oak/\Q/`, 'Qoak\n'],
+    ['1~2p', 'oakoak\noakoak\n'],
+    ['2,~3p', 'oakoak\n'],
+    ['s/oak/elm/ # comment', 'elmoak\n'],
+    ['r input', 'oakoak\noakoak\n'],
+    ['R input', 'oakoak\noakoak\n'],
+    ['0r input', 'oakoak\noakoak\n'],
+    ['W /dev/stdout', 'oakoak\noakoak\n'],
   ]) it(script, () => check(script, 'oakoak\n', stdout))
 })
 

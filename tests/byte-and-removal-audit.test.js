@@ -83,7 +83,7 @@ describe('base64 descriptor and option boundaries', () => {
     const t = createTerminal({ '-w': 'foo', '0': 'bar' })
     assert.deepEqual(await t.run('base64 -- -w'), result('Zm9v\n'))
     assert.deepEqual(await t.run('base64 -w0 0'), result('YmFy'))
-    assert.deepEqual(await t.run('base64 -wno --wrap=0 0'), result('', 1, 'base64: invalid wrap size: no\n'))
+    assert.deepEqual(await t.run('base64 -wno --wrap=0 0'), result('', 1, 'base64: invalid wrap size: ‘no’\n'))
   })
   it('consumes shared stdin once and reopens regular /dev/stdin from the start', async () => {
     const t = createTerminal({ input: 'foo' })

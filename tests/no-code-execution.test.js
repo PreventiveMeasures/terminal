@@ -375,7 +375,7 @@ describe('no JS execution — runtime', () => {
     // cannot take a refused builtin's name to smuggle the call past the
     // parse-time check either.
     assert.match((await t.run("awk 'BEGIN { f = \"system\"; @f(\"id\") }'")).stderr, /indirect calls .* are not supported/u)
-    assert.match((await t.run("awk 'function system(c) { return 1 } BEGIN { system(\"id\") }'")).stderr, /cannot redefine builtin function `system`/u)
+    assert.match((await t.run("awk 'function system(c) { return 1 } BEGIN { system(\"id\") }'")).stderr, /`system' is a built-in function, it cannot be redefined/u)
     // Only awk's three device names are writable; everything else is
     // refused rather than reaching a real file.
     assert.equal((await t.run("awk 'BEGIN { print \"x\" > \"/dev/stderr\" }'")).stderr, 'x\n')
@@ -397,7 +397,7 @@ describe('no JS execution — runtime', () => {
       const r = await t.run(`awk 'BEGIN { print ${name}("1+1") }'`)
       assert.equal(r.exitCode, 2, name)
       assert.equal(r.stdout, '', name)
-      assert.match(r.stderr, new RegExp(`function \`${name}\` not defined`, 'u'), name)
+      assert.equal(r.stderr, `awk: cmd. line:1: fatal: function \`${name}' not defined\n`, name)
     }
     // `getline < file` reads the virtual FS: a host path is simply
     // absent (-1), not opened.
@@ -410,12 +410,15 @@ describe('no JS execution — runtime', () => {
     // Subscripts come from input, so they are attacker-chosen. Held in
     // a Map, they are keys; in a plain object, `a["__proto__"] = ...`
     // would reach Object.prototype instead of the array.
+    // They come out of `for (k in a)` in the order gawk 5.2.1's string hash
+    // gives them.
     const r = await t.run("awk 'BEGIN { a[\"__proto__\"] = 1; a[\"constructor\"] = 2; a[\"toString\"] = 3; for (k in a) print k, a[k] }'")
     assert.equal(r.exitCode, 0)
-    assert.equal(r.stdout, '__proto__ 1\nconstructor 2\ntoString 3\n')
+    assert.equal(r.stdout, '__proto__ 1\ntoString 3\nconstructor 2\n')
     // A fresh array inherits none of it, and an unset element is empty
-    // rather than an inherited member.
-    assert.equal((await t.run("awk 'BEGIN { a[\"__proto__\"] = 1; print length(b), ((\"__proto__\" in b) ? \"yes\" : \"no\") }'")).stdout, '0 no\n')
+    // rather than an inherited member. (`length(b)` settles an untyped `b`
+    // as a scalar in gawk, so the membership test asks a different name.)
+    assert.equal((await t.run("awk 'BEGIN { a[\"__proto__\"] = 1; print length(b), ((\"__proto__\" in c) ? \"yes\" : \"no\"), ((\"toString\" in c) ? \"yes\" : \"no\") }'")).stdout, '0 no no\n')
     assert.equal((await t.run("awk 'BEGIN { print length(a[\"toString\"]) }'")).stdout, '0\n')
   })
 

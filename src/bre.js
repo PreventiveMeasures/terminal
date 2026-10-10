@@ -2,61 +2,119 @@ import { readPosixClass } from './charclass.js'
 import { UnsupportedError } from './unsupported.js'
 
 // Callers validate GNU syntax and unsupported escapes before translation.
-export function breToEs(pattern, tables) {
+// A backslash in a bracket is a member, which the JS class spells `\\`.
+//
+// A repetition — `*`, `\+`, `\?` or `\{` — where an expression begins has
+// nothing to repeat. GNU's two matchers say where that is differently:
+// glibc's regex begins an expression afresh after every anchor, where the
+// dfa's lexer (`laststart`) only does at the start, after `\(` and after
+// `\|`, with anchors there leaving it so. A BRE reads such a repetition as
+// the character it is, and where both agree that is all there is to it.
+// With `grep` set — GNU grep's syntax rather than sed's, where `\{` there is
+// an error — they disagree on a repetition right after an anchor that
+// follows something else, `a\b*`, which the dfa applies to the anchor and
+// glibc reads as a `*`. A word anchor sends the pattern to glibc, since the
+// dfa cannot match one in a multibyte locale, but only for the lines the
+// dfa's own reading — the anchor and the repetition taken for nothing —
+// also selects; with nothing after them that is every line glibc selects,
+// and glibc's reading stands. Any other is refused, and so is a `$` before
+// a bare `)` or `|`, which the dfa takes for an anchor and glibc for a `$`.
+export function breToEs(pattern, tables, grep = false) {
   const swap = '(){}+?|'
-  let canRepeat = false, groups = 0, inClass = false, out = ''
+  let laststart = true
+  let anchored = false
+  let word = false
+  let interval = false
+  let groups = 0
+  let out = ''
+  // Whether the repetition ending at `end` repeats, or is the character.
+  const repeats = (end) => {
+    if (laststart) return false
+    if (!anchored) return true
+    if (!grep || (word && end === pattern.length)) return false
+    throw new UnsupportedError('feature', 'regex repetition after an anchor', 'grep: a repetition directly after an anchor is read differently by GNU\'s two matchers, and is not supported')
+  }
+  const atom = () => { laststart = anchored = word = false }
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i]
-    if (inClass) {
-      if (c === '[' && (pattern[i + 1] === '.' || pattern[i + 1] === '=')) throw new UnsupportedError('feature', 'regex collating or equivalence class', 'grep: collating and equivalence classes are not supported')
-      if (c === '[') {
-        const cls = readPosixClass(pattern, i, { classes: tables })
-        if (cls) { out += cls.body; i = cls.end - 1; continue }
-      }
-      out += c
-      if (c === ']') { inClass = false; canRepeat = true }
-      continue
-    }
     if (c === '[') {
-      out += c; inClass = true
-      if (pattern[i + 1] === '^') { out += '^'; i++ }
-      // The first ] is a member, including immediately after negation.
-      if (pattern[i + 1] === ']') { out += '\\]'; i++ }
+      const bracket = bracketToEs(pattern, i, tables)
+      out += bracket.source
+      i = bracket.end
+      atom()
       continue
     }
     if (c === '\\') {
       const next = pattern[++i]
       if (next === undefined) return { error: 'trailing backslash (\\)' }
+      if (next === '{' && (!grep || repeats(-1))) {
+        // An interval: its digits and comma pass as they are, and the `\}`
+        // after them closes it.
+        out += '{'; interval = true; atom()
+        continue
+      }
+      if (next === '}' && interval) { out += '}'; interval = false; continue }
+      if (next === '+' || next === '?') {
+        out += repeats(i + 1) ? next : '\\' + next
+        atom()
+        continue
+      }
       if (swap.includes(next)) {
-        if ((next === '+' || next === '?') && !canRepeat) {
-          out += '\\' + next; canRepeat = true; continue
-        }
         if (next === '(') groups++
         if (next === ')' && groups-- === 0) return { error: 'Unmatched ) or \\)' }
-        if (next === '(' || next === '|') canRepeat = false
-        if (next === ')' || next === '}') canRepeat = true
-        out += next
-      } else {
-        out += '^$\\.*[]/bBsSwW<>`\'123456789'.includes(next) ? '\\' + next : next
-        canRepeat = !'bB<>`\''.includes(next)
+        out += next === '{' || (next === '}' && grep) ? '\\' + next : next
+        atom()
+        laststart = next === '(' || next === '|'
+        continue
       }
+      out += '^$\\.*[]/bBsSwW<>`\'123456789'.includes(next) ? '\\' + next : next
+      if ('bB<>`\''.includes(next)) { anchored = true; word = 'bB<>'.includes(next) } else atom()
       continue
     }
-    if (c === '*') { out += canRepeat ? '*' : '\\*'; canRepeat = true; continue }
+    if (c === '*') {
+      out += repeats(i + 1) ? '*' : '\\*'
+      atom()
+      continue
+    }
     if (c === '^') {
-      canRepeat = !caretIsAnchor(pattern, i)
-      out += canRepeat ? '\\^' : '^'
+      const anchor = caretIsAnchor(pattern, i)
+      out += anchor ? '^' : '\\^'
+      if (anchor) { anchored = true; word = false } else atom()
       continue
     }
     if (c === '$') {
-      canRepeat = !(i === pattern.length - 1 || (pattern[i + 1] === '\\' && (pattern[i + 2] === ')' || pattern[i + 2] === '|')))
-      out += canRepeat ? '\\$' : '$'
+      const anchor = i === pattern.length - 1 || (pattern[i + 1] === '\\' && (pattern[i + 2] === ')' || pattern[i + 2] === '|'))
+      if (grep && !anchor && (pattern[i + 1] === ')' || pattern[i + 1] === '|') && i + 2 < pattern.length) {
+        throw new UnsupportedError('feature', 'regex anchor', 'grep: a `$` before a bare `)` or `|` is read differently by GNU\'s two matchers, and is not supported')
+      }
+      out += anchor ? '$' : '\\$'
+      if (anchor) { anchored = true; word = false } else atom()
       continue
     }
-    out += swap.includes(c) ? '\\' + c : c
-    canRepeat = true
+    out += swap.includes(c) || c === ']' ? '\\' + c : c
+    atom()
   }
   return groups > 0 ? { error: 'Unmatched ( or \\(' } : { source: out }
+}
+
+// A bracket expression from its `[`, as a JS class, and where it ends: a
+// backslash in it is a member, and a class name is spelt out from the
+// locale's tables.
+function bracketToEs(pattern, start, tables) {
+  let i = start + 1
+  let out = '['
+  if (pattern[i] === '^') { out += '^'; i++ }
+  // The first ] is a member, including immediately after negation.
+  if (pattern[i] === ']') { out += '\\]'; i++ }
+  for (; i < pattern.length; i++) {
+    const c = pattern[i]
+    if (c === '[' && (pattern[i + 1] === '.' || pattern[i + 1] === '=')) throw new UnsupportedError('feature', 'regex collating or equivalence class', 'grep: collating and equivalence classes are not supported')
+    const cls = c === '[' ? readPosixClass(pattern, i, { classes: tables }) : null
+    if (cls) { out += cls.body; i = cls.end - 1; continue }
+    if (c === ']') return { source: out + ']', end: i }
+    out += c === '\\' ? '\\\\' : c
+  }
+  return { source: out, end: pattern.length }
 }
 
 // POSIX BRE: `^` is an anchor at pos 0 or immediately after `\(` /

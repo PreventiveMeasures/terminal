@@ -57,18 +57,8 @@ describe('sed unsupported features retain diagnostics', () => {
   const gaps = [
     ["sed -n '/a/Mp' input", 'address regex flags'],
     ["sed -n '/a/ M p' input", 'address regex flags'],
-    ["sed -n '1~2p' input", 'step address'],
-    ["sed -n '0~2p' input", 'step address'],
-    ["sed -n '/a/,~3p' input", 'step address'],
     [String.raw`sed -n '/\(a\)\1/p' input`, 'regex backreferences'],
     [String.raw`sed -E 's/(a)\1/x/' input`, 'regex backreferences'],
-    [String.raw`sed -n '/\o101/p' input`, 'regex escape'],
-    [String.raw`sed -E 's/\o101/x/' input`, 'regex escape'],
-    ["sed -n 'p # comment' input", 'comments'],
-    ["sed -n 'p# comment' input", 'comments'],
-    ["sed -n 'p;# comment' input", 'comments'],
-    ["sed 's/a/x/ # comment' input", 'comments'],
-    [String.raw`sed -E 's/a/\U&/' input`, 'replacement escape'],
     ["sed -n '/в/Ip' extended", 'case folding of Cyrillic Extended-C letters'],
   ]
   for (const [command, detail] of gaps) {
@@ -112,14 +102,38 @@ describe('sed unsupported features retain diagnostics', () => {
   // GNU compile_regex rejects modifiers on empty patterns during compilation,
   // even when no input record could evaluate the address.
   // https://github.com/mirror/sed/blob/0c1fe22ccacf4887e0be6c11deb4e9c83acc287d/sed/regexp.c
-  for (const script of ['//Ip', '//Mp', '//IMp', '// I p', '// M p', '/a/p;//Ip', String.raw`\%%Ip`]) {
+  for (const [script, char] of [['//Ip', 3], ['//Mp', 3], ['//IMp', 4], ['// I p', 5], ['// M p', 5], ['/a/p;//Ip', 8], [String.raw`\%%Ip`, 4]]) {
     for (const input of ['', 'a\n']) {
       it(`empty address modifiers fail before reading ${input ? 'nonempty' : 'empty'} input: ${script}`, async () => {
         assert.deepEqual(await createTerminal({ input }).run(`sed -n '${script}' input`), {
-          stdout: '', stderr: 'sed: cannot specify modifiers on empty regexp\n',
+          stdout: '', stderr: `sed: -e expression #1, char ${char}: cannot specify modifiers on empty regexp\n`,
           exitCode: 1, cwd: '/', notes: [], unsupported: [],
         })
       })
     }
+  }
+})
+
+// Recorded from GNU sed 4.9: step addresses, octal escapes in a regex,
+// comments, and case conversion in a replacement.
+describe('sed GNU extensions answer as GNU does', () => {
+  const cases = [
+    ["sed -n '1~2p' input", 'aa\nc\n'],
+    ["sed -n '0~2p' input", 'b\nd\n'],
+    ["sed -n '/a/,~3p' input", 'aa\nb\nc\n'],
+    [String.raw`sed -n '/\o141/p' input`, 'aa\n'],
+    [String.raw`sed -E 's/\o141/x/' input`, 'xa\nb\nc\nd\n'],
+    ["sed -n 'p # comment' input", 'aa\nb\nc\nd\n'],
+    ["sed -n 'p# comment' input", 'aa\nb\nc\nd\n'],
+    ["sed -n 'p;# comment' input", 'aa\nb\nc\nd\n'],
+    ["sed 's/a/x/ # comment' input", 'xa\nb\nc\nd\n'],
+    [String.raw`sed -E 's/a/\U&/' input`, 'Aa\nb\nc\nd\n'],
+  ]
+  for (const [command, stdout] of cases) {
+    it(command, async () => {
+      assert.deepEqual(await createTerminal({ input: 'aa\nb\nc\nd\n' }).run(command), {
+        stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [],
+      })
+    })
   }
 })

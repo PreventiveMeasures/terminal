@@ -25,7 +25,7 @@ async function check(expression, exitCode) {
 async function invalid(expression, operand) {
   for (const name of COMMANDS) {
     const command = invocation(name, expression)
-    assert.deepEqual(await createTerminal(FILES).run(command), result(2, '', `${name}: ${operand}: integer expression expected\n`), command)
+    assert.deepEqual(await createTerminal(FILES).run(command), result(2, '', `terminal: ${name}: ${operand}: integer expression expected\n`), command)
   }
 }
 
