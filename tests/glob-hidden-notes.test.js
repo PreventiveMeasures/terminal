@@ -181,11 +181,11 @@ describe('pathname notes survive shell execution and remain scoped per run', () 
 
   it('retains completed omissions if a later visible candidate triggers an unsupported matcher error', async () => {
     const terminal = createTerminal({ '.hidden/file': '', 'café': '' })
-    const result = await terminal.run('{ printf "%s\\n" ?*; } 2>/dev/null | true')
+    const result = await terminal.run('{ printf "%s\\n" ?[[:alpha:]]*; } 2>/dev/null | true')
     assert.equal(result.stdout, '')
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)
-    assert.deepEqual(result.notes, [omission('?*', ['/.hidden'])])
+    assert.deepEqual(result.notes, [omission('?[[:alpha:]]*', ['/.hidden'])])
     assert.ok(result.unsupported.some(({ detail }) => detail === 'non-ASCII glob matching'))
   })
 

@@ -48,12 +48,14 @@ export function routeOutput(result, io, ctx) {
   return ctx.io ? ctx.io.output(result, io, run) : run(writeEvent)
 }
 
+// Whether two descriptors lead to one destination, where what each writes
+// interleaves with the other.
+export const sameDestination = (first, second) => first === second && first !== 'null' && first !== 'closed'
+  || Boolean(first?.identity && second?.identity ? first.identity === second.identity : first?.path && first.path === second?.path)
+
 function routeEvents(result, io, ctx, write) {
   let r = result
-  const first = io.fds[1], second = io.fds[2]
-  const merged = first === second && first !== 'null' && first !== 'closed'
-    || (first?.identity && second?.identity ? first.identity === second.identity : first?.path && first.path === second?.path)
-  if (merged && unorderedOutput(r)) {
+  if (sameDestination(io.fds[1], io.fds[2]) && unorderedOutput(r)) {
     r = unsupported('feature', null, 'combined output ordering', 'error: merging this command’s stdout and stderr in order is not supported')
     ctx.unsupported.add(unsupportedNote(r))
   }

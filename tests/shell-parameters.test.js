@@ -293,12 +293,34 @@ describe('parameter pathname expansion and failures', () => {
     })
   }
 
-  for (const command of ['echo "${x:?required}"; echo unexpected', 'echo "${1:=value}"; echo unexpected']) {
+  // `${x?}` ends a shell that is not interactive, which `bash -c` reports as
+  // 127; every other expansion error stops the list with status 1.
+  for (const [command, exitCode] of [['echo "${x:?required}"; echo unexpected', 127], ['echo "${1:=value}"; echo unexpected', 1]]) {
     it(`ordinary expansion failures stop the command list: ${command}`, async () => {
       const result = await createTerminal({}).run(command)
       assert.equal(result.stdout, '')
-      assert.equal(result.exitCode, 1)
+      assert.equal(result.exitCode, exitCode)
       assert.notEqual(result.stderr, '')
+      assert.deepEqual(result.unsupported, [])
+    })
+  }
+
+  // A subshell and a substitution each catch the end themselves and exit 1;
+  // a pipeline's stage is the line's own shell forked, and exits 127.
+  for (const [command, stdout, exitCode] of [
+    ['echo ${x?msg}', '', 127],
+    ['{ echo ${x?msg}; }; echo unexpected', '', 127],
+    ['for i in 1; do : ${x?msg}; done; echo unexpected', '', 127],
+    ['(echo ${x?msg}); echo $?', '1\n', 0],
+    ['y=$(echo ${x?msg}; echo in); echo "$? [$y]"', '1 []\n', 0],
+    ['echo a | echo ${x?msg}; echo $?', '127\n', 0],
+    ['echo a | (echo ${x?msg}); echo $?', '1\n', 0],
+  ]) {
+    it(`reports a missing required parameter with bash's status: ${command}`, async () => {
+      const result = await createTerminal({}).run(command)
+      assert.equal(result.stdout, stdout)
+      assert.equal(result.exitCode, exitCode)
+      assert.match(result.stderr, /x: msg/u)
       assert.deepEqual(result.unsupported, [])
     })
   }

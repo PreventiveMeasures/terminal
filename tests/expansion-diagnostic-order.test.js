@@ -76,7 +76,7 @@ describe('expansion diagnostics use descriptors active at the expansion site', (
     ['input target expansion interleaves warnings and substitution errors', 'cat <"$MISSING$(cat nope)input"', 'present\n', missing + nope],
     ['input target expansion follows an earlier stderr redirect', 'cat 2>/dev/null <"$MISSING$(cat nope)input"', 'present\n', '', ['MISSING'], 0, hidden(nope)],
     ['input target diagnostics precede a later stderr redirect', 'cat <"$MISSING$(cat nope)input" 2>/dev/null', 'present\n', missing + nope],
-    ['input target diagnostics precede a failed file open', 'cat <"$MISSING$(cat nope)absent"', '', missing + nope + 'error: absent: No such file or directory\n', ['MISSING'], 1],
+    ['input target diagnostics precede a failed file open', 'cat <"$MISSING$(cat nope)absent"', '', missing + nope + 'terminal: absent: No such file or directory\n', ['MISSING'], 1],
     ['output target expansion precedes the output redirect', 'echo ready >"$MISSING$(cat nope)/dev/null"', '', missing + nope],
     ['redirect expansions retain order when later redirects change stderr', 'cat <<<"$MISSING$(cat nope)" 2>/dev/null <<<"$OTHER$(cat gone)"', '\n', missing + nope, ['MISSING', 'OTHER'], 0, hidden(gone)],
     ['heredoc expansions share the same diagnostic ordering', 'cat <<END\n$MISSING$(cat nope)$OTHER$(cat gone)\nEND', '\n', missing + nope + other + gone, ['MISSING', 'OTHER']],
@@ -93,7 +93,7 @@ describe('nested expansion diagnostic order', () => {
     ['a group preserves expansion and command output event ordering when merged', '{ echo before; echo "$MISSING$(cat nope)"; echo after >&2; } 2>&1', 'before\n' + missing + nope + '\nafter\n', ''],
     ['nested substitutions retain inner lexical order', 'printf "%s" "$(printf "%s" "$MISSING$(cat nope)$OTHER")"', '', missing + nope + other, ['MISSING', 'OTHER']],
     ['outer and inner expansion diagnostics retain their boundaries', 'printf "%s" "$MISSING$(printf "%s" "$OTHER$(cat nope)")$LAST"', '', missing + other + nope + warning('LAST'), ['MISSING', 'OTHER', 'LAST']],
-    ['substitution NUL diagnostics stay between surrounding parameter warnings', String.raw`printf "%s" "$MISSING$(printf 'a\0b'; cat nope)$OTHER"`, 'ab', missing + nope + 'warning: command substitution: ignored null byte in input\n' + other, ['MISSING', 'OTHER'], 0, ['command substitution: discarded 1 NUL byte.']],
+    ['substitution NUL diagnostics stay between surrounding parameter warnings', String.raw`printf "%s" "$MISSING$(printf 'a\0b'; cat nope)$OTHER"`, 'ab', missing + nope + 'terminal: warning: command substitution: ignored null byte in input\n' + other, ['MISSING', 'OTHER'], 0, ['command substitution: discarded 1 NUL byte.']],
     ['conditional execution does not emit diagnostics for a skipped branch', 'if true; then echo "$MISSING$(cat nope)"; else echo "$OTHER$(cat gone)"; fi', '\n', missing + nope],
     ['an enclosing redirect suppresses nested warnings but keeps their unsupported entries', '{ printf "%s" "$MISSING$(printf "%s" "$OTHER$(cat nope)")"; } 2>/dev/null | cat', '', '', ['MISSING', 'OTHER'], 0, hidden(nope)],
   ])

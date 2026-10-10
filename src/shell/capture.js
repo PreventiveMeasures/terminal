@@ -1,16 +1,31 @@
-import { UnsupportedError, unsupportedNote } from '../unsupported.js'
+import { UnsupportedError, shellMessage, unsupportedNote } from '../unsupported.js'
 import { expansionStderr } from './output.js'
 import { isolated, withState } from './state.js'
 import { err } from '../util.js'
 import { parseLine } from './parse.js'
 import { MAX_SUBSTITUTION_DEPTH } from './substitution.js'
+import { bashMessages } from './printable.js'
+
+// A backtick body is read as a script is, so its syntax error says where in
+// the body it is, and one the grammar found shows the line it found it on.
+// The end of the input is the line past the last, and a line's own number is
+// only known here for a body of one line.
+function backtickError(command, e) {
+  const { kind, message } = e
+  if (command.includes('\n')) return null
+  const where = (line) => `command substitution: line ${line}: `
+  if (kind === 'end') return [where(2) + message]
+  if (kind === 'unmatched') return [where(1) + message]
+  if (kind !== 'near') return null
+  return [...bashMessages(e), `\`${command}'`].map((said) => where(1) + said)
+}
 
 export async function commandSubstitution(command, ctx, runSteps, backtick = false) {
   const depth = (ctx.substitutionDepth ?? 0) + 1
   if (depth > MAX_SUBSTITUTION_DEPTH) throw new UnsupportedError('feature', 'command substitution nesting limit', `command substitution nesting beyond ${MAX_SUBSTITUTION_DEPTH} levels is not supported`)
   const stderr = ctx.expansionFds[2]
   const outputFds = { 1: 'out', 2: typeof stderr === 'object' || stderr === 'closed' ? stderr : 'err' }
-  const result = await withState(ctx, { substitutionDepth: depth, outputFds, errexitOff: true, closed: { out: false, err: stderr === 'closed' } }, () => isolated(ctx, () => {
+  const result = await withState(ctx, { substitutionDepth: depth, outputFds, errexitOff: true, subshell: true, closed: { out: false, err: stderr === 'closed' } }, () => isolated(ctx, () => {
     let steps
     try {
       steps = parseLine(command, ctx.writable, ctx.registry.has)
@@ -24,7 +39,8 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
         // unit instead, where the error takes the line down with it, so that
         // form keeps failing. Heredoc bodies are parsed during expansion,
         // where Bash's recovery depends on builtin versus external scopes.
-        if (backtick) return err(`error: command substitution: ${e.message}`, 2)
+        const said = backtick ? backtickError(command, e) : null
+        if (said) return err(said.map(shellMessage).join('\n'), 2)
         throw new UnsupportedError('feature', 'command substitution syntax', `runtime command substitution syntax errors are not supported: ${e.message}`)
       }
       ctx.unsupported.add(note)
@@ -32,7 +48,10 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
     }
     const stage = steps.length === 1 && !steps[0].negate && steps[0].stages.length === 1 ? steps[0].stages[0] : null
     // Bash's $(<file) shorthand reads the file without a command name.
-    if (stage && !stage.group && !stage.loop && !stage.conditional && !stage.test && stage.words.length === 0 && stage.assigns.length === 0 && stage.redirs.length === 1 && stage.redirs[0].op === 'read') stage.words.push({ value: 'cat', mask: null })
+    if (stage && !stage.group && !stage.loop && !stage.conditional && !stage.test && stage.words.length === 0 && stage.assigns.length === 0 && stage.redirs.length === 1 && stage.redirs[0].op === 'read') {
+      stage.words.push({ value: 'cat', mask: null })
+      stage.slurp = true
+    }
     return runSteps(steps, ctx, { text: ctx.stdinLeft, bytes: ctx.stdinBytes })
   }))
   ctx.lastExit = ctx.substitutionExit = result.exitCode
@@ -43,7 +62,7 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
     value = value.replaceAll('\0', '')
     const count = length - value.length
     ctx.notes.add(`command substitution: discarded ${count} NUL ${count === 1 ? 'byte' : 'bytes'}.`)
-    errors += 'warning: command substitution: ignored null byte in input\n'
+    errors += shellMessage('warning: command substitution: ignored null byte in input\n')
   }
   expansionStderr(ctx, errors)
   let end = value.length

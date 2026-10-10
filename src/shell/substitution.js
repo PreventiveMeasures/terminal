@@ -2,6 +2,31 @@ import { UnsupportedError } from '../unsupported.js'
 
 export const MAX_SUBSTITUTION_DEPTH = 64
 
+// What bash says when the input ends inside a quote or a substitution: the
+// character it was still looking for.
+export const unmatched = (closer) => {
+  const message = `unexpected EOF while looking for matching \`${closer}'`
+  return Object.assign(new Error(message), { kind: 'unmatched', messages: [message] })
+}
+
+// Bash's own words for input it cannot read, as distinct from a refusal: one
+// message, or one from each of its readers that the error stopped, which the
+// shell signs one by one. A `kind` says which of its forms an error is, for a
+// reader that reports one form differently: `near` for a token the grammar
+// stopped at, `end` for the end of the input.
+export const syntaxError = (messages, kind) => {
+  const said = [messages].flat()
+  return Object.assign(new Error(said.join('\n')), { grammar: true, kind, messages: said })
+}
+// The error keeps the token, which the shell names as bash does when it
+// prints it: spelt as an ANSI-C string where it would not print.
+export const nearMessage = (label) => `syntax error near unexpected token \`${label}'`
+export const unexpectedToken = (label) => Object.assign(syntaxError(nearMessage(label), 'near'), { token: label })
+
+// A grammar error inside `$( … )` stops the enclosing reader too, which adds
+// a plain `syntax error` of its own for each level it is nested in.
+export const nestedSyntaxError = (error) => (error?.grammar ? Object.assign(syntaxError([...error.messages, 'syntax error']), { token: error.token }) : error)
+
 // Backticks quote differently from `$( )`: a backslash escapes only `$`, a
 // backslash, a newline and a backtick, and every other backslash reaches the
 // inner command intact. An escaped backtick is how the form nests, and the
@@ -21,7 +46,22 @@ export function readBacktickSubstitution(line, start) {
     if (next === '\n') { i++; continue }
     command += c
   }
-  throw new Error('unterminated backtick substitution')
+  throw unmatched('`')
+}
+
+// Inside double quotes a backslash before `"` escapes it too, so
+// "`echo \"q\"`" runs `echo "q"`. Only the reader knows the quotes, and the
+// word keeps the source re-read at expansion, so the escape is taken out of
+// that source here: a `"` cannot end the substitution, and every other pair
+// stays for the re-read to unescape as it always does.
+export function doubleQuotedBacktick(raw) {
+  let out = ''
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] !== '\\') { out += raw[i]; continue }
+    out += raw[i + 1] === '"' ? '"' : raw.slice(i, i + 2)
+    i++
+  }
+  return out
 }
 
 const freshWord = () => ({ value: '', quoted: false, started: false })
@@ -35,8 +75,12 @@ export function readCommandSubstitution(line, start, open, depth, helpers) {
   while (st.i < line.length) {
     if (scan(st)) return { raw: line.slice(start, st.i + 1), command: line.slice(open + 1, st.i) }
   }
-  if (st.quote) throw new Error(`unterminated ${st.quote === "'" ? 'single' : 'double'} quote`)
-  throw new Error('unterminated command substitution')
+  if (st.quote) throw unmatched(st.quote)
+  // Bash reads the body by its grammar, where a `(` after a word opens a
+  // definition or is an error, and either may take a `)` this count gave
+  // to that `(` — so where the input ends, what bash says is not known here.
+  if (st.afterWord) throw new UnsupportedError('feature', 'command substitution', 'an unterminated `$( … )` holding a `(` after a word is not supported')
+  throw unmatched(')')
 }
 
 function append(st, text, quoted = false) {
@@ -116,10 +160,14 @@ function dollar(st) {
     return
   }
   if (!st.quote && line[next] === '"') { st.quote = '"'; st.word.started = true; st.i = next + 1; return }
-  const ref = st.helpers.readExpansion(line, i, st.depth + st.parens + 1, st.quote === '"')
+  const ref = nestedExpansion(st, i)
   const text = ref?.raw ?? '$'
   append(st, text, Boolean(st.quote))
   st.i += text.length
+}
+
+function nestedExpansion(st, i) {
+  try { return st.helpers.readExpansion(st.line, i, st.depth + st.parens + 1, st.quote === '"') } catch (error) { throw nestedSyntaxError(error) }
 }
 
 // Backticks remain unavailable at execution, but their quoted parentheses
@@ -131,7 +179,7 @@ function backticks(st) {
     if (c === '`') { append(st, st.line.slice(start, st.i), Boolean(st.quote)); return }
     if (c === '\\' && st.i < st.line.length) st.i++
   }
-  throw new Error('unterminated backtick substitution')
+  throw unmatched('`')
 }
 
 function operator(st, op) {
@@ -146,6 +194,7 @@ function operator(st, op) {
     st.command = false
   } else if (token.kind === 'paren_open') {
     if (st.depth + ++st.parens >= MAX_SUBSTITUTION_DEPTH) throw depthGap()
+    st.afterWord ||= !st.command
     st.command = true
   } else if (token.kind === 'redir') {
     st.command = false
@@ -158,7 +207,9 @@ function operator(st, op) {
 
 function newline(st) {
   finishWord(st)
-  if (st.heredocs.some((h) => h.delim === null)) throw new Error('heredoc requires a delimiter')
+  // A `<<` with no word after it, which the reader of the enclosing line
+  // reports as its own syntax error too.
+  if (st.heredocs.some((h) => h.delim === null)) throw nestedSyntaxError(unexpectedToken('newline'))
   if (st.heredocs.length) {
     st.i = st.helpers.readHeredocBodies(st.line, st.i, st.heredocs)
     st.heredocs = []

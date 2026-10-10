@@ -15,7 +15,7 @@ import { discardedNotes, err, missingPathNote, reason } from './util.js'
 import { complete } from './complete.js'
 import { commandSubstitution } from './shell/capture.js'
 import { BindingMap, isolated, withState } from './shell/state.js'
-import { commandWriteError, createIoGuard, routeExternalOutput, runSteps } from './shell/run.js'
+import { commandWriteError, createIoGuard, routeExternalOutput, runSteps, shellDiagnostic } from './shell/run.js'
 
 export function createTerminal(sources, opts = {}) {
   const { fs, cwd, home, mount, writable, locale } = mountSources(sources, opts)
@@ -59,7 +59,10 @@ const copiedSession = (parent) => ({ vars: new BindingMap(parent.vars), function
 function fork(parent, opts = {}) {
   const { cwd, home, user, locale, inherit } = forkSettings(parent, opts)
   const session = inherit ? copiedSession(parent) : freshSession()
-  return terminal(context(parent, { cwd, home, user, locale, ...session }), 'fork')
+  // Where it stands is the parent's own spelling of it — `//` included —
+  // unless it was given a cwd of its own.
+  const doubleSlash = opts.cwd === undefined ? parent.doubleSlash : false
+  return terminal(context(parent, { cwd, home, user, locale, doubleSlash, ...session }), 'fork')
 }
 
 // Stdin position, open descriptors and the two diagnostic feeds belong to
@@ -74,7 +77,7 @@ function context({ fs, io, mount, writable, registry, createdAt, lock }, session
   }
   // find -exec and xargs dispatch externally in isolated shell state. What
   // xargs runs reads /dev/null, as GNU's does, where find's reads find's own.
-  ctx.dispatch = (name, tokens, stdin, { devNull = false } = {}) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinBytes: ctx.stdinBytes, stdinFile: false, stdinPiped: false, stdinTerminal: ctx.stdinTerminal && !devNull, stdinOrigin: null, stdinHandle: null },
+  ctx.dispatch = (name, tokens, stdin, { devNull = false } = {}) => withState(ctx, { stdinLeft: ctx.stdinLeft, stdinBytes: ctx.stdinBytes, stdinFile: false, stdinDirectory: false, stdinPiped: false, stdinTerminal: ctx.stdinTerminal && !devNull, stdinOrigin: null, stdinHandle: null },
     () => isolated(ctx, () => dispatch(name, tokens, stdin, ctx, true)))
   ctx.flushOutput = (result) => routeExternalOutput(result, ctx)
   ctx.hasCommand = (name) => registry.has(name) && !registry.shellOnly(name)
@@ -106,7 +109,7 @@ async function dispatch(name, tokens, stdin, ctx, external = false) {
   const run = () => {
     if ((external || name !== resolved) && reg.shellOnly(resolved)) return unsupported('command', name, name, `${name}: shell builtin cannot be invoked as an external command`, 127)
     const cmd = reg.commands[resolved]
-    return cmd ? cmd(stdin, tokens, ctx) : unknownCommand(name, reg)
+    return cmd ? cmd(stdin, tokens, ctx) : unknownCommand(name, reg, external, ctx)
   }
   const route = (r) => routeExternalOutput(record(ctx, commandWriteError(name, r, ctx), resolved), ctx)
   try {
@@ -173,7 +176,7 @@ function safeRun(line, ctx) {
       const note = unsupportedNote(e)
       if (note) feed.add(note)
       ctx.lastExit = e.exitCode ?? (note ? 1 : 2)
-      result.stderr += `error: ${e.message}\n`
+      result.stderr += `${shellDiagnostic(e, e.message)}\n`
       result.exitCode = ctx.lastExit
     }
     return finish(result, ctx, feed)

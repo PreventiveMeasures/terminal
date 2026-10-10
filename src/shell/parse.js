@@ -5,11 +5,11 @@
 // Token kinds and quoting distinguish operators/keywords from literal words.
 
 import { assignmentOf, sliceWord } from './word.js'
-import { tokenLabel } from './lex.js'
+import { syntaxLabel, tokenLabel } from './lex.js'
 import { parseConditional, parseFor, parseFunction, parseWhile, skipNewlines } from './parse-blocks.js'
 import { UnsupportedError } from '../unsupported.js'
 import { advanceAliases } from './aliases.js'
-import { IncompleteInput, incomplete, readAll, readLine, readUnits, tokenAt } from './parse-input.js'
+import { IncompleteInput, readAll, readLine, readUnits, tokenAt, unexpectedAt, unexpectedEnd, unexpectedToken } from './parse-input.js'
 
 export const parseLine = (line, writable = false, hasCommand = () => false, options = {}) => readLine(line, writable, hasCommand, options, parseTokens)
 export const parseUnits = (line, writable = false, hasCommand = () => false) => readUnits(line, writable, hasCommand, parseTokens)
@@ -17,10 +17,9 @@ export const parseUnits = (line, writable = false, hasCommand = () => false) => 
 export const parseAll = (line, writable = false, hasCommand = () => false) => readAll(line, writable, hasCommand, parseTokens)
 
 function parseTokens(tokens, writable, hasCommand, options) {
-  const p = { raw: tokens, i: 0, done: !options.read, read: options.read, unitOnly: options.unit, emptyStage: false, writable, aliases: options.aliases ?? new Set(), aliasUsed: options.aliasUsed ?? false, hasCommand, syntaxOnly: options.syntaxOnly }
+  const p = { raw: tokens, i: 0, done: !options.read, read: options.read, unitOnly: options.unit, writable, aliases: options.aliases ?? new Set(), aliasUsed: options.aliasUsed ?? false, hasCommand, syntaxOnly: options.syntaxOnly, closer: options.closer, lexError: options.lexError }
   try {
     const steps = tokenAt(p) ? buildSteps(p, null) : []
-    if (p.emptyStage) throw new Error('empty pipeline stage')
     options.aliasUsed = p.aliasUsed
     options.done = p.done
     return steps
@@ -35,11 +34,11 @@ function parseTokens(tokens, writable, hasCommand, options) {
   }
 }
 
-// Record empty stages while building, but defer the error until the whole
-// line parses so later syntax errors retain precedence. Nested readers share p.
-function appendStage(p, step, stage) {
+// A stage with nothing in it is where bash's grammar stops, at the token that
+// ended it: `;` in `a; ; b`, `|` in `| b`, the `done` of `do a && done`.
+function appendStage(step, stage, token) {
+  if (!isBlock(stage) && !isCommand(stage)) throw unexpectedToken(syntaxLabel(token))
   step.stages.push(stage)
-  if (!isBlock(stage) && !isCommand(stage)) p.emptyStage = true
 }
 
 // Assignments and redirects alone are valid commands. Check emptiness before
@@ -92,15 +91,15 @@ function buildSteps(p, end) {
   let stage = newStage()
   for (let t; (t = tokenAt(p));) {
     if (t.kind === 'condition') {
-      if (!commandPosition(stage)) throw new Error('unexpected `[[`')
+      if (!commandPosition(stage)) throw unexpectedToken('[[')
       stage.test = t.expression
       p.i++
       continue
     }
     if (t.kind === 'paren_close') {
-      if (end !== ')') throw new Error('unexpected `)`')
+      if (end !== ')') throw unexpectedToken(')')
       p.i++
-      return finishBlock(p, steps, stage, end)
+      return finishBlock(p, steps, stage)
     }
     if (t.kind === 'paren_open') {
       openParen(p, stage)
@@ -109,7 +108,7 @@ function buildSteps(p, end) {
     if (SEPARATORS.has(t.kind)) {
       // `|&` is `2>&1 |`, applied after the stage's own redirects.
       if (t.kind === 'pipe_err' && (isCommand(stage) || isBlock(stage))) stage.redirs.push({ fd: 2, op: 'dup', toFd: 1 })
-      if (!(t.kind === 'semi' && bareBang(steps.at(-1), stage))) appendStage(p, steps.at(-1), stage)
+      if (!(t.kind === 'semi' && bareBang(steps.at(-1), stage))) appendStage(steps.at(-1), stage, t)
       // `&` gives the whole `a && b` list it closes to the background, and
       // bash takes it as the separator it also is: `a & b` runs both.
       if (t.kind === 'amp') steps.at(-1).background = true
@@ -125,39 +124,38 @@ function buildSteps(p, end) {
       p.i++
       continue
     }
-    if (t.kind === 'dsemi') throw new Error('syntax error near unexpected token `;;`')
+    if (t.kind === 'dsemi') throw unexpectedToken(';;')
     if (t.kind === 'redir') {
       // Bash reads a complete top-level line before executing its commands.
       // Warnings precede that unit even when its gated command is skipped.
-      if (t.warning) p.unit.warnings = (p.unit.warnings ?? '') + t.warning
+      if (t.warning) (p.unit.warnings ??= []).push(t.warning)
       if (stage.define) throw new UnsupportedError('feature', 'function', `\`${stage.define.name}()\` with a redirect of its own is not supported`)
       const redir = parseRedirect(p)
       if (redir) stage.redirs.push(redir)
       continue
     }
-    // A completed block accepts only a boundary or a redirect. A definition
-    // ends on its `}` like a group, and bash rejects a word after either.
-    if (stage.group || stage.define) throw new Error(`unexpected token after \`${stage.isolate ? ')' : '}'}\``)
-    if (stage.loop) throw new Error('unexpected token after `done`')
-    if (stage.conditional) throw new Error('unexpected token after `fi`')
-    if (stage.test) throw new Error('unexpected token after `]]`')
+    // A completed block accepts only a boundary, a redirect, or — since bash
+    // reads a reserved word after a `}`, `)`, `fi`, `done` or `]]` — the
+    // closer of the block around it: `{ { a; } }`. A definition ends on its
+    // `}` like a group, and bash rejects a word after either.
+    const closes = !t.quoted && (Array.isArray(end) ? end.includes(t.value) : t.value === end)
+    if (closes && (commandPosition(stage) || isBlock(stage))) { p.i++; return finishBlock(p, steps, stage) }
+    if (isBlock(stage)) throw unexpectedToken(syntaxLabel(t))
     if (!t.quoted && stage.words.length === 0 && p.aliases.has(t.value)) p.aliasUsed = true
-    if (!t.quoted && commandPosition(stage)) {
-      if (Array.isArray(end) ? end.includes(t.value) : t.value === end) { p.i++; return finishBlock(p, steps, stage, end) }
-      if (commandWord(t, p, steps.at(-1), stage)) continue
-    }
+    if (!t.quoted && commandPosition(stage) && commandWord(t, p, steps.at(-1), stage)) continue
     const assign = stage.words.length === 0 ? assignmentOf(t) : null
     if (assign === null) stage.words.push(sliceWord(t))
     else stage.assigns.push({ name: assign.name, word: sliceWord(t, assign.end) })
     p.i++
   }
-  if (end === ')') throw incomplete('unmatched `(`')
-  if (end === '}') throw incomplete('unmatched `{`')
-  if (end === 'do' || end === 'done') throw incomplete(`${p.loop}: missing \`${end}\``)
-  if (end) throw incomplete(`if: missing \`${end === 'then' ? 'then' : 'fi'}\``)
-  if (!p.emptyStage && !isBlock(stage) && !isCommand(stage) && ['and', 'or', 'pipe', 'pipe_err'].includes(raw.at(-1)?.kind)) throw incomplete('empty pipeline stage')
+  // A block still open, or a `|`, `&&` or `||` still waiting for its command,
+  // is input that ends where the grammar wants more.
+  if (end !== null) throw unexpectedEnd(p)
   if (ENDS_LIST.has(raw.at(-1)?.kind)) steps.pop()
-  else if (!bareBang(steps.at(-1), stage)) appendStage(p, steps.at(-1), stage)
+  else if (!bareBang(steps.at(-1), stage)) {
+    if (!isBlock(stage) && !isCommand(stage)) throw unexpectedEnd(p)
+    steps.at(-1).stages.push(stage)
+  }
   return steps
 }
 
@@ -176,12 +174,18 @@ function openParen(p, stage) {
   if (next?.kind === 'paren_open' && next.adjacent && commandPosition(stage)) {
     throw new UnsupportedError('feature', '((', 'arithmetic evaluation (`((…))`) is not supported')
   }
-  if (stage.words.length === 1 && stage.assigns.length === 0 && stage.redirs.length === 0 && next?.kind === 'paren_close') {
-    stage.define = parseFunction(p, stage.words.pop(), buildSteps)
+  const definition = stage.words.length === 1 && stage.assigns.length === 0 && stage.redirs.length === 0
+  if (definition && next?.kind === 'paren_close') {
+    // The name as its token has it, quotes and all: they decide whether
+    // bash takes it for a name.
+    stage.words.pop()
+    stage.define = parseFunction(p, previous, buildSteps)
     return
   }
-  // A subshell occupies a whole stage, but retains any leading redirects.
-  if (!commandPosition(stage)) throw new Error('unexpected `(`')
+  // `name (` can only open a definition, which wants its `)` next; anywhere
+  // else a subshell occupies a whole stage, but retains any leading redirects.
+  if (definition) throw unexpectedToken(syntaxLabel(next))
+  if (!commandPosition(stage)) throw unexpectedToken('(')
   p.i++
   stage.group = buildSteps(p, ')')
   stage.isolate = true
@@ -192,11 +196,11 @@ function openParen(p, stage) {
 function commandWord(t, p, step, stage) {
   const v = t.value
   if (UNIMPLEMENTED_BLOCKS.has(v)) throw new UnsupportedError('feature', v, UNIMPLEMENTED_BLOCKS.get(v))
-  if (CLOSERS.has(v)) throw new Error(`syntax error near unexpected token \`${v}\``)
+  if (CLOSERS.has(v)) throw unexpectedToken(syntaxLabel(t))
   if (!KEYWORDS.has(v)) return false
   p.i++
   if (v === '!') {
-    if (step.stages.length > 0 || stage.redirs.length > 0) throw new Error('syntax error near unexpected token `!`')
+    if (step.stages.length > 0 || stage.redirs.length > 0) throw unexpectedToken('!')
     step.negate = !step.negate
     step.bang = true
     return true
@@ -207,28 +211,22 @@ function commandWord(t, p, step, stage) {
     stage.isolate = false
     return true
   }
-  if (v === '}') throw new Error('syntax error near unexpected token `}`')
-  if (v === 'done') throw new Error('unexpected `done`')
-  if (v === 'do') throw new Error('unexpected `do`')
+  if (v === '}' || v === 'done' || v === 'do') throw unexpectedToken(v)
   if (v === 'if') stage.conditional = parseConditional(p, buildSteps)
   else stage.loop = v === 'for' ? parseFor(p, buildSteps) : parseWhile(p, v, buildSteps)
   return true
 }
 
 // A trailing ';' creates an empty tail to discard, while trailing &&/||
-// must remain invalid. Redirect-only stages are not empty; a truly empty
-// block and a bare '!' before a closer have their own syntax errors.
-const EMPTY_BLOCK_ERRORS = { ')': 'empty subshell `()`', '}': 'empty group `{ }`' }
-const emptyLoop = (p, end) => (end === 'do' ? `${p.loop}: empty condition` : end === 'done' ? `${p.loop}: empty loop body` : end === 'then' ? 'if: empty condition' : 'if: empty branch body')
-
-function finishBlock(p, steps, stage, end) {
+// must remain invalid. Redirect-only stages are not empty; a block with
+// nothing in it at all, and a bare '!' before a closer, stop bash's grammar
+// at the closer.
+function finishBlock(p, steps, stage) {
   const lastStep = steps.at(-1)
+  const closer = p.raw[p.i - 1]
   const emptyTail = commandPosition(stage) && stage.redirs.length === 0 && lastStep.stages.length === 0
-  if (emptyTail && steps.length === 1) throw new Error(EMPTY_BLOCK_ERRORS[end] ?? emptyLoop(p, end))
-  // `{ echo a; ! }`: bash wants a separator after a bare `!`.
-  if (emptyTail && lastStep.bang) throw new Error('syntax error near unexpected token after `!`')
-  if (emptyTail && lastStep.gate === 'seq') steps.pop()
-  else appendStage(p, lastStep, stage)
+  if (emptyTail && lastStep.gate === 'seq' && !lastStep.bang) steps.pop()
+  else appendStage(lastStep, stage, closer)
   return steps
 }
 
@@ -243,7 +241,7 @@ function parseRedirect(p) {
   if (p.syntaxOnly) {
     if (!['dup', 'close'].includes(op.op)) {
       const target = tokenAt(p, p.i++)
-      if (!target || target.kind !== 'word') throw new Error(`redirect \`${label}\` requires a target`)
+      if (!target || target.kind !== 'word') throw unexpectedAt(p, target)
     }
     return op
   }
@@ -260,7 +258,7 @@ function parseRedirect(p) {
     return { fd: op.fd, op: 'close' }
   }
   const target = tokenAt(p, p.i++)
-  if (!target || target.kind !== 'word') throw new Error(`redirect \`${label}\` requires a target`)
+  if (!target || target.kind !== 'word') throw unexpectedAt(p, target)
   if (op.op === 'heredoc' || op.op === 'herestring' || op.op === 'read') {
     // Bash opens `2<<END` or `2<f` on that descriptor, for reading; a
     // command's write into it then fails. Only fd 0 is modeled.

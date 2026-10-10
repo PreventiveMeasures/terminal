@@ -17,10 +17,23 @@ describe('glob locale diagnostics', () => {
     }
   })
 
-  it('mirrors locale gaps for unmatched and escaped metacharacters despite stderr suppression', async () => {
+  // C.UTF-8 matches a character a code point at a time, so `?`, a set and a
+  // literal bracket answer for non-ASCII names as for any other.
+  it('answers wildcards and sets for non-ASCII names', async () => {
+    const cases = [
+      ["find . -name '[' ", './[\n'],
+      ["find . -name '\\?'", ''],
+      ["find . -name '?.txt'", './😀.txt\n'],
+      ["find . -name '[!a]*.txt' | sort", './café.txt\n./😀.txt\n'],
+    ]
+    for (const [command, stdout] of cases) {
+      assert.deepEqual(await createTerminal(FILES).run(command), { stdout, stderr: '', exitCode: 0, cwd: '/', notes: [], unsupported: [] }, command)
+    }
+  })
+
+  it('mirrors locale gaps for classes and case folding despite stderr suppression', async () => {
     for (const command of [
-      "find . -name '[' 2>/dev/null | cat",
-      "find . -name '\\?' 2>/dev/null | cat",
+      "find . -name '[[:alpha:]]*' 2>/dev/null | cat",
       "find . -iname 'CAFÉ.TXT' 2>/dev/null | cat",
     ]) {
       assert.deepEqual(await createTerminal(FILES).run(command), {

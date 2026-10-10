@@ -153,7 +153,7 @@ describe('a link ln made is a name the rest of the overlay answers for', () => {
     await check(t, 'ln -s /tmp/out link; echo x > link; cat /tmp/out', 'x\n')
     await check(t, 'mkdir d; ln -s d dl; mkdir -p dl/sub; touch dl/f; cp /repo/file dl/c; find /tmp/d', '/tmp/d\n/tmp/d/c\n/tmp/d/f\n/tmp/d/sub\n')
     await fails(t, 'mkdir dl', "mkdir: cannot create directory 'dl': File exists\n")
-    await fails(t, 'echo x > dl', 'error: dl: Is a directory\n')
+    await fails(t, 'echo x > dl', 'terminal: dl: Is a directory\n')
   })
 
   it('sed -i writes a file over the link, and keeps the link as the backup', async () => {

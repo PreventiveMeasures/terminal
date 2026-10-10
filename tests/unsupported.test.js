@@ -63,7 +63,7 @@ describe('run().unsupported — what counts as a gap', () => {
     assert.equal(u.kind, 'command')
     assert.equal(u.command, 'frobnicate')
     assert.equal(u.detail, 'frobnicate')
-    assert.match(u.message, /^frobnicate: command not found\./u)
+    assert.match(u.message, /^terminal: frobnicate: command not found\./u)
     // The name as TYPED, so a bin-prefixed miss is reported as written.
     assert.deepEqual(await details('/usr/bin/frobnicate'), ['/usr/bin/frobnicate'])
   })

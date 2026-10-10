@@ -43,6 +43,7 @@ export function replaceParameter(value, word, replacement, global) {
   if ((/\\+$/u.exec(pattern)?.[0].length ?? 0) % 2) {
     throw error('unescaped trailing backslashes in replacement patterns are not supported')
   }
+  if (missized(pattern)) return value
   const literal = literalPattern(pattern)
   const find = literal === null ? globFinder(value, pattern, anchor, state) : literalFinder(value, literal, anchor)
   const out = []
@@ -64,6 +65,44 @@ export function replaceParameter(value, word, replacement, global) {
   } while (from < value.length)
   out.push(value.slice(from))
   return out.join('')
+}
+
+// Bash 5.2 sizes a replacement pattern with no `*` before matching it, and
+// tries only substrings of that size. Its sizing (umatchlen) ends a bracket
+// expression at the first `]` after the character it takes for granted, so
+// `[!]]` and `[^]a]` size as a bracket and then more characters: every
+// substring tried is longer than anything the pattern matches, and it
+// matches nothing at all. A `*` ahead of the size being fixed leaves the
+// pattern to match as any other.
+function missized(pattern) {
+  let missed = false
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]
+    if (c === '\\') i++
+    else if (c === '*') return false
+    else if (c === '[') {
+      if ((pattern[i + 1] === '!' || pattern[i + 1] === '^') && pattern[i + 2] === ']') missed = true
+      i = bracketEnd(pattern, i) - 1
+    }
+  }
+  return missed
+}
+
+// Where umatchlen's reading of a bracket expression ends: past its first
+// character, escapes and `[:…:]` classes, at the next `]` — or at the end
+// of a pattern that never closes it.
+function bracketEnd(pattern, open) {
+  let j = open + 1
+  let c = pattern[j++]
+  let inside = null
+  do {
+    if (c === undefined) return pattern.length
+    if (c === '\\') {
+      if (pattern[j] === undefined || pattern[++j] === undefined) return pattern.length
+    } else if (c === '[' && /[:.=]/u.test(pattern[j] ?? '')) inside = pattern[j++]
+    else if (inside !== null && c === inside && pattern[j] === ']') { j++; inside = null }
+  } while ((c = pattern[j++]) !== ']')
+  return j
 }
 
 function literalFinder(value, pattern, anchor) {

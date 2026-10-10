@@ -36,7 +36,7 @@ describe('broad audit — ordered shell output and control flow', () => {
   it('preserves explicit unsets across runs and temporary scopes', async () => {
     const t = createTerminal(FILES)
     await t.run('unset HOME PWD x')
-    assert.equal((await t.run('cd')).stderr, 'cd: HOME not set\n')
+    assert.equal((await t.run('cd')).stderr, 'terminal: cd: HOME not set\n')
     assert.deepEqual((await t.run('echo "$HOME$PWD$x"')).unsupported, [])
     assert.equal((await t.run('cd dir; echo $PWD')).stdout, '/dir\n')
     await check('x=old; x=tmp unset x; echo $x', 'old\n')
@@ -162,7 +162,7 @@ describe('broad audit — fields, names and traversal', () => {
 describe('broad audit — unsupported constructs remain visible to agents', () => {
   const cases = [
     ['cat f missing 2>&1', 'combined output ordering'],
-    ["find . -name '?'", 'non-ASCII glob matching'],
+    ["find . -name '[[:alpha:]]'", 'non-ASCII glob matching'],
     ['xxd -s-2 f', '-s -2'],
     ['od f 10', 'legacy offset operand'],
     ['od -j1 dir f', 'skip across unreadable input'],

@@ -12,7 +12,7 @@ async function syntaxError(command, commands, prior = []) {
   const result = await terminal(commands).run(command)
   assert.equal(result.exitCode, 2, command)
   assert.equal(result.stdout, '', command)
-  assert.match(result.stderr, /^error: /mu, command)
+  assert.match(result.stderr, /^terminal: syntax error near unexpected token `.+'$/mu, command)
   assert.deepEqual(notes(result), prior.map((detail) => ['feature', detail]), command)
 }
 

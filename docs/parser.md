@@ -26,7 +26,7 @@ parse('sort input | uniq -c')
 //   ] } ] }
 
 parse('for f in src/*.js; do').incomplete   // true — ask for another line
-parse('echo )').error                       // 'unexpected `)`'
+parse('echo )').error                       // "syntax error near unexpected token `)'"
 parse('while :; do echo x; done').unsupported[0].detail  // 'while'
 ```
 

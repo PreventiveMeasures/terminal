@@ -1,4 +1,5 @@
 import { compareNames, lookup, resolve } from './fs.js'
+import { SHELL_NAME } from './unsupported.js'
 
 // Use only for lookups whose failure is reported, not existence probes.
 export function lookupWithNote(ctx, command, path, options) {
@@ -69,8 +70,10 @@ export function hiddenEntryNotes() {
 // path just as completely: `grep -rn a d1 d2 d3 2>/dev/null` exits non-zero
 // whether the pattern was absent or `d2` never existed, and nothing in what
 // the caller can see tells the two apart. Notes survive redirects, so this is
-// the one channel that can still say it.
-const ACCESS_FAILURE = /^(?<command>[^:]+): (?<operand>.+): (?<reason>no such file or directory|not a directory|is a directory)$/iu
+// the one channel that can still say it. The shell's own failure — a `<` or
+// `>` naming nothing it can open, a `cd` — carries the shell's name ahead of
+// whatever it names, as bash's carries `bash: `, and is the shell's.
+const ACCESS_FAILURE = new RegExp(`^(?:${SHELL_NAME}: )?(?:(?<command>[^:]+): )?(?<operand>.+): (?<reason>no such file or directory|not a directory|is a directory)$`, 'iu')
 
 export function discardedStderr(ctx, text) {
   for (const line of text.split('\n')) {
@@ -86,7 +89,7 @@ export function discardedNotes(discarded, stderr, notes) {
   const groups = new Map()
   for (const line of discarded) {
     if (stderr.includes(line)) continue
-    const { command, operand, reason } = ACCESS_FAILURE.exec(line).groups
+    const { command = SHELL_NAME, operand, reason } = ACCESS_FAILURE.exec(line).groups
     // `cp: cannot stat 'x': …` wraps its operand; everything else is the path.
     const path = /'([^']*)'$/u.exec(operand)?.[1] ?? operand
     if ([...notes].some((note) => note.includes(JSON.stringify(path)))) continue

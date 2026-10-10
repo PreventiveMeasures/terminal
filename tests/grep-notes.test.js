@@ -151,7 +151,7 @@ describe('grep notes identify entries omitted by filename and directory filters'
   })
 
   it('retains earlier filename omissions when a later filename is unsupported', async () => {
-    const result = await createTerminal({ 'a.skip': 'hit\n', é: 'hit\n' }).run('grep -r hit . --include="[a-z]" 2>/dev/null | true')
+    const result = await createTerminal({ 'a.skip': 'hit\n', é: 'hit\n' }).run('grep -r hit . --include="[[:lower:]]" 2>/dev/null | true')
     assert.deepEqual(result.notes, [excludedNote(['/a.skip'])])
     assert.equal(result.stderr, '')
     assert.equal(result.exitCode, 0)

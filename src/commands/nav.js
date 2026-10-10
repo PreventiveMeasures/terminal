@@ -4,47 +4,11 @@ import { compareNames, lookup, resolve } from '../fs.js'
 import { longFormat } from './ls-long.js'
 import { tree } from './tree.js'
 import { find } from './find.js'
-import { homeOf } from '../shell/expand.js'
 import { parseArgs } from '../args.js'
 import { err, ok, usage } from '../util.js'
-import { unsupported } from '../unsupported.js'
 import { hiddenEntryNotes, lookupWithNote } from '../notes.js'
 import { FS_TOOLS } from './fs-tools.js'
-
-function pwd(_stdin, tokens, ctx) {
-  parseArgs(tokens)
-  return ok(ctx.cwd + '\n')
-}
-
-// A successful cd updates PWD and OLDPWD; cd - also prints the destination.
-function cd(_stdin, tokens, ctx) {
-  const { positional } = parseArgs(tokens)
-  if (positional.length > 1) return err('cd: too many arguments')
-  if (!positional.length && ctx.vars.unsetNames.has('HOME')) return err('cd: HOME not set')
-  let target = positional[0] ?? homeOf(ctx)
-  if (target === '-') {
-    if (!ctx.vars.has('OLDPWD')) return err('cd: OLDPWD not set')
-    target = ctx.vars.get('OLDPWD')
-  }
-  const printed = positional[0] === '-' ? target + '\n' : ''
-  if (target === '') return ok(printed)
-  const { path: abs, error } = lookupWithNote(ctx, 'cd', target)
-  if (error) return err(`cd: ${target}: ${error}`)
-  if (!ctx.fs.isDir(abs)) return err(`cd: ${target}: Not a directory`)
-  // Bash keeps the name it was given in PWD, links and all, and collapses a
-  // later `..` in it rather than in the path it leads to — the logical
-  // directory `cd -L` means and `pwd` prints. Nothing here holds a working
-  // directory that is not the one on the filesystem, so a path that crosses a
-  // link is refused rather than answered as `cd -P` would answer it. A walk
-  // that crossed none leaves the same path lexical normalization does.
-  if (abs !== resolve(ctx.cwd, target)) {
-    return unsupported('feature', 'cd', 'symbolic link cwd', `cd: ${target}: a working directory reached through a symbolic link is not supported (it leads to ${abs})`)
-  }
-  ctx.vars.set('OLDPWD', ctx.cwd)
-  ctx.vars.set('PWD', abs)
-  ctx.cwd = abs
-  return ok(printed)
-}
+import { cd, pwd } from './cd.js'
 
 // What `-F` marks each kind with: nothing here is executable, a socket or a
 // pipe, so `/` and `@` are the whole of it.

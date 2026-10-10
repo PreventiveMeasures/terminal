@@ -3,45 +3,56 @@
 
 import { err, ok } from '../util.js'
 import { ONLY_C_UTF8 } from '../locale.js'
-import { unsupported } from '../unsupported.js'
+import { shellMessage, unsupported } from '../unsupported.js'
 import { NAME_RE } from './lex.js'
-import { boundValue } from './variables.js'
+import { boundValue, variableSet } from './variables.js'
 import { INT64_MAX, INT64_MIN } from '../numeric.js'
+import { lookup } from '../fs.js'
+import { printableName } from './printable.js'
 
 // Bash accepts signed 64-bit control counts. Exit status wraps modulo 256;
 // malformed exit numbers take precedence over excess-argument errors.
 // Subshell/pipeline boundaries consume halt without stopping the outer shell.
+// Bash's legal_number: strtoimax skips any leading space, newline included,
+// and only blanks may follow the digits. A message names the word as it was.
 function controlNumber(value) {
-  const arg = value.replace(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/gu, '')
-  const parsed = /^[+-]?\d+$/u.test(arg) ? BigInt(arg) : null
+  const digits = /^[ \t\n\r\v\f]*([+-]?\d+)[ \t]*$/u.exec(value)?.[1]
+  const parsed = digits === undefined ? null : BigInt(digits)
   const n = parsed !== null && parsed >= INT64_MIN && parsed <= INT64_MAX ? parsed : null
-  return { arg, n }
+  return { arg: value, n }
 }
 
 const halt = (result) => ({ ...result, halt: true })
 
+// Bash answers `--help` as the first operand of a builtin with that builtin's
+// help text, which this shell does not carry.
+const help = (name) => unsupported('option', name, '--help', `${name}: --help is not supported`)
+
 function exit(_stdin, tokens, ctx) {
+  if (tokens[0] === '--help') return help('exit')
   const args = tokens[0] === '--' ? tokens.slice(1) : tokens
   if (args.length === 0) return halt({ ...ok(), exitCode: ctx.lastExit })
   const { arg, n } = controlNumber(args[0])
   if (n === null) {
-    return halt(err(`exit: ${arg}: numeric argument required`, 2))
+    return halt(err(shellMessage(`exit: ${arg}: numeric argument required`), 2))
   }
-  if (args.length > 1) return halt(err('exit: too many arguments'))
+  if (args.length > 1) return halt(err(shellMessage('exit: too many arguments')))
   return halt({ ...ok(), exitCode: Number(((n % 256n) + 256n) % 256n) })
 }
 
 // `break` / `continue` end or skip the current iteration of the
 // enclosing `for`, or N enclosing loops. A subshell starts with no
-// enclosing loops; outside any loop Bash only warns, and so does this.
+// enclosing loops; outside any loop Bash only warns, before it reads its
+// operands at all, and so does this.
 function loopControl(name) {
   return (_stdin, tokens, ctx) => {
+    if (tokens[0] === '--help') return help(name)
+    if (ctx.loopDepth === 0) return err(shellMessage(`${name}: only meaningful in a \`for', \`while', or \`until' loop`), 0)
     const args = tokens[0] === '--' ? tokens.slice(1) : tokens
-    if (args.length > 1) return halt(err(`${name}: too many arguments`))
+    if (args.length > 1) return halt(err(shellMessage(`${name}: too many arguments`)))
     const { arg, n } = controlNumber(args[0] ?? '1')
-    if (n === null) return halt(err(`${name}: ${arg}: numeric argument required`, 128))
-    if (n <= 0) return { ...err(`${name}: ${arg}: loop count out of range`), control: ctx.loopDepth ? { type: 'break', levels: ctx.loopDepth } : undefined }
-    if (ctx.loopDepth === 0) return err(`${name}: only meaningful in a \`for\`, \`while\` or \`until\` loop`, 0)
+    if (n === null) return halt(err(shellMessage(`${name}: ${arg}: numeric argument required`), 128))
+    if (n <= 0) return { ...err(shellMessage(`${name}: ${arg}: loop count out of range`)), control: { type: 'break', levels: ctx.loopDepth } }
     return { ...ok(), control: { type: name, levels: Number(n > BigInt(ctx.loopDepth) ? BigInt(ctx.loopDepth) : n) } }
   }
 }
@@ -59,20 +70,25 @@ function exportCmd(_stdin, tokens, ctx) {
     const append = eq > 0 && t[eq - 1] === '+'
     const name = eq === -1 ? t : t.slice(0, append ? eq - 1 : eq)
     if (!terminated && t.startsWith('-')) return unsupported('option', 'export', t, `export: option \`${t}\` is not supported`)
-    if (!NAME_RE.test(name)) { stderr += `export: \`${name}': not a valid identifier\n`; continue }
+    // Bash names the whole operand, value and all.
+    if (!NAME_RE.test(name)) { stderr += shellMessage(`export: \`${t}': not a valid identifier\n`); continue }
     if (eq !== -1) ctx.vars.set(name, (append ? boundValue(name, ctx) : '') + t.slice(eq + 1))
     else if (ctx.vars.has(name)) ctx.vars.set(name, ctx.vars.get(name))
   }
   return { stdout: '', stderr, exitCode: stderr ? 1 : 0 }
 }
 
+// `-v` unsets variables and `-f` functions; with neither, a name that is no
+// variable the shell has is the function of that name, as bash falls back.
 function unset(_stdin, tokens, ctx) {
-  let start = tokens[0] === '-v' ? 1 : 0
+  const only = tokens[0] === '-v' || tokens[0] === '-f' ? tokens[0] : null
+  let start = only ? 1 : 0
   const terminated = tokens[start] === '--'
   if (terminated) start++
   const operands = tokens.slice(start)
   for (const t of operands) {
     if (!terminated && t.startsWith('-')) return unsupported('option', 'unset', t, `unset: option \`${t}\` is not supported`)
+    if (only === '-f' || (only === null && ctx.functions.has(t) && !variableSet(t, ctx))) { ctx.functions.delete(t); continue }
     if (t.includes('[')) return unsupported('feature', 'unset', 'array subscript', 'unset: array subscripts are not supported')
     // Unsetting LANG would hand the character set to the C locale.
     if (t === 'LANG') return unsupported('feature', 'unset', 'LANG', `unset: LANG: ${ONLY_C_UTF8}`)
@@ -102,6 +118,18 @@ const refusedSet = () => unsupported('feature', 'set', 'set', 'set: `set` is sup
 
 export const SHELL_BUILTINS = {
   exit, break: loopControl('break'), continue: loopControl('continue'), export: exportCmd, set: setOptions, unset,
+}
+
+// Why the shell could not run a name, as bash says it, and the status: a
+// bare name was not found, and is spelt as an ANSI-C string where it would
+// not print; a path is run rather than looked for, so the answer is what is
+// there — nothing, a directory, or a file, none of which is executable here —
+// and the path is named as it was.
+export function commandFailure(name, ctx) {
+  if (!name.includes('/') || !ctx) return [`${printableName(name)}: command not found`, 127]
+  const { path, error } = lookup(ctx.cwd, name, ctx.fs)
+  if (error) return [`${name}: ${error}`, 127]
+  return [`${name}: ${ctx.fs.isDir(path) ? 'Is a directory' : 'Permission denied'}`, 126]
 }
 
 // Diagnose unavailable shell machinery after checking registered overrides.

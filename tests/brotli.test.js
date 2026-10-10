@@ -194,9 +194,10 @@ describe('a compressor is there only where the runtime can do its format', () =>
   it('has no brotli where the streams do not know brotli', () => {
     const answers = withoutFormat('brotli')
     // Not found, in every spelling, and in nothing the terminal offers. A
-    // path to a name the registry does not have stays the path it was.
-    assert.deepEqual(answers['brotli -dc a.txt'], { exitCode: 127, head: 'brotli: command not found', listed: false, gaps: ['command:brotli'] })
-    assert.deepEqual(answers['/usr/bin/brotli -dc a.txt'], { exitCode: 127, head: '/usr/bin/brotli: command not found', listed: false, gaps: ['command:/usr/bin/brotli'] })
+    // path to a name the registry does not have stays the path it was, and
+    // misses as bash misses a path: nothing is there.
+    assert.deepEqual(answers['brotli -dc a.txt'], { exitCode: 127, head: 'terminal: brotli: command not found', listed: false, gaps: ['command:brotli'] })
+    assert.deepEqual(answers['/usr/bin/brotli -dc a.txt'], { exitCode: 127, head: 'terminal: /usr/bin/brotli: No such file or directory', listed: false, gaps: ['command:/usr/bin/brotli'] })
     assert.ok(!answers.completion.includes('brotli'))
     // gzip, whose format every such stream knows, is there as ever: a file
     // that is not a member is the answer it gives, not a missing command.
@@ -205,8 +206,8 @@ describe('a compressor is there only where the runtime can do its format', () =>
 
   it('has no gzip where the streams do not know gzip', () => {
     const answers = withoutFormat('gzip')
-    assert.deepEqual(answers['gzip -dc a.txt'], { exitCode: 127, head: 'gzip: command not found', listed: false, gaps: ['command:gzip'] })
-    assert.deepEqual(answers['/usr/bin/gzip -dc a.txt'], { exitCode: 127, head: '/usr/bin/gzip: command not found', listed: false, gaps: ['command:/usr/bin/gzip'] })
+    assert.deepEqual(answers['gzip -dc a.txt'], { exitCode: 127, head: 'terminal: gzip: command not found', listed: false, gaps: ['command:gzip'] })
+    assert.deepEqual(answers['/usr/bin/gzip -dc a.txt'], { exitCode: 127, head: 'terminal: /usr/bin/gzip: No such file or directory', listed: false, gaps: ['command:/usr/bin/gzip'] })
     // brotli is a format these streams still know, and answers as it does.
     assert.deepEqual(answers['brotli -dc a.txt'], { exitCode: 1, head: 'corrupt input [a.txt]\n', listed: false, gaps: [] })
   })

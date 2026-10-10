@@ -38,7 +38,7 @@ const cases = [
   ['sort file', 'sort', 'file', 2, 'sort: cannot read: file: No such file or directory\n'],
   ['ls dir', 'ls', 'dir', 2, 'ls: cannot access \'dir\': No such file or directory\n'],
   ['find dir', 'find', 'dir', 1, 'find: \'dir\': No such file or directory\n'],
-  ['cd dir', 'cd', 'dir', 1, 'cd: dir: No such file or directory\n'],
+  ['cd dir', 'cd', 'dir', 1, 'terminal: cd: dir: No such file or directory\n'],
   ['grep x file', 'grep', 'file', 2, 'grep: file: No such file or directory\n'],
   ['grep -r x dir', 'grep', 'dir', 2, 'grep: dir: No such file or directory\n'],
   ['grep -s x file', 'grep', 'file', 2, ''],
@@ -54,7 +54,7 @@ const cases = [
   ['cp -t dir keep', 'cp', 'dir', 1, "cp: target directory 'dir': No such file or directory\n"],
   ['cp keep keep dir', 'cp', 'dir', 1, "cp: target 'dir': No such file or directory\n"],
   ['rm file', 'rm', 'file', 1, "rm: cannot remove 'file': No such file or directory\n"],
-  ['cat <file', 'shell', 'file', 1, 'error: file: No such file or directory\n'],
+  ['cat <file', 'shell', 'file', 1, 'terminal: file: No such file or directory\n'],
 ]
 
 describe('cwd notes accompany actual relative-path lookup failures', () => {
@@ -177,7 +177,7 @@ const rootedCases = [
   ['sort /file', 'sort', '/file', 2, 'sort: cannot read: /file: No such file or directory\n'],
   ['ls /dir', 'ls', '/dir', 2, "ls: cannot access '/dir': No such file or directory\n"],
   ['find /dir', 'find', '/dir', 1, "find: '/dir': No such file or directory\n"],
-  ['cd /dir', 'cd', '/dir', 1, 'cd: /dir: No such file or directory\n'],
+  ['cd /dir', 'cd', '/dir', 1, 'terminal: cd: /dir: No such file or directory\n'],
   ['grep x /file', 'grep', '/file', 2, 'grep: /file: No such file or directory\n'],
   ['grep -r x /dir', 'grep', '/dir', 2, 'grep: /dir: No such file or directory\n'],
   ["sed 's/x/y/' /file", 'sed', '/file', 2, "sed: can't read /file: No such file or directory\n"],
@@ -185,7 +185,7 @@ const rootedCases = [
   ['awk -f /file', 'awk', '/file', 2, 'awk: cannot open program file `/file`: No such file or directory\n'],
   ['cp /file /tmp/file', 'cp', '/file', 1, "cp: cannot stat '/file': No such file or directory\n"],
   ['rm /file', 'rm', '/file', 1, "rm: cannot remove '/file': No such file or directory\n"],
-  ['cat </file', 'shell', '/file', 1, 'error: /file: No such file or directory\n'],
+  ['cat </file', 'shell', '/file', 1, 'terminal: /file: No such file or directory\n'],
 ]
 
 describe('root notes accompany an absolute path another root answers for', () => {
