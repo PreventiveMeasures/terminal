@@ -7,8 +7,8 @@
 // name is followed, as the kernel follows one, since only the last name is
 // ever unlinked.
 //
-// The overlay holds no permissions and no times — `ls -l` shows every entry
-// of this tree the one way — so what an entry says of those is not kept; it
+// The overlay holds no permissions and no times -- `ls -l` shows every entry
+// of this tree the one way -- so what an entry says of those is not kept; it
 // holds no hard links and no devices either, and an entry that would make
 // one is a gap. So is a name outside /tmp, which is the read-only filesystem
 // every other write here meets.
@@ -20,7 +20,7 @@ import { quoteColon, quoteLocale } from './names.js'
 const WRITTEN = new Set(['file', 'contiguous-file', 'directory', 'symlink'])
 
 // Where the entry goes once the leading components are stripped off it, or
-// null where stripping leaves nothing — an entry GNU passes over whole.
+// null where stripping leaves nothing -- an entry GNU passes over whole.
 export function strippedName(stored, strip) {
   const parts = stored.split('/').filter((part) => part !== '')
   return parts.length <= strip ? null : parts.slice(strip).join('/')

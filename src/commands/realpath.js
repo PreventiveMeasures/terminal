@@ -8,13 +8,13 @@ import { err, ok } from '../util.js'
 // `-P`, the default, is the walk the kernel makes: every link on the way is
 // replaced by what it names, `..` included, so `l/..` is the parent of what
 // `l` leads to. `-L` takes `..` from the name as written, cancelling the
-// component before it — link or not — and resolves what is left. `-s` expands
+// component before it -- link or not -- and resolves what is left. `-s` expands
 // no link at all and prints the name it was given.
 //
 // The existence mode is the other half: `-m` needs none of the path to be
-// there, so whatever the walk could not reach — a name that is not there, a
+// there, so whatever the walk could not reach -- a name that is not there, a
 // component that is not a directory, a link that never stops leading to
-// another — is kept as it was spelled; `-e` needs all of it; and the default
+// another -- is kept as it was spelled; `-e` needs all of it; and the default
 // mode allows the last component alone to be missing, which is where a link
 // pointing at nothing leads.
 export function canonicalize(ctx, path, mode, links) {
@@ -23,7 +23,7 @@ export function canonicalize(ctx, path, mode, links) {
   let walked = path
   if (links === 'logical') {
     // The same lexical reduction `-s` prints, with the same checks on the
-    // components a `..` passes over — then the walk resolves what is left.
+    // components a `..` passes over -- then the walk resolves what is left.
     const reduced = mode === 'm' ? { path: resolve(ctx.cwd, path) } : strippedPath(ctx, path)
     if (reduced.error) return reduced
     walked = reduced.path + (path.endsWith('/') ? '/' : '')
@@ -37,8 +37,8 @@ export function canonicalize(ctx, path, mode, links) {
 }
 
 // `-s` expands no link, in any existence mode: the name it prints is the one
-// it was given with `..` taken lexically, and `-e` asks whether that name —
-// the reduced one, not the spelling it came from — leads anywhere. The two
+// it was given with `..` taken lexically, and `-e` asks whether that name --
+// the reduced one, not the spelling it came from -- leads anywhere. The two
 // part where a `..` cancels a link: `l/../z` is `z` here, so `z` is what has
 // to be there, where the walk `-e` makes without `-s` would ask about the
 // directory `l` leads to instead.
@@ -54,7 +54,7 @@ function strippedName(ctx, path, mode) {
 // parent checks to the final lookup: in the default mode ENOENT there is
 // allowed even when more than one component is absent. Parents followed by ..
 // or a terminal . still require a directory check, and that check is the
-// kernel's, through any link on the way — which is how a `..` passes over a
+// kernel's, through any link on the way -- which is how a `..` passes over a
 // link without expanding it.
 function strippedPath(ctx, path) {
   const parts = (path.startsWith('/') ? path : ctx.cwd + '/' + path).split('/').filter(Boolean)

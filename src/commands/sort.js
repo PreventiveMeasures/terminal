@@ -129,7 +129,7 @@ function parseKeySpecs(raw, globals) {
       return { error: unsupported('option', 'sort', `-k${spec}`, `sort: invalid key specification: ${spec} (character offsets are not supported)`, 2) }
     }
     // Any option on EITHER position suppresses the globals for this key
-    // — `b` included, so `sort -r -k2b` sorts ascending.
+    // -- `b` included, so `sort -r -k2b` sorts ascending.
     const own = mods.length > 0
     specs.push({
       start: from.field,
@@ -183,7 +183,7 @@ function keyOf(line, spec, bounds) {
 }
 
 // C-locale folding is ASCII-only; full Unicode case expansion can
-// silently merge distinct records under -u (for example ß and SS).
+// silently merge distinct records under -u (for example the sharp s and SS).
 const foldCase = (s) => s.replace(/[a-z]/gu, (c) => c.toUpperCase())
 
 function sortByKeys(lines, specs, sep, unique, globalReverse) {

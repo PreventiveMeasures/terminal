@@ -2,8 +2,8 @@
 // @preventive/archive's zip writer: each file deflated through the runtime's
 // stream and kept deflated only where that made it smaller, as Info-ZIP
 // keeps it, and one named as compressed already stored as it is (see
-// STORED_SUFFIXES). What it says of each entry — "stored 0%", "deflated
-// 53%" — is what this archive holds, worked out with Info-ZIP's own rounding
+// STORED_SUFFIXES). What it says of each entry -- "stored 0%", "deflated
+// 53%" -- is what this archive holds, worked out with Info-ZIP's own rounding
 // from the deflated size the same stream gives; the bytes are the runtime's
 // deflate rather than Info-ZIP's, so a file can come out a few bytes apart
 // from what Info-ZIP would have made of it, and its share a few points.
@@ -140,7 +140,7 @@ function percent(n, m) {
 }
 
 // The name Info-ZIP stores: its leading slashes taken off, and then any
-// `./` in front — and no more, so `.//src` is stored as `/src`. What is
+// `./` in front -- and no more, so `.//src` is stored as `/src`. What is
 // left of `.` is the directory the names are under, which is no entry of
 // its own. -j keeps no directory at all.
 function storedName(given, opts) {

@@ -2,7 +2,7 @@
 //
 // One `type` per node, operators spelled the way they were written, and no
 // field that only says "nothing here". A value is a plain string wherever the
-// text is final — `head -20` is `['head', '-20']` — and a word in pieces only
+// text is final -- `head -20` is `['head', '-20']` -- and a word in pieces only
 // where expansion still decides it, so reading arguments never means reading
 // quoting.
 
@@ -16,8 +16,8 @@ export function read(line, writable) {
   const feed = createUnsupportedFeed()
   const { units, error, incomplete } = parseAll(line, writable)
   const list = []
-  // A gap the tree itself reaches — a `~user` home this shell cannot look up
-  // — stops the reading where a syntax error does, and leaves the commands
+  // A gap the tree itself reaches -- a `~user` home this shell cannot look up
+  // -- stops the reading where a syntax error does, and leaves the commands
   // ahead of it readable as one does.
   let refused = null
   try { extend(list, units) } catch (e) {
@@ -106,7 +106,7 @@ function ifOf(conditional) {
 // What the shell will still do to the word a slot holds. Splitting a result
 // into fields and matching it as a pattern are the two things quoting turns
 // off, so a slot that does neither reads as quoted however it was written: an
-// assignment value, a here-string and a `[[ … ]]` operand are all expanded and
+// assignment value, a here-string and a `[[ ... ]]` operand are all expanded and
 // then left alone, and `x=*.js` is the text bash assigns rather than a
 // pattern. The one operand quoting still governs is the pattern side of
 // `[[ x == y ]]`, which is matched against the other side rather than split.
@@ -118,7 +118,7 @@ const PATTERN_OPS = new Set(['==', '=', '!='])
 
 // The one rule the whole tree follows: text that nothing can change any more
 // is that text, and everything else is a word in the pieces expansion works
-// on — literal runs, and the references and substitutions between them.
+// on -- literal runs, and the references and substitutions between them.
 function valueOf(w, slot = WORD, braces = false) {
   if (!expandable(w)) return w.value
   const parts = partsOf(w, braces ? { ...slot, braces: true } : slot)
@@ -128,8 +128,8 @@ function valueOf(w, slot = WORD, braces = false) {
 
 // Brace expansion is the one expansion a line settles on its own: no
 // filesystem, no variables, only text, and bash runs it before anything else.
-// So a word list is read with its braces already expanded — `a{b,c}` is `ab`
-// and `ac` — and only the two places that cannot be keep a `brace` piece: a
+// So a word list is read with its braces already expanded -- `a{b,c}` is `ab`
+// and `ac` -- and only the two places that cannot be keep a `brace` piece: a
 // slot that takes a single word, and a group with more products than reading
 // a line should make.
 const valuesOf = (w) => {
@@ -138,7 +138,7 @@ const valuesOf = (w) => {
 }
 
 // A redirect names one file, so a target that multiplies is an ambiguous
-// redirect — what it was written as is all there is to say about it.
+// redirect -- what it was written as is all there is to say about it.
 function targetOf(w) {
   const products = expand(w)
   return products?.length === 1 ? valueOf(products[0]) : valueOf(w, WORD, true)
@@ -188,7 +188,7 @@ function partsOf(word, slot) {
     // because tilde expansion is neither split into fields nor matched as a
     // pattern, which is what quoting a reference settles too.
     if (homes.has(i)) { flush(i); push({ type: 'variable', name: 'HOME', multi: false }); continue }
-    // `<( … )` is a command whose output the word is a path to, so what it
+    // `<( ... )` is a command whose output the word is a path to, so what it
     // holds is what it runs. Quoting settles it as text: `"<(ls)"` is `<(ls)`.
     if (mask[i] === '0' && (value[i] === '<' || value[i] === '>') && value[i + 1] === '(') {
       const found = processAt(value, i)
@@ -213,7 +213,7 @@ function partsOf(word, slot) {
 
 // Quoting settles text, and so does having nothing in it that expands: either
 // way the piece is the string itself. What is left says which expansion it is
-// waiting for, named for the first one that will reach it — brace expansion
+// waiting for, named for the first one that will reach it -- brace expansion
 // runs before the pathname matching a product of it may still go through.
 function textOf(word, value, quoted, from, to, slot) {
   if (quoted) return value
@@ -229,7 +229,7 @@ function textOf(word, value, quoted, from, to, slot) {
 const matchedBy = (part) => (part.type === 'variable' || part.type === 'substitution' ? { type: 'pattern', pattern: part, multi: false } : part)
 
 // A run is matched as a pattern once it holds a `*` or `?`, or a `[` that a
-// bare `]` closes — which may be in a later run, since quoting inside a
+// bare `]` closes -- which may be in a later run, since quoting inside a
 // bracket expression makes its text literal without ending it.
 function globbed(word, from, to) {
   for (let i = from; i < to; i++) {
@@ -266,8 +266,8 @@ function processAt(value, at) {
 //
 // `multi` is what quoting decides and what a reader of one argument has to
 // know: whether what comes back is still one word. Quotes settle it, and so
-// does a slot that splits nothing — an assignment value, a here-string, a
-// `[[ … ]]` operand — since only its own top level is settled, and the
+// does a slot that splits nothing -- an assignment value, a here-string, a
+// `[[ ... ]]` operand -- since only its own top level is settled, and the
 // commands inside a substitution are read as commands wherever it stands.
 function expansionAt(value, at, quoted, slot) {
   const splits = slot.split === true
@@ -294,7 +294,7 @@ function expansionAt(value, at, quoted, slot) {
 // A word an expansion could still change: a `$` or backtick that quoting has
 // not disarmed, or a bare `~`, `*`, `?` or `{`. A `[` counts only once a `]`
 // could close it, since a bracket expression nothing closes matches its own
-// text and nothing else — which is all `[` in `[ -f x ]` ever is. Masks count
+// text and nothing else -- which is all `[` in `[ -f x ]` ever is. Masks count
 // UTF-16 units, so index the value the same way rather than by code point.
 function expandable(word) {
   for (let i = 0; i < word.value.length; i++) {

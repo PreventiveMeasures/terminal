@@ -5,8 +5,8 @@
  * `{ type: 'directory' }` a directory, which need hold nothing; and
  * `{ type: 'symlink', target }` a symbolic link, holding the path it carries,
  * resolved from the directory the link itself is in, exactly as the kernel
- * resolves one. The target need not exist — a link leading nowhere is a link,
- * and `find -type l` and `ls -l` say so — and an absolute target names a path
+ * resolves one. The target need not exist -- a link leading nowhere is a link,
+ * and `find -type l` and `ls -l` say so -- and an absolute target names a path
  * in the terminal's own filesystem rather than one inside the mount. Bytes
  * spelt in base64, `{ format: 'base64', data }` (RFC 4648, padded or not), are
  * the file a `Uint8Array` of the same bytes would be, for a tree that arrives
@@ -24,15 +24,15 @@ export type SourceEntry =
 /**
  * Virtual source tree: paths within the configured mount (leading `/`
  * optional) to what is there, as either a plain object or a `Map`. A file is
- * the text it holds, or — for one no string can spell, such as an image or a
- * compiled object — the bytes themselves, as a `Uint8Array` that is copied
+ * the text it holds, or -- for one no string can spell, such as an image or a
+ * compiled object -- the bytes themselves, as a `Uint8Array` that is copied
  * when the terminal is made; anything else is a {@link SourceEntry}. Parent
  * directories are implied. The tree follows `@preventive/vfs`'s rules for a
  * map: two spellings of one path (`a/f`, `./a/f`) are one name, declared again
  * only as the same entry; nothing is declared under a file or through a link;
  * a name is at most 255 bytes of UTF-8; and text must have a UTF-8 encoding,
  * which text holding a lone surrogate has not. A source that breaks a rule,
- * or declares nothing — `null`, a number, an object without a type — makes
+ * or declares nothing -- `null`, a number, an object without a type -- makes
  * `createTerminal` throw a `TypeError` naming it.
  */
 export type Sources = Record<string, string | Uint8Array | SourceEntry> | Map<string, string | Uint8Array | SourceEntry>
@@ -45,7 +45,7 @@ export interface CommandFs {
   isFile(path: string): boolean
   /** Whether `path` names a directory, declared as one or implied by the paths below it. */
   isDir(path: string): boolean
-  /** Whether `path` itself names a symbolic link — the name is not followed, as `lstat` does not follow one. Every other method here resolves links on the way, and `path` reaching through one is resolved for this check too. */
+  /** Whether `path` itself names a symbolic link -- the name is not followed, as `lstat` does not follow one. Every other method here resolves links on the way, and `path` reaching through one is resolved for this check too. */
   isLink(path: string): boolean
   /** The path a symbolic link holds, unresolved, or `undefined` if `path` is not one. */
   readLink(path: string): string | undefined
@@ -53,9 +53,9 @@ export interface CommandFs {
   isBytes(path: string): boolean
   /** Contents of `path`, or `undefined` if it is not a file. Throws where the file holds bytes that spell no text, as this string-based terminal cannot carry them out; {@link CommandFs.readBytes} reads those. */
   readFile(path: string): string | undefined
-  /** The bytes of `path`, or `undefined` if it is not a file — what a file declared as a `Uint8Array` holds, and what the text of any other file encodes to as UTF-8. */
+  /** The bytes of `path`, or `undefined` if it is not a file -- what a file declared as a `Uint8Array` holds, and what the text of any other file encodes to as UTF-8. */
   readBytes(path: string): Uint8Array | undefined
-  /** Immediate children of directory `path`, each list sorted (copies — mutating them cannot affect the tree). Links are listed apart from the files they may lead to. Throws `<path>: Not a directory` / `No such file or directory` otherwise. */
+  /** Immediate children of directory `path`, each list sorted (copies -- mutating them cannot affect the tree). Links are listed apart from the files they may lead to. Throws `<path>: Not a directory` / `No such file or directory` otherwise. */
   listDir(path: string): { dirs: string[]; files: string[]; links: string[] }
   /** Every file path at or under `path`, absolute. `path` resolves as it does everywhere else here, so a link naming a directory walks the directory it names; a link the walk then reaches is neither crossed nor named. Empty if `path` does not exist. */
   walkFiles(path: string): string[]
@@ -73,7 +73,7 @@ export interface CommandInput {
 
 /** Result of {@link CommandIo.readInputs}: the coreutils partial-failure model. */
 export interface CommandInputs {
-  /** Inputs that could be read, in operand order — the subset a filter wants. */
+  /** Inputs that could be read, in operand order -- the subset a filter wants. */
   inputs: CommandInput[]
   /** Every operand in order, readable or not, so a command can tell a directory from a missing path. */
   entries: CommandInput[]
@@ -95,21 +95,21 @@ export interface CommandIo {
   cwd: string
   /** Read-only view of the virtual source tree. */
   fs: CommandFs
-  /** Read each path, collecting errors instead of aborting. Called with no arguments (or an empty list) it yields one nameless input carrying {@link CommandIo.stdin} — the shape a pure filter wants. */
+  /** Read each path, collecting errors instead of aborting. Called with no arguments (or an empty list) it yields one nameless input carrying {@link CommandIo.stdin} -- the shape a pure filter wants. */
   readInputs(paths?: readonly string[]): CommandInputs
   /**
    * Run a line on the terminal this command is running in, inside this
    * command's turn: it is part of the line that reached the handler rather
    * than a turn of its own, and it sees the filesystem, the cwd and the
-   * variables as they stand. Its diagnostics are its own — `unsupported` and
+   * variables as they stand. Its diagnostics are its own -- `unsupported` and
    * `notes` report what happened beneath this call and nothing of the line
    * around it.
    *
    * This is how a handler re-enters, and {@link Terminal.run} is not: that
    * one waits for a turn, as every caller of it does, and a handler waiting
    * there would be waiting for the turn it is itself holding. Which caller a
-   * `run` came from cannot be read off the call — the handler and a consumer
-   * that called during its wait arrive alike — so the terminal does not
+   * `run` came from cannot be read off the call -- the handler and a consumer
+   * that called during its wait arrive alike -- so the terminal does not
    * guess, and a handler says which it is by using this.
    */
   run(line: string): Promise<RunResult>
@@ -118,7 +118,7 @@ export interface CommandIo {
 /**
  * What a {@link CommandRun} handler may return in place of a plain string.
  * Missing fields default to `''` / `0`, but at least one must be present and
- * no other field may be — an object that is not a result (an array of lines
+ * no other field may be -- an object that is not a result (an array of lines
  * awaiting a `join`, a binary digest, a misspelled key) is rejected rather
  * than read as a successful command that printed nothing.
  */
@@ -142,7 +142,7 @@ export interface CommandResult {
  * normally. A promise that rejects fails the command the same way.
  *
  * A handler that runs a line of its own uses {@link CommandIo.run}, not the
- * terminal's — see there for why.
+ * terminal's -- see there for why.
  */
 export type CommandRun = (io: CommandIo) => string | CommandResult | void | Promise<string | CommandResult | void>
 
@@ -156,14 +156,14 @@ export interface CommandSpec {
   run: CommandRun
   /** Offer this command as a completion target after `|`. Set it when the handler reads `stdin`. Defaults to `false`. */
   pipe?: boolean
-  /** Keep the command dispatchable (and resolvable by `which`) but out of completion and the "Available: …" hint. Defaults to `false`. */
+  /** Keep the command dispatchable (and resolvable by `which`) but out of completion and the "Available: ..." hint. Defaults to `false`. */
   hidden?: boolean
 }
 
 /**
  * Commands to wire in, keyed by the name they are typed as: a plain object
- * (own enumerable properties) or a `Map`. Anything else — an array, a `Set`,
- * a class instance whose handlers live on the prototype — is rejected, since
+ * (own enumerable properties) or a `Map`. Anything else -- an array, a `Set`,
+ * a class instance whose handlers live on the prototype -- is rejected, since
  * it would otherwise register nothing, or register index keys as names.
  */
 export type Commands =
@@ -191,7 +191,7 @@ export interface CreateTerminalOptions {
    * Requires mount to be neither `/`, `/tmp`, nor a descendant of `/tmp`.
    * The source tree remains read-only. Missing parent directories are not
    * created by output redirection; `mkdir` and `cp -r` are what make one there,
-   * and `rm -r` is what takes it away — except for `/tmp` itself, which is
+   * and `rm -r` is what takes it away -- except for `/tmp` itself, which is
    * where the overlay is mounted rather than something inside it. Unsupported streaming read/write overlap
    * and changes to inherited input files reach the diagnostic channel.
    */
@@ -202,10 +202,10 @@ export interface CreateTerminalOptions {
   user?: string
   /**
    * The locale the terminal runs in. Only C.UTF-8 is implemented, so only that
-   * is accepted — spelt as glibc spells it, `'C.UTF-8'` or `'C.utf8'` in
-   * either case — and it is the default. `$LANG` answers it; a shell assignment that would move the
-   * character set — `LANG`, `LC_ALL` or `LC_CTYPE` set to any other value,
-   * or `LANG` unset — is refused with an unsupported diagnostic, while the
+   * is accepted -- spelt as glibc spells it, `'C.UTF-8'` or `'C.utf8'` in
+   * either case -- and it is the default. `$LANG` answers it; a shell assignment that would move the
+   * character set -- `LANG`, `LC_ALL` or `LC_CTYPE` set to any other value,
+   * or `LANG` unset -- is refused with an unsupported diagnostic, while the
    * other `LC_` categories also take `C` and `POSIX`, which read the same
    * as C.UTF-8 in them. A fork keeps the locale of the terminal it came from.
    * @throws if any other value is given.
@@ -231,18 +231,18 @@ export interface CreateTerminalOptions {
    */
   network?: boolean
   /**
-   * Commands to add to the built-in set — the wiring point for anything this
+   * Commands to add to the built-in set -- the wiring point for anything this
    * package will not implement itself, such as a `sha256sum` whose hashing
    * comes from the host. Wired commands are dispatchable, pipeable, and
    * expandable like built-ins, and appear after them in completion and the
-   * "Available: …" hint, in registration order.
+   * "Available: ..." hint, in registration order.
    */
   commands?: Commands
 }
 
 /**
- * Options for {@link Terminal.fork}. What the terminal is *over* — the source
- * tree, the mount, the `/tmp/` overlay, the network, the wired commands —
+ * Options for {@link Terminal.fork}. What the terminal is *over* -- the source
+ * tree, the mount, the `/tmp/` overlay, the network, the wired commands --
  * belongs to the parent and cannot be given another value here; an option this leaves out is
  * rejected rather than ignored, since `fork({ writable: false })` would
  * otherwise read as an isolation a fork does not provide.
@@ -258,15 +258,15 @@ export interface ForkOptions {
    * Home path used by `~`, `$HOME`, and argumentless `cd`. Defaults to the
    * parent's; a relative path resolves from the parent's working directory. A
    * `HOME` assignment inherited from the parent stands in front of it, exactly
-   * as an assignment stands in front of {@link CreateTerminalOptions.home} —
+   * as an assignment stands in front of {@link CreateTerminalOptions.home} --
    * which is the reason to pass `inherit: false` along with it.
    */
   home?: string
   /** User name reported by `whoami`. Defaults to the parent's. */
   user?: string
   /**
-   * Whether to hand the fork the parent's shell state: its variables — the
-   * names it knows to be unset included — its functions, and `$?`. `true` by
+   * Whether to hand the fork the parent's shell state: its variables -- the
+   * names it knows to be unset included -- its functions, and `$?`. `true` by
    * default, which is what makes this a fork.
    *
    * `false` starts that state empty, where a newly created terminal starts,
@@ -283,14 +283,14 @@ export interface ForkOptions {
 /**
  * What kind of gap an {@link Unsupported} entry reports.
  *
- * - `command` — the name is not a registered command.
- * - `option` — a registered command was handed an option it does not
+ * - `command` -- the name is not a registered command.
+ * - `option` -- a registered command was handed an option it does not
  *   implement, or explicitly rejects.
- * - `feature` — a construct this terminal recognizes and deliberately
+ * - `feature` -- a construct this terminal recognizes and deliberately
  *   goes no further on: `&` backgrounding, `case` / `select` and the other
  *   shell blocks it does not implement, a loop that never ends, command substitution
- *   and arithmetic, the `${…}` parameter-expansion operators, shell
- *   builtins it lacks (`source`, `eval`, …), a variable
+ *   and arithmetic, the `${...}` parameter-expansion operators, shell
+ *   builtins it lacks (`source`, `eval`, ...), a variable
  *   nothing set (there is no environment: `$PATH` expands to nothing,
  *   with this entry), a redirect that would write a file against the
  *   filesystem without a writable overlay, unsupported `sed` commands or regex features,
@@ -328,7 +328,7 @@ export interface RunResult {
   /** Working directory after the line completed. */
   cwd: string
   /**
-   * Gaps in this implementation hit anywhere in the line — the diagnostic
+   * Gaps in this implementation hit anywhere in the line -- the diagnostic
    * channel, for callers driving the terminal programmatically.
    *
    * Frozen, empty when the line asked for nothing this terminal lacks, and
@@ -339,8 +339,8 @@ export interface RunResult {
    * because stderr belongs to the command, so the shell's ordinary plumbing is
    * free to discard it: `find . -prune -o -print 2>/dev/null | head` silences
    * the message and then replaces the exit code, leaving a missing option
-   * indistinguishable from an empty tree. Nothing in a command line —
-   * redirect, pipe, `&&` gate, or subshell — can suppress this list.
+   * indistinguishable from an empty tree. Nothing in a command line --
+   * redirect, pipe, `&&` gate, or subshell -- can suppress this list.
    *
    * Scope is gaps, not failures. A missing file, a `grep` that matched
    * nothing, or a `cd` into a non-directory are things GNU reports the same
@@ -363,7 +363,7 @@ export interface RunResult {
    * about `.foo.txt`.
    *
    * A command that fails inside an `&&` chain cancels the rest of it, and
-   * that is noted where it actually stopped something from running — never
+   * that is noted where it actually stopped something from running -- never
    * for `test`, `[`, `true`, `false` or `grep -q`, whose status is the point
    * of the gate.
    *
@@ -375,7 +375,7 @@ export interface RunResult {
    * A failed file lookup also notes verified alternatives under the session's
    * other roots: `/`, the mount, and the home. A relative path was looked up
    * from the current directory and an absolute one from `/`, so the note asks
-   * whichever roots are left whether the same path names something there —
+   * whichever roots are left whether the same path names something there --
    * which is what answers a `cat /src/app.js` over a tree mounted at `/repo`.
    * Roots that coincide, and roots that lead to the same file, are reported
    * once. A single alternative is identified as a file or dir; several are
@@ -390,7 +390,7 @@ export interface RunResult {
 /**
  * The parser's own vocabulary, re-exported from the
  * `@preventive/terminal/parse.js` entry point: what `parse(line)` hands back,
- * and the nodes it is made of. Reading a line is that entry point's alone — a
+ * and the nodes it is made of. Reading a line is that entry point's alone -- a
  * terminal runs one.
  */
 export type {
@@ -451,28 +451,28 @@ export type {
 export interface Terminal {
   /**
    * Parse and execute one command line: pipelines, `&&` / `||` / `;`
-   * gates, `!`, `(...)` subshells and `{ …; }` groups, `for … in …; do …;
+   * gates, `!`, `(...)` subshells and `{ ...; }` groups, `for ... in ...; do ...;
    * done` loops with `break` / `continue`, `exit`, `NAME=value`
    * assignments (`export` / `unset`, and in front of a command),
-   * `if` branches and `[[ … ]]` file/string/integer conditionals,
+   * `if` branches and `[[ ... ]]` file/string/integer conditionals,
    * redirects (`>` `>>` `2>` `&>` to `/dev/null`, the two stream
    * devices, or files in an enabled `/tmp/` overlay; `2>&1`, `>&-`,
    * `<`, `<<`, `<<<`),
    * comments, bash quoting and backslash rules, brace expansion with
-   * sequences, `~`, `$NAME` / `$?`, command substitution, scalar `$(( … ))`
-   * arithmetic, `${…}` defaults, assignment, length, substring extraction,
+   * sequences, `~`, `$NAME` / `$?`, command substitution, scalar `$(( ... ))`
+   * arithmetic, `${...}` defaults, assignment, length, substring extraction,
    * pattern replacement and prefix/suffix removal,
    * and globs with bracket expressions. Other expansion operators, arrays,
-   * and `[[ … =~ … ]]` report unsupported diagnostics. Variables and the
+   * and `[[ ... =~ ... ]]` report unsupported diagnostics. Variables and the
    * working directory persist across calls.
    *
    * A line is run when the call is made and answered with a promise,
-   * because a command may have work the runtime does rather than this code —
-   * `gzip` waits on a compression stream — and the line waits for it where
+   * because a command may have work the runtime does rather than this code --
+   * `gzip` waits on a compression stream -- and the line waits for it where
    * it meets it. One line runs at a time over a tree: a line handed to this
    * terminal, or to a fork of it, while another is in flight takes its turn
    * rather than starting in the gap that one left, so calls made without
-   * awaiting the first still run in the order they were made — a wired
+   * awaiting the first still run in the order they were made -- a wired
    * command that waits is waited for like any other, and a handler that
    * wants to run a line inside its own turn has {@link CommandIo.run} for
    * it. A failing line is reported in the result, as before; the promise
@@ -482,14 +482,14 @@ export interface Terminal {
   /** Current working directory. */
   cwd(): string
   /**
-   * Tab-completion. Each entry is a full-line replacement for `line` —
+   * Tab-completion. Each entry is a full-line replacement for `line` --
    * the partial trailing word is filled in, everything before it (prior
    * args, separators, whitespace) is preserved verbatim. Consumers can
    * drop a result in without tokenizing the input themselves: e.g.
    * `complete('cat|gre')` returns `['cat|grep']`.
    *
-   * In command position — the start of the line, or after `;`, a newline,
-   * `|`, `&&`, `||`, `(`, or a `for` loop's `do` — completes command names
+   * In command position -- the start of the line, or after `;`, a newline,
+   * `|`, `&&`, `||`, `(`, or a `for` loop's `do` -- completes command names
    * (including under bin prefixes like `/usr/bin/`). In argument position, walks the virtual
    * FS treating the trailing word as a path (relative to cwd unless it
    * starts with `/` or unquoted `~/`); directories carry a trailing `/`.
@@ -500,14 +500,14 @@ export interface Terminal {
   complete(line: string): string[]
   /**
    * Fork this terminal: a second terminal over the same filesystem, carrying a
-   * copy of this one's session state — the working directory, the variables,
+   * copy of this one's session state -- the working directory, the variables,
    * the shell functions, and `$?` as they are at the moment of the call.
    *
    * It is the process fork rather than a second {@link createTerminal}: the
    * source tree, the mount, the `/tmp/` overlay, and the wired commands are
-   * this terminal's own, not copies. Afterwards the two run independently —
+   * this terminal's own, not copies. Afterwards the two run independently --
    * neither one's `cd`, assignment, `unset`, or function definition is visible
-   * to the other, in either direction — and what they write in `/tmp/` is the
+   * to the other, in either direction -- and what they write in `/tmp/` is the
    * one thing that passes between them, as it does between two processes
    * sharing a disk. With no writable overlay they share nothing but the
    * read-only sources.
@@ -515,8 +515,8 @@ export interface Terminal {
    * Each terminal's {@link RunResult} is its own: `unsupported` and `notes`
    * report the line that terminal ran, and nothing else.
    *
-   * {@link ForkOptions.inherit} set to `false` withholds that copy — no
-   * variables, no functions, no `$?` — for a fork that shares the filesystem
+   * {@link ForkOptions.inherit} set to `false` withholds that copy -- no
+   * variables, no functions, no `$?` -- for a fork that shares the filesystem
    * and nothing of the session.
    *
    * @throws if `opts` is not an object, carries an option a fork cannot honor,

@@ -6,7 +6,7 @@ export const MAX_SUBSTITUTION_DEPTH = 64
 // backslash, a newline and a backtick, and every other backslash reaches the
 // inner command intact. An escaped backtick is how the form nests, and the
 // escape levels compound with the nesting, so those are refused rather than
-// half-implemented — callers get a diagnostic naming the escape.
+// half-implemented -- callers get a diagnostic naming the escape.
 export function readBacktickSubstitution(line, start) {
   let command = ''
   for (let i = start + 1; i < line.length; i++) {

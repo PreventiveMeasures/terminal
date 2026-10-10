@@ -1,5 +1,5 @@
-// An archive read the way GNU tar 1.35 opens one — from stdin or a file, and
-// through gzip where it is compressed — and then read whole by
+// An archive read the way GNU tar 1.35 opens one -- from stdin or a file, and
+// through gzip where it is compressed -- and then read whole by
 // @preventive/archive's tar reader, which is strict: an archive it will not
 // read in full is one this terminal does not read at all, and says so.
 //
@@ -99,7 +99,7 @@ function openArchive(opts, state) {
 }
 
 // The entries of the archive `opts.archive` names, and the status gzip
-// left, which the caller reports once it has done with them — or null,
+// left, which the caller reports once it has done with them -- or null,
 // where the run has already ended.
 export function readArchive(opts, state) {
   const source = openArchive(opts, state)

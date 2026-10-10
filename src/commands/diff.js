@@ -31,7 +31,7 @@ export function diff(stdin, tokens, ctx) {
     if (file === '-') return err("diff: cannot compare '-' to a directory", 2)
     // A name that is not there is no file to look for inside the directory:
     // GNU answers for the operand it was given, and `-N` makes it the empty
-    // directory the walk compares against. Absence alone, as ever — a link
+    // directory the walk compares against. Absence alone, as ever -- a link
     // that loops is the error it is.
     if (kinds[1 - dirSide] === 'missing') {
       const failure = lookup(state.ctx.cwd, file, state.ctx.fs).error
@@ -75,7 +75,7 @@ export function report(state, text, status = 0, stderr = false) {
 // then only inside a directory or beside a file that does exist.
 // `listed` is what a directory comparison knows and an operand does not: which
 // side the listing held. `-N` stands in for a name a directory does not have,
-// and never for one it has and cannot read — a link leading nowhere is there,
+// and never for one it has and cannot read -- a link leading nowhere is there,
 // and GNU says so rather than diffing it as the empty file it is not. Two
 // operands have no listing behind them, so ENOENT is absence there, and `-N`
 // covers it unless it is all either of them is.
@@ -94,7 +94,7 @@ export function compareFiles(state, nameA, nameB, inDirectory, listed = null) {
   if (sides[0].identity !== undefined && sides[0].identity === sides[1].identity && !missing[0]) return sameReport(state, nameA, nameB)
   const label = (i) => opts.labels[i] ?? [nameA, nameB][i]
   // A file holding a NUL is binary to diff, which says only whether the two
-  // differ and reads neither as text — so one whose bytes spell none is
+  // differ and reads neither as text -- so one whose bytes spell none is
   // answered for here as readily as one that does.
   if (!opts.text && sides.some(isBinary)) {
     if (sameSides(sides)) return sameReport(state, nameA, nameB)
@@ -104,7 +104,7 @@ export function compareFiles(state, nameA, nameB, inDirectory, listed = null) {
   // spell none is one it would print as those bytes. What it says of such a
   // file without printing it, this terminal says too: the same bytes are the
   // same file, and `-q` says only that two differ. An option that reads text
-  // more loosely than its bytes — case, whitespace, line endings — answers
+  // more loosely than its bytes -- case, whitespace, line endings -- answers
   // for neither, since files differing in bytes may be the same text to it.
   if (sides.some((side) => side.content === undefined)) {
     if (sameSides(sides)) return sameReport(state, nameA, nameB)
@@ -147,7 +147,7 @@ function sameReport(state, nameA, nameB) {
 const stripTrailingCr = (text) => text.replace(/\r\n/gu, '\n')
 
 // GNU looks for a NUL in the first block it reads; a file this size is read
-// whole, so the whole file is what is looked at — its bytes where its text
+// whole, so the whole file is what is looked at -- its bytes where its text
 // is not there to look through.
 const isBinary = (side) => side.content === undefined ? side.bytes.includes(0) : side.content?.includes('\0') === true
 
@@ -161,7 +161,7 @@ const sameSides = ([a, b]) => a.content !== undefined && b.content !== undefined
 const EMPTY = new Uint8Array()
 
 // Content null means the file is not there, and undefined that its bytes
-// spell no text — which diff answers for, since a file holding a NUL is one
+// spell no text -- which diff answers for, since a file holding a NUL is one
 // it compares without reading either as text. Identity tells `diff a ./a`
 // apart from two files that merely read the same.
 function readOperand(state, name) {

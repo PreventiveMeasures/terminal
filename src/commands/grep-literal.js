@@ -13,7 +13,7 @@ export { wholeCharacters } from '../unicode.js'
 
 // The bytes a plain literal can be, character by character: what each one is
 // as written, or the bytes of each character it stands for where `-i` folds
-// it — `s` for `s`, `S` and `ſ`, which are one, one and two bytes.
+// it -- `s` for `s`, `S` and the long s, which are one, one and two bytes.
 function literalMask({ pattern, tables }, folded) {
   return [...pattern].map((character) => {
     const codes = folded ? tables.fold(character.codePointAt(0)) : [character.codePointAt(0)]
@@ -37,7 +37,7 @@ export function cannotHoldMatch(bytes, res) {
 // The same question, asked of patterns that were never compiled here: `rg`
 // reads its own dialect and only needs to know whether a plain literal, as
 // written, is anywhere in the bytes at all. Nothing else answers, and a
-// folded one does not either — ripgrep folds case by its own tables.
+// folded one does not either -- ripgrep folds case by its own tables.
 export function literalsMissing(bytes, patterns, literal, locale = LOCALE) {
   const tables = classTables(locale)
   return patterns.every((pattern) => (literal || !METACHARACTER.test(pattern)) && pattern.isWellFormed() &&
@@ -73,8 +73,8 @@ const ERE_SPECIAL = new Set('\\.[*^$+?(){}|')
 // The text a pattern selects when it is a plain literal, or null when it is
 // more than that. `-F` is always one, and a GNU pattern is one where every
 // special character in its dialect is escaped into itself: `foo(` in a BRE,
-// `foo\(` in an ERE, `a\.b` in either. Any other escape — `\(` in a BRE,
-// `\w`, `\<` — is an operator. `-P` keeps the reading `rg` has.
+// `foo\(` in an ERE, `a\.b` in either. Any other escape -- `\(` in a BRE,
+// `\w`, `\<` -- is an operator. `-P` keeps the reading `rg` has.
 export function literalText(pattern, flags) {
   if (flags.has('F')) return pattern
   if (flags.has('P')) return METACHARACTER.test(pattern) ? null : pattern
@@ -93,10 +93,11 @@ export function literalText(pattern, flags) {
 // never take it for a wildcard, a set or a literal, whatever the set holds.
 // It still sits between characters, and where glibc's regex asks whether a
 // word starts or ends there it reads the byte as the character of that value,
-// as the C locale reads every byte — so after 0xE9, read as `é`, no word
-// starts at a letter, and after 0xD7, read as `×`, one does. `-w` asks GNU's
-// own word test instead, which takes such a byte for no word character at
-// all; its lookarounds are plain sets, which hold no marker, and say the same.
+// as the C locale reads every byte -- so after 0xE9, read as e acute, no
+// word starts at a letter, and after 0xD7, read as the multiplication sign,
+// one does. `-w` asks GNU's own word test instead, which takes such a byte
+// for no word character at all; its lookarounds are plain sets, which hold
+// no marker, and say the same.
 // Only the escapes that read a marker differently are spelt here; grepSource
 // takes the rest as it spells them over text.
 const MARKED = new Map()
@@ -184,7 +185,7 @@ export function glibcRuns(text) {
 // takes a character past U+10FFFF even in GNU's own matcher; a wildcard; and
 // whether glibc's regex answers the whole pattern, which in a multibyte locale
 // it does for a backreference, a word edge, `\w`, `\s` and their negations,
-// and a set holding a class or a range — and then reads both those runs as
+// and a set holding a class or a range -- and then reads both those runs as
 // characters, as it always does for what `-o` prints. The pattern has passed
 // validateRegex, so every set in it ends where validateBracket says.
 export function patternShape(pattern, backrefs) {

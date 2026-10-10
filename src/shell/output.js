@@ -6,7 +6,7 @@ import { discardedStderr } from '../notes.js'
 
 // An event carries text, or the bytes a command wrote where no text spells
 // them: a dump of a file, a member a stream inflated. Where they are going
-// decides what becomes of them — a file and a pipe take the bytes, and a
+// decides what becomes of them -- a file and a pipe take the bytes, and a
 // terminal carrying its output as a string takes the text they spell, or
 // reports that they spell none.
 export const textOf = (event) => event.text ?? decodeUtf8(event.bytes)
@@ -54,7 +54,7 @@ function routeEvents(result, io, ctx, write) {
   const merged = first === second && first !== 'null' && first !== 'closed'
     || (first?.identity && second?.identity ? first.identity === second.identity : first?.path && first.path === second?.path)
   if (merged && unorderedOutput(r)) {
-    r = unsupported('feature', null, 'combined output ordering', 'error: merging this command’s stdout and stderr in order is not supported')
+    r = unsupported('feature', null, 'combined output ordering', 'error: merging this command\u2019s stdout and stderr in order is not supported')
     ctx.unsupported.add(unsupportedNote(r))
   }
   const events = []
@@ -63,7 +63,7 @@ function routeEvents(result, io, ctx, write) {
     const dest = io.fds[e.fd]
     if (typeof dest === 'object') { write(e, dest); continue }
     // Bytes on their way somewhere else wait for the router that writes it,
-    // which is the one that can hand them over as the bytes they are — or
+    // which is the one that can hand them over as the bytes they are -- or
     // drop them, which needs them to be no more readable than this does.
     if (io.deferred?.[e.fd] && e.bytes !== undefined) { events.push(e); continue }
     if (dest !== 'out' && dest !== 'err') {

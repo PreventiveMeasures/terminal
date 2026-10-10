@@ -2,7 +2,7 @@
 //
 // A first word with no dash in front of it is the old style: every letter in
 // it is an option, and each one that takes an argument takes the next word
-// after the cluster, in order — `tar czf out.tgz dir`. Everything after that
+// after the cluster, in order -- `tar czf out.tgz dir`. Everything after that
 // is getopt's: a cluster's letter that takes an argument takes the rest of
 // the cluster, or the next word where nothing is left (`-cfz x` names the
 // archive `z`); a long option takes `=value` or the next word; `--` ends the

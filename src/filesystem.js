@@ -26,8 +26,8 @@ export function createFs(sources, mount = '/') {
 }
 
 // One name is one entry, as @preventive/vfs builds a tree from a map: a
-// repeat is skipped where it declares exactly what is there — `a/f` and
-// `a/./f` spell one name — and refused where it declares anything else,
+// repeat is skipped where it declares exactly what is there -- `a/f` and
+// `a/./f` spell one name -- and refused where it declares anything else,
 // rather than letting declaration order pick a winner. A name is declared
 // where it stands, so nothing is declared under a file or through a link:
 // a link declared on the way would put an entry wherever the link leads.
@@ -90,7 +90,7 @@ const emptyListing = () => ({ dirs: [], files: [], links: [] })
 // asked about, as a directory index was built from the sources before: what
 // a name is, and what a directory lists, are then a lookup away however deep
 // they are, where the Vfs resolves every path from the root. Where the tree
-// may change from — `writableAt` names it — names are read from the Vfs as
+// may change from -- `writableAt` names it -- names are read from the Vfs as
 // they are asked for instead, one directory at a time, and forgotten each
 // time a writer says the tree has `reshaped`.
 function vfsFs(vfs) {
@@ -218,8 +218,8 @@ function sourceEntries(sources) {
 const FIELDS = { file: ['data'], directory: [], symlink: ['target'] }
 const UNKEPT = new Set(['mode', 'mtime'])
 
-// A source value is a file's contents — text, or the bytes of one a string
-// cannot spell — or an object saying what the entry is, in the shapes
+// A source value is a file's contents -- text, or the bytes of one a string
+// cannot spell -- or an object saying what the entry is, in the shapes
 // @preventive/vfs declares: `{ type: 'file', data }`, `{ type: 'directory' }`
 // and `{ type: 'symlink', target }`; or bytes spelt in base64,
 // `{ format: 'base64', data }`, for a tree that arrives serialized as text.
@@ -228,7 +228,7 @@ const UNKEPT = new Set(['mode', 'mtime'])
 function sourceEntry(value, key) {
   const name = JSON.stringify(key)
   if (typeof value === 'string') return { type: 'file', data: textContent(value, key) }
-  // A `Uint8Array` — or any other one-byte view, `Buffer` among them — is the
+  // A `Uint8Array` -- or any other one-byte view, `Buffer` among them -- is the
   // file's bytes. They are copied, so the tree a terminal was made with is
   // the tree it keeps however the caller goes on to use the array.
   if (ArrayBuffer.isView(value)) return { type: 'file', data: byteContent(value, key) }

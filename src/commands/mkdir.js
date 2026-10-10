@@ -42,8 +42,8 @@ function makeParents(name, state) {
     if (parts[i] !== '') prefixes.push(parts.slice(0, i + 1).join('/'))
   }
   // Slashes alone name the root, which is there already; an empty operand
-  // names nothing at all, and GNU says so rather than passing over it — a
-  // silent success would let `mkdir -p "$dir" && …` run on a name it never got.
+  // names nothing at all, and GNU says so rather than passing over it -- a
+  // silent success would let `mkdir -p "$dir" && ...` run on a name it never got.
   if (prefixes.length === 0) {
     if (name === '') makeDirectory(name, state, true)
     return

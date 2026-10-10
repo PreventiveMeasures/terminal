@@ -8,7 +8,7 @@ export type Operator = ';' | '&&' | '||'
 /**
  * A word in more than one piece: the text, patterns, references and
  * substitutions it is made of, joined in order. A word of one piece is that
- * piece, and text nothing can change is a plain string — so `a*` is a
+ * piece, and text nothing can change is a plain string -- so `a*` is a
  * {@link PatternPart}, `'a*'` is `"a*"`, and only `a*"b"` is one of these.
  */
 export interface Parts {
@@ -17,26 +17,26 @@ export interface Parts {
 }
 
 /**
- * One piece of a word — or the whole word, when it is the only piece.
+ * One piece of a word -- or the whole word, when it is the only piece.
  *
  * A piece is a plain string once nothing can change it, quoted or not: `"a b"`
  * is `'a b'`, and so is `a" "b`, whose runs join. Every other piece names the
  * expansion it is waiting for, and says with `multi` whether what comes back
- * is still one word — except where its own kind already answers that: a brace
+ * is still one word -- except where its own kind already answers that: a brace
  * group is always more than one word, and a sum is never more than one. A
- * pattern and a brace are bare by definition — quoting either settles the text
+ * pattern and a brace are bare by definition -- quoting either settles the text
  * instead.
  */
 export type Part = string | PatternPart | BracePart | VariablePart | SubstitutionPart | ProcessPart | ArithmeticPart
 
 /**
- * Bare text carrying glob syntax — `*`, `?`, or a `[` a bare `]` closes —
+ * Bare text carrying glob syntax -- `*`, `?`, or a `[` a bare `]` closes --
  * matched rather than read as text. Quoting settles the text instead, so a
  * pattern is never quoted: `a*` is one of these and `'a*'` is the string `a*`.
  *
  * Only where the shell matches: against the filesystem in a word list or a
  * redirect target, and against the other side in `[[ x == a* ]]`. An
- * assignment value, a here-string and every other `[[ … ]]` operand are
+ * assignment value, a here-string and every other `[[ ... ]]` operand are
  * expanded and then left alone, so `x=*.js` is the string `*.js`, exactly as
  * bash assigns it.
  *
@@ -45,7 +45,7 @@ export type Part = string | PatternPart | BracePart | VariablePart | Substitutio
  * with `a` and ends with a literal `b`.
  *
  * `pattern` is the text where the line settles it, and the piece whose result
- * is that text where only running it does — `[[ a == $b ]]` matches by
+ * is that text where only running it does -- `[[ a == $b ]]` matches by
  * whatever `b` holds, where `[[ a == "$b" ]]` compares that text and is a
  * {@link VariablePart} of its own. A piece stands here only on the pattern
  * side of `[[ x == y ]]`: it is the one slot that matches what it does not
@@ -61,7 +61,7 @@ export interface PatternPart {
 
 /**
  * A pattern the line settles the text of, which is every pattern but the one
- * `[[ x == $y ]]` matches by — so this is what stands wherever a piece cannot,
+ * `[[ x == $y ]]` matches by -- so this is what stands wherever a piece cannot,
  * and reading its text needs no check that there is any.
  */
 export interface StringPatternPart extends PatternPart {
@@ -70,14 +70,14 @@ export interface StringPatternPart extends PatternPart {
 
 /**
  * Braces this reading did not expand. Brace expansion needs nothing but the
- * text, so a word list arrives expanded — `a{b,c}` is the two words `ab` and
- * `ac` — and this is left for the two places that cannot be: a slot that takes
+ * text, so a word list arrives expanded -- `a{b,c}` is the two words `ab` and
+ * `ac` -- and this is left for the two places that cannot be: a slot that takes
  * a single word, where a redirect target like `> {a,b}` is the ambiguous
  * redirect running it reports, and a group with more products than reading a
  * line should make.
  *
  * Braces nothing expands are never this: `a{b}` is the string `a{b}`, and so
- * are the braces in an assignment, a here-string or a `[[ … ]]` operand, none
+ * are the braces in an assignment, a here-string or a `[[ ... ]]` operand, none
  * of which the shell expands. A group that does expand is always more than one
  * word, so unlike a pattern it has nothing to say about how many come back.
  */
@@ -91,28 +91,28 @@ export interface BracePart {
  * `$1`, `$@`.
  *
  * A `~` prefix is one of these: it names the home directory, which is what
- * `"$HOME"` names, and never more than one word for the same reason — tilde
+ * `"$HOME"` names, and never more than one word for the same reason -- tilde
  * expansion is neither split nor matched. `~/a` reads exactly as `"$HOME/a"`
  * does, and so
  * does the `~/a` in `PATH=~/a:~/b`, since a prefix opens a word or an
  * assignment component. Quoting one leaves the text alone: `a~b`, `~''/x` and
  * `~"/x"` are the paths they spell. A prefix naming a user or the directory
- * stack — `~alice`, `~+` — is refused rather than read, since bash expands it
+ * stack -- `~alice`, `~+` -- is refused rather than read, since bash expands it
  * and this shell has no users to look one up in.
  */
 export interface VariablePart {
   type: 'variable'
   /** The name, or the character a special one is spelled with: `x`, `?`, `1`, `@`. */
   name: string
-  /** What the reference does beyond reading the value — `:-`, `:=`, `:?`, `:+`, `#`, `##`, `%`, `%%`, `/`, `//`, `:` for a substring, and `length` for `${#x}`. Absent for a plain reference. */
+  /** What the reference does beyond reading the value -- `:-`, `:=`, `:?`, `:+`, `#`, `##`, `%`, `%%`, `/`, `//`, `:` for a substring, and `length` for `${#x}`. Absent for a plain reference. */
   operator?: string
-  /** The operator's operand, as written: the default in `${x:-a b}`, the pattern in `${x##prefix}`. Absent when the operator takes none. It is the source text rather than a {@link Value}, so an expansion inside it is text here too — `${x:-$(id)}` keeps `$(id)`, and {@link summarize} refuses it rather than say a line runs nothing it runs. */
+  /** The operator's operand, as written: the default in `${x:-a b}`, the pattern in `${x##prefix}`. Absent when the operator takes none. It is the source text rather than a {@link Value}, so an expansion inside it is text here too -- `${x:-$(id)}` keeps `$(id)`, and {@link summarize} refuses it rather than say a line runs nothing it runs. */
   operand?: string
   /**
    * Whether what comes back may be more than one word, said either way: bare,
    * a result is split into fields and matched as a pattern, and quoting is
-   * what settles it — as does a slot that splits nothing, an assignment
-   * value, a here-string or a `[[ … ]]` operand. `"$@"` is the one quotes do
+   * what settles it -- as does a slot that splits nothing, an assignment
+   * value, a here-string or a `[[ ... ]]` operand. `"$@"` is the one quotes do
    * not settle: a word for each positional parameter, and none at all where a
    * shell has none, as this one does.
    */
@@ -120,13 +120,13 @@ export interface VariablePart {
 }
 
 /**
- * `$( … )` or `` ` … ` ``: commands, so the commands are what it holds.
+ * `$( ... )` or `` ` ... ` ``: commands, so the commands are what it holds.
  * ``foo `bar a b c` `` names `foo`, and `bar` inside its argument.
  *
  * Bash parses a backtick when it expands it rather than when it reads the
  * line, so a backtick body that does not parse carries its diagnostic here and
- * an empty `list`, leaving the line itself readable — which is what running it
- * does too. A `$( … )` body is parsed with the line, so a broken one fails the
+ * an empty `list`, leaving the line itself readable -- which is what running it
+ * does too. A `$( ... )` body is parsed with the line, so a broken one fails the
  * whole parse and never reaches this.
  */
 export interface SubstitutionPart {
@@ -139,9 +139,9 @@ export interface SubstitutionPart {
 }
 
 /**
- * `<( … )` or `>( … )`: commands again, so the commands are what it holds.
- * The word they become is a path — the one their output arrives on, or the
- * one they read what is written to — rather than the output itself, which is
+ * `<( ... )` or `>( ... )`: commands again, so the commands are what it holds.
+ * The word they become is a path -- the one their output arrives on, or the
+ * one they read what is written to -- rather than the output itself, which is
  * what a {@link SubstitutionPart} becomes.
  *
  * `op` is the direction as written. There is no `multi`: a path is one word,
@@ -156,14 +156,14 @@ export interface ProcessPart {
 }
 
 /**
- * `$(( … ))`: the expression as written, which this parser does not read
- * further. A sum is a number and no number is two words — nothing splits on a
- * digit, since a custom `IFS` is refused, and no digit matches a file — so
+ * `$(( ... ))`: the expression as written, which this parser does not read
+ * further. A sum is a number and no number is two words -- nothing splits on a
+ * digit, since a custom `IFS` is refused, and no digit matches a file -- so
  * unlike the other expansions this one says nothing about how many words come
  * back. It is always the one.
  *
  * A summary keeps it as it stands here, since an expression is not a list of
- * commands to summarize — unless it holds one, `$(( $(id -u) + 1 ))` being a
+ * commands to summarize -- unless it holds one, `$(( $(id -u) + 1 ))` being a
  * command behind text, which {@link summarize} refuses rather than hide.
  */
 export interface ArithmeticPart {
@@ -259,13 +259,13 @@ export interface Pipeline extends NodeBase {
   stages: Node[]
 }
 
-/** `( … )`: a list with its own working directory and variables. */
+/** `( ... )`: a list with its own working directory and variables. */
 export interface Subshell extends NodeBase {
   type: 'subshell'
   list: Node[]
 }
 
-/** `{ …; }`: a list sharing the enclosing shell's directory and variables. */
+/** `{ ...; }`: a list sharing the enclosing shell's directory and variables. */
 export interface Group extends NodeBase {
   type: 'group'
   list: Node[]
@@ -276,7 +276,7 @@ export interface ForLoop extends NodeBase {
   type: 'for'
   /** The loop variable, which keeps its last value after the loop. */
   name: string
-  /** The words after `in`; empty for `for f in; do …; done`. */
+  /** The words after `in`; empty for `for f in; do ...; done`. */
   words: Value[]
   /** The loop body. */
   list: Node[]
@@ -284,13 +284,13 @@ export interface ForLoop extends NodeBase {
 
 /**
  * `name () { list; }`: the list runs wherever the name is called, which is
- * all a function can be here — this shell supports one only while its body
+ * all a function can be here -- this shell supports one only while its body
  * reads and writes no variable, so a call cannot tell itself from the line it
  * stands in. What a caller would otherwise hand it is then nothing the body
  * could have read: its arguments as `$1`, a variable of its own, a `local`.
  *
- * Defining one runs nothing. Anything else — a body reading `$1`, a name that
- * calls itself — is refused with the gap `function` rather than run as
+ * Defining one runs nothing. Anything else -- a body reading `$1`, a name that
+ * calls itself -- is refused with the gap `function` rather than run as
  * something it is not.
  */
 export interface FunctionDefinition extends NodeBase {
@@ -324,7 +324,7 @@ export interface Branch {
   list: Node[]
 }
 
-/** `if … then … elif … else … fi`. */
+/** `if ... then ... elif ... else ... fi`. */
 export interface If extends NodeBase {
   type: 'if'
   /** The `if` arm first, then each `elif`, in order. */
@@ -333,7 +333,7 @@ export interface If extends NodeBase {
   otherwise?: Node[]
 }
 
-/** `[[ … ]]`, which runs no command. */
+/** `[[ ... ]]`, which runs no command. */
 export interface Test extends NodeBase {
   type: 'test'
   expression: Condition
@@ -358,7 +358,7 @@ export interface ConditionNot {
 /** `[[ -f x ]]`, and a bare `[[ x ]]`, which is `-n`. */
 export interface ConditionUnary {
   type: 'unary'
-  /** `-f`, `-z`, `-n`, … */
+  /** `-f`, `-z`, `-n`, ... */
   op: string
   word: Value
 }
@@ -379,7 +379,7 @@ export interface ConditionBinary {
   right: Value
 }
 
-/** A `[[ … ]]` expression. `=~` is refused rather than parsed. */
+/** A `[[ ... ]]` expression. `=~` is refused rather than parsed. */
 export type Condition = ConditionJunction | ConditionNot | ConditionUnary | ConditionBinary
 
 /** What the parser made of a line. */
@@ -391,7 +391,7 @@ export interface ParseResult {
    * unclosed `(` or `{`, an `if` or `for` still missing its `then`, `do`, `fi`
    * or `done`, or a trailing `&&`, `||` or `|`. This is what an interactive
    * caller reads a continuation line for. `ok` is `false` either way; an
-   * unterminated quote or `$( … )` is a syntax error rather than incomplete
+   * unterminated quote or `$( ... )` is a syntax error rather than incomplete
    * input, and a here-document body ends with the input.
    */
   incomplete: boolean
@@ -408,8 +408,8 @@ export interface ParseResult {
   list: Node[]
   /**
    * Gaps this implementation has, that parsing itself reached: refused shell
-   * constructs (`case`, `select`, `((`), unsupported `${…}` operators and
-   * `[[ … ]]` forms, a `~alice` home this shell cannot look up. Frozen and
+   * constructs (`case`, `select`, `((`), unsupported `${...}` operators and
+   * `[[ ... ]]` forms, a `~alice` home this shell cannot look up. Frozen and
    * deduplicated, in the shape a run reports.
    *
    * Only what parsing can see: whether a command exists, what an option means
@@ -422,13 +422,13 @@ export interface ParseResult {
  * One token of a chain that stands for a word: the text it will be, the
  * pattern it will be matched by, the variable it reads, the shell it waits
  * on, or the pieces those are joined from. Each says what it reaches for as
- * plainly as a name does —
+ * plainly as a name does --
  * `ls *.js` is `['ls', { type: 'pattern', pattern: '*.js', multi: true }]` and `ls ~/bin`
  * is `['ls', { type: 'parts', parts: [{ type: 'variable', name: 'HOME', multi: false }, '/bin'] }]`.
  *
  * A pattern here is a {@link StringPatternPart}: the one pattern whose text a
  * command has to run first stands on the pattern side of `[[ x == y ]]`, and
- * a `[[ … ]]` is not a chain to summarize.
+ * a `[[ ... ]]` is not a chain to summarize.
  */
 export type WordToken = TokenPiece | TokenParts
 
@@ -449,14 +449,14 @@ export interface TokenParts {
 }
 
 /**
- * `$( … )` or `` ` … ` ``: the commands it runs, summarized as a line of their
+ * `$( ... )` or `` ` ... ` ``: the commands it runs, summarized as a line of their
  * own, and the word is whatever they print. A summary of commands is a
- * summary, so `` echo `a;b` `` holds one — which is what keeps
+ * summary, so `` echo `a;b` `` holds one -- which is what keeps
  * `` `a;b` ``, `` `a|b` `` and `` `a` `` three different words, quoted or not.
  *
  * `multi` is what quoting decides here as anywhere: bare, the output is split
  * into fields and matched as a pattern, so it may come back as any number of
- * words. A `"$(cat <<'EOF' … EOF)"` is not one of these at all — it is the
+ * words. A `"$(cat <<'EOF' ... EOF)"` is not one of these at all -- it is the
  * text that here-document holds, which nothing has to run to know.
  */
 export interface ShellToken {
@@ -467,7 +467,7 @@ export interface ShellToken {
 }
 
 /**
- * `<( … )` or `>( … )`: what it runs, summarized as a line of its own, and the
+ * `<( ... )` or `>( ... )`: what it runs, summarized as a line of its own, and the
  * direction as written. The word is the path rather than the output, so unlike
  * a {@link ShellToken} it is one word however it was written.
  */
@@ -478,7 +478,7 @@ export interface ProcessToken {
 }
 
 /**
- * The `A=1 B=2` a command carries, in one token at the head of its row —
+ * The `A=1 B=2` a command carries, in one token at the head of its row --
  * where they were written, and where bash reads them. `A=1 B=2 cmd` sets them
  * for that command alone and `A=1 B=2` on its own sets them for the shell, so
  * a row may hold this and nothing else.
@@ -498,7 +498,7 @@ export interface TokenAssignment {
 
 /**
  * One command of a chain: each pipeline stage's `argv`, with the assignments
- * it carries in front, and each redirect as the tokens it was written with —
+ * it carries in front, and each redirect as the tokens it was written with --
  * `['>', 'out']`, `['2>&1']`. Where a stage is a block, the row is the block.
  */
 export type Chain = ChainRow[]
@@ -507,8 +507,8 @@ export type Chain = ChainRow[]
 export type ChainRow = Token[] | ChainParens | ChainBraces | ChainFor | ChainWhile
 
 /**
- * A `( … )` a chain runs: the commands inside, summarized as a line of their
- * own, since a subshell holds a list like any other — `(cd dir; ls) > out` is
+ * A `( ... )` a chain runs: the commands inside, summarized as a line of their
+ * own, since a subshell holds a list like any other -- `(cd dir; ls) > out` is
  * `[{ type: 'parens', summary: [[['cd', 'dir']], [['ls']]] }, ['>', 'out']]`.
  *
  * Parentheses holding one command that changes nothing the shell around them
@@ -516,7 +516,7 @@ export type ChainRow = Token[] | ChainParens | ChainBraces | ChainFor | ChainWhi
  * plain rows, while `(cd dir)` keeps them, since they are what stops the `cd`
  * reaching the shell. This is not the tree's `subshell`: a chain's rows are
  * commands, and what it holds is a {@link Summary} rather than a list of
- * nodes — which is why it is a `summary` here and a `list` there.
+ * nodes -- which is why it is a `summary` here and a `list` there.
  */
 export interface ChainParens {
   type: 'parens'
@@ -525,7 +525,7 @@ export interface ChainParens {
 }
 
 /**
- * A `{ …; }` a chain runs, which is a {@link ChainParens} but for the one
+ * A `{ ...; }` a chain runs, which is a {@link ChainParens} but for the one
  * thing brackets decide: a brace group runs in the shell it stands in, so
  * a `cd`, an assignment or an `exit` inside it reaches the line around it.
  *
@@ -541,7 +541,7 @@ export interface ChainBraces {
 
 /**
  * A `while` or `until` a chain runs: the list it repeats and the list it asks
- * before every turn, each summarized as a line of its own —
+ * before every turn, each summarized as a line of its own --
  * `while read -r f; do wc -l; done` is one row holding both.
  */
 export interface ChainWhile {
@@ -553,12 +553,12 @@ export interface ChainWhile {
 }
 
 /**
- * A `for NAME in WORD…; do … done` a chain runs: the list it repeats,
- * summarized as a line of its own, and what it repeats that list over —
+ * A `for NAME in WORD...; do ... done` a chain runs: the list it repeats,
+ * summarized as a line of its own, and what it repeats that list over --
  * `for d in a-*; do echo "$d"; done` is one row holding the name `d`, the
  * pattern `a-*`, and a summary of the `echo`.
  *
- * `words` is empty for `for f in; do … done`, which runs nothing. As with
+ * `words` is empty for `for f in; do ... done`, which runs nothing. As with
  * {@link ChainBraces}, this is not the tree's `for`: `summary` is a
  * {@link Summary} rather than a list of nodes, and the words are tokens.
  */
@@ -574,13 +574,13 @@ export interface ChainFor {
 
 /**
  * A definition is not a chain: it runs nothing, and the body stands where the
- * name is called instead — `f() { ls; }; f | wc` summarizes as `ls | wc`, a
+ * name is called instead -- `f() { ls; }; f | wc` summarizes as `ls | wc`, a
  * body of one command reading as that command. A call that reaches its own
  * name has no end to stand in for, and is refused.
  *
  * A summarized line: its chains in order, with `&&` or `||` standing between
  * the two it gates, and `&` standing after the chain it hands to the
- * background — which may be the last of the line, since `&` ends one. A `;`
+ * background -- which may be the last of the line, since `&` ends one. A `;`
  * decides nothing about what follows, so nothing stands between those.
  *
  * ```js
@@ -594,8 +594,8 @@ export type Summary = Array<Chain | '&&' | '||' | '&'>
  *
  * This entry point is the parser alone: it has no commands, no filesystem and
  * no variables, so it never reports that a command is missing and never
- * refuses a redirect — where a line may write is a property of a terminal, not
- * of the line, and `createTerminal(…).run(line)` is what reports the gap for a
+ * refuses a redirect -- where a line may write is a property of a terminal, not
+ * of the line, and `createTerminal(...).run(line)` is what reports the gap for a
  * write its filesystem cannot take.
  */
 export function parse(line: string): ParseResult
@@ -613,7 +613,7 @@ export function parse(line: string): ParseResult
  * ```
  *
  * It says what the line does rather than how it was spelled, so whatever feeds
- * a command is the command that feeds it — a file is the `cat` that reads it,
+ * a command is the command that feeds it -- a file is the `cat` that reads it,
  * and text is the `echo` that writes it:
  *
  * ```js
@@ -623,28 +623,28 @@ export function parse(line: string): ParseResult
  * ```
  *
  * A `cat` left with nothing to read but its own input hands it straight on, so
- * it is left out once something is feeding the chain — which is why writing a
+ * it is left out once something is feeding the chain -- which is why writing a
  * here-document to a file is one `echo` and its redirect. Where `echo` would
- * say something else than the text does — a body ending without a newline, or
- * a first word it would read as an option — `printf` says it exactly.
+ * say something else than the text does -- a body ending without a newline, or
+ * a first word it would read as an option -- `printf` says it exactly.
  *
- * A quoted `$(cat <<'EOF' … EOF)` is the text it holds, so that is what it
+ * A quoted `$(cat <<'EOF' ... EOF)` is the text it holds, so that is what it
  * says: the here-document, minus the trailing newlines `$( )` strips.
- * `echo "$(cat <<'EOF'` … `EOF` … `)"` summarizes as `[[['echo', '…']]]`.
+ * `echo "$(cat <<'EOF'` ... `EOF` ... `)"` summarizes as `[[['echo', '...']]]`.
  * The delimiter has to be quoted, since an expanding body is not settled
  * text, and the substitution has to be one word, since bare its text would be
  * split into fields and globbed.
  *
  * A token is text, or the pattern or variable an argument is written as, the
  * shell whose output it will be, the word those are joined into, or the
- * `A=1 B=2` a command carries — each of which says what it reaches for as
+ * `A=1 B=2` a command carries -- each of which says what it reaches for as
  * plainly as a name says what it runs. Anything a summary
  * would have to lie about throws instead: a line that does not parse, an
- * `if` or `[[ … ]]`, a `!`, a
+ * `if` or `[[ ... ]]`, a `!`, a
  * here-document whose delimiter leaves its body to expand, a stage that reads
  * its own input from inside a pipeline, and any word that would hide a
- * command inside text a summary keeps as written — `${x:-$(id)}`,
- * `$(( $(id -u) ))` — or the braces of an ambiguous redirect. {@link parse}
+ * command inside text a summary keeps as written -- `${x:-$(id)}`,
+ * `$(( $(id -u) ))` -- or the braces of an ambiguous redirect. {@link parse}
  * reads those; this is the short answer while a line stays simple, and an
  * error the moment it does not.
  *

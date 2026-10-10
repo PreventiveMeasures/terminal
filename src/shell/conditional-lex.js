@@ -100,7 +100,7 @@ function nextToken(p) {
     }
     if (c === '\n') { p.i++; return { kind: 'newline' } }
     const pair = p.line.slice(p.i, p.i + 2)
-    if (pair === '<(' || pair === '>(') throw new UnsupportedError('feature', pair, `process substitution (\`${pair}…\`) is not supported`)
+    if (pair === '<(' || pair === '>(') throw new UnsupportedError('feature', pair, `process substitution (\`${pair}\u2026\`) is not supported`)
     if (pair === '&&' || pair === '||') { p.i += 2; return { kind: pair } }
     if ('()<>;&|'.includes(c)) { p.i++; return { kind: c, value: c } }
     const word = readWord(p)

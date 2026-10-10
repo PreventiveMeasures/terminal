@@ -133,7 +133,7 @@ function parseContext(value) {
   return parsed.error ? null : parsed.value
 }
 
-// The option words as typed, for the `diff -r …` line above each file pair
+// The option words as typed, for the `diff -r ...` line above each file pair
 // in a directory comparison: GNU joins the option arguments it was given,
 // shell-quoted, in the order getopt left them (options before operands).
 function switchString(tokens) {

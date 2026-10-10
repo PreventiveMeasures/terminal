@@ -32,7 +32,7 @@ export function complete(line, ctx, reg) {
 const OPENS_LIST = new Set(['!', '{', 'do', 'then', 'else', 'elif', 'if', 'while', 'until'])
 const CLOSES_LIST = new Set(['done', 'fi', '}', 'esac'])
 
-// Bin prefixes complete registered commands, not arbitrary executable paths —
+// Bin prefixes complete registered commands, not arbitrary executable paths --
 // and a function is not one of those, whatever it is named. Everywhere else a
 // defined function is a command this shell runs, so it completes as one, after
 // the registered names and only where it does not already stand among them.

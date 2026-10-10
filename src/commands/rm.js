@@ -56,7 +56,7 @@ function removeOperand(name, state) {
 }
 
 // Whether the walk reached a directory only by the operand's trailing slash,
-// where the name itself is a link — which is what `rm` would have to unlink.
+// where the name itself is a link -- which is what `rm` would have to unlink.
 function crossedLink(ctx, name) {
   const bare = name.replace(/\/+$/u, '')
   if (bare === name || bare === '') return false

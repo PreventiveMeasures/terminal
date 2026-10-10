@@ -57,7 +57,7 @@ export function duOptions(tokens, ctx) {
 // `-h` rounds up to one decimal, written with the numeric locale's decimal
 // point: `.` in C, POSIX and C.UTF-8, the ones a session can be in today. Any
 // other would write it differently, so this keeps checking the category
-// against the locale — LC_ALL, LC_NUMERIC, then the environment's — rather
+// against the locale -- LC_ALL, LC_NUMERIC, then the environment's -- rather
 // than trusting that the assignment guard never lets another through.
 export function humanScale(ctx, base = 1024n) {
   const numeric = ctx.vars.get('LC_ALL') || ctx.vars.get('LC_NUMERIC') || ctx.locale
@@ -95,7 +95,7 @@ function blockSize(value) {
 // What ext4 allocates for an entry, the one model plain `du` and `ls -l` read
 // from a tree that keeps no disk: 4 KiB blocks, a directory taking one, an
 // empty file none, and a link whose target is under 60 bytes none either,
-// since ext4 keeps that target in the inode itself — the fast symlink.
+// since ext4 keeps that target in the inode itself -- the fast symlink.
 export const BLOCK = 4096
 const FAST_LINK = 60
 export const allocated = (bytes, kind) => (kind === 'dir' ? BLOCK : kind === 'link' && bytes < FAST_LINK ? 0 : Math.ceil(bytes / BLOCK) * BLOCK)

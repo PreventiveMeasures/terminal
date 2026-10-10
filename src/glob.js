@@ -154,7 +154,7 @@ export function globMatch(name, pattern) {
   return compileGlob(pattern).test(name)
 }
 
-// Whether a word has an unquoted `*`, `?` or `[` — the only case that
+// Whether a word has an unquoted `*`, `?` or `[` -- the only case that
 // reaches the filesystem at all.
 export function hasGlobMeta(word) {
   const { value, mask } = word
@@ -194,7 +194,7 @@ function bracketEnd(word, start, bare) {
 
 // The word as a pattern for compileGlob: bare characters as typed,
 // quoted ones backslash-escaped where they would otherwise be read as
-// glob syntax — including the characters that are only special inside
+// glob syntax -- including the characters that are only special inside
 // a bracket expression, so `[a"-"c]` is a set of three, not a range.
 const QUOTABLE = /[*?[\]^!\\:.=-]/u
 
@@ -216,7 +216,7 @@ export function globPattern(word) {
 // the last segment is a path the pattern would have produced, and the names
 // its marks name are the ones the note reports. `*/nope` therefore says
 // nothing about a hidden directory the pattern would have entered and found
-// nothing in — the gate cost that caller nothing.
+// nothing in -- the gate cost that caller nothing.
 export function globPaths(word, ctx) {
   const pattern = globPattern(word)
   const segments = pattern.match(/[^/]+|\/+/gu) ?? []
@@ -298,8 +298,8 @@ function expandSegment(candidates, seg, isLast, ctx, gatedSoFar) {
   return next
 }
 
-// A matcher that refuses rather than guesses — a locale question over a
-// non-ASCII name — leaves the answer unknown. Counting the name keeps the
+// A matcher that refuses rather than guesses -- a locale question over a
+// non-ASCII name -- leaves the answer unknown. Counting the name keeps the
 // omission visible, which is the safer of the two ways to be imprecise.
 function couldMatch(re, name) {
   try { return re.test(name) } catch { return true }

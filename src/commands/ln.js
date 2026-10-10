@@ -9,10 +9,10 @@ import { canonicalize, relativePath } from './realpath.js'
 // `ln -s` makes a symbolic link in the writable overlay, holding the target as
 // it was written: it is resolved from the link's own directory when the link
 // is read, as the kernel resolves one, whether or not it leads anywhere. Which
-// name the link gets follows GNU coreutils 9.4 — one operand makes it in the
+// name the link gets follows GNU coreutils 9.4 -- one operand makes it in the
 // current directory under the target's last component, a directory operand
 // takes it inside unless -T or, for a link to a directory, -n, and -t names
-// the directory outright — and what a name it cannot take fails with is what
+// the directory outright -- and what a name it cannot take fails with is what
 // symlink(2) would say. A hard link, which `ln` makes without -s, is a second
 // name for one inode; the overlay has inodes, but nothing else here reads two
 // names as one file, so it is refused rather than made as a copy.
@@ -60,7 +60,7 @@ function destinations(files, directory, opts, ctx) {
     if (opts.noTargetDirectory) return { error: err(`ln: missing destination file operand after ${shown(files[0])}`) }
     return [inside('.', files[0])]
   }
-  // Two operands name a link outright when the second is not a directory —
+  // Two operands name a link outright when the second is not a directory --
   // or, under -n, is a link to one, since -n asks about the name itself.
   if (files.length === 2) {
     const found = lookup(ctx.cwd, files[1], ctx.fs, { follow: !opts.noDereference })
@@ -78,7 +78,7 @@ function destinations(files, directory, opts, ctx) {
 }
 
 // The name a link takes inside a directory: the target's last component, as
-// GNU joins them — a slash only where the directory did not end in one. A
+// GNU joins them -- a slash only where the directory did not end in one. A
 // target of `/` has no last component, and GNU makes that link by the empty
 // name relative to the directory, which no filesystem has a name for.
 function inside(directory, target) {
@@ -125,7 +125,7 @@ function link(target, dest, opts, state, nameless = false) {
 }
 
 // What symlink(2) says of a name a link cannot take: one already there, where
-// a link — followed or not — is a name taken; a parent that is missing or is
+// a link -- followed or not -- is a name taken; a parent that is missing or is
 // not a directory; and a trailing slash, which asks for a directory of a name
 // that is not there.
 function nameError(ctx, dest) {
@@ -140,7 +140,7 @@ function nameError(ctx, dest) {
 }
 
 // -r spells the target from the link's own directory, both taken as far as
-// they lead — through every link on the way, and past what is not there — as
+// they lead -- through every link on the way, and past what is not there -- as
 // `realpath -m` reads them; a target no reading can start on stays as written.
 function relativeTarget(ctx, target, dest) {
   const from = canonicalize(ctx, dirname(dest), 'm', 'physical')

@@ -7,23 +7,23 @@ import { compress as compressBytes, supports } from '@preventive/archive/compres
 import { decompressMembers } from '../compression.js'
 
 // gzip, both ways round. The work itself is the runtime's stream rather than
-// this code's (../compression.js), and it answers asynchronously — so the
+// this code's (../compression.js), and it answers asynchronously -- so the
 // command waits for it, which a line here can now do.
 //
 // What compressing writes is bytes, and this terminal carries a command's
 // output as a string: no string spells a member, since the second byte of its
 // header begins no character. So `-c` reports the gap every byte output here
-// reports, and the file written beside the one it came from — which the
-// overlay is the only place to write — is what compressing is for.
+// reports, and the file written beside the one it came from -- which the
+// overlay is the only place to write -- is what compressing is for.
 
 const FORMAT = 'gzip'
 
 // One program under several names, which is what GNU ships: `gunzip` is it
-// decompressing — `exec gzip -d` — and `zcat` is it decompressing to stdout,
+// decompressing -- `exec gzip -d` -- and `zcat` is it decompressing to stdout,
 // `exec gzip -cd`, which is why both say `gzip:` of what they cannot read.
 // `gzcat` is the name the BSDs give what GNU calls `zcat`, theirs having kept
 // `zcat` for the older `.Z`; it is the same thing, and it is that here. They
-// are all here the same way — one command, reached by the name that says what
+// are all here the same way -- one command, reached by the name that says what
 // it is for.
 const gunzip = (stdin, tokens, ctx) => gzip(stdin, ['-d', ...tokens], ctx)
 const zcat = (stdin, tokens, ctx) => gzip(stdin, ['-d', '-c', ...tokens], ctx)
@@ -39,7 +39,7 @@ export const looksCompressed = (bytes) => bytes !== undefined && bytes.length >=
 
 // What else GNU decompresses, known by its first bytes wherever a member
 // could begin (get_method): gzip 0.5's members, pack's, compress's and SCO
-// LZH's — and a zip, at the very start of the input alone. None of them is
+// LZH's -- and a zip, at the very start of the input alone. None of them is
 // read here, and bytes that open one are refused rather than called garbage.
 const FOREIGN = Object.freeze([[0x1f, 0x9e], [0x1f, 0x1e], [0x1f, 0x9d], [0x1f, 0xa0]])
 const PKZIP = Object.freeze([0x50, 0x4b, 0x03, 0x04])
@@ -70,7 +70,7 @@ const DEFLATE = 8
 //
 // What it says is also what `tar -z` passes on of it, so it is handed back as
 // the text and the status, and whether what gzip wrote before it was every
-// member whole — which is all `tar` then has to read.
+// member whole -- which is all `tar` then has to read.
 export function gzipTrouble(name, inflated) {
   const rest = inflated.rest
   const data = (message) => ({ text: `\ngzip: ${name}: ${message}\n`, status: 1, whole: false })
@@ -133,7 +133,7 @@ export async function gzip(stdin, tokens, ctx) {
 // A pipe carries text unless a stage upstream wrote bytes into it, and a
 // member is bytes: `cat f.gz | gzip -d` hands them over, where a pipe of text
 // is read the way GNU reads one carrying anything else and always finds the
-// same thing. Compressing reads that pipe as readily as decompressing does —
+// same thing. Compressing reads that pipe as readily as decompressing does --
 // a member is what `gzip | gzip` is handed, and no text spells one.
 async function fromStdin(opts, state) {
   // GNU neither writes a member to a terminal nor reads one from it, unless
@@ -181,8 +181,8 @@ function isLink(name, ctx) {
 }
 
 // The name it writes is the name it was given with a suffix on the end, and a
-// name already carrying one is a file GNU says it is leaving alone — while
-// making nothing of it: what it says there changes no status — unless forced.
+// name already carrying one is a file GNU says it is leaving alone -- while
+// making nothing of it: what it says there changes no status -- unless forced.
 async function compress(name, path, opts, state) {
   const { ctx } = state
   const suffix = suffixOf(name)
@@ -191,12 +191,12 @@ async function compress(name, path, opts, state) {
   return opts.stdout ? toStdout(member, state) : toFile(name + SUFFIX, member, name, opts, state)
 }
 
-// The tree has no clock of its own, so the moment it was made stands in — the
+// The tree has no clock of its own, so the moment it was made stands in -- the
 // same one `ls -l` dates every file in it to.
 const moment = (ctx) => Math.floor(ctx.createdAt / 1000)
 
 // GNU records where a member came from: the name the file had, without the
-// directory it stood in, and the moment it carried. A stream writes neither —
+// directory it stood in, and the moment it carried. A stream writes neither --
 // what it writes is the header of a member that came from no file, which is
 // the very one GNU writes for a pipe. Everything past the header is the
 // member's own and says nothing about either, so the name and the moment go
@@ -295,7 +295,7 @@ function toFile(target, bytes, source, opts, state) {
 }
 
 // What GNU says of data that is not what the header promised, which it writes
-// a newline ahead of — where a file it could not open, or passed over, is
+// a newline ahead of -- where a file it could not open, or passed over, is
 // reported as it stands, and a file it is leaving alone is reported without
 // being made anything of.
 const dataError = (state, message) => fail(state, message, 1, '\n')

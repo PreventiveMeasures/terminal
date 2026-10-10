@@ -1,6 +1,6 @@
 // The compound commands: a list run more than once, or run somewhere other
 // than where it stands. Each is a list in the end, so each is handed the one
-// thing it needs from the runner — how to run one.
+// thing it needs from the runner -- how to run one.
 
 import { expandWords } from './expand.js'
 import { err } from '../util.js'
@@ -21,7 +21,7 @@ export function runBlock(stage, ctx, stdin, runSteps) {
 // succeeds, and `until` for as long as it fails. The condition's own output
 // is the loop's, and its status is not: a loop that never runs its body
 // reports 0, as bash does. Nothing runs beside a line here, so a loop that
-// never ends is one that never returns — past a bound no line means to cross
+// never ends is one that never returns -- past a bound no line means to cross
 // it refuses, rather than take the terminal with it.
 const TURN_LIMIT = 10_000
 const TURN_GAP = { kind: 'feature', command: null, detail: 'loop limit', message: `a loop running more than ${TURN_LIMIT} times is not supported` }

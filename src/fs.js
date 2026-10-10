@@ -43,7 +43,7 @@ const isLink = (fs, path) => fs.isLink?.(path) === true
 // A link is replaced by what it names, component by component, as the kernel
 // replaces it: the target is read from the directory the link sits in, and a
 // target that is itself a link is followed in turn. `follow: false` stops at a
-// link in the final position instead — what `lstat` answers, and what `find`,
+// link in the final position instead -- what `lstat` answers, and what `find`,
 // `ls -l`, `stat` and `du` ask of a name they are about to describe.
 export function lookup(cwd, path, fs, { follow = true } = {}) {
   const found = walkPath(cwd, path, fs, { follow })
@@ -96,12 +96,12 @@ export function walkPath(cwd, path, fs, { follow = true, lenient = false } = {})
 
 // Which file a write lands on, and so which side of a boundary it falls. The
 // kernel resolves every component of a name before it opens anything, so a
-// link on the way decides — and at the end too, where opening a link opens
+// link on the way decides -- and at the end too, where opening a link opens
 // what it names and a link to nothing is that name made. Unlinking a name and
 // replacing it act on the name itself, as `lstat` reads one, and pass
 // `follow: false`. A component that is not there is kept as it was spelled,
 // since the file being made is the one being asked about.
-// A name no resolution can start on — empty, or holding a NUL — keeps the
+// A name no resolution can start on -- empty, or holding a NUL -- keeps the
 // spelling it came with, so it is answered for where it was aimed and the
 // diagnostic is the one that name earns.
 export const writeTarget = (fs, cwd, path, follow = true) => path === '' || path.includes('\0')

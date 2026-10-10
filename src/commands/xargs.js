@@ -49,7 +49,7 @@ export async function xargs(stdin, tokens, ctx) {
   return { ...out, exitCode, ignored: false }
 }
 
-// Dispatch names the command, so the message says only what went wrong —
+// Dispatch names the command, so the message says only what went wrong --
 // which quote it was, and that `-0` is the way to stop reading them.
 const unmatched = (quote) =>
   new Error(`unmatched ${quote === "'" ? 'single' : 'double'} quote; by default quotes are special to xargs unless you use the -0 option`)

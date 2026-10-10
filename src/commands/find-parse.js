@@ -106,7 +106,7 @@ function valuePredicate(kind, value, negate, depth) {
   return { kind, negate, re: compileGlob(value, { ignoreCase: kind.startsWith('i') }) }
 }
 
-// A size is a sign, a count, and the unit it is counted in — and what is
+// A size is a sign, a count, and the unit it is counted in -- and what is
 // measured is rounded up to the next whole unit, so `-size 1k` is every file
 // from one byte to a thousand and twenty-four. `b` is the unit when none is
 // given, which is the half-kilobyte block find has always counted in.

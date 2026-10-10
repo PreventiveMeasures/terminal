@@ -66,8 +66,8 @@ function copyOperands({ positional, flags, order }, ctx) {
   return { target, directory, sources: explicit === undefined ? positional.slice(0, -1) : positional }
 }
 
-// A recursive copy follows no link in the source — `-r` keeps each one as the
-// link it is, and only `-L` would read through it — and nothing here can make a
+// A recursive copy follows no link in the source -- `-r` keeps each one as the
+// link it is, and only `-L` would read through it -- and nothing here can make a
 // link, since the overlay holds files and directories alone. So a link such a
 // copy meets is refused rather than written as the file it points at.
 function refuseLinkedCopy(source, destination, state) {
@@ -97,7 +97,7 @@ const skippedByNoClobber = (destination, state) =>
   state.noClobber && lookup(state.ctx.cwd, destination, state.ctx.fs, { follow: false }).path !== null
 
 // Each directory the copy would have to enter or make on the way down to an
-// entry. One that is there and is not a directory ends that branch — and a
+// entry. One that is there and is not a directory ends that branch -- and a
 // link is none of them, whatever it leads to, since a directory is the one
 // thing no link can be written through.
 function blockedAbove(into, below, state) {
@@ -114,7 +114,7 @@ const linkedCopy = (name) => new UnsupportedError('feature', 'symbolic link', `c
 
 // A destination that is a link leading nowhere. GNU writes through neither
 // half of such a name: not the link, which is a name already taken, and not
-// the file it names, which is not there to open — `-f` and `-n` leave that
+// the file it names, which is not there to open -- `-f` and `-n` leave that
 // alone. So the copy is refused rather than made, whatever the link leads to.
 const danglingTarget = (ctx, name, dest) =>
   dest.path === null && ctx.fs.isLink?.(lookup(ctx.cwd, name, ctx.fs, { follow: false }).path) === true
@@ -139,7 +139,7 @@ function copyFile(source, destination, state, top = null) {
   const shownTarget = quoteName(destination, ctx)
   // Without `-r` a link operand is read through, which is GNU's default for
   // one it is handed; with it, every link is the link itself to copy, and
-  // this filesystem has nowhere to put one — unless `-n` has left the
+  // this filesystem has nowhere to put one -- unless `-n` has left the
   // destination alone, which is decided before the source is opened.
   if (state.recursive && ctx.fs.isLink?.(lookup(ctx.cwd, source, ctx.fs, { follow: false }).path)) {
     if (!skippedByNoClobber(destination, state)) throw linkedCopy(source)
@@ -351,7 +351,7 @@ function operandOverlaps(source, destination, scan) {
     return treeOverlaps(from, into, scan)
   }
   // A source is one directory or one file however it is spelled, and `cp` keeps
-  // it by the name it resolves to — `s` and `s/sub/..` are the same operand
+  // it by the name it resolves to -- `s` and `s/sub/..` are the same operand
   // twice even though they would be copied to different destinations.
   if (scan.sources.has(from)) return false
   scan.sources.add(from)
@@ -362,7 +362,7 @@ function operandOverlaps(source, destination, scan) {
 }
 
 // Every file below the source is read, and written to the name it keeps below
-// the destination — but only where the entry gets that far. Its parents are
+// the destination -- but only where the entry gets that far. Its parents are
 // this copy's own to make, so a component that is not there yet says nothing
 // about it; what is already in the way does.
 function treeOverlaps(from, into, scan) {

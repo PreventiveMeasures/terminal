@@ -116,7 +116,7 @@ function invoke(name, run, stdin, tokens, ctx) {
     // part of the line that reached the command rather than a turn of its
     // own, because the turn is the one this command is holding. The
     // terminal's own `run` waits for a turn, as every caller of it does, and
-    // a handler waiting there would be waiting for itself — which is why a
+    // a handler waiting there would be waiting for itself -- which is why a
     // handler that re-enters is handed this rather than left to say it some
     // way that could not be told from anyone else's call.
     //
@@ -188,7 +188,7 @@ function normalizeResult(result) {
     }
   }
   if (keys.length === 0) {
-    throw new TypeError(`invalid result: an object with none of ${RESULT_KEYS.join(', ')} — return a string for plain output`)
+    throw new TypeError(`invalid result: an object with none of ${RESULT_KEYS.join(', ')} \u2014 return a string for plain output`)
   }
   const { stdout = '', stderr = '', exitCode = 0 } = result
   if (typeof stdout !== 'string') throw new TypeError(`invalid result: stdout must be a string (got ${typeof stdout})`)

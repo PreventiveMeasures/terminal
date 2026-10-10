@@ -6,7 +6,7 @@
 // before it does anything with it, and warns of each keyword it does not
 // know; a global header's it takes without a word. Of those it knows, the
 // package takes what it takes and leaves the rest as GNU leaves them when
-// not asked to restore attributes — but for access and change times, which
+// not asked to restore attributes -- but for access and change times, which
 // GNU checks where the package does not, and the records of multi-volume
 // and incremental archives, which change what GNU makes of an entry. An
 // archive with a time GNU would complain of, or with one of those records,
@@ -51,7 +51,7 @@ function refusedRecord(records, quote) {
 
 // What the records and stored names of `entries` say that their fields do
 // not: for each entry the warnings GNU gives as it comes to it, and its time
-// to the fraction of a second where a record gives one — or a gap's detail
+// to the fraction of a second where a record gives one -- or a gap's detail
 // and message, for the first thing in the archive this terminal cannot
 // answer for. `quote` spells a name in a message.
 export function tarNotes(entries, quote) {

@@ -119,7 +119,7 @@ function sequence(body) {
 }
 
 // Zero padding applies when either endpoint was written with a leading
-// zero (`{01..10}`, `{1..010}`) — a `+` sign in front of it does not
+// zero (`{01..10}`, `{1..010}`) -- a `+` sign in front of it does not
 // count, as in bash; the width is the longest endpoint's, sign
 // included, as bash pads `-1` alongside `-10` to `-01`.
 function padWidth(a, b) {

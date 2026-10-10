@@ -48,7 +48,7 @@ export function lineRecords(text, delimiter = '\n') {
 }
 
 // Whether a command's stdin is the terminal itself: nothing piped or
-// redirected into it — a file, /dev/null, a here-document — and not the
+// redirected into it -- a file, /dev/null, a here-document -- and not the
 // /dev/null xargs gives what it runs. Nothing can be typed into this
 // terminal, so its stdin holds nothing to read, and a tool that will not read
 // from a terminal does not read from this one.
@@ -71,7 +71,7 @@ export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null) 
   // Taking stdin takes the bytes it held with it: what a reader stopped short
   // of it hands back, and the next command in the group reads that and no
   // more. A reader that took the lot leaves none, so there are none to read
-  // twice — which is what a shared input is.
+  // twice -- which is what a shared input is.
   ctx.stdinBytes = bytesLeft
 }
 
@@ -80,13 +80,13 @@ export function consumeStdin(ctx, rest = '', asBytes = false, bytesLeft = null) 
 // /dev/stdin reopens a regular file independently but shares a pipe's offset.
 //
 // `read` says what an operand is read as, for the commands that do not work in
-// text alone. `bytes` and `loose-bytes` hand back the bytes themselves — the
+// text alone. `bytes` and `loose-bytes` hand back the bytes themselves -- the
 // first as the input exactly has them, the second as a command only measuring
 // or slicing them reads text holding a lone surrogate, which a pipe can carry
-// and a file cannot — and the entry then carries `bytes` and no `content`, so
+// and a file cannot -- and the entry then carries `bytes` and no `content`, so
 // a command wanting text cannot quietly read an empty string. `as-held` hands
-// back the input as it is held — `content` for text a pipe carried, `bytes`
-// for a file, every one of which is bytes — and `maybe-text` adds the text
+// back the input as it is held -- `content` for text a pipe carried, `bytes`
+// for a file, every one of which is bytes -- and `maybe-text` adds the text
 // those bytes spell where they spell one, for the command that has something
 // to say about a file whose bytes spell none.
 // Nothing is converted either way, so a command that can work in either pays
@@ -191,7 +191,7 @@ export function readInputs(cmd, files, stdin, ctx, options) {
     // Stdin is text unless a stage upstream wrote bytes into the pipe, and
     // then it is those bytes: read as they are where a reader works in them,
     // as the text they spell where one does not, and refused where they spell
-    // none — the same answer a file of such bytes gives.
+    // none -- the same answer a file of such bytes gives.
     const read = options?.read
     const asBytes = read === 'bytes' || read === 'loose-bytes'
     const only = [{ name: null, kind: 'file', ...piped === null ? textInput(stdin, read, asBytes) : bytesInput(piped, read, asBytes, cmd, ctx) }]

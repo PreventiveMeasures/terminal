@@ -1,6 +1,6 @@
 // The network is the runtime's work rather than this code's, exactly as
 // compression is (./compression.js): `fetch` makes the request, and it
-// answers asynchronously where everything over the tree answers at once — so
+// answers asynchronously where everything over the tree answers at once -- so
 // the command waits for it where it meets it, which is what an asynchronous
 // `run` is for.
 //
@@ -8,7 +8,7 @@
 // package does happens over a tree that exists only in memory: no host
 // filesystem, no processes, nothing a command line can touch that the caller
 // did not hand over. A request does leave, so it is asked for rather than
-// assumed — `createTerminal(sources, { network: true })` — and without that
+// assumed -- `createTerminal(sources, { network: true })` -- and without that
 // the command that would make one is not in the registry at all: the name is
 // not found, which is what it was before the command was written, and is the
 // whole of what a line inside such a terminal is told about it.
@@ -16,12 +16,12 @@
 // Two rules hold whatever is asked for. What it will speak is http and https
 // and nothing else: `file:` would be the host filesystem this package does
 // not have, `data:` is bytes pretending to be a transfer, and every other
-// scheme is a protocol nothing here speaks — a redirect is held to the same
+// scheme is a protocol nothing here speaks -- a redirect is held to the same
 // rule, since a hop is a request. And nothing is read off the host to make
 // the request with: no environment, no `.netrc`, no cookie jar, no client
 // certificate. What goes out is what the command line said.
 
-// Whether a request can be made at all — asked when the registry is built,
+// Whether a request can be made at all -- asked when the registry is built,
 // since a runtime does not grow a `fetch` later. Nothing here reaches for one
 // it has not first been told is there, and it is the runtime's own `fetch`
 // that is reached for, named as this file names any other of its intrinsics.
@@ -41,7 +41,7 @@ export function networkOption(opts) {
 const SCHEMES = Object.freeze(['http:', 'https:'])
 const SCHEME_WRITTEN = /^[a-zA-Z][a-zA-Z0-9+.-]*:/u
 
-// curl reads a bare host as http — the one guess it makes about a URL, and
+// curl reads a bare host as http -- the one guess it makes about a URL, and
 // the one made here. Everything else a URL can be wrong in is the URL
 // parser's to say, and what it refuses is curl's code 3.
 export function readUrl(text) {
@@ -57,7 +57,7 @@ export function readUrl(text) {
 // trouble. A `fetch` that fails says little and says it differently in every
 // runtime, so the classification goes by the error code underneath where
 // there is one, and what is left is reported as the connection failure it
-// most often is — with the runtime's own words kept, rather than dropped for
+// most often is -- with the runtime's own words kept, rather than dropped for
 // a tidier guess.
 const RESOLVE = new Set(['ENOTFOUND', 'EAI_AGAIN'])
 const TIMEOUT = new Set(['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'])
@@ -117,7 +117,7 @@ export async function transfer(url, init, timeout = null) {
   }
 }
 
-// The body, whole, as the bytes it is — what a terminal carrying its output
+// The body, whole, as the bytes it is -- what a terminal carrying its output
 // as a string then makes of them is the caller's business, as it is for every
 // other command here that writes bytes. A body that stops early is its own
 // failure, told apart from a connection that never opened.

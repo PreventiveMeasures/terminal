@@ -32,7 +32,7 @@ function cd(_stdin, tokens, ctx) {
   if (error) return err(`cd: ${target}: ${error}`)
   if (!ctx.fs.isDir(abs)) return err(`cd: ${target}: Not a directory`)
   // Bash keeps the name it was given in PWD, links and all, and collapses a
-  // later `..` in it rather than in the path it leads to — the logical
+  // later `..` in it rather than in the path it leads to -- the logical
   // directory `cd -L` means and `pwd` prints. Nothing here holds a working
   // directory that is not the one on the filesystem, so a path that crosses a
   // link is refused rather than answered as `cd -P` would answer it. A walk
@@ -64,8 +64,8 @@ function ls(_stdin, tokens, ctx) {
   const kindOf = (abs) => ctx.fs.isDir(abs) ? 'dir' : ctx.fs.isLink?.(abs) ? 'link' : 'file'
   const indicator = (kind) => flags.has('F') ? MARKS[kind] : ''
   // A file operand and a directory entry are the same row: what it was called,
-  // what to print for it, where it is, what it is, and — for a link, which a
-  // long listing names beside what it points at — the target it holds. Once a
+  // what to print for it, where it is, what it is, and -- for a link, which a
+  // long listing names beside what it points at -- the target it holds. Once a
   // row names both, the mark goes on the target rather than on the link, and
   // on the target as it was written, trailing slash and all: GNU marks the
   // name it printed, and only an operand's own spelling keeps it from doubling.

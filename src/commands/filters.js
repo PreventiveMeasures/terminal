@@ -1,7 +1,7 @@
 // The filters that rewrite a line rather than choose one: nl puts a number in
 // front of it, cut keeps the fields or characters named, and tr maps one set
 // of characters onto another. What they share is a spelling of what to act on
-// — a width, a field list, a set — read before any line is.
+// -- a width, a field list, a set -- read before any line is.
 
 import { parseArgs } from '../args.js'
 import { INT64_MAX, INT64_MIN, UINT64_MAX } from '../numeric.js'
@@ -82,8 +82,8 @@ function cutBytes(line, ranges) {
 
 // GNU names a bad list by what the list is of, and by what it could not read
 // in it: a number below one, a decreasing range, a range with more than two
-// ends, a number it could not parse — named from the first character it could
-// not read — or one too large to hold. Recorded from coreutils 9.4.
+// ends, a number it could not parse -- named from the first character it could
+// not read -- or one too large to hold. Recorded from coreutils 9.4.
 const CUT_NAMES = {
   field: {
     zero: 'fields are numbered from 1',
@@ -178,7 +178,7 @@ export function tr(stdin, tokens, ctx) {
   return ok([...stdin].map((c) => map.get(c) ?? c).join(''))
 }
 
-// The classes tr knows, which are the locale's own — the same table the regex
+// The classes tr knows, which are the locale's own -- the same table the regex
 // and glob parsers read `[[:alpha:]]` from, so a set here holds exactly what a
 // bracket expression there does. This reads its input as ASCII, and a class is
 // taken in code point order, which is the order a translation pairs the two
@@ -198,7 +198,7 @@ function classAt(spec, at) {
 }
 
 // A class in string2 is only ever `upper` or `lower`, and only opposite the
-// other one over the very same stretch of string1 — which is what makes the
+// other one over the very same stretch of string1 -- which is what makes the
 // pairing mean anything, the two being the same length. Complementing string1
 // leaves nothing of it to pair against, so what string2 may then say is
 // narrower still: a class at its end has no stretch to answer for, and

@@ -127,9 +127,9 @@ function intervalBounds(pattern, i, extended) {
 // POSIX stacks quantifiers: `a+?` is `(a+)?`, which matches the empty
 // string, and `a+*` is `(a+)*`. ECMAScript reads `+?` as a lazy `+` and
 // rejects `+*` outright, so the pair has to be rewritten for the JS
-// matcher. Wrapping it as `(?:a+)*` would be correct and catastrophic —
+// matcher. Wrapping it as `(?:a+)*` would be correct and catastrophic --
 // nested unbounded repetition backtracks exponentially on input that
-// fails to match — so the pair is folded into one quantifier instead.
+// fails to match -- so the pair is folded into one quantifier instead.
 const QUANTS = { __proto__: null, '*': { min: 0, max: Infinity }, '+': { min: 1, max: Infinity }, '?': { min: 0, max: 1 } }
 
 function quantBounds(text) {
@@ -143,7 +143,7 @@ const times = (a, b) => (a === 0 || b === 0 ? 0 : a === Infinity || b === Infini
 
 // `(X{m1,n1}){m2,n2}` matches k copies of X for every k that is a sum of
 // between m2 and n2 numbers drawn from [m1,n1]. When those k form one
-// unbroken range the pair is a single quantifier — `a+*` is just `a*` —
+// unbroken range the pair is a single quantifier -- `a+*` is just `a*` --
 // and the nesting disappears with them. Returns null when the reachable
 // counts have a hole, as `(a{2,}){0,1}` does between 0 and 2.
 function collapse(inner, outer) {
@@ -165,7 +165,7 @@ function quantText(b) {
 
 // A repetition consumes a fixed width only when the atom does: a single
 // character, escape or bracket expression matches exactly one. A group
-// can match several lengths — `(a|aa){3}` covers 3 to 6 characters — and
+// can match several lengths -- `(a|aa){3}` covers 3 to 6 characters -- and
 // repeating that under an unbounded count is the ambiguity the fold
 // exists to avoid, so groups and backreferences do not qualify.
 const fixedWidth = (atom) => !atom.startsWith('(') && !/^\\[1-9]/u.test(atom)
@@ -250,7 +250,7 @@ export function posixQuantifiers(source) {
 export function validateRegex(pattern, extended, multibyte = false) {
   // Membership is by position, not by the next `]`: a class ends where
   // validateBracket says it does, so the `]` closing `[:alpha:]` inside it
-  // — or a literal `]` in first position — does not end it early. Members
+  // -- or a literal `]` in first position -- does not end it early. Members
   // shaped like intervals or groups are then read as the characters they
   // are, so `[[:alpha:]{40000}]` and `[(?]` stay the classes GNU sees.
   let bracketEnd = -1
@@ -279,8 +279,8 @@ function hasBackreference(pattern) {
 }
 
 // A wildcard, or a set spelt by what it excludes, over the normalised source:
-// either can match what is not ASCII, and what that is — one character or the
-// bytes of one — is the locale's to say.
+// either can match what is not ASCII, and what that is -- one character or the
+// bytes of one -- is the locale's to say.
 function readsAnyCharacter(source) {
   let inClass = false
   for (let i = 0; i < source.length; i++) {
@@ -348,12 +348,12 @@ export function compilePatterns(patterns, flags, locale = LOCALE) {
       re.emptyWord = word && !re.pcre && new RegExp(gnu ? grepSource(posixQuantifiers(canonical), 'js', tables) : canonical, reFlags).test('')
       // Whether the pattern reads a character at a time rather than a byte: a
       // wildcard and a set spelt by what it excludes both reach past ASCII,
-      // and a locale's own classes name ASCII alone outside C.UTF-8 — so a set
+      // and a locale's own classes name ASCII alone outside C.UTF-8 -- so a set
       // spelt by what it holds reads the same either way, and a literal does.
       re.anyCharacter = readsAnyCharacter(canonical)
       const literal = literalText(pattern, flags)
       // Whether the bytes alone can say that a file this terminal cannot read
-      // as text holds no match — which only a plain literal answers, and only
+      // as text holds no match -- which only a plain literal answers, and only
       // one read as written or folded by the locale's own tables, never by
       // PCRE's. `-w` and `-x` narrow what the bytes being there would select,
       // so they answer here too, and a pattern holding a lone surrogate spells
@@ -423,8 +423,8 @@ export function inputGap(inp, res, locale = LOCALE, only = false) {
   // The matcher reads a character at a time, which is C.UTF-8's reading and
   // no other locale's: anywhere else, a pattern the locale could change is
   // refused over non-ASCII text before any of it is read. A wildcard is one
-  // such pattern — where a byte is a character it matches one byte of what is
-  // spelt in more than one — so it is refused with the rest rather than
+  // such pattern -- where a byte is a character it matches one byte of what is
+  // spelt in more than one -- so it is refused with the rest rather than
   // answered a character at a time.
   const nonAscii = () => res.some((re) => re.unicodePattern) || /[\u0080-\u{10FFFF}]/u.test(inp.content)
   if (locale !== LOCALE && res.some((re) => re.localeSensitive || re.folded || re.anyCharacter) && nonAscii()) {

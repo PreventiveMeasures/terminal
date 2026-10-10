@@ -4,7 +4,7 @@
 // A member operand has its trailing slashes taken off (a lone `/` keeps its
 // one) and then names what is stored under exactly that name, and whatever
 // is stored below it: `repo/src` takes `repo/src/` and `repo/src/b.js`. It is
-// no pattern — the wildcards are off unless asked for — so `*` is a star,
+// no pattern -- the wildcards are off unless asked for -- so `*` is a star,
 // and an operand spelled with one that matches nothing earns a warning that
 // it may have been meant as a pattern. An empty operand names nothing and is
 // never missed.
@@ -21,7 +21,7 @@ export const quoteColon = (text, ctx) => quoteEscape(text, ctx).replaceAll(':', 
 // locale are the curly ones.
 export function quoteLocale(text, ctx) {
   const inner = quoteEscape(text, ctx)
-  return byteLocale(ctx) ? `'${inner.replaceAll("'", "\\'")}'` : `‘${inner}’`
+  return byteLocale(ctx) ? `'${inner.replaceAll("'", "\\'")}'` : `\u2018${inner}\u2019`
 }
 
 export function memberOperand(name) {

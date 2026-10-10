@@ -36,7 +36,7 @@ export function parseFor(p, buildSteps) {
   const outer = p.loop
   p.loop = 'for'
   const nameTok = tokenAt(p)
-  if (nameTok?.kind === 'paren_open') throw new UnsupportedError('feature', 'for ((', 'arithmetic `for ((…))` loops are not supported; use `for NAME in WORD...`')
+  if (nameTok?.kind === 'paren_open') throw new UnsupportedError('feature', 'for ((', 'arithmetic `for ((\u2026))` loops are not supported; use `for NAME in WORD...`')
   if (nameTok === undefined || nameTok.kind !== 'word') throw new Error('for: expected a variable name')
   const name = nameTok.value
   if (nameTok.quoted || !NAME_RE.test(name)) throw new Error(`for: \`${name}\` is not a valid variable name`)
@@ -47,7 +47,7 @@ export function parseFor(p, buildSteps) {
   if (separator?.kind === 'semi' && !separator.newline && isWord(inToken, 'in')) throw new Error('for: unexpected `in` after `;`')
   if (!isWord(inToken, 'in')) {
     if (isWord(inToken, 'do') || inToken === undefined) {
-      const gap = new UnsupportedError('feature', 'for NAME; do', `\`for ${name}; do …\` iterates the positional parameters, which this shell does not have; write \`for ${name} in WORD...\``)
+      const gap = new UnsupportedError('feature', 'for NAME; do', `\`for ${name}; do \u2026\` iterates the positional parameters, which this shell does not have; write \`for ${name} in WORD...\``)
       throw inToken === undefined ? new IncompleteInput(gap) : gap
     }
     throw new Error(`for: expected \`in\` after \`${name}\``)
@@ -89,13 +89,13 @@ export function parseWhile(p, keyword, buildSteps) {
 }
 // `name () { list; }`, whose body is a list like any other. Bash takes any
 // compound command for a body; a brace group is the one this reads, since a
-// `( … )` body would keep to itself what a caller asked it to do.
+// `( ... )` body would keep to itself what a caller asked it to do.
 export function parseFunction(p, name, buildSteps) {
   if (name.quoted || !NAME_RE.test(name.value)) throw new UnsupportedError('feature', 'function', `shell functions named \`${name.value}\` are not supported`)
   p.i += 2
   skipNewlines(p)
   const open = tokenAt(p)
-  if (!isWord(open, '{')) throw new UnsupportedError('feature', 'function', `\`${name.value}()\` needs a \`{ … }\` body`)
+  if (!isWord(open, '{')) throw new UnsupportedError('feature', 'function', `\`${name.value}()\` needs a \`{ \u2026 }\` body`)
   p.i++
   skipNewlines(p)
   const body = buildSteps(p, '}')
@@ -105,8 +105,8 @@ export function parseFunction(p, name, buildSteps) {
 
 // A body that is the same list wherever it is called: one that neither reads
 // nor writes a variable, and so cannot tell a call from the line it stands in.
-// What a caller would otherwise hand it — arguments as `$1`, a variable of its
-// own, a `local` — is then nothing the body could have read.
+// What a caller would otherwise hand it -- arguments as `$1`, a variable of its
+// own, a `local` -- is then nothing the body could have read.
 const macroSafe = (steps) => steps.every((step) => step.stages.every(stageSafe))
 
 function stageSafe(stage) {
@@ -118,7 +118,7 @@ function stageSafe(stage) {
   return stage.words.every(plainWord) && stage.redirs.every(plainRedirect)
 }
 
-// A `[[ … ]]` holds its operands in an expression rather than a word list, so
+// A `[[ ... ]]` holds its operands in an expression rather than a word list, so
 // reach them there to ask of each what a word list is asked of.
 function testSafe(node) {
   if (node.kind === 'and' || node.kind === 'or') return testSafe(node.left) && testSafe(node.right)

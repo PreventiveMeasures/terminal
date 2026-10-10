@@ -5,15 +5,15 @@ import { quoteHeaderName } from './quote-name.js'
 // What `diff` prints, around what @preventive/diff produces: the library is
 // given the two files and the options that decide the comparison, and hands
 // back the diff itself. The two label lines a context format opens with are
-// the caller's, and so is the `diff -r …` line above each pair, because both
-// name files — which is this terminal's business, not the library's.
+// the caller's, and so is the `diff -r ...` line above each pair, because both
+// name files -- which is this terminal's business, not the library's.
 
 // The virtual filesystem keeps no modification times, so a header carries
 // the name alone, as it does under --label. A file -N stands in for gets
 // the epoch, which is what tells patch the file did not exist.
 const EPOCH = ['\t1970-01-01 00:00:00.000000000 +0000', '\tThu Jan  1 00:00:00 1970']
 
-// The `diff -r …` line names the pair the way the command line would, and
+// The `diff -r ...` line names the pair the way the command line would, and
 // the header labels are --label if given, else the quoted names. Empty when
 // the two compare the same, as the library's own result is: a header with
 // nothing under it is not a diff, and the caller reads the empty string as

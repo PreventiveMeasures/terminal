@@ -143,8 +143,8 @@ function tzOffset(d, utc) {
 export const EXTRA_COMMANDS = { rg, cut, tac, tr, seq, nl, which: whichCmd, hexdump, base64, ...WRITE_TOOLS }
 // `gzip` is here for the same reason the others are: it answers where it can,
 // and is not one of the commands this terminal offers.
-// What the runtime does rather than this code — the compressors, the digests
-// — is there only where the runtime can do it, and nothing at all where it
+// What the runtime does rather than this code -- the compressors, the digests
+// -- is there only where the runtime can do it, and nothing at all where it
 // cannot.
 export const HIDDEN_EXTRAS = { whoami, date, od, xxd, base32, ...RUNTIME_COMMANDS }
 // What a network adds, for the registry to ask for: the one thing here that

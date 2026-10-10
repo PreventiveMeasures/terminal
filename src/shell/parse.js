@@ -50,9 +50,9 @@ const isBlock = (s) => s.group || s.loop || s.conditional || s.test || s.define
 const newStage = () => ({ words: [], assigns: [], redirs: [] })
 const newStep = (gate) => ({ gate, stages: [], negate: false, bang: false })
 
-// A `!` with nothing after it before the separator — bash's empty
+// A `!` with nothing after it before the separator -- bash's empty
 // negated pipeline, a complete command with status 1 (`!` alone on a
-// line, `{ !⏎}`, `do !; done`). The step keeps no stage at all.
+// line, `{ !\n}`, `do !; done`). The step keeps no stage at all.
 const bareBang = (step, stage) => step.bang && step.stages.length === 0 && commandPosition(stage) && stage.redirs.length === 0
 
 // Reserved words require no words or assignments yet; leading redirects may
@@ -174,7 +174,7 @@ function openParen(p, stage) {
     (word && word.value === previous?.value && (stage.words.length === 1 || (first.mask === null && ASSIGNMENT_COMMANDS.has(first.value)))))
   if (assignment && raw[i].wordAdjacent && previous?.kind === 'word' && !previous.quoted && /^[A-Za-z_][A-Za-z0-9_]*\+?=$/u.test(previous.value)) throw new UnsupportedError('feature', 'array assignment', 'shell array assignments are not supported')
   if (next?.kind === 'paren_open' && next.adjacent && commandPosition(stage)) {
-    throw new UnsupportedError('feature', '((', 'arithmetic evaluation (`((…))`) is not supported')
+    throw new UnsupportedError('feature', '((', 'arithmetic evaluation (`((\u2026))`) is not supported')
   }
   if (stage.words.length === 1 && stage.assigns.length === 0 && stage.redirs.length === 0 && next?.kind === 'paren_close') {
     stage.define = parseFunction(p, stage.words.pop(), buildSteps)
@@ -188,7 +188,7 @@ function openParen(p, stage) {
 }
 
 // An unquoted word in command position: a reserved word, a refused
-// block, or — returning false — an ordinary command name.
+// block, or -- returning false -- an ordinary command name.
 function commandWord(t, p, step, stage) {
   const v = t.value
   if (UNIMPLEMENTED_BLOCKS.has(v)) throw new UnsupportedError('feature', v, UNIMPLEMENTED_BLOCKS.get(v))
@@ -278,8 +278,8 @@ function parseRedirect(p) {
 }
 
 // A target that is not yet its final text: a `$` or a backtick that quoting
-// has not disarmed — a reference, or commands whose output the name is — a
-// `<( … )`, whose name is a path nothing has opened yet, or a bare `~`, glob
+// has not disarmed -- a reference, or commands whose output the name is -- a
+// `<( ... )`, whose name is a path nothing has opened yet, or a bare `~`, glob
 // character or brace. All of those are expanded when the stage runs and
 // checked then, `>/dev/nu*` may well being `/dev/null`. Masks count UTF-16
 // units, so index the value the same way rather than by code point.
