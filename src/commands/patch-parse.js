@@ -28,7 +28,7 @@ const ED_COMMAND = /^(?:\d+(?:,\d+)?)?(?:[acdi]|s\/\.\/\/)[ \t]*\n$/u
 const HEX = /^[0-9a-fA-F]+/u
 
 // pch.c intuit_diff_type. The header names land in slots in the order the
-// lines come — `+++` in the old slot, `---` in the new one — and swap when
+// lines come -- `+++` in the old slot, `---` in the new one -- and swap when
 // a unified hunk starts; a context hunk uses them as they are. `/dev/null`
 // leaves the slot alone and marks the side nonexistent, which is how a git
 // header's name survives it.

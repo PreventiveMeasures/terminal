@@ -1,5 +1,5 @@
 // UTF-8 between strings and bytes, refusing what a string-based terminal
-// could not carry back out. Split from util.js so that lexing `$'…'` does
+// could not carry back out. Split from util.js so that lexing `$'...'` does
 // not pull in command I/O, the filesystem and its notes.
 
 import { UnsupportedError } from './unsupported.js'
@@ -18,11 +18,11 @@ export function encodeUtf8(text) {
 
 // A lead byte says how many bytes its character takes; anything else starts
 // none. The sequence itself is checked by decoding it, which is where UTF-8's
-// own rules live — no overlong form, no surrogate, nothing past U+10FFFF.
+// own rules live -- no overlong form, no surrogate, nothing past U+10FFFF.
 const SEQUENCE = (byte) => byte < 0x80 ? 1 : byte >= 0xc2 && byte <= 0xdf ? 2 : byte >= 0xe0 && byte <= 0xef ? 3 : byte >= 0xf0 && byte <= 0xf4 ? 4 : 0
 
 // Each character the bytes spell, as its code point, and -1 for a byte that
-// spells none — which is what a count needs to tell a character it can read
+// spells none -- which is what a count needs to tell a character it can read
 // from one it cannot, where the two are counted differently. A sequence cut
 // short at the end is the bytes it is made of, as a reader that never sees
 // more must.
@@ -52,13 +52,13 @@ function sequenceCode(bytes, at, width) {
 
 // Bytes that spell no character, read as the replacement character each of
 // them stands for. Only a reading that such a byte cannot change may be taken
-// from this — base64's alphabet, which no replacement character is in — never
+// from this -- base64's alphabet, which no replacement character is in -- never
 // the text itself, which is the thing these bytes do not have.
 export const decodeUtf8Loose = (bytes) => utf8toStringLoose(bytes)
 
 // The text the bytes spell, or nothing where they spell none: for a command
-// that answers for such a file — a search that calls it binary, a comparison
-// that says the two differ — rather than refusing to read it at all.
+// that answers for such a file -- a search that calls it binary, a comparison
+// that says the two differ -- rather than refusing to read it at all.
 export function decodeUtf8Maybe(bytes) {
   let text
   try { text = utf8toString(bytes) } catch { /* bytes that spell none leave it unset */ }
@@ -71,7 +71,7 @@ export function decodeUtf8Maybe(bytes) {
 // A byte spells nothing only from 0x80 up, so markers run U+DC80 to U+DCFF.
 // This is how a search reads a file its locale cannot read as text: every
 // character the bytes do spell is still that character, and each byte that
-// is none is still there to be stepped over — and handed back, byte for
+// is none is still there to be stepped over -- and handed back, byte for
 // byte, by encodeUtf8Marked.
 export function decodeUtf8Marked(bytes) {
   const text = decodeUtf8Maybe(bytes)

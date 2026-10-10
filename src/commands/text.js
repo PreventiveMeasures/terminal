@@ -115,8 +115,8 @@ function takeFrom(cmd, stdin, files, ctx, pick, { unit, banner, leftover = () =>
       rest = leftover(content)
       consumeStdin(ctx, rest)
     }
-    // A directory yields no body at all — not even the newline an empty
-    // line-pick would append — so `pick` is skipped for it entirely.
+    // A directory yields no body at all -- not even the newline an empty
+    // line-pick would append -- so `pick` is skipped for it entirely.
     const body = kind === 'dir' ? '' : pick(content)
     if (kind === 'file' && body !== content) {
       const note = truncationNote(cmd, content, body, unit, inputLabel(name, ctx))
@@ -149,7 +149,7 @@ function wc(stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['l', 'w', 'c', 'm'] })
   const which = pickWcFlags(flags)
   // Counted in what each input is: the text a pipe carried, and the bytes of
-  // a file, which this terminal may not be able to spell — and need not spell
+  // a file, which this terminal may not be able to spell -- and need not spell
   // to be counted.
   const r = readInputs('wc', positional, stdin, ctx, { read: 'as-held' })
   const needsWidth = positional.length > 1 || Object.values(which).filter(Boolean).length > 1
@@ -157,7 +157,7 @@ function wc(stdin, tokens, ctx) {
   // reserving seven columns when an input is a pipe of unknown size.
   const rows = []
   const total = { l: 0, w: 0, m: 0, c: 0 }
-  // A directory is a row of zeros — GNU's `wc -l dir` prints `0 dir`
+  // A directory is a row of zeros -- GNU's `wc -l dir` prints `0 dir`
   // beside its error, because the open succeeded. A missing path gets
   // no row at all.
   for (const { name, content, bytes, kind, shared } of r.entries.filter((e) => e.kind !== 'missing')) {
@@ -192,7 +192,7 @@ function pickWcFlags(flags) {
 // cannot spell as text is counted like any other, and text is never encoded
 // to be counted. Bytes are the size, which text has to be
 // encoded to know; characters are the spelling itself, which bytes that spell
-// no text do not have — the C locale counts them as the bytes they are, and a
+// no text do not have -- the C locale counts them as the bytes they are, and a
 // UTF-8 one says so rather than counting a guess.
 function wcCounts(input, ctx, which, needsWidth) {
   const cLocale = byteLocale(ctx)
@@ -222,8 +222,8 @@ function characterCount(input) {
 // only a printable character is looked at at all. A printable character
 // glibc calls a space parts a word, and so do the four non-breaking spaces
 // wc adds to them itself; any other printable character is a word's own; and
-// everything else — a control, an unassigned code point, a byte that spells
-// no character — passes through without beginning a word or ending one. So
+// everything else -- a control, an unassigned code point, a byte that spells
+// no character -- passes through without beginning a word or ending one. So
 // `\x01` alone is no word and `abc\x89def` is one, while U+2028, a space
 // glibc does not call printable, joins the two sides of it into one.
 const ASCII_BLANKS = new Set([0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20])
@@ -260,7 +260,7 @@ function wordCount(input, ctx) {
 }
 
 // The characters wc reads one at a time: the text's own where it has text,
-// and where it has bytes, the characters they spell — with -1 for a byte that
+// and where it has bytes, the characters they spell -- with -1 for a byte that
 // spells none, which no class holds. A lone surrogate is read as the
 // replacement character its bytes are, which is how every reader that only
 // measures text reads one. The C locale reads bytes throughout, where each
@@ -275,7 +275,7 @@ function* wordCharacters(input, ctx) {
   }
 }
 
-// A skipped field includes its leading blanks, leaving the next field’s blanks
+// A skipped field includes its leading blanks, leaving the next field's blanks
 // in the comparison key: skipping one field of "k1 v1" leaves " v1".
 function dropFields(line, n) {
   let i = 0

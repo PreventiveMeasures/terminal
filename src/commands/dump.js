@@ -9,8 +9,8 @@ import { err, joinLines, okWith } from '../util.js'
 
 const BYTES_PER_LINE = 16
 // Full-line widths the partial last row pads out to. hexdump: 7-digit
-// offset + space + eight 2-byte words (`XXXX` ×8 + 7 gaps = 39). xxd:
-// the hex column is eight raw 2-byte groups (`XXXX` ×8 + 7 gaps = 39).
+// offset + space + eight 2-byte words (`XXXX` x8 + 7 gaps = 39). xxd:
+// the hex column is eight raw 2-byte groups (`XXXX` x8 + 7 gaps = 39).
 const HEXDUMP_ROW_WIDTH = 47
 const XXD_HEX_WIDTH = 39
 
@@ -48,7 +48,7 @@ export function xxd(stdin, tokens, ctx) {
 // od always prints one, hexdump requires a nonzero end offset, and xxd omits it.
 function dump(bytes, start, verbose, spec) {
   // Every byte of a dump is two hex digits, and the runtime turns the whole
-  // input into them in one go — far faster than asking each byte for its own
+  // input into them in one go -- far faster than asking each byte for its own
   // two, which is what this did. A row written byte by byte takes its share
   // of that string; one written in little-endian words, or in octal, still
   // works them out for itself, there being no such conversion to borrow.
@@ -118,7 +118,7 @@ function canonicalRow(off, row, hex) {
 
 // Little-endian 2-byte words (hexdump/od grouping): bytes b0,b1 read as
 // b0 | b1<<8. A lone trailing byte becomes the low half of a 0-padded
-// word (`6c` → `006c` / `000154`).
+// word (`6c` -> `006c` / `000154`).
 function leWords(row) {
   const words = []
   for (let i = 0; i < row.length; i += 2) {
@@ -127,7 +127,7 @@ function leWords(row) {
   return words
 }
 
-// xxd grouping: raw byte pairs, NOT byte-swapped (`he` → `6865`), which is
+// xxd grouping: raw byte pairs, NOT byte-swapped (`he` -> `6865`), which is
 // the order the digits are already in; a lone trailing byte renders as a
 // single 2-digit group, which is all the slice has left to give.
 function xxdGroups(row, hex) {

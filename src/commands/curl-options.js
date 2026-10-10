@@ -7,8 +7,8 @@ import { unsupported } from '../unsupported.js'
 // Reading a curl command line: the options this one carries, the ones it
 // refuses by name, and everything the request is then made of. The two
 // reporters are here as well, because a line that could not be read says so
-// in the same words a transfer that failed says it in — `curl: (N) …`, in
-// curl's own numbers — and reaches the same two channels.
+// in the same words a transfer that failed says it in -- `curl: (N) ...`, in
+// curl's own numbers -- and reaches the same two channels.
 
 // The options this curl carries. A name that is not here is an unknown option
 // and reports as one; a name that is here and refused is in REFUSED below,
@@ -28,7 +28,7 @@ const SCHEMA = {
     'limit-rate', 'resolve', 'interface', 'form',
   ],
   // Read back off `order` rather than out of `values`, so `-d a -d b` and
-  // `-o one -O` keep the order they were written in — which is the order curl
+  // `-o one -O` keep the order they were written in -- which is the order curl
   // joins data in, and the order it pairs outputs with URLs in.
   repeatable: ['H', 'header', 'd', 'data', 'data-raw', 'data-ascii', 'data-binary', 'json', 'o', 'output'],
 }
@@ -46,8 +46,8 @@ const REFUSED = new Map([
   ['get', 'moving the data into the query string is not implemented; put it in the URL'],
   ['n', 'there is no home directory here to read a `.netrc` from'],
   ['netrc', 'there is no home directory here to read a `.netrc` from'],
-  ['b', 'there is no cookie jar here; a cookie to send is `-H "Cookie: …"`'],
-  ['cookie', 'there is no cookie jar here; a cookie to send is `-H "Cookie: …"`'],
+  ['b', 'there is no cookie jar here; a cookie to send is `-H "Cookie: \u2026"`'],
+  ['cookie', 'there is no cookie jar here; a cookie to send is `-H "Cookie: \u2026"`'],
   ['c', 'there is no cookie jar here to write'],
   ['cookie-jar', 'there is no cookie jar here to write'],
   ['w', 'the transfer keeps no measurements of its own to write out'],
@@ -59,8 +59,8 @@ const REFUSED = new Map([
   ['form', 'a multipart body is not implemented; `--data-binary` sends one you spell out yourself'],
   ['T', 'uploading a file is not implemented; `-X PUT --data-binary @file` sends the same bytes'],
   ['upload-file', 'uploading a file is not implemented; `-X PUT --data-binary @file` sends the same bytes'],
-  ['r', 'a ranged request is `-H "Range: bytes=…"`'],
-  ['range', 'a ranged request is `-H "Range: bytes=…"`'],
+  ['r', 'a ranged request is `-H "Range: bytes=\u2026"`'],
+  ['range', 'a ranged request is `-H "Range: bytes=\u2026"`'],
   ['C', 'there is nothing to resume: a transfer here is one request and its answer'],
   ['continue-at', 'there is nothing to resume: a transfer here is one request and its answer'],
   ['E', 'client certificates are the runtime\'s own'],
@@ -68,8 +68,8 @@ const REFUSED = new Map([
   ['key', 'client certificates are the runtime\'s own'],
   ['cacert', 'the trust store is the runtime\'s own'],
   ['capath', 'the trust store is the runtime\'s own'],
-  ['e', 'a referer is `-H "Referer: …"`'],
-  ['referer', 'a referer is `-H "Referer: …"`'],
+  ['e', 'a referer is `-H "Referer: \u2026"`'],
+  ['referer', 'a referer is `-H "Referer: \u2026"`'],
   ['D', 'writing the headers to a file of their own is not implemented; `-i` writes them in front of the body'],
   ['dump-header', 'writing the headers to a file of their own is not implemented; `-i` writes them in front of the body'],
   ['connect-timeout', 'only the whole transfer can be timed here, which is `--max-time`'],
@@ -101,7 +101,7 @@ const LINE_ENDINGS = new Set([0x0a, 0x0d])
 export function readCommandLine(tokens, stdin, state) {
   const { flags, values, positional, order } = parseArgs(tokens, SCHEMA)
   // Asked for what it can do, it answers before anything else it was handed,
-  // as curl does — and answers with what it carries rather than with curl's
+  // as curl does -- and answers with what it carries rather than with curl's
   // own list, since it will not offer what it would then refuse.
   if (flags.has('h') || flags.has('help')) return { help: true }
   const refusal = refusedOption(flags, values)
@@ -118,8 +118,8 @@ function refusedOption(flags, values) {
   return null
 }
 
-// Everything the request is made of, read once. What a redirect may change —
-// the method, the body, and what the body had the request say about it — it
+// Everything the request is made of, read once. What a redirect may change --
+// the method, the body, and what the body had the request say about it -- it
 // changes on the way rather than here.
 function readOptions(flags, values, order, stdin, state) {
   state.quiet = (flags.has('s') || flags.has('silent')) && !flags.has('S') && !flags.has('show-error')
@@ -205,7 +205,7 @@ function dataPiece(how, value, stdin, state) {
   // The text forms drop the line endings a file carries, which is what makes
   // `-d @body.txt` the one field it looks like rather than one with a newline
   // stuck on the end. `--data-binary` keeps them, and so does `--json`, which
-  // is that same option under two headers — a document is what it holds.
+  // is that same option under two headers -- a document is what it holds.
   return how === 'text' ? bytes.filter((byte) => !LINE_ENDINGS.has(byte)) : bytes
 }
 
@@ -229,7 +229,7 @@ function fileBytes(name, state) {
 }
 
 // What the request carries: what was asked for, what a body needs said about
-// it, and nothing off the host — no environment, no stored credential, and no
+// it, and nothing off the host -- no environment, no stored credential, and no
 // header added behind the caller's back beyond the content type a body
 // implies, which `-H` overrides as it does in curl.
 function requestHeaders(values, order, body, state) {
@@ -241,7 +241,7 @@ function requestHeaders(values, order, body, state) {
   const credentials = values.get('u') ?? values.get('user')
   if (credentials !== undefined) {
     // curl asks a terminal for the password a `-u user` leaves out, and there
-    // is no terminal here to ask — the same reason `read` is not a builtin.
+    // is no terminal here to ask -- the same reason `read` is not a builtin.
     if (!credentials.includes(':')) return gap(state, 'feature', '-u', 2, 'there is no interactive input here to read a password from')
     headers.set('authorization', `Basic ${toBase64(encodeUtf8(credentials))}`)
   }
@@ -254,8 +254,8 @@ function requestHeaders(values, order, body, state) {
 
 // curl's three spellings of a custom header: `Name: value` sends it, `Name;`
 // sends it empty, and `Name:` takes away one curl would have sent. The third
-// is the one that cannot be done here — what a request carries beyond what is
-// set is the runtime's own — so it is refused rather than taken for a header
+// is the one that cannot be done here -- what a request carries beyond what is
+// set is the runtime's own -- so it is refused rather than taken for a header
 // that was set and then was not.
 function setWritten(headers, written, state) {
   const cut = written.indexOf(':')
@@ -296,7 +296,7 @@ function outputTargets(order) {
 }
 
 // A transfer that failed, in the number curl gives the same failure. `-s` is
-// silence about the transfer, so it is silence here — and never silence on
+// silence about the transfer, so it is silence here -- and never silence on
 // the diagnostic feed, which carries this implementation's own report rather
 // than the transfer's noise.
 export function fail(state, code, message) {

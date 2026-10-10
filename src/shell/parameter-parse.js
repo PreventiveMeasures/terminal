@@ -1,4 +1,4 @@
-// Reading a `${…}` reference: its name, operator and operand, decided while
+// Reading a `${...}` reference: its name, operator and operand, decided while
 // the line is still being tokenized. Evaluating one is parameter.js, whose
 // pattern and transform machinery this side deliberately does not reach.
 

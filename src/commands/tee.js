@@ -1,7 +1,7 @@
 // tee writes what it reads twice over: into every file it was given, and on
 // to the stream it was going to anyway. A file it cannot open is that file's
-// trouble rather than the read's — GNU names it, goes on to the next, and
-// still writes everything it read — so only the status carries it.
+// trouble rather than the read's -- GNU names it, goes on to the next, and
+// still writes everything it read -- so only the status carries it.
 //
 // The overlay is the only place here a file can be written, so a name outside
 // it is a gap rather than one of GNU's errors: the write is one GNU would

@@ -83,7 +83,7 @@ function unset(_stdin, tokens, ctx) {
 
 // `set -e` is the one shell option this keeps: it changes what a line does,
 // where the rest of what `set` can do changes what the shell prints or what it
-// is handed. Anything else `set` is asked for is refused whole — applying the
+// is handed. Anything else `set` is asked for is refused whole -- applying the
 // `-e` of `set -eu` would leave the line running under half of what was asked.
 function setOptions(_stdin, tokens, ctx) {
   let wanted = null

@@ -48,7 +48,7 @@ export function dumpInput(cmd, files, stdin, ctx, opt) {
       const left = all.subarray(skipped + taken)
       // Bytes came in, so bytes are what is left: handed back as they are,
       // and as the text they spell for a reader of text, which may be none.
-      // Where text came in, text is what is left — and a read that stopped
+      // Where text came in, text is what is left -- and a read that stopped
       // inside a character has half of one to hand on, which is the same
       // limitation it was before any input here was bytes.
       const handed = piped !== null && !rewind && left.length > 0 ? left : null

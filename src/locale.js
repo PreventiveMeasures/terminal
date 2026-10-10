@@ -1,7 +1,7 @@
 // The locale this terminal runs in: C.UTF-8, glibc's own, where text is read
 // a character at a time, collation is code point order and the decimal point
 // is `.`. It is the one locale implemented, so it is the one a session can be
-// in: the variables that pick the character set — LANG, LC_ALL and LC_CTYPE —
+// in: the variables that pick the character set -- LANG, LC_ALL and LC_CTYPE --
 // take a spelling of C.UTF-8 and nothing else, and `createTerminal` takes the
 // same. The other LC_ categories read the same in C and POSIX as they do here,
 // so those keep taking both.
@@ -92,10 +92,10 @@ function inRanges(ranges, code) {
 
 // Case, as GNU's tools read it for grep's -i, sed's I and gawk's IGNORECASE:
 // the DFA the three share spells each letter out as the set grep calls its
-// case-folded counterparts — the letter, its upper case, the lower case of
+// case-folded counterparts -- the letter, its upper case, the lower case of
 // that where it maps back up, and the few "lonesome" lower-case letters that
 // map up to the same letter without being its lower case (`s` stands for
-// `s`, `S` and `ſ`; the Kelvin sign, its own upper case, for itself alone).
+// `s`, `S` and the long s; the Kelvin sign, its own upper case, for itself alone).
 // A range and a class fall to glibc's regex, which upper-cases the pattern
 // and the text alike through towupper and then matches exactly: a range
 // runs between its endpoints' upper cases, over the text's (`[a-{]` reads as
@@ -110,7 +110,7 @@ export const foldedClass = (name) => (name === 'upper' || name === 'lower' ? 'al
 // lower case, as the DFA folds them.
 const LONESOME = [0x00B5, 0x0131, 0x017F, 0x01C5, 0x01C8, 0x01CB, 0x01F2, 0x0345, 0x03C2, 0x03D0, 0x03D1, 0x03D5, 0x03D6, 0x03F0, 0x03F1, 0x03F2, 0x03F5, 0x1E9B, 0x1FBE]
 
-// U+1C80–U+1C88, old letterforms whose upper case is a plain Cyrillic
+// U+1C80-U+1C88, old letterforms whose upper case is a plain Cyrillic
 // capital's: glibc's regex folds them together with it and GNU's DFA does
 // not, so which answers a pattern decides the match. Case-insensitive
 // matching over text or a pattern holding one is refused rather than guessed.

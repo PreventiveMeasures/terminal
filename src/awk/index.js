@@ -74,7 +74,7 @@ export function awk(stdin, tokens, ctx) {
 
 // `-F', *'` reaches us as the single token `-F, *`: the shell glues a
 // quoted value to its flag, and parseArgs treats any token carrying
-// whitespace as positional — which here would make it the program.
+// whitespace as positional -- which here would make it the program.
 // Peel the flag off such tokens, up to the first real positional. A
 // bare `-F` / `-v` / `-f` keeps its next token as the value untouched.
 const GLUED = /^-[Fvf]\S*\s/su

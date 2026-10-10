@@ -38,7 +38,7 @@ export function writableFs(base) {
 // A descriptor holds a file rather than a name, as the kernel's does, so a
 // file written through one is the file it opened however its name moves or
 // goes. That file is a cell: where its bytes are, `path`, while a name leads
-// to them, and the bytes themselves, `detached`, once none does — an open
+// to them, and the bytes themselves, `detached`, once none does -- an open
 // descriptor keeps an unlinked file until its last writer ends. A cell is
 // also the file's identity, which is what tells a command that its output is
 // one of its inputs. Only a file under /tmp has one: nothing else changes,
@@ -193,7 +193,7 @@ function removeFile(fs, overlay, cwd, path) {
 // Removing a directory is removing it alone: `rm -r` clears what is inside it
 // first, so anything left here is a caller's mistake. `/tmp` is where the
 // overlay is mounted rather than something inside it, and a mount point is not
-// the tree below it to remove — which is the busy device Linux reports.
+// the tree below it to remove -- which is the busy device Linux reports.
 function dropDirectory(fs, overlay, cwd, path) {
   const absolute = writeTarget(fs, cwd, path, false)
   if (!inOverlay(absolute)) return false
@@ -210,7 +210,7 @@ function dropDirectory(fs, overlay, cwd, path) {
 // What a name can be written as, asked of the walk rather than of the spelling:
 // components are checked where they are, so `file/../new` and `missing/../new`
 // cannot make a sibling by lexical normalization alone, and the name a link
-// leads to answers for its own parent — a link into a directory that is not
+// leads to answers for its own parent -- a link into a directory that is not
 // there names a file nothing can make, where the spelling's parent is fine.
 function checkTarget(fs, cwd, path) {
   const found = walkPath(cwd, path, fs)
@@ -227,7 +227,7 @@ function checkTarget(fs, cwd, path) {
 }
 
 // What a name about to be made must be, as symlink(2) checks one: not there,
-// under a directory that is, and — a trailing slash asking for a directory —
+// under a directory that is, and -- a trailing slash asking for a directory --
 // not a name that could only be a file. A link already there is a name taken,
 // wherever it leads, so the final component is never followed.
 function checkNewName(fs, cwd, path) {

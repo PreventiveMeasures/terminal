@@ -9,7 +9,7 @@ import { unsupported } from '../unsupported.js'
 //
 // What they print is coreutils' and Digest::SHA's own, recorded from
 // sha256sum 9.4 and shasum 6.02: the digest, two spaces or a space and a
-// star, and the name — `-` for what came in on stdin.
+// star, and the name -- `-` for what came in on stdin.
 
 // What a runtime's crypto digests, by the number these commands name it with.
 const ALGORITHMS = Object.freeze({ __proto__: null, 1: 'SHA-1', 256: 'SHA-256', 384: 'SHA-384', 512: 'SHA-512' })
@@ -65,7 +65,7 @@ function sums(cmd, bits) {
 
 // How the file was read, which is the last thing said about it: coreutils
 // takes `-b` and `-t` as one setting written over, and `--tag` writes binary
-// into it too — so `-t --tag` tags and `--tag -t` is the refusal below.
+// into it too -- so `-t --tag` tags and `--tag -t` is the refusal below.
 // shasum keeps the two apart and calls having both of them ambiguous, whatever
 // order they came in, which is why the two commands answer differently here.
 const BINARY = new Set(['b', 'binary'])
@@ -82,7 +82,7 @@ function fileMode(cmd, order) {
 }
 
 // `--tag` writes the BSD form, which says which digest it is and marks nothing
-// about how the file was read — so asking for it and for text is asking for
+// about how the file was read -- so asking for it and for text is asking for
 // both of two things, which these commands refuse rather than pick between.
 function tagMode(cmd, flags, order) {
   const mode = fileMode(cmd, order)

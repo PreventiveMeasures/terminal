@@ -103,7 +103,7 @@ function scanNumber(src, i) {
 // Returns the decoded text and the index just past the escape. The
 // recognized set is awk's: the C control escapes, `\"` `\\`, octal
 // `\ddd` and hex `\xHH`. Anything else is the plain character with a
-// warning — gawk's reading, which matters for a string used as a
+// warning -- gawk's reading, which matters for a string used as a
 // dynamic regex: `"a\.b"` is the regex `a.b`.
 const SIMPLE_ESCAPES = { __proto__: null, n: '\n', t: '\t', r: '\r', a: '\u0007', b: '\b', f: '\f', v: '\v', '"': '"', '\\': '\\' }
 

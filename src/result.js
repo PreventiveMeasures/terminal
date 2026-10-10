@@ -12,5 +12,5 @@ export const err = (msg, code = 1) => ({
 })
 
 // coreutils exits 1 when it cannot read the command line at all; grep and the
-// two that walk a tree — ls and sort — exit 2 for everything.
+// two that walk a tree -- ls and sort -- exit 2 for everything.
 export const usage = (line, code = 1) => err(`usage: ${line}`, code)

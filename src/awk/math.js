@@ -59,7 +59,7 @@ function exp(m, args) {
 }
 
 // strtonum: like a numeric string, except that a string STARTING with
-// `0x` is hex and one starting with `0` and octal digits is octal — no
+// `0x` is hex and one starting with `0` and octal digits is octal -- no
 // leading blanks or sign before the prefix, as gawk reads them.
 function strtonum(m, args) {
   const v = evalExpr(m, args[0])

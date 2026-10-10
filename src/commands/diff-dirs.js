@@ -21,7 +21,7 @@ export function compareDirs(state, dirA, dirB) {
 
 // A name in one directory only, with -N: the other side stands in empty. Which
 // side that is goes with it, since a name the listing did have is one this
-// still answers for — a link leading nowhere among them.
+// still answers for -- a link leading nowhere among them.
 function compareStandIn(state, [pathA, pathB], kind, listed) {
   // The kind is the listed side's, and the stand-in is a name nothing holds:
   // a walk that refuses to cross a link names the side the link is on.
@@ -57,14 +57,14 @@ const isDir = (kind) => kind === 'dir' || kind === 'link'
 
 // diff compares what a name leads to, as GNU does for an operand: a link to a
 // file is that file, and a link to a directory that directory. Entering the
-// tree a link names is the one thing left out — a link pointing above itself
+// tree a link names is the one thing left out -- a link pointing above itself
 // would enter the tree already being compared, which is the cycle GNU stops
-// at and this does not model — so only a walk that would cross one refuses,
+// at and this does not model -- so only a walk that would cross one refuses,
 // and a name listed, named as a type or compared as a file never does.
 function entryKind(ctx, path) {
   const found = lookup(ctx.cwd, path, ctx.fs)
-  // A name the listing held and the filesystem cannot answer for — a link
-  // leading nowhere, or one that loops — is none of the three types.
+  // A name the listing held and the filesystem cannot answer for -- a link
+  // leading nowhere, or one that loops -- is none of the three types.
   if (found.error) return 'gone'
   if (!ctx.fs.isDir(found.path)) return 'file'
   return ctx.fs.isLink?.(lookup(ctx.cwd, path, ctx.fs, { follow: false }).path) ? 'link' : 'dir'

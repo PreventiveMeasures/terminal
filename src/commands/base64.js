@@ -20,7 +20,7 @@ export function decodeBase64(input, ignoreGarbage = false) {
 // GNU accepts concatenated padded blocks and emits recoverable bytes even
 // from a malformed final block. The strict decoder handles the common case.
 // The bits past the last whole byte are not read at all, so a group spelling
-// them differently spells the same bytes — `YR==` is `a`, as `YQ==` is — and
+// them differently spells the same bytes -- `YR==` is `a`, as `YQ==` is -- and
 // a tail that runs out before its padding is what it recovered and invalid.
 function decodePartial(text) {
   const output = new Uint8Array(Math.ceil(text.length / 4) * 3)

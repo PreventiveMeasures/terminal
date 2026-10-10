@@ -47,11 +47,11 @@ export function readExpansion(line, i, depth = 0, quoted = false, options = {}) 
     return result
   }
   if (n === '{') return readBracedExpansion(line, i, next, depth, quoted, { readExpansion: nested, decodeAnsiC })
-  if (n === '[') throw new UnsupportedError('feature', '$[', 'arithmetic expansion (`$[…]`) is not supported')
+  if (n === '[') throw new UnsupportedError('feature', '$[', 'arithmetic expansion (`$[\u2026]`) is not supported')
   return scanRef(line, i)
 }
 
-// `<( … )` and `>( … )` run commands too, so their body is found the same
+// `<( ... )` and `>( ... )` run commands too, so their body is found the same
 // way: the parenthesis that closes it, with nothing inside read any further.
 export function readProcessSubstitution(line, i, options = {}) {
   const nested = (source, at, level, inQuotes) => readExpansion(source, at, level, inQuotes, options)

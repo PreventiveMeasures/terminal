@@ -1,5 +1,5 @@
 // In-memory shell over a { path: content } source tree; no host I/O, and no
-// network unless the caller asked for one — `network: true`, which is what
+// network unless the caller asked for one -- `network: true`, which is what
 // puts `curl` in the registry (net.js) and is not the default.
 // cwd and variables persist across run() calls. Unsupported constructs also
 // reach a diagnostic feed that redirects and pipelines cannot suppress.
@@ -47,7 +47,7 @@ const copiedSession = (parent) => ({ vars: new BindingMap(parent.vars), function
 
 // A fork is the process fork rather than a second terminal over the same
 // sources: the filesystem, the /tmp/ overlay, and the wired commands stay the
-// parent's, while the shell state — variables, functions, last exit status — is
+// parent's, while the shell state -- variables, functions, last exit status -- is
 // copied. Afterwards neither side's cd, assignment, or unset is visible to the
 // other, and only what they write in /tmp/ passes between them, as it does
 // between two processes sharing a disk.
@@ -110,8 +110,8 @@ async function dispatch(name, tokens, stdin, ctx, external = false) {
   }
   const route = (r) => routeExternalOutput(record(ctx, commandWriteError(name, r, ctx), resolved), ctx)
   try {
-    // A command may answer with a promise — gzip waits on a stream the
-    // runtime owns rather than on anything here — and what it then throws is
+    // A command may answer with a promise -- gzip waits on a stream the
+    // runtime owns rather than on anything here -- and what it then throws is
     // this call's to report, so the waiting happens here rather than in
     // whoever reads the result.
     return await ctx.io.run(resolved, async () => route(await run()))
@@ -134,7 +134,7 @@ function record(ctx, result, resolved) {
 }
 
 // One line at a time, and one line at a time over the whole tree rather than
-// over the one terminal: a line waits now — for a command that has to — and
+// over the one terminal: a line waits now -- for a command that has to -- and
 // what it would wait in the middle of is a filesystem every fork of it
 // shares. So a second line takes its turn rather than starting in the gap the
 // first one left, which is the order a caller reading the lines expects of
@@ -143,8 +143,8 @@ function record(ctx, result, resolved) {
 function queued(ctx, line) {
   const { lock } = ctx
   // Every caller waits, this one included: which caller a `run` came from is
-  // not a thing that can be read off a call — the handler that is holding the
-  // turn and a consumer that called during its wait arrive here alike — so
+  // not a thing that can be read off a call -- the handler that is holding the
+  // turn and a consumer that called during its wait arrive here alike -- so
   // nothing here guesses. A command that means to run a line inside its own
   // turn asks for it with the `run` it was handed (custom.js), which says so
   // rather than being taken for saying so.

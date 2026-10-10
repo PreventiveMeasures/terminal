@@ -22,8 +22,8 @@ const VALUE_SHORTS = ['A', 'B', 'C', 'm']
 const ARGS = { short: SHORT_FLAGS, long: ['text', 'no-messages'], valueShort: VALUE_SHORTS, repeatable: ['e', 'f', 'file', 'include', 'exclude', 'exclude-dir'] }
 
 // Whether this search was asked for its status alone. Answered by the same
-// parse the run uses, so a pattern that merely looks like a flag — `-e -q`,
-// or anything after `--` — is read as the operand it is.
+// parse the run uses, so a pattern that merely looks like a flag -- `-e -q`,
+// or anything after `--` -- is read as the operand it is.
 export function quietSearch(tokens) {
   try { return parseArgs(tokens, ARGS).flags.has('q') } catch { return false }
 }
@@ -127,7 +127,7 @@ function grepQuiet(stdin, rest, ctx, recursive, filters, res, invert) {
 
 // What a search reads a file as. Text is read as it is, and bytes that spell
 // none as the characters they do spell with a marker for each byte that is
-// none (decodeUtf8Marked) — GNU searches such a file all the same, and holds
+// none (decodeUtf8Marked) -- GNU searches such a file all the same, and holds
 // back each line it would print that has such a byte in it (grepRun). A NUL
 // within GNU's first read makes the file binary from its first line: NULs end
 // lines there, and the first selection only says that the file matches. `-I`
@@ -155,7 +155,7 @@ function textInput(input, filters, res, invert, ctx) {
 }
 
 // A file GNU calls binary for a NUL at byte `at`: from the line that NUL is on
-// where GNU's first read held it, and from the top where it did not — with the
+// where GNU's first read held it, and from the top where it did not -- with the
 // lines ended within that read printed as text, if nothing between them and
 // the NUL's line depends on how the rest is read (lateBinary).
 function binaryInput(input, bytes, at, window) {
@@ -230,7 +230,7 @@ function checkConflicts(flags) {
 }
 
 // No pattern at all matches no line, which GNU reads as `-v ''`; and an
-// empty pattern matches every line, so `-v` with nothing else selects none —
+// empty pattern matches every line, so `-v` with nothing else selects none --
 // unless -x or -w ask more of a line than that it is there.
 function selectsNothing(patterns, flags) {
   if (patterns.length === 0) return !flags.has('v')
@@ -312,7 +312,7 @@ function grepInputs(recursive, stdin, rest, ctx, filters) {
 // What `-R` makes of a link a walk reached: the file it names, read under the
 // link's own name, or the diagnostic a link to nothing earns. A rule keeping
 // the name out is what neither spelling ever opens, so the rules answer first
-// — the --exclude-dir ones where the link leads to a directory, the
+// -- the --exclude-dir ones where the link leads to a directory, the
 // --include/--exclude ones where it leads to a file, as GNU sorts them. A
 // directory is the one thing left: crossing into that tree is not modelled, so
 // `-R` refuses it rather than search a part of it.
@@ -363,7 +363,7 @@ function includedByName(name, nameFilters) {
 }
 
 // GNU also prunes a NAMED start directory by its own trailing component,
-// matched as typed — `--exclude-dir=foo` drops a `foo` operand but not a
+// matched as typed -- `--exclude-dir=foo` drops a `foo` operand but not a
 // `foo/` one (the trailing slash defeats the base-name match).
 function excludedStartDir(operand, dirRes) {
   if (dirRes.length === 0 || operand.endsWith('/')) return false

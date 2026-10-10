@@ -6,7 +6,7 @@
 // This is the published entry, `@preventive/terminal/parse.js`, and the only
 // way in: reading a line is its own entry point, where running one is a
 // terminal's. There is no filesystem on this side, so a redirect is read,
-// never refused — where a line may write is a property of a terminal, not of
+// never refused -- where a line may write is a property of a terminal, not of
 // the line, and `run()` is what refuses a write its filesystem cannot take.
 
 import { read } from './parse-tree.js'

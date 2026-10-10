@@ -11,7 +11,7 @@ import { decompressBytes } from '../compression.js'
 // at the first operand it could not do, where gzip takes them all.
 //
 // What it writes compressing is a brotli stream, which this terminal carries
-// as a string only where those bytes spell text — usually they do not, so
+// as a string only where those bytes spell text -- usually they do not, so
 // `-c` is usually the gap every byte output here is, and the file written
 // beside the one it came from is what compressing is for.
 
@@ -19,7 +19,7 @@ const FORMAT = 'brotli'
 const SUFFIX = '.br'
 // Only where the runtime's streams know the format. gzip is everywhere they
 // are; brotli is where it was added, and a terminal whose streams do not know
-// it does not carry the command — the name is not found, as it was before.
+// it does not carry the command -- the name is not found, as it was before.
 export const BROTLI = supports(FORMAT) ? { brotli } : {}
 // The name brotli gives the input it did not open, which is the console's on
 // the system it was first written for.
@@ -75,7 +75,7 @@ function one(name, stdin, opts, state) {
   const { ctx } = state
   // A pipe carries text unless a stage upstream wrote bytes into it, and a
   // brotli stream is bytes: `cat f.br | brotli -d` hands them over. Taking it
-  // is taking it — what is read here is read, so a second `-` and the next
+  // is taking it -- what is read here is read, so a second `-` and the next
   // command in the list both find the pipe at its end, as they would a file's.
   if (name === '-') {
     // Unless forced, brotli reads nothing compressed from a terminal and
@@ -88,7 +88,7 @@ function one(name, stdin, opts, state) {
     return through(piped ?? encodeUtf8(text), STDIN, null, opts, state)
   }
   // The name it writes is the name it was given with the suffix on the end,
-  // or with the suffix taken off — and a name too short to take one off of
+  // or with the suffix taken off -- and a name too short to take one off of
   // has nothing left to be called.
   let target = null
   if (!opts.stdout) {
@@ -136,7 +136,7 @@ function toFile(target, bytes, state) {
   return true
 }
 
-// Brotli names what went wrong and nothing else — no command in front of it —
+// Brotli names what went wrong and nothing else -- no command in front of it --
 // and the first operand it could not do is the last one it looks at.
 function fail(state, message) {
   state.stderr += `${message}\n`

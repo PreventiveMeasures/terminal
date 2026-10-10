@@ -16,7 +16,7 @@ export const isFailure = (item) => item.failure !== undefined
 const label = (input) => input.name ?? '(standard input)'
 
 // What a search reads a file as: lines, which in a file GNU calls binary for
-// a NUL are ended by every NUL too — it turns each into a line end before it
+// a NUL are ended by every NUL too -- it turns each into a line end before it
 // looks. A file of bytes that spell no text is matched with the patterns that
 // take no such byte for a character (markedRegex).
 const contentOf = (input) => (input.binaryLine === undefined ? input.content : input.content.replaceAll('\0', '\n'))
@@ -91,7 +91,7 @@ export function grepRun(items, res, opts) {
 }
 
 // GNU's grep: the lines a read ends are searched, and then, once the file is
-// done, a last line no newline ends, on its own — with the lines before it
+// done, a last line no newline ends, on its own -- with the lines before it
 // kept for leading context, and where it last printed forgotten unless those
 // lines begin there. A file is one read here: past GNU's first, a file whose
 // lines can be held back is refused where that would show (contextAcrossReads).
@@ -133,9 +133,9 @@ function binaryMatches(input, opts, run) {
   if (opts.binaryFiles === 'binary') run.write.err(`grep: ${label(input)}: binary file matches\n`)
 }
 
-// GNU's grepbuf: find each selected line from `from` up to `to` — a block of
-// them under -v — and hand it to prtext. A NUL makes the file binary from
-// where GNU finds it — the top, where its first read held it — and from there
+// GNU's grepbuf: find each selected line from `from` up to `to` -- a block of
+// them under -v -- and hand it to prtext. A NUL makes the file binary from
+// where GNU finds it -- the top, where its first read held it -- and from there
 // nothing is printed and the first selection is the last.
 function grepbuf(f, from, to) {
   const { invert } = f.opts
@@ -168,7 +168,7 @@ function grepbuf(f, from, to) {
 }
 
 // The lines from `beg` up to `lim`, with the leading context GNU reaches back
-// for — never past the last line it printed — and the group separator where
+// for -- never past the last line it printed -- and the group separator where
 // what it prints does not follow on from that line. `used` is set by any
 // selection, printed or not, so a binary file's match separates the next one.
 function prtext(f, beg, lim) {
@@ -234,7 +234,7 @@ function presentMatches(f, line, i, selected) {
 }
 
 // Where the pattern next matches: by the POSIX extent matcher where it has
-// one, and by the matcher the line is selected with where it does not — a
+// one, and by the matcher the line is selected with where it does not -- a
 // global copy of it, kept apart so the one testing lines stays a plain RegExp.
 const SCANS = new WeakMap()
 

@@ -15,7 +15,7 @@ export const base32 = baseCommand('base32', { encode: (bytes) => toBase32(bytes,
 // What base32 wrote is what base32 mostly reads, and the runtime's own decoder
 // reads that: it is asked first, and answers the whole of it. Asked for the
 // padding coreutils insists on, the one thing it still takes that coreutils
-// does not is a lowercase alphabet — so what it answers is looked over for
+// does not is a lowercase alphabet -- so what it answers is looked over for
 // that alone, which is cheaper than reading the whole input twice to decide
 // whether to ask. Anything it will not read goes to the reading below, which
 // is coreutils' own: a group at a time, lenient where coreutils is lenient.
@@ -33,8 +33,8 @@ export function decodeBase32(input, ignoreGarbage = false) {
 
 // GNU reads a group of eight at a time and writes the whole bytes it spells,
 // so a group that is not its alphabet's stops the reading without taking back
-// what earlier groups wrote. A group short of eight — at the end of the
-// input, or all that a stray `=` leaves — writes nothing and is invalid: what
+// what earlier groups wrote. A group short of eight -- at the end of the
+// input, or all that a stray `=` leaves -- writes nothing and is invalid: what
 // it holds is not a group yet. The bits past the last whole byte are not read
 // at all, so a group spelling them differently spells the same bytes.
 function decodeGroups(text) {

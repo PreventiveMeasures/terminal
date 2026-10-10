@@ -1,6 +1,6 @@
 // The long listing `ls -l` prints, over metadata a path-to-content map does
 // not keep: it has no permissions, no owners and no clock. Rather than a guess
-// per entry, what it shows is one deliberate model of such a tree — every
+// per entry, what it shows is one deliberate model of such a tree -- every
 // entry is the session user's alone (`-rw-------`, `drwx------`) and is dated
 // to the moment the terminal was created, a time its forks carry with them.
 // Link counts, directory sizes and the `total` line are what ext4 would say of
@@ -33,7 +33,7 @@ export function longFormat(ctx, human) {
   const width = (strings) => Math.max(0, ...strings.map((s) => s.length))
   return {
     // Entries carry a name to print, an absolute path and what kind of entry
-    // they are — a link also carries what it points at, which the row names
+    // they are -- a link also carries what it points at, which the row names
     // after it; a directory listing gets its `total` line first.
     lines(entries, listing) {
       const rows = entries.map(({ name, abs, kind, target }) => {

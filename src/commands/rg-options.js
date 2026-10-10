@@ -98,7 +98,7 @@ export function patternArgs(patterns, literal) {
 const REJECTED = [
   [/\\[1-9]/u, 'backreference'],
   [/\(\?<?[=!]/u, 'look-around'],
-  [/\\[QE]/u, String.raw`\Q…\E literal span`],
+  [/\\[QE]/u, '\\Q\u2026\\E literal span'],
 ]
 
 // ripgrep searches a line at a time, so a pattern that spells out a newline is

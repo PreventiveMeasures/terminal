@@ -19,7 +19,7 @@ export async function commandSubstitution(command, ctx, runSteps, backtick = fal
       if (!note) {
         // Bash parses a backtick lazily, at expansion, so a syntax error
         // inside one is reported and the substitution yields nothing while
-        // the enclosing command carries on — status 2 when the substitution
+        // the enclosing command carries on -- status 2 when the substitution
         // is the whole command. `$( )` is parsed with its enclosing input
         // unit instead, where the error takes the line down with it, so that
         // form keeps failing. Heredoc bodies are parsed during expansion,

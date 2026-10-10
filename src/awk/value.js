@@ -22,11 +22,11 @@ const PREFIX_RE = new RegExp(`^${BLANK}(${NUMBER})`, 'u')
 const MAGIC_RE = new RegExp(`^${BLANK}([+-])(inf|nan)${BLANK}$`, 'iu')
 
 // "Looks numeric": the whole string, blanks aside, is a decimal number.
-// Hex (`0x10`) is not a number here — gawk's default reading, and the
+// Hex (`0x10`) is not a number here -- gawk's default reading, and the
 // one POSIX describes.
 export const looksNumeric = (s) => NUMERIC_RE.test(s) || MAGIC_RE.test(s)
 
-// String → number conversion takes the longest numeric PREFIX, like C's
+// String -> number conversion takes the longest numeric PREFIX, like C's
 // strtod: `"3x"` is 3, `" 4 "` is 4, `"abc"` is 0.
 function parsePrefix(s) {
   const m = PREFIX_RE.exec(s)
@@ -123,7 +123,7 @@ export function compare(a, b, m) {
 }
 
 // Truth: a number is true when non-zero, a string when non-empty, and a
-// numeric string follows its numeric value — so the input field `0` is
+// numeric string follows its numeric value -- so the input field `0` is
 // false but the constant `"0"` is true.
 export function truthy(v) {
   if (typeof v === 'number') return v !== 0 && !Number.isNaN(v)

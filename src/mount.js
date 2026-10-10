@@ -3,8 +3,8 @@ import { resolve } from './fs.js'
 import { localeOption } from './locale.js'
 import { writableFs } from './writable.js'
 
-// Session settings a fork sets anew. Everything else it is over — the sources,
-// the mount, the /tmp/ overlay, the network, the wired commands — belongs to
+// Session settings a fork sets anew. Everything else it is over -- the sources,
+// the mount, the /tmp/ overlay, the network, the wired commands -- belongs to
 // the terminal it forked from and cannot be given another value here.
 const FORK_OPTIONS = ['cwd', 'home', 'user', 'inherit']
 

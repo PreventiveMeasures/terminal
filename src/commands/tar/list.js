@@ -2,8 +2,8 @@
 // package hands out wherever the archive is read at all (see
 // ../stored-names.js), and with -v the long line `-tv` shows. Names are
 // quoted in tar's own style, `escape`: printed as they are where the locale
-// can print them, a backslash doubled, and everything else — a control
-// character, a character the locale cannot print — as C escapes, a byte at
+// can print them, a backslash doubled, and everything else -- a control
+// character, a character the locale cannot print -- as C escapes, a byte at
 // a time.
 //
 // The long line is GNU's print_header: mode, owner/group, size, the time to
@@ -87,7 +87,7 @@ function linkSuffix(entry, ctx) {
 }
 
 // tartime, to the minute: local time unless told otherwise, the year as
-// glibc spells it — no padding, a minus sign before the common era. A
+// glibc spells it -- no padding, a minus sign before the common era. A
 // moment past what a Date holds is past what this can spell.
 function timeStamp(seconds, utc) {
   const date = new Date(seconds * 1000)

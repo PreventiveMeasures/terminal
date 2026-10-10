@@ -6,8 +6,8 @@ import { read } from './parse-tree.js'
 
 // A chain is what a line looks like when nothing in it needs explaining: the
 // commands it runs, each stage's argv, each redirect as the tokens it was
-// written with. Anything a summary would have to lie about — a block, a
-// negation, an assignment, a word an expansion still decides — stops it, so a
+// written with. Anything a summary would have to lie about -- a block, a
+// negation, an assignment, a word an expansion still decides -- stops it, so a
 // caller either gets the whole line in plain text or hears why it cannot.
 //
 // A gate stands between the chains it gates, since `&&` and `||` decide
@@ -19,8 +19,8 @@ export function summarize(line, writable) {
   return summaryOf(result.list, { defined: new Map(), open: new Set() })
 }
 
-// What a list of commands looks like summarized, top level or inside a `( … )`
-// — the same thing either way, since a subshell holds a list like any other.
+// What a list of commands looks like summarized, top level or inside a `( ... )`
+// -- the same thing either way, since a subshell holds a list like any other.
 function summaryOf(nodes, macros) {
   const summary = []
   for (const node of nodes) {
@@ -38,7 +38,7 @@ function summaryOf(nodes, macros) {
   return summary
 }
 
-// A call is the body it names, standing where the call stands — which is all
+// A call is the body it names, standing where the call stands -- which is all
 // a body that reads nothing of its caller can be. A body of one command reads
 // as that command, since brackets that keep nothing in come off. A body that
 // reaches its own name has no end to stand in for, so it is refused, as
@@ -52,7 +52,7 @@ function inlined(stage, macros, depth = 0) {
   return inlined({ type: 'group', name: step.argv[0], list, redirects: step.redirects, assignments: step.assignments }, macros, depth + 1)
 }
 
-const BLOCKS = { if: '`if`', test: '`[[ … ]]`', pipeline: 'a pipeline of pipelines', function: 'a function defined in a pipeline' }
+const BLOCKS = { if: '`if`', test: '`[[ \u2026 ]]`', pipeline: 'a pipeline of pipelines', function: 'a function defined in a pipeline' }
 
 // What a chain's rows can be: a command, and the two blocks that are a list of
 // commands and nothing a summary would have to leave out.
@@ -84,13 +84,13 @@ function chainOf(node, macros) {
 
 // A command is its words; the blocks that are a list of commands are that
 // list, summarized as a line of its own, with whatever the block says about
-// how it runs one — a `for` says which name it runs the list over, and what
-// it gives that name in turn. `( … )` and `{ …; }` are told apart by the
+// how it runs one -- a `for` says which name it runs the list over, and what
+// it gives that name in turn. `( ... )` and `{ ...; }` are told apart by the
 // brackets they were written with, which is the whole of the difference: one
 // keeps what it runs to itself, and the other does not.
 function rowOf(stage, macros) {
   // `X=1 f` sets X for the call alone, and a row holding a list has nowhere to
-  // say so — dropping it would read as the same line as a call without it.
+  // say so -- dropping it would read as the same line as a call without it.
   if (stage.assignments && stage.argv === undefined) throw refuse('an assignment on a call of more than one command')
   // What a subshell defines belongs to the subshell, so a name defined in one
   // is not a name the line around it can call.
@@ -143,14 +143,14 @@ const passthrough = (row, commands) => commands > 0 && row.length === 1 && row[0
 
 // `A=1 B=2 cmd` sets those for that command alone and `A=1` on its own sets
 // them for the shell, so they stand at the head of the row they were written
-// at the head of — one token, since one command takes them all together, and
+// at the head of -- one token, since one command takes them all together, and
 // a row's name is the first token that is not this one.
 const assignmentsOf = (assignments, macros) => ({ type: 'assignments', assignments: assignments.map((a) => ({ name: a.name, value: literal(a.value, macros) })) })
 
 // A summary says what a line does, not how it was spelled, so whatever feeds
 // a command is the command that feeds it. Only the first stage can be fed that
-// way — a later one reading its own input leaves the stage before it writing
-// into nothing, which no chain says — and one stage reads from one place, so a
+// way -- a later one reading its own input leaves the stage before it writing
+// into nothing, which no chain says -- and one stage reads from one place, so a
 // second source has no equivalent either.
 function inputOf(redirects, index) {
   const inputs = redirects.filter((r) => r.op === '<' || r.op === '<<' || r.op === '<<<')
@@ -161,8 +161,8 @@ function inputOf(redirects, index) {
 }
 
 // A file is the `cat` that reads it: `wc < 1.txt` is `cat 1.txt | wc`. Text is
-// the command that writes it: `cat > notes.md <<EOF … EOF` is
-// `echo … | cat > notes.md`. An unquoted delimiter leaves the body to be
+// the command that writes it: `cat > notes.md <<EOF ... EOF` is
+// `echo ... | cat > notes.md`. An unquoted delimiter leaves the body to be
 // expanded when it runs, which is not text anyone can write down yet.
 function inputStage(redirect, macros) {
   if (redirect.op === '<') return ['cat', literal(redirect.target, macros)]
@@ -176,8 +176,8 @@ function inputStage(redirect, macros) {
 const hereStringStage = (text) => (typeof text === 'string' ? textStage(`${text}\n`) : ['printf', '%s\\n', text])
 
 // `echo` writes its argument and a newline, which is how a here-document ends,
-// so the body gives one up to it. Where echo would say something else — a body
-// that ends without one, or a first word it would read as an option — `printf`
+// so the body gives one up to it. Where echo would say something else -- a body
+// that ends without one, or a first word it would read as an option -- `printf`
 // says it exactly.
 function textStage(text) {
   const line = text.endsWith('\n') ? text.slice(0, -1) : null
@@ -217,7 +217,7 @@ function piece(part, macros) {
   }
   if (part.type === 'process') return { type: 'process', op: part.op, summary: summaryOf(part.list, macros) }
   // A sum is an expression rather than a list of commands, so a summary says
-  // it as the line wrote it — and as with an operand, text is all it may
+  // it as the line wrote it -- and as with an operand, text is all it may
   // hold: `$(( $(id -u) ))` would be running one behind a reader.
   if (part.type === 'arithmetic') {
     if (RUNS.test(part.source)) throw refuse(spell(part), 'a literal word')
@@ -230,9 +230,9 @@ function piece(part, macros) {
   return { type: 'shell', summary: summaryOf(part.list, macros), multi: part.multi }
 }
 
-// `"$(cat <<'EOF' … EOF)"` is the text it holds and nothing else: a literal
+// `"$(cat <<'EOF' ... EOF)"` is the text it holds and nothing else: a literal
 // here-document, cat, and the trailing newlines `$( )` strips. Every part has
-// to be quoted for that to hold — bare, the text would be split into fields
+// to be quoted for that to hold -- bare, the text would be split into fields
 // and globbed, and no single token would stand for it.
 function literalText(value) {
   let text = ''
@@ -262,7 +262,7 @@ const spell = (part) => {
   if (part.type === 'pattern') return part.pattern
   if (part.type === 'brace') return part.source
   if (part.type === 'variable') return `\${${part.name}${part.operator ?? ''}${part.operand ?? ''}}`
-  return part.type === 'arithmetic' ? '$((…))' : '$(…)'
+  return part.type === 'arithmetic' ? '$((\u2026))' : '$(\u2026)'
 }
 
 // What no text says outright: a command whose output it will hold.

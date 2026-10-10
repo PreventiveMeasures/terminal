@@ -59,7 +59,7 @@ function scan(st, incremental) {
     if (c === '(' && st.mask.at(-1) === '0' && /[?*+@!]/u.test(st.cur.at(-1)) && !st.empty.includes(st.cur.length)) {
       throw new UnsupportedError('feature', 'extglob', 'extended glob patterns are not supported')
     }
-    // `<( … )` opens a command rather than a redirect, and the word it becomes
+    // `<( ... )` opens a command rather than a redirect, and the word it becomes
     // is the path that command's output arrives on, so it stays in the word.
     if ((c === '<' || c === '>') && st.line[skipContinuations(st.line, st.i + 1)] === '(') { takeProcess(st); continue }
     const op = readOperator(st.line, st.i, !inToken)

@@ -1,8 +1,8 @@
 // An unzip command line, read the way Info-ZIP UnZip 6.00 reads one, and the
 // patterns it names members with.
 //
-// Options come before the archive — letters, in clusters, `-d DIR` or
-// `-dDIR` for where to extract — and everything after it is a member
+// Options come before the archive -- letters, in clusters, `-d DIR` or
+// `-dDIR` for where to extract -- and everything after it is a member
 // pattern, bar two words it still watches for: `-x`, after which the
 // patterns exclude, and `-d`. Anything else that looks like an option there
 // is a name like any other, and is reported as one when nothing matches it.

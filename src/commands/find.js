@@ -70,7 +70,7 @@ export async function find(stdin, tokens, ctx) {
 // `-depth` turns the walk inside out: what a directory holds is reached
 // before the directory is, and a starting point is the last thing reached.
 // Nothing is read until the whole walk is, so `-prune` has nothing left to
-// prune — which is what GNU says of the two of them together.
+// prune -- which is what GNU says of the two of them together.
 function* deepestFirstOrder(entries) {
   const open = []
   for (const entry of entries) {

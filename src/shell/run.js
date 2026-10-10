@@ -17,7 +17,7 @@ export { commandWriteError } from './output.js'
 // of those stay bytes until it writes them: only this terminal's own output
 // is a string, and only what is going there has to spell text. A pipe takes
 // bytes, and a descriptor that is closed or /dev/null takes them the way it
-// takes everything — so asking any of the three for text asks the wrong
+// takes everything -- so asking any of the three for text asks the wrong
 // question, and would answer with a gap where there is no trouble at all.
 export function routeExternalOutput(result, ctx) {
   const fds = {
@@ -29,7 +29,7 @@ export function routeExternalOutput(result, ctx) {
 }
 
 // A descriptor the enclosing router will deal with: a pipe, a closed one or
-// /dev/null — anything but a file, which is an object with a path and is
+// /dev/null -- anything but a file, which is an object with a path and is
 // written here, and the terminal's own two streams, which are the string.
 const elsewhere = (fd) => fd !== 'out' && fd !== 'err' && !fd?.path
 
@@ -37,8 +37,8 @@ const elsewhere = (fd) => fd !== 'out' && fd !== 'err' && !fd?.path
 // `exit` bypasses pipeline negation; break/continue still carry its status.
 export async function runSteps(steps, ctx, stream, condition = false) {
   // `&` hands the whole list it closes to the background, and nothing here
-  // runs there. Running it in the foreground instead is a different answer —
-  // a different order, and a status the shell would not have waited for — so
+  // runs there. Running it in the foreground instead is a different answer --
+  // a different order, and a status the shell would not have waited for -- so
   // the list refuses before any of it runs.
   if (steps.some((step) => step.background)) throw new UnsupportedError('feature', '&', 'background processes (`&`) are not supported')
   const result = emptyOutput()
@@ -52,8 +52,8 @@ export async function runSteps(steps, ctx, stream, condition = false) {
     gate?.flush(ctx.notes)
     // `set -e` reads the last command of a `&&`/`||` chain and nothing else in
     // it, nothing a condition asks, and nothing a `!` negates. The exemption
-    // reaches whatever that command itself runs — a subshell, a group, a body
-    // it calls — so it travels with the shell state rather than this call.
+    // reaches whatever that command itself runs -- a subshell, a group, a body
+    // it calls -- so it travels with the shell state rather than this call.
     const exempt = condition || step.negate || continues(steps, index)
     // A list is one command after another, which is what a list is: each step
     // waits for the one before it, whether or not that one had to wait itself.
@@ -163,7 +163,7 @@ function pipelineStage(stage, ctx, { stdin, stdinBytes, stdinFile, fds, stdinPip
     ctx.expansionFds = io.fds
     let routed = false
     // Blame for an `&&` gate reading this stage's status. A stage that failed
-    // before reaching a command — a bad redirect, an expansion error — leaves
+    // before reaching a command -- a bad redirect, an expansion error -- leaves
     // it unset, and the gate then has nothing to name.
     let blame = null
     const result = await withStreams(io, ctx, () => shellResult(ctx, async () => {
@@ -300,7 +300,7 @@ async function shellResult(ctx, fn) {
 }
 
 // Closed descriptors propagate from enclosing groups. What the enclosing list
-// shares is one input — the text left in it and the bytes left in it — so both
+// shares is one input -- the text left in it and the bytes left in it -- so both
 // stay available to it, while the rest of the stream state is restored.
 function withStreams(io, ctx, fn) {
   const state = { outputFds: io.fds, closed: { out: io.fds[1] === 'closed', err: io.fds[2] === 'closed' }, stdinFile: Boolean(io.stdinFile), stdinPiped: io.stdinPiped ?? ctx.stdinPiped, stdinTerminal: io.stdinTerminal ?? ctx.stdinTerminal, stdinOrigin: io.stdinOrigin, stdinHandle: io.stdinHandle }

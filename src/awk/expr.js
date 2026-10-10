@@ -101,7 +101,7 @@ function expectArrayName(p) {
 const isRelOp = (p, opts) => p.tok.type === 'punct' && REL_OPS.has(p.tok.value) && !(opts.noGt && p.tok.value === '>')
 
 // Concatenation has no operator: two operands side by side. Anything
-// that can start an operand continues one — except `+`, `-` (binary
+// that can start an operand continues one -- except `+`, `-` (binary
 // operators here, so `1 -1` is 0, not "1-1") and `!`.
 function startsConcat(p) {
   const t = p.tok
@@ -114,8 +114,8 @@ export function parseConcat(p, opts) {
 }
 
 // The value of a constant numeric expression, or null. gawk folds
-// these while reading the program, so `1 / 0` — or `2 ^ 3 % 0` in a
-// branch that never runs — is refused before anything executes.
+// these while reading the program, so `1 / 0` -- or `2 ^ 3 % 0` in a
+// branch that never runs -- is refused before anything executes.
 function constValue(node) {
   if (node.type === 'num') return node.value
   if (node.type === 'neg' || node.type === 'plus') {
@@ -203,7 +203,7 @@ function parseName(p) {
   const name = p.next().value
   const subs = parseSubscripts(p)
   if (subs !== null) return { type: 'index', name, subs }
-  // `f (x)` — a space before the paren — is how awk writes `f`
+  // `f (x)` -- a space before the paren -- is how awk writes `f`
   // concatenated with `(x)`; when `f` is a function gawk refuses the
   // ambiguity outright rather than guess.
   if (p.is('(') && p.funcs.has(name)) p.fail(`function \`${name}\` called with space between name and \`(\``)
@@ -225,7 +225,7 @@ function parseCallArgs(p) {
   return args
 }
 
-// `(expr)`, or `(a, b) in arr` — the multi-subscript membership test,
+// `(expr)`, or `(a, b) in arr` -- the multi-subscript membership test,
 // the only place a parenthesized list is an expression.
 function parseGroup(p) {
   // Collapse pure enclosing pairs without spending stack frames per pair.

@@ -11,7 +11,7 @@ import { inOverlay } from '../writable.js'
 // entry here carries the one time the terminal was made, the time a long
 // listing prints, so there is no per-entry clock to move forward. Where a write
 // could have happened and only that clock is missing, the gap is reported
-// rather than passed off as done — a caller touching a file to make it newer
+// rather than passed off as done -- a caller touching a file to make it newer
 // than another would otherwise be told it worked.
 export function touch(_stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['c'], long: ['no-create'] })
@@ -28,8 +28,8 @@ function touchPath(name, noCreate, state) {
   const shown = quoteName(name, ctx)
   const found = lookup(ctx.cwd, name, ctx.fs)
   if (found.error === null) return existing(name, shown, found.path, state)
-  // GNU opens a name to create it, and where it cannot — `-c`, or a trailing
-  // slash no open would make a file of — sets times directly instead, naming
+  // GNU opens a name to create it, and where it cannot -- `-c`, or a trailing
+  // slash no open would make a file of -- sets times directly instead, naming
   // in the diagnostic which of the two it was doing. `-c` passes over a name
   // that is simply absent; every other failure is still one.
   const setting = noCreate || name.endsWith('/')

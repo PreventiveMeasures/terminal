@@ -75,7 +75,7 @@ export function formatNumeric(value, spec) {
 
 // The zero cases follow gawk. `%d` / `%i` with precision 0 print no
 // digits (and no sign) for a value that TRUNCATES to zero; the unsigned
-// conversions test the original double instead — 1e-6 is not zero, so
+// conversions test the original double instead -- 1e-6 is not zero, so
 // `%#o` of it is `00` and `%.0u` of it is `0`, while an exact 0 gives
 // `0` and nothing.
 function formatInteger(value, spec) {
@@ -145,7 +145,7 @@ function exponential(abs, prec) {
   const [roundedMantissa, roundedExponent] = abs.toExponential(prec).split('e')
   const mantissa = tieToEven(roundedMantissa, exact.slice(0, e), prec === 0 ? dot : dot + 1 + prec, dot + 1 + prec)
   // The rounded mantissa may have carried into a new power of ten
-  // (9.95 → 1.0e+1); take the exponent from the rounded form then.
+  // (9.95 -> 1.0e+1); take the exponent from the rounded form then.
   const exp = Number(mantissa === roundedMantissa ? roundedExponent : exact.slice(e + 1))
   return `${mantissa}e${exp < 0 ? '-' : '+'}${String(Math.abs(exp)).padStart(2, '0')}`
 }

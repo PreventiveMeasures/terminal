@@ -2,7 +2,7 @@
 // current directory, or the `-d` one, which it makes if its parent is there;
 // every missing parent made on the way; a directory already there kept; a
 // name already taken replaced with `-o`, kept with `-n`, and asked about
-// otherwise — on stdin, where this terminal has nothing to answer with, so
+// otherwise -- on stdin, where this terminal has nothing to answer with, so
 // the first question meets its end, and UnZip reads that as "None" for the
 // rest. A link is made last, once everything else is written, as UnZip
 // defers them: until then its name holds a placeholder, a file of its
@@ -47,7 +47,7 @@ function extractEntries(entries, base, links, opts, run) {
       continue
     }
     // Each file an extraction writes is named "extracting" or "inflating" by
-    // how it was stored, which the reader does not say — so an extraction
+    // how it was stored, which the reader does not say -- so an extraction
     // that names them goes no further than the first; a directory is
     // "creating" whatever it is.
     if (run.quiet === 0) {

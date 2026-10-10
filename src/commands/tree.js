@@ -53,8 +53,8 @@ export function tree(_stdin, tokens, ctx) {
   return { stdout: out.join('\n') + '\n', stderr: '', exitCode: missing ? 2 : 0 }
 }
 
-// `-F` marks the operand as it was typed, whatever it ends in — `tree -F d/`
-// prints `d//` — and marks it for what the name itself is, so a link earns the
+// `-F` marks the operand as it was typed, whatever it ends in -- `tree -F d/`
+// prints `d//` -- and marks it for what the name itself is, so a link earns the
 // `@` however far it leads. `-d` lists directories alone and marks none of
 // them, the operand included; the `@` still says the operand is not one.
 function rootMark(ctx, flags, named, isDir) {
@@ -99,7 +99,7 @@ function walk(fs, root, out, flags, limit, count, omitted, hidden, branches) {
 function itemsFor(fs, dir, flags, hidden = null) {
   const { dirs, files, links } = fs.listDir(dir)
   // A link is named beside what it points at and crossed no more than the walk
-  // below it is — but what it leads to is what it counts as, and what decides
+  // below it is -- but what it leads to is what it counts as, and what decides
   // whether `-d` lists it: a link to a directory is one of the directories.
   const linked = links.map((n) => {
     const found = lookup(dir, n, fs)

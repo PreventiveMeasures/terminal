@@ -2,7 +2,7 @@
 // code's: `CompressionStream` and `DecompressionStream` do it, and both
 // answer asynchronously where everything else here answers at once. So the
 // command waits for them where it meets them, which is what an asynchronous
-// `run` is for — nothing is worked out ahead of a line to spare it the wait,
+// `run` is for -- nothing is worked out ahead of a line to spare it the wait,
 // because a line that can wait has no need of that.
 //
 // Reaching those streams is @preventive/archive's work, the same code its
@@ -19,8 +19,8 @@ import { CompressionError, decompress, supports } from '@preventive/archive/comp
 import { joinBytes } from './bytes.js'
 
 // The bytes the stream gave back, and what stopped it where it stopped: what
-// a tool makes of that — the words it uses, and whether it keeps what came
-// before it — is the tool's own business, so both travel together. The word
+// a tool makes of that -- the words it uses, and whether it keeps what came
+// before it -- is the tool's own business, so both travel together. The word
 // is the platform's: Node's stream error carries zlib's under it, and names
 // a raw stream's trailing bytes itself.
 export async function decompressBytes(bytes, format) {
@@ -42,7 +42,7 @@ export async function decompressBytes(bytes, format) {
 // to its own end and hands over whole, minding nothing that follows it; and
 // the four bytes before a member's end count what that member held. So the
 // data is inflated on its own to learn that count, and the end is where the
-// input spells it — one place in four thousand million, whatever the rest of
+// input spells it -- one place in four thousand million, whatever the rest of
 // the input is and however much of it there is. Each end so found is
 // decompressed as the member it claims to be before a byte of it is answered
 // with, so nothing here was guessed at.
@@ -76,16 +76,16 @@ function headerLength(bytes, at) {
 // The member beginning at `at`, and where it ends, or nothing where the bytes
 // there are no whole member. An end ahead of the real one has to spell the
 // same count in four bytes to be tried at all, which no run of data does; a
-// run of zeros spells nought, so a member whose data held nothing — or was
-// never data — is given up on after a few rather than followed to the end of
+// run of zeros spells nought, so a member whose data held nothing -- or was
+// never data -- is given up on after a few rather than followed to the end of
 // the input, there being no end of its own to find either way.
 const TRIES = 64
 async function memberAt(bytes, at) {
   const head = headerLength(bytes, at)
   if (head < 0) return null
   const raw = await decompressBytes(bytes.subarray(at + head), RAW)
-  // Whatever stopped the raw stream stopped it past what this member held —
-  // that is the trailer and what follows, which are no part of the data — so
+  // Whatever stopped the raw stream stopped it past what this member held --
+  // that is the trailer and what follows, which are no part of the data -- so
   // the count stands or no end will match it.
   const held = raw.bytes.length % 0x100000000
   let tries = TRIES

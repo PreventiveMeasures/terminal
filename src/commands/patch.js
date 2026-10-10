@@ -10,7 +10,7 @@ import { quoteShell } from './quote-name.js'
 import { parsePatchOptions } from './patch-options.js'
 
 // patch: apply a diff to the files it names. Messages go to stdout as GNU's
-// do; a fatal error is `patch: **** …` on stderr with status 2; a hunk that
+// do; a fatal error is `patch: **** ...` on stderr with status 2; a hunk that
 // did not apply is status 1, its text saved beside the file as a .rej.
 // Files are written only inside a writable /tmp/ overlay; anywhere else the
 // write is refused on the feed rather than pretended.

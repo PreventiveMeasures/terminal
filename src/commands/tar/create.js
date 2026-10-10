@@ -1,21 +1,21 @@
 // An archive made the way GNU tar 1.35 makes one, written by
 // @preventive/archive's tar writer, which puts down byte for byte what GNU
-// does for the same entries — but in the header GNU writes ahead of a name
+// does for the same entries -- but in the header GNU writes ahead of a name
 // too long for its own, where GNU records the host's names for user and
 // group 0 unless under --numeric-owner, and the package no names at all.
 //
 // The entries are this tree as `ls -l` describes it: every file `-rw-------`,
 // every directory `drwx------`, every link `lrwxrwxrwx`, all of them dated to
 // the moment the terminal was made. An archive also records who owns each
-// entry, as a number, and this terminal has no numbers for its user — `$UID`
-// is refused for the same reason — so the owner and group have to be given:
+// entry, as a number, and this terminal has no numbers for its user -- `$UID`
+// is refused for the same reason -- so the owner and group have to be given:
 // `--owner=NAME:UID --group=NAME:GID`, or the ids with `--numeric-owner`,
 // which records no names. Without them the archive is refused rather than
 // written with numbers made up.
 //
 // Names are stored as GNU stores them: the operand as it was typed, with
-// what would climb out of the archive taken off the front — a leading `/`,
-// and everything up to the last `..` — and a warning, once, for each prefix
+// what would climb out of the archive taken off the front -- a leading `/`,
+// and everything up to the last `..` -- and a warning, once, for each prefix
 // so removed. A name GNU would store with a `.` segment in it (anything
 // under `.`, say) is one the package would store without, so it is refused
 // rather than written as a different archive; so is anything else the
@@ -94,7 +94,7 @@ function compressionFor(opts, state) {
 }
 
 // GNU opens the archive before it reads a single file, truncating what was
-// there — so it is there, empty, while the files are walked.
+// there -- so it is there, empty, while the files are walked.
 function openTarget(name, state) {
   const { ctx } = state
   if (name === '-') return { kind: 'stdout' }
@@ -112,7 +112,7 @@ function openTarget(name, state) {
   return { kind: 'file', handle, path: handle.path }
 }
 
-// safer_name_suffix: the prefix a name loses, and the name it keeps — which
+// safer_name_suffix: the prefix a name loses, and the name it keeps -- which
 // GNU works out, and warns of, before it looks for the file at all.
 function memberName(orig, walk) {
   let cut = 0
@@ -145,7 +145,7 @@ function addOperand(given, dir, walk) {
 }
 
 // One entry, and for a directory everything under it, in the order this
-// tree lists them — by name, which is GNU's `--sort=name`.
+// tree lists them -- by name, which is GNU's `--sort=name`.
 function addPath(path, orig, safe, walk) {
   const { state } = walk
   const { fs } = state.ctx
@@ -158,7 +158,7 @@ function addPath(path, orig, safe, walk) {
   const type = dir ? 'directory' : link ? 'symlink' : 'file'
   // Where there are several operands, GNU keeps everything but a directory
   // by its inode, and stores the same one met again as a hard link to the
-  // name it was first stored under: reached twice, or given twice — which
+  // name it was first stored under: reached twice, or given twice -- which
   // is a hard link to its own name, an entry the package will not write.
   const first = walk.many && !dir ? walk.archived.get(path) : undefined
   if (first === safe.name) return state.refuse('feature', 'repeated name', `${quoteColon(orig, state.ctx)}: storing a name again, as a hard link to itself, is not supported`)

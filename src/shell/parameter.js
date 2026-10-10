@@ -1,5 +1,5 @@
-// Evaluating a `${…}` reference against the shell's bindings. Reading one —
-// name, operator and operand — is parameter-parse.js, which tokenizing needs
+// Evaluating a `${...}` reference against the shell's bindings. Reading one --
+// name, operator and operand -- is parameter-parse.js, which tokenizing needs
 // before any of this exists.
 
 import { trimParameter } from './parameter-pattern.js'
@@ -45,7 +45,7 @@ function parameterLength(name, value, ctx) {
   if (name === '*' || name === '@') return { value: '0' }
   // How long a value is, is how many of whatever the locale counts in are in
   // it: bytes where a byte is a character, and characters where one is spelt
-  // in more than one byte — which is a reading only C.UTF-8's tables give.
+  // in more than one byte -- which is a reading only C.UTF-8's tables give.
   if (byteLocale(ctx)) return { value: String(encodeUtf8Loose(value).length) }
   if (/\P{ASCII}/u.test(value)) {
     throw parameterError('#' + name, 'locale-dependent length of non-ASCII parameters is not supported')

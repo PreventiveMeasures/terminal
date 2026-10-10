@@ -7,7 +7,7 @@ import { quoteName } from './quote-name.js'
 import { allocated, duOptions, duSize } from './du-options.js'
 
 // Sizes come in the two readings GNU's do: `--apparent-size` (`-b`) counts
-// the bytes a file holds, and plain `du` the space the tree takes on disk —
+// the bytes a file holds, and plain `du` the space the tree takes on disk --
 // which no map of paths to contents keeps, so it is what ext4 would allocate
 // for the same tree, the model `ls -l` reads its `total` from (see allocated
 // in ./du-options.js). `--inodes` counts entries instead.
@@ -57,8 +57,8 @@ function measure(path, name, state) {
     }
     const isDir = ctx.fs.isDir(item.path)
     // A walk measures the links it finds, which is what du does without `-L`.
-    // What `-L` would measure instead — the tree each one leads to, and the
-    // cycle a link above itself makes of that walk — is not modelled.
+    // What `-L` would measure instead -- the tree each one leads to, and the
+    // cycle a link above itself makes of that walk -- is not modelled.
     if (!isDir && options.links === 'all' && ctx.fs.isLink?.(item.path)) {
       throw new UnsupportedError('option', 'dereference', `following symbolic links is not supported: ${item.name}`)
     }

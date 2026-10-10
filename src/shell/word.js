@@ -26,7 +26,7 @@ const maskAt = (w, i) => (w.mask === null ? '0' : w.mask[i])
 // `:`; nothing in it may be quoted, since a quote anywhere leaves the text
 // alone; and it ends at the first bare `/`, at a bare `:` inside an
 // assignment, or with the word. Anything written between the `~` and that end
-// names a user or the directory stack, and this shell has neither — bash
+// names a user or the directory stack, and this shell has neither -- bash
 // expands `~alice`, so reading it as the text it is would answer a different
 // question than the one asked.
 export function homePrefixes(w, assignmentValue = false) {

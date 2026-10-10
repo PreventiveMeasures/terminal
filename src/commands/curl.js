@@ -4,8 +4,8 @@ import { discard, readUrl, receive, transfer } from '../net.js'
 import { fail, gap, readCommandLine } from './curl-options.js'
 
 // curl, over the runtime's `fetch` (../net.js). It is here only where the
-// caller asked for a terminal with a network — `createTerminal(sources, {
-// network: true })` — and where the runtime has a `fetch` to make the request
+// caller asked for a terminal with a network -- `createTerminal(sources, {
+// network: true })` -- and where the runtime has a `fetch` to make the request
 // with; without either, the name is not a command at all, and says no more
 // than that. How a terminal was built is the caller's business and nothing a
 // line running inside it can do anything about, so a missing `curl` reads
@@ -13,9 +13,9 @@ import { fail, gap, readCommandLine } from './curl-options.js'
 //
 // What it is: the request the command line describes, made once, and the
 // answer written out. What it is not is libcurl. A transfer here is one
-// request and its response — no connection to reuse, no cookie jar, no
+// request and its response -- no connection to reuse, no cookie jar, no
 // proxy, no resume, and no progress meter, since there is no terminal to
-// draw one on — and the options that would ask for those are refused by name
+// draw one on -- and the options that would ask for those are refused by name
 // rather than accepted and quietly dropped, because someone who typed `-k` is
 // asking for something specific and deserves to be told it did not happen.
 //
@@ -81,7 +81,7 @@ Every other option curl carries is refused by name, and says what would have
 to exist here for it to work.
 `
 
-// What it wrote, in the order it wrote it, and the gap it met if it met one —
+// What it wrote, in the order it wrote it, and the gap it met if it met one --
 // carried on the result rather than in place of it, so a URL that answered
 // before the gap is not lost to it.
 function answer(state) {
@@ -100,7 +100,7 @@ async function one(spelt, target, opts, state) {
   const file = target?.remote ? remoteName(read.url) : target?.file ?? null
   const hop = { url: read.url, method: opts.method, body: opts.body, headers: opts.headers }
   // One deadline for the transfer rather than one per hop, since what
-  // `--max-time` is given is the time this URL may take — the hops it turns
+  // `--max-time` is given is the time this URL may take -- the hops it turns
   // out to need included, as they are in curl.
   const signal = opts.timeout === null ? null : AbortSignal.timeout(opts.timeout)
   let headers = ''
@@ -189,7 +189,7 @@ async function finish(response, url, headers, file, opts, state) {
 
 // Headers are text and a body is bytes, and the two are one stream: a file
 // takes the whole of it as bytes, and stdout takes the headers as the text
-// they are — so a terminal reading its output as a string is never told that
+// they are -- so a terminal reading its output as a string is never told that
 // a header block spells no text when it is the body that does not.
 function write(headers, body, file, state) {
   if (file !== null) return toFile(file, headers, body, state)

@@ -10,7 +10,7 @@ export function lookupWithNote(ctx, command, path, options) {
 // A session has three roots a path can be meant from: `/`, the mount its
 // sources are under, and the home `~` names. A relative path was looked up from
 // the cwd and an absolute one from `/`, so the note asks the roots left over
-// whether the same text names something there — the mount is the one that
+// whether the same text names something there -- the mount is the one that
 // answers when a caller reads `/src/app.js` of a tree mounted at `/repo`.
 // Roots that coincide, and roots that lead to the same file, are one root and
 // one alternative: home follows the mount unless it was set apart.
@@ -87,7 +87,7 @@ export function discardedNotes(discarded, stderr, notes) {
   for (const line of discarded) {
     if (stderr.includes(line)) continue
     const { command, operand, reason } = ACCESS_FAILURE.exec(line).groups
-    // `cp: cannot stat 'x': …` wraps its operand; everything else is the path.
+    // `cp: cannot stat 'x': ...` wraps its operand; everything else is the path.
     const path = /'([^']*)'$/u.exec(operand)?.[1] ?? operand
     if ([...notes].some((note) => note.includes(JSON.stringify(path)))) continue
     const key = `${command}: ${reason}`

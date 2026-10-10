@@ -94,7 +94,7 @@ function parseItem(p, program) {
   }
   // The action must open on the pattern's line; a pattern alone prints
   // the record, and a `{` on the next line is a separate, unconditional
-  // rule — exactly as awk reads it.
+  // rule -- exactly as awk reads it.
   const action = p.is('{') ? parseBlock(p, 'main') : null
   if (action === null && !(p.tok.type === 'newline' || p.tok.type === 'eof' || p.is(';'))) p.unexpected()
   program.rules.push({ pattern, action })
@@ -311,8 +311,8 @@ const isPrintEnd = (p) => p.is(';') || p.is('}') || p.is('>') || p.is('>>') || p
 
 // `print a, b > "/dev/stderr"`: inside a print list an unparenthesized
 // `>` is a redirection, not a comparison (awk's own rule). A leading
-// `(` is ambiguous — `print (a, b)` is a parenthesized list, `print
-// (a)(b)` a concatenation, `print (a > b) ? c : d` an expression — so
+// `(` is ambiguous -- `print (a, b)` is a parenthesized list, `print
+// (a)(b)` a concatenation, `print (a > b) ? c : d` an expression -- so
 // the list reading is tried first and abandoned unless a terminator or
 // redirection follows the `)`.
 function parsePrint(p, kind) {

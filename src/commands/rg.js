@@ -64,7 +64,7 @@ export function rg(stdin, tokens, ctx) {
 }
 
 // What a run would open: the paths it was given, and the files a walk finds
-// below each starting point, unless a dot-prefixed component keeps them out —
+// below each starting point, unless a dot-prefixed component keeps them out --
 // a hidden file is neither searched nor refused over unless `--hidden` asks
 // for it.
 function openedFiles(operands, targets, options, ctx) {
@@ -81,7 +81,7 @@ function openedFiles(operands, targets, options, ctx) {
 
 // The first of those files this terminal cannot answer for, named as the
 // caller spelled it. A file holding a NUL is binary to ripgrep, which a walk
-// passes over and never reads — so what its bytes spell is never asked there,
+// passes over and never reads -- so what its bytes spell is never asked there,
 // while `--text` asks it of every file and a named one was answered for
 // above. What is read is refused on two counts: bytes that spell no text,
 // which ripgrep searches and prints as the bytes they are, and neither of
@@ -110,8 +110,8 @@ function refusedFile(files, options, ctx) {
 // Bytes that spell no text are refused unless a literal that is nowhere in
 // them is all that was asked for: ripgrep matches the bytes as they are rather
 // than the text they fail to spell, so it prints nothing for them and there is
-// nothing to refuse. Only a literal read as written answers — `-i` folds by
-// ripgrep's own tables — and `-v` selects the lines a pattern does not, which
+// nothing to refuse. Only a literal read as written answers -- `-i` folds by
+// ripgrep's own tables -- and `-v` selects the lines a pattern does not, which
 // is every line there is.
 function unreadableBytes(bytes, name, options, ctx) {
   if (!options.invert && !options.ignoreCase && literalsMissing(bytes, options.patterns, options.literal, ctx.locale)) return null

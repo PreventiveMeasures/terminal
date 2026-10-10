@@ -15,16 +15,16 @@ export function probeParameter(name, ctx) {
   return { value: '', set: false }
 }
 
-// A name the shell knows — assigned here, or unset here on purpose — is
+// A name the shell knows -- assigned here, or unset here on purpose -- is
 // answered from that knowledge, whatever bash would have had in it. A name
 // bash sets itself, or one whose value would change how this shell runs, is
 // refused when nothing here has said what it is.
 const unknown = (name) => UNMODELED_VARIABLES.has(name) || SHELL_STATE.has(name)
 const refused = (name) => new UnsupportedError('feature', `$${name}`, `shell parameter ${name} is not supported`)
 
-// What `$name` would expand to: the value `export name+=…` appends to, from
+// What `$name` would expand to: the value `export name+=...` appends to, from
 // the same bindings and the same shell-supplied answers as the expansion, so
-// a name answered without ever being assigned — HOME, USER, LANG — appends to
+// a name answered without ever being assigned -- HOME, USER, LANG -- appends to
 // what it says rather than to nothing. An unset name appends to nothing.
 export const boundValue = (name, ctx) => parameterValue(name, ctx)?.value ?? ''
 
@@ -54,7 +54,7 @@ export function lookupParameter(name, ctx) {
   }
   const found = parameterValue(name, ctx)
   if (found) return found
-  // What bash itself would have answered — a uid, a path, a random number —
+  // What bash itself would have answered -- a uid, a path, a random number --
   // has no honest substitute either, and a probe of the same name already
   // refuses: an empty value here would be a wrong one wearing a warning.
   if (unknown(name)) throw refused(name)

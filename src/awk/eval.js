@@ -81,7 +81,7 @@ export function getArray(m, name) {
 
 // `value` is what `$0` evaluates to: a numeric string for a record that
 // came from input (the default), the assigned value after `$0 = ...`,
-// and a plain string once fields were assigned and the record rebuilt —
+// and a plain string once fields were assigned and the record rebuilt --
 // so `$1 = $1` turns the line `10` into a string and `$0 < 9` becomes
 // a string comparison, as in gawk.
 export function setRecord(m, text, value = new StrNum(text)) {
