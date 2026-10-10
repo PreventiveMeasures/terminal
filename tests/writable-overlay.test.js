@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
+import { createFs } from '../src/filesystem.js'
+import { writableFs } from '../src/writable.js'
 
 const SOURCES = { 'README.md': 'source readme\n', 'src/a.js': 'source alpha\n', 'tmp/source.txt': 'mounted source\n' }
 const OPTIONS = { mount: '/repo', cwd: '/repo', writable: '/tmp/' }
@@ -142,7 +144,7 @@ describe('existing filesystem consumers see current overlay contents', () => {
     await check(t, 'ls -A /tmp', '.hidden\nalpha.txt\nzeta.js\n')
     await check(t, 'find /tmp -type f', '/tmp/.hidden\n/tmp/alpha.txt\n/tmp/zeta.js\n')
     // `.hidden` is not a `.txt` name, so the dotfile gate changed nothing here.
-    check(t, "printf '%s\\n' /tmp/*.txt", '/tmp/alpha.txt\n')
+    await check(t, "printf '%s\\n' /tmp/*.txt", '/tmp/alpha.txt\n')
     assert.deepEqual(await t.run("printf '%s\\n' /tmp/*"), {
       stdout: '/tmp/alpha.txt\n/tmp/zeta.js\n', stderr: '', exitCode: 0, cwd: '/repo', unsupported: [],
       notes: ['glob: omitted 1 hidden entry while expanding "/tmp/*": "/tmp/.hidden".'],
@@ -247,5 +249,29 @@ describe('output paths respect the writable directory boundary', () => {
     assert.deepEqual(result.unsupported, [])
     await check(t, 'ls /tmp', 'from-relative\nfrom-source\nresult\n')
     await check(t, 'mkdir /tmp/nested; printf x >/tmp/nested/file; cat /tmp/nested/file', 'x')
+  })
+})
+
+// A walk asks each directory it passes whether its kept mode lets a name be
+// looked up in it, and the overlay has no question for it at all until some
+// directory keeps a mode denying search or reading.
+describe('a kept mode closes a directory only once one does', () => {
+  it('asks nothing of a walk until a directory keeps a mode denying search or reading', () => {
+    const fs = writableFs(createFs({}, '/src'))
+    assert.equal(fs.makeWritableDir('/', '/tmp/d'), true)
+    assert.equal(fs.searchGuard(), null)
+    fs.keepMetadata('/tmp/d', { mode: 0o700 })
+    assert.equal(fs.searchGuard(), null)
+    fs.keepMetadata('/tmp/d', { mode: 0o600 })
+    assert.equal(fs.searchGuard()('/tmp'), null)
+    assert.match(fs.searchGuard()('/tmp/d').message, /^\/tmp\/d: looking up a name in a directory where its mode denies it/u)
+    fs.keepMetadata('/tmp/d', { mode: 0o500 })
+    assert.equal(fs.searchGuard(), null)
+    // Searched but not read: a name in it can be looked up, and it cannot be listed.
+    fs.keepMetadata('/tmp/d', { mode: 0o100 })
+    assert.equal(fs.searchGuard()('/tmp/d'), null)
+    assert.throws(() => fs.listDir('/tmp/d'), /^UnsupportedError: \/tmp\/d: listing a directory where its mode denies it/u)
+    assert.equal(fs.removeWritableDir('/', '/tmp/d'), true)
+    assert.equal(fs.searchGuard(), null)
   })
 })

@@ -18,6 +18,8 @@ async function check(t, command, stdout = '', stderr = '', exitCode = 0, cwd = '
   assert.deepEqual(await t.run(command), { stdout, stderr, exitCode, cwd, notes: [], unsupported: [] }, command)
 }
 const check2 = (t, command, stdout = '') => check(t, command, stdout, '', 0, '/tmp')
+// What the coreutils 9.4 GNU/Linux distributions ship says of every -n.
+const NO_CLOBBER = 'cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead\n'
 
 const TREE = '/tmp/copy\n/tmp/copy/.hidden\n/tmp/copy/one\n/tmp/copy/sub\n/tmp/copy/sub/deep\n/tmp/copy/sub/deep/three\n/tmp/copy/sub/two\n'
 
@@ -84,7 +86,7 @@ describe('cp -r copies a tree into the writable filesystem', () => {
     const t = terminal()
     await check(t, 'cp -r a /tmp/copy')
     await check(t, 'printf mine >/tmp/copy/one')
-    await check(t, 'cp -rn a/. /tmp/copy')
+    await check(t, 'cp -rn a/. /tmp/copy', '', NO_CLOBBER)
     await check(t, 'cat /tmp/copy/one', 'mine')
   })
 
@@ -135,7 +137,7 @@ describe('cp -r refuses what GNU refuses', () => {
       await check(t, command, '', message, 1)
     }
     // Nothing of the refused copy is left behind.
-    check(t, 'find /tmp -type d', '/tmp\n/tmp/a\n/tmp/a/sub\n/tmp/a/sub/deep\n')
+    await check(t, 'find /tmp -type d', '/tmp\n/tmp/a\n/tmp/a/sub\n/tmp/a/sub/deep\n')
   })
 
   it('will not copy a directory onto itself', async () => {
@@ -157,12 +159,12 @@ describe('cp -r refuses what GNU refuses', () => {
     await check(t, 'cp -r a /tmp/src')
     // The destination is under the source either way; what it already is
     // settles it first.
-    check(t, 'cp -rT /tmp/src /tmp/src/one', '', "cp: cannot overwrite non-directory '/tmp/src/one' with directory '/tmp/src'\n", 1)
+    await check(t, 'cp -rT /tmp/src /tmp/src/one', '', "cp: cannot overwrite non-directory '/tmp/src/one' with directory '/tmp/src'\n", 1)
     await check(t, 'cp -r /tmp/src /tmp/src/one', '', "cp: cannot overwrite non-directory '/tmp/src/one' with directory '/tmp/src'\n", 1)
     await check(t, 'cat /tmp/src/one', '1\n')
     // A directory under the source is still the loop, and the source itself
     // is still the same file.
-    check(t, 'cp -r /tmp/src /tmp/src/sub', '', "cp: cannot copy a directory, '/tmp/src', into itself, '/tmp/src/sub/src'\n", 1)
+    await check(t, 'cp -r /tmp/src /tmp/src/sub', '', "cp: cannot copy a directory, '/tmp/src', into itself, '/tmp/src/sub/src'\n", 1)
     await check(t, 'cp -r /tmp/src/sub /tmp/src', '', "cp: '/tmp/src/sub' and '/tmp/src/sub' are the same file\n", 1)
   })
 
@@ -191,7 +193,7 @@ describe('cp -r refuses what GNU refuses', () => {
     await check(t, 'mkdir /tmp/dest')
     // The warning is for an operand repeated on the command line. `a/sub/two`
     // and `a` are two names with two destinations, so both are copied.
-    check(t, 'cp -r a/sub/two a /tmp/dest')
+    await check(t, 'cp -r a/sub/two a /tmp/dest')
     await check(t, 'find /tmp/dest -type f', '/tmp/dest/a/.hidden\n/tmp/dest/a/one\n/tmp/dest/a/sub/deep/three\n/tmp/dest/a/sub/two\n/tmp/dest/two\n')
   })
 
@@ -201,7 +203,7 @@ describe('cp -r refuses what GNU refuses', () => {
     // GNU refuses the second copy of `a/sub` as a hard link it would rather
     // make than copy; nothing here is linked, so each name is copied for
     // itself and the tree the operands asked for is what comes out.
-    check(t, 'cp -r a/sub a /tmp/dest')
+    await check(t, 'cp -r a/sub a /tmp/dest')
     await check(t, 'find /tmp/dest -type f', '/tmp/dest/a/.hidden\n/tmp/dest/a/one\n/tmp/dest/a/sub/deep/three\n/tmp/dest/a/sub/two\n/tmp/dest/sub/deep/three\n/tmp/dest/sub/two\n')
   })
 
@@ -255,7 +257,7 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     await check(t, 'cp -rT a /tmp/exact/')
     await check(t, 'find /tmp -type d', '/tmp\n/tmp/exact\n/tmp/exact/sub\n/tmp/exact/sub/deep\n/tmp/new\n/tmp/new/sub\n/tmp/new/sub/deep\n')
     // The same spelling on a directory that is there copies into it, as ever.
-    check(t, 'cp -r a /tmp/new/')
+    await check(t, 'cp -r a /tmp/new/')
     await check(t, 'find /tmp/new/a -type f', '/tmp/new/a/.hidden\n/tmp/new/a/one\n/tmp/new/a/sub/deep/three\n/tmp/new/a/sub/two\n')
   })
 
@@ -264,10 +266,10 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     await check(t, 'cp -r a /tmp/src')
     // Lexically this normalizes inside the source, but the missing component
     // is what a caller needs told, not a loop that is not one.
-    check(t, 'cp -r /tmp/src /tmp/src/missing/../copy', '', "cp: cannot create directory '/tmp/src/missing/../copy': No such file or directory\n", 1)
+    await check(t, 'cp -r /tmp/src /tmp/src/missing/../copy', '', "cp: cannot create directory '/tmp/src/missing/../copy': No such file or directory\n", 1)
     await check(t, 'cp -r /tmp/src /tmp/other/missing/../copy', '', "cp: cannot create directory '/tmp/other/missing/../copy': No such file or directory\n", 1)
     // A destination that does resolve inside the source is still the loop.
-    check(t, 'cp -r /tmp/src /tmp/src/sub/../inner', '', "cp: cannot copy a directory, '/tmp/src', into itself, '/tmp/src/sub/../inner'\n", 1)
+    await check(t, 'cp -r /tmp/src /tmp/src/sub/../inner', '', "cp: cannot copy a directory, '/tmp/src', into itself, '/tmp/src/sub/../inner'\n", 1)
     await check(t, 'find /tmp -type d', '/tmp\n/tmp/src\n/tmp/src/sub\n/tmp/src/sub/deep\n')
   })
 
@@ -278,7 +280,7 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     assert.equal(refused.exitCode, 1)
     assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
     // The redirect truncated the file; nothing was written to it after that.
-    check(t, 'cat /tmp/src/one', '')
+    await check(t, 'cat /tmp/src/one', '')
     await check(t, 'test -e /tmp/dest', '', '', 1)
   })
 
@@ -316,11 +318,11 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     await check(t, 'cp -r a /tmp/src')
     // These refuse before anything is made or announced, so what GNU would
     // have buffered never arises and the ordinary diagnostic stands.
-    check(t, 'cp -rvT /tmp/src /tmp/src >/tmp/src/one', '', "cp: '/tmp/src' and '/tmp/src' are the same file\n", 1)
+    await check(t, 'cp -rvT /tmp/src /tmp/src >/tmp/src/one', '', "cp: '/tmp/src' and '/tmp/src' are the same file\n", 1)
     await check(t, 'cp -rv /tmp/src /tmp/src >/tmp/src/one', '', "cp: cannot copy a directory, '/tmp/src', into itself, '/tmp/src/src'\n", 1)
     await check(t, 'cp -rv /tmp/src/sub /tmp/src >/tmp/src/one', '', "cp: '/tmp/src/sub' and '/tmp/src/sub' are the same file\n", 1)
     // The redirect truncated the file; nothing wrote to it after that.
-    check(t, 'cat /tmp/src/one', '')
+    await check(t, 'cat /tmp/src/one', '')
   })
 
   it('lets a destination it cannot make answer before the buffering one', async () => {
@@ -329,7 +331,7 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     // GNU announces a directory only where it makes one, so a destination it
     // cannot make emits no verbose line and there is nothing to be unsure
     // about — the read-only answer is the whole of it, redirect or no.
-    check(t, 'cp -rv /tmp/src /repo/new >/tmp/src/one', '', "cp: cannot create directory '/repo/new': Read-only file system\n", 1)
+    await check(t, 'cp -rv /tmp/src /repo/new >/tmp/src/one', '', "cp: cannot create directory '/repo/new': Read-only file system\n", 1)
     await check(t, 'cp -rv /tmp/src /repo/new', '', "cp: cannot create directory '/repo/new': Read-only file system\n", 1)
     await check(t, 'cat /tmp/src/one', '')
     // A destination it *can* make still refuses, since that line would be
@@ -344,7 +346,7 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     await check(t, 'cp -r a /tmp/dest')
     // Every name is already there, so nothing is copied and nothing is
     // announced: there is no buffered line to be unsure about.
-    check(t, 'cp -rvn a/. /tmp/dest >/tmp/dest/one')
+    await check(t, 'cp -rvn a/. /tmp/dest >/tmp/dest/one', '', NO_CLOBBER)
     await check(t, 'cat /tmp/dest/one', '')
     await check(t, 'cat /tmp/dest/sub/two', '2\n')
   })
@@ -358,7 +360,7 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     // the lines land there when the buffer flushes at exit.
     const lines = (await terminal().run(`${setup}; cp -rvn a/. /tmp/d`)).stdout
     assert.ok(lines.includes("'a/./sub/two' -> '/tmp/d/./sub/two'") && !lines.includes("/tmp/d/./one"), lines)
-    await check(t, 'cp -rvn a/. /tmp/d >/tmp/d/one')
+    await check(t, 'cp -rvn a/. /tmp/d >/tmp/d/one', '', NO_CLOBBER)
     await check(t, 'cat /tmp/d/one', lines)
     await check(t, 'cat /tmp/d/sub/two', '2\n')
     // Without -n the same name is overwritten, and that is still refused.
@@ -375,7 +377,7 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     // of the tree is copied with its lines landing there, as GNU has it.
     const lines = (await terminal().run(`${setup}; cp -rv /tmp/s/. /tmp/d`)).stdout
     assert.ok(lines.includes("'/tmp/s/./sub/two' -> '/tmp/d/./sub/two'") && !lines.includes("'/tmp/d/./one'"), lines)
-    await check(t, 'cp -rv /tmp/s/. /tmp/d >/tmp/s/one', '', "cp: cannot overwrite directory '/tmp/d/./one' with non-directory '/tmp/s/./one'\n", 1)
+    await check(t, 'cp -rv /tmp/s/. /tmp/d >/tmp/s/one', '', "cp: cannot overwrite directory '/tmp/d/./one' with non-directory\n", 1)
     await check(t, 'cat /tmp/s/one', lines)
     await check(t, 'cat /tmp/d/sub/two', '2\n')
     // A descriptor on an entry that is copied still refuses.
@@ -389,7 +391,7 @@ describe('cp -r keeps a copy inside the destination it was given', () => {
     // `/tmp/s` names a destination under itself, so it is refused before it is
     // listed and nothing below it is opened — including the descriptor's file.
     // The operand beside it is copied and announced, as GNU announces it.
-    check(t, 'cp -rv file /tmp/s /tmp/s/inside >/tmp/s/out', '', "cp: cannot copy a directory, '/tmp/s', into itself, '/tmp/s/inside/s'\n", 1)
+    await check(t, 'cp -rv file /tmp/s /tmp/s/inside >/tmp/s/out', '', "cp: cannot copy a directory, '/tmp/s', into itself, '/tmp/s/inside/s'\n", 1)
     await check(t, 'cat /tmp/s/out', "'file' -> '/tmp/s/inside/file'\n")
     await check(t, 'cat /tmp/s/inside/file', 'plain\n')
     // The same operand against a destination it can be walked into refuses,

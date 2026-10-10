@@ -13,7 +13,7 @@ const result = (stdout = '', exitCode = 0, stderr = '', cwd = '/') => ({ stdout,
 const run = (command) => createTerminal(sources).run(command)
 
 describe('du apparent sizes and traversal', () => {
-  for (const flag of ['-b', '--bytes', '--apparent-size -B1', '-AB1']) {
+  for (const flag of ['-b', '--bytes', '--apparent-size -B1', '--apparent-size --block-size=1']) {
     it(flag, async () => assert.deepEqual(await run(`du ${flag}`), result('5\t./dir/sub\n12\t./dir\n17\t.\n')))
   }
   it('includes hidden files without glob or listing omission notes', async () => {
@@ -79,14 +79,14 @@ describe('du scales exact byte counts', () => {
     assert.deepEqual(await terminal.run('DU_BLOCK_SIZE=2 du -b a'), result('1025\ta\n'))
   })
   it('uses the first configured block-size variable, including explicit overrides', async () => {
-    assert.deepEqual(await terminal.run('DU_BLOCK_SIZE=2 BLOCK_SIZE=1 BLOCKSIZE=512 du -A a'), result('513\ta\n'))
-    assert.deepEqual(await terminal.run('BLOCK_SIZE=2 BLOCKSIZE=1 du -A a'), result('513\ta\n'))
-    assert.deepEqual(await terminal.run('BLOCKSIZE=2 du -A a'), result('513\ta\n'))
+    assert.deepEqual(await terminal.run('DU_BLOCK_SIZE=2 BLOCK_SIZE=1 BLOCKSIZE=512 du --apparent-size a'), result('513\ta\n'))
+    assert.deepEqual(await terminal.run('BLOCK_SIZE=2 BLOCKSIZE=1 du --apparent-size a'), result('513\ta\n'))
+    assert.deepEqual(await terminal.run('BLOCKSIZE=2 du --apparent-size a'), result('513\ta\n'))
     assert.deepEqual(await terminal.run('DU_BLOCK_SIZE=invalid du -b a'), result('1025\ta\n'))
   })
   for (const setting of ['DU_BLOCK_SIZE=', 'DU_BLOCK_SIZE=invalid', 'BLOCK_SIZE=2junk', 'BLOCKSIZE=0']) {
     it(`diagnoses GNU fallback semantics for ${setting}`, async () => {
-      const actual = await terminal.run(`${setting} du -A a 2>/dev/null | cat`)
+      const actual = await terminal.run(`${setting} du --apparent-size a 2>/dev/null | cat`)
       assert.equal(actual.stdout, '')
       assert.equal(actual.stderr, '')
       assert.equal(actual.unsupported[0].detail, 'invalid block size environment')
@@ -189,7 +189,7 @@ describe('du reports failures without inventing metadata', () => {
       assert.equal(actual.unsupported[0].command, 'du')
     })
   }
-  for (const flags of ['-as', '-sd1', '-d-1', '-d1.5', '-d08', '-d9223372036854775808', '-B0', '-B08', '-B1.5K', '-B18446744073709551616', '-B1e', '-B1p', '-B+M', "-B' M'"]) {
+  for (const flags of ['-as', '-sd1', '-d-x', '-d1.5', '-d08', '-d9223372036854775808', '-B0', '-B08', '-B1.5K', '-B18446744073709551616', '-B1e', '-B1p', '-B+M', "-B' M'"]) {
     it(`rejects invalid option values ${flags}`, async () => {
       const actual = await run(`du -b ${flags} a`)
       assert.equal(actual.exitCode, 1)

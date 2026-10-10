@@ -183,6 +183,35 @@ describe('unzip lists and tests what an archive holds', () => {
     assert.deepEqual(await t.run('unzip -p empty.zip'), result('', { stderr: 'warning [empty.zip]:  zipfile is empty\n', exitCode: 1 }))
   })
 
+  it('shows the archive comment under its name, unless quiet', async () => {
+    // The comment goes after the end record, whose last field counts it.
+    const commented = (text) => {
+      const comment = Buffer.from(text, 'latin1')
+      const out = Uint8Array.of(...PKG_ZIP, ...comment)
+      out[PKG_ZIP.length - 2] = comment.length
+      return out
+    }
+    const t = createTerminal({ 'c.zip': commented('my comment'), 'odd.zip': commented('a\r\nb\u001Bc\0d') }, { mount: '/repo', writable: '/tmp/' })
+    const tested = (name) => `    testing: pkg/README.md            OK\nNo errors detected in ${name} for the 1 file tested.\n`
+    assert.deepEqual(await t.run('unzip -t c.zip pkg/README.md'), result(`Archive:  c.zip\nmy comment\n${tested('c.zip')}`))
+    assert.deepEqual(await t.run('unzip -tq c.zip pkg/README.md'), result('No errors detected in c.zip for the 1 file tested.\n'))
+    // As UnZip shows it: no carriage return, an escape spelt out, nothing
+    // past a NUL, and a newline at the end.
+    assert.deepEqual(await t.run('unzip -t odd.zip pkg/README.md'), result(`Archive:  odd.zip\na\nb^[c\n${tested('odd.zip')}`))
+  })
+
+  it('prints its usage where it is given no archive', async () => {
+    const t = await terminal()
+    const usage = await t.run('unzip')
+    assert.match(usage.stdout, /^UnZip 6\.00 of 20 April 2009, by Debian\. Original by Info-ZIP\.\n\nUsage: unzip /u)
+    assert.equal(usage.exitCode, 0)
+    // Anything given, and still no archive, is an error; a `-` alone is a
+    // word of no options, and -t says even this on stdout.
+    assert.deepEqual(await t.run('unzip -l -'), result('', { stderr: usage.stdout, exitCode: 10 }))
+    assert.deepEqual(await t.run('unzip -t -'), result(usage.stdout, { exitCode: 10 }))
+    assert.deepEqual(await t.run('unzip -qql -- - pkg.zip pkg/README.md'), result('        6  2024-05-06 07:08   pkg/README.md\n'))
+  })
+
   it('refuses an archive whose names it cannot give back as stored', async () => {
     // UnZip lists and matches `./a` as it is stored; the package hands it out
     // as `a`. Nothing is extracted, and no -d directory made.
@@ -212,6 +241,48 @@ describe('unzip extracts into the writable overlay', () => {
       stderr: 'caution:  both -n and -o specified; ignoring -o\n', cwd: '/tmp',
     }))
     assert.deepEqual(await t.run('unzip -qq /repo/pkg.zip pkg/README.md -d out'), result('', { stderr: replace('out/pkg/README.md'), exitCode: 1, cwd: '/tmp' }))
+  })
+
+  it('gives what a DOS maker stored the mode UnZip gives it', async () => {
+    // Two files marked by DOS's attributes alone, one of them read-only:
+    // UnZip expands that bit into no write permission, and takes the umask,
+    // 077, off what is left.
+    const DOS = bytesOf(`
+UEsDBBQAAAAAAIAYIlh+8EwyBAAAAAQAAAAGAAAAcm8udHh0ZG9zClBLAwQUAAAAAACAGCJYfvBMMgQAAAAEAAAABgAAAHJ3LnR4dGRvcwpQSwECFAAUAAAAAACAGCJYfvBM
+MgQAAAAEAAAABgAAAAAAAAAAACEAAAAAAAAAcm8udHh0UEsBAhQAFAAAAAAAgBgiWH7wTDIEAAAABAAAAAYAAAAAAAAAAAAgAAAAKAAAAHJ3LnR4dFBLBQYAAAAAAgACAGgA
+AABQAAAAAAA=`)
+    const t = createTerminal({ 'dos.zip': DOS }, { mount: '/repo', writable: '/tmp/' })
+    assert.deepEqual(await t.run('cd /tmp && unzip -q /repo/dos.zip && ls -l | cut -c 1-10'), result('total 8\n-r--------\n-rw-------\n', { cwd: '/tmp' }))
+  })
+
+  it('keeps the mode and the time each entry was stored with, as UnZip does', async () => {
+    const t = await terminal()
+    // No umask is taken from an entry's own mode; a directory made for -d is
+    // what the umask, 077, leaves of 0777, dated to when it was made, and a
+    // link is dated to when it was made too.
+    assert.deepEqual(await t.run('cd /tmp && unzip -q /repo/pkg.zip -d out && ls -l out/pkg/README.md out/pkg/bin/run.sh && ls -ld out/pkg out/pkg/src'), result(
+      '-rw-r--r-- 1 user user  6 May  6  2024 out/pkg/README.md\n-rwxr-xr-x 1 user user 19 May  6  2024 out/pkg/bin/run.sh\n'
+      + 'drwxr-xr-x 5 user user 4096 May  6  2024 out/pkg\ndrwxr-xr-x 3 user user 4096 May  6  2024 out/pkg/src\n',
+      { cwd: '/tmp' },
+    ))
+    assert.deepEqual(await t.run('ls -ld out | cut -c 1-10'), result('drwx------\n', { cwd: '/tmp' }))
+    // An archive made of them stores the times they keep.
+    assert.deepEqual(await t.run('cd out && zip -qr ../again.zip pkg/bin && unzip -l ../again.zip'), result(
+      `Archive:  ../again.zip\n${HEAD}        0  2024-05-06 07:08   pkg/bin/\n       19  2024-05-06 07:08   pkg/bin/run.sh\n---------                     -------\n       19                     2 files\n`,
+      { cwd: '/tmp/out' },
+    ))
+  })
+
+  it('refuses to date what it extracts where it cannot tell the reading of a time', async () => {
+    const previous = process.env.TZ
+    process.env.TZ = 'America/New_York'
+    try {
+      const t = createTerminal(SOURCES, { mount: '/repo', writable: '/tmp/' })
+      await gap(t, 'unzip -q pkg.zip -d /tmp/out', 'archive times', "unzip: whether an entry's time is exact or a DOS time is not known here, and outside UTC the two date what is extracted differently (TZ=UTC answers it)\n")
+    } finally {
+      if (previous === undefined) delete process.env.TZ
+      else process.env.TZ = previous
+    }
   })
 
   it('holds the name of a link it makes last, as UnZip does', async () => {

@@ -1,16 +1,44 @@
 import { parseArgs } from '../args.js'
-import { creationError, lookup } from '../fs.js'
-import { err, reason } from '../util.js'
-import { unsupportedFrom, unsupportedNote } from '../unsupported.js'
+import { joinPath, lookup, nameTooLong, pathTooLong } from '../fs.js'
+import { byteLocale, encodeUtf8, err, isMarker, reason } from '../util.js'
+import { UnsupportedError, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
 import { missingPathNote } from '../notes.js'
+import { inOverlay, writeRefusal } from '../writable.js'
+
+// GNU's quote(), which names a file in mkdir's diagnostics and in all of
+// find's: the locale's own quotation marks around it — ‘…’ where the charset
+// is UTF-8, apostrophes where it is bytes — with C's backslash escapes for
+// what would not print, and a backslash before a backslash or a closing mark
+// in the name itself.
+const LOCALE_ESCAPES = new Map([['\u0007', 'a'], ['\b', 'b'], ['\f', 'f'], ['\n', 'n'], ['\r', 'r'], ['\t', 't'], ['\v', 'v'], ['\\', '\\']])
+const octal = (byte) => '\\' + byte.toString(8).padStart(3, '0')
+
+export function quoteLocale(name, ctx) {
+  const bytes = byteLocale(ctx)
+  const [open, close] = bytes ? ["'", "'"] : ['‘', '’']
+  let out = open
+  for (const char of name) {
+    const code = char.codePointAt(0)
+    const named = LOCALE_ESCAPES.get(char)
+    if (named !== undefined) out += '\\' + named
+    else if (char === close) out += '\\' + char
+    else if (code < 32 || code === 127) out += octal(code)
+    else if (isMarker(code)) out += octal(code - 0xdc00)
+    else if (code > 127 && bytes) for (const byte of encodeUtf8(char)) out += octal(byte)
+    else if (code > 127 && /[\p{C}\p{Zl}\p{Zp}]/u.test(char)) {
+      throw new UnsupportedError('feature', 'filename quoting', 'quoting nonprinting Unicode filenames is not supported')
+    } else out += char
+  }
+  return out + close
+}
 
 // Directories in the writable overlay, which `cp -r` made the first of. There
 // are no permissions here, so `-m` and the modes it takes are refused like any
 // other option this terminal has nothing to answer with.
 export function mkdir(_stdin, tokens, ctx) {
   const { flags, positional } = parseArgs(tokens, { short: ['p', 'v'], long: ['parents', 'verbose'] })
-  if (positional.length === 0) return err('mkdir: missing operand')
+  if (positional.length === 0) return err("mkdir: missing operand\nTry 'mkdir --help' for more information.")
   const state = {
     ctx, events: [], stdout: '', stderr: '',
     parents: flags.has('p') || flags.has('parents'),
@@ -19,7 +47,7 @@ export function mkdir(_stdin, tokens, ctx) {
   try {
     for (const name of positional) {
       if (state.parents) makeParents(name, state)
-      else makeDirectory(name, state, true)
+      else if (!fail(state, name, made(state, ctx.cwd, name))) announce(state, name)
     }
   } catch (e) {
     missingPathNote(ctx, 'mkdir', e?.path, e?.fsError)
@@ -32,68 +60,102 @@ export function mkdir(_stdin, tokens, ctx) {
   return { stdout: state.stdout, stderr: state.stderr, events: state.events, exitCode: state.stderr ? 1 : 0 }
 }
 
-// `-p` makes each component of the name in turn, passing over the ones already
-// there and stopping at the first it cannot make. GNU announces each one as the
-// prefix it is, and the last one as the operand was typed.
+// `-p` as GNU's mkancesdirs makes it: each directory on the way is made and
+// then entered, one component at a time from where the last one left off, so
+// no call is handed more of the name than one component and a name of any
+// length can be made. Making one that is there already is no failure;
+// entering it is what has to work, and where it does not, the diagnostic
+// names the operand only as far as that component, and says why making it
+// failed where entering it found nothing there. The last component is made
+// like any other directory, and is fine already there if it leads to one.
 function makeParents(name, state) {
-  const parts = name.split('/')
-  const prefixes = []
-  for (let i = 0; i < parts.length; i++) {
-    if (parts[i] !== '') prefixes.push(parts.slice(0, i + 1).join('/'))
+  const { ctx } = state
+  const parts = [...name.matchAll(/[^/]+/gu)]
+  let wd = name.startsWith('/') ? '/' : ctx.cwd
+  let at = 0
+  // Directories that are there already are entered without a word, so where
+  // the way to the last component is a plain run of names that is a
+  // directory, that is where the making starts; otherwise a deep tree would
+  // be walked again from its top at every component.
+  const ancestors = Math.max(0, parts.length - 1)
+  const special = parts.findIndex(([part]) => part === '.' || part === '..')
+  const plain = special < 0 || special > ancestors ? ancestors : special
+  if (plain > 0) {
+    const prefix = joinPath(wd, parts.slice(0, plain).map(([part]) => part).join('/'))
+    if (ctx.fs.isDir(prefix)) { wd = prefix; at = plain }
   }
-  // Slashes alone name the root, which is there already; an empty operand
-  // names nothing at all, and GNU says so rather than passing over it — a
-  // silent success would let `mkdir -p "$dir" && …` run on a name it never got.
-  if (prefixes.length === 0) {
-    if (name === '') makeDirectory(name, state, true)
-    return
+  for (; at < ancestors; at++) {
+    const [part] = parts[at]
+    const shown = name.slice(0, parts[at].index + part.length)
+    if (part === '.') continue
+    // `..` is not made, since it is there wherever its parent is.
+    const making = part === '..' ? null : made(state, wd, part)
+    if (making === null && part !== '..') announce(state, shown)
+    const found = lookup(wd, part, ctx.fs)
+    let error = found.error ?? (ctx.fs.isDir(found.path) ? null : 'Not a directory')
+    if (error === 'No such file or directory' && making) error = making
+    if (fail(state, shown, error)) return
+    wd = found.path
   }
-  prefixes[prefixes.length - 1] = name
-  for (const [index, prefix] of prefixes.entries()) {
-    if (!makeDirectory(prefix, state, index === prefixes.length - 1)) return
+  const last = parts.length ? name.slice(parts.at(-1).index) : name
+  const making = made(state, wd, last)
+  if (making === null) return announce(state, name)
+  if (making !== 'No such file or directory') {
+    const there = lookup(wd, last, ctx.fs)
+    if (there.error === null && ctx.fs.isDir(there.path)) return
+    if (making === 'File exists' && there.error !== null && there.error !== 'No such file or directory' && there.error !== 'Not a directory') {
+      return report(state, `mkdir: cannot stat ${quoteLocale(name, ctx)}: ${there.error}\n`)
+    }
   }
+  fail(state, name, making)
 }
 
-function makeDirectory(name, state, last) {
+// mkdir(2) of `name` from `cwd`: what it fails with, or null once the
+// directory is made. The kernel walks the way to the last component first,
+// then answers for a name that cannot be made — `.`, `..` and `/` are
+// there already, and a component too long to be in any directory — then for
+// one already taken, a link included whatever it leads to, and only then for
+// the directory it would go in, which the overlay can write and nothing else
+// here can.
+function made(state, cwd, name) {
   const { ctx } = state
-  const shown = quoteName(name, ctx)
-  const fail = (message) => {
-    report(state, `mkdir: cannot create directory ${shown}: ${message}\n`)
-    return false
+  if (name === '') return 'No such file or directory'
+  if (pathTooLong(name)) return 'File name too long'
+  const bare = name.replace(/\/+$/u, '')
+  if (bare === '') return 'File exists'
+  const cut = bare.lastIndexOf('/') + 1
+  const last = bare.slice(cut)
+  const parent = cut === 0 ? { path: cwd, error: null } : lookup(cwd, bare.slice(0, cut), ctx.fs)
+  if (parent.error) {
+    missingPathNote(ctx, 'mkdir', name, parent.error)
+    return parent.error
   }
-  // A trailing slash says the name is a directory, which is what this makes.
-  const target = name.replace(/\/+$/u, '') || name
-  const found = lookup(ctx.cwd, target, ctx.fs)
-  if (found.error === null) {
-    // An existing directory is what `-p` was asking for; anything else in the
-    // way of the name is not, and a component that is not a directory cannot
-    // hold the one below it.
-    if (!state.parents) return fail('File exists')
-    return ctx.fs.isDir(found.path) ? true : fail(last ? 'File exists' : 'Not a directory')
-  }
-  // Making a directory never follows the final component, so a name a link has
-  // taken is taken whatever the link leads to. `-p` asks where it leads all
-  // the same, and answers with what stopped that question: a link leading
-  // nowhere leaves its own name in the way, and one leading through something
-  // that is not a directory cannot hold the name below it either.
-  if (lookup(ctx.cwd, target, ctx.fs, { follow: false }).error === null) {
-    return fail(!state.parents || last || found.error !== 'Not a directory' ? 'File exists' : 'Not a directory')
-  }
-  const invalid = creationError(ctx.cwd, target, ctx.fs, found)
-  if (invalid) {
-    missingPathNote(ctx, 'mkdir', target, invalid)
-    return fail(invalid)
-  }
+  if (last === '.' || last === '..') return 'File exists'
+  if (nameTooLong(last)) return 'File name too long'
+  const target = joinPath(parent.path, last)
+  if (ctx.fs.isDir(target) || ctx.fs.isFile(target) || ctx.fs.isLink?.(target)) return 'File exists'
+  if (!ctx.writable || !inOverlay(target)) return writeRefusal(ctx, parent.path)
   try {
-    if (!ctx.fs.makeWritableDir?.(ctx.cwd, target)) return fail('Read-only file system')
+    if (!ctx.fs.makeWritableDir?.(parent.path, last)) return writeRefusal(ctx, parent.path)
   } catch (e) {
     if (unsupportedNote(e)) throw e
     missingPathNote(ctx, 'mkdir', e?.path, e?.fsError)
     const message = reason(e)
-    return fail(message.startsWith(target + ': ') ? message.slice(target.length + 2) : message)
+    return e?.fsError ?? (message.startsWith(last + ': ') ? message.slice(last.length + 2) : message)
   }
-  if (state.verbose) report(state, `mkdir: created directory ${shown}\n`, 1)
+  return null
+}
+
+// A failure names the operand as far as it got, in quote()'s marks; whether
+// there was one is what the caller goes on from.
+function fail(state, shown, error) {
+  if (error === null) return false
+  report(state, `mkdir: cannot create directory ${quoteLocale(shown, state.ctx)}: ${error}\n`)
   return true
+}
+
+function announce(state, shown) {
+  if (state.verbose) report(state, `mkdir: created directory ${quoteName(shown, state.ctx)}\n`, 1)
 }
 
 function report(state, text, fd = 2) {

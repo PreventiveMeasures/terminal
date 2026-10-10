@@ -25,7 +25,7 @@ describe('mkdir makes directories in the writable overlay', () => {
   it('makes several, and keeps going after one it cannot make', async () => {
     const t = terminal()
     await check(t, 'mkdir /tmp/one /tmp/two')
-    await check(t, 'mkdir /tmp/one /tmp/three', '', "mkdir: cannot create directory '/tmp/one': File exists\n", 1)
+    await check(t, 'mkdir /tmp/one /tmp/three', '', "mkdir: cannot create directory ‘/tmp/one’: File exists\n", 1)
     await check(t, 'ls /tmp', 'one\nthree\ntwo\n')
   })
 
@@ -71,28 +71,28 @@ describe('mkdir -p makes each missing component and passes over the rest', () =>
   it('names the component a file is in the way of', async () => {
     const t = terminal()
     await check(t, 'printf x >/tmp/blocked')
-    await check(t, 'mkdir -p /tmp/blocked/inner', '', "mkdir: cannot create directory '/tmp/blocked': Not a directory\n", 1)
-    await check(t, 'mkdir -p /tmp/blocked', '', "mkdir: cannot create directory '/tmp/blocked': File exists\n", 1)
+    await check(t, 'mkdir -p /tmp/blocked/inner', '', "mkdir: cannot create directory ‘/tmp/blocked’: Not a directory\n", 1)
+    await check(t, 'mkdir -p /tmp/blocked', '', "mkdir: cannot create directory ‘/tmp/blocked’: File exists\n", 1)
     await check(t, 'cat /tmp/blocked', 'x')
   })
 
   it('stops at the component it could not make', async () => {
     const t = terminal()
     await check(t, 'printf x >/tmp/blocked')
-    await check(t, 'mkdir -pv /tmp/blocked/inner/deeper', '', "mkdir: cannot create directory '/tmp/blocked': Not a directory\n", 1)
+    await check(t, 'mkdir -pv /tmp/blocked/inner/deeper', '', "mkdir: cannot create directory ‘/tmp/blocked’: Not a directory\n", 1)
     await check(t, 'ls /tmp', 'blocked\n')
   })
 })
 
 describe('mkdir refuses what it cannot make', () => {
   for (const [command, stderr] of [
-    ['mkdir', 'mkdir: missing operand\n'],
-    ['mkdir /tmp/here', "mkdir: cannot create directory '/tmp/here': File exists\n"],
-    ['mkdir /tmp/taken', "mkdir: cannot create directory '/tmp/taken': File exists\n"],
-    ['mkdir /tmp/missing/inner', "mkdir: cannot create directory '/tmp/missing/inner': No such file or directory\n"],
-    ['mkdir /tmp/taken/inner', "mkdir: cannot create directory '/tmp/taken/inner': Not a directory\n"],
-    ['mkdir /repo/new', "mkdir: cannot create directory '/repo/new': Read-only file system\n"],
-    ['mkdir dir', "mkdir: cannot create directory 'dir': File exists\n"],
+    ['mkdir', "mkdir: missing operand\nTry 'mkdir --help' for more information.\n"],
+    ['mkdir /tmp/here', "mkdir: cannot create directory ‘/tmp/here’: File exists\n"],
+    ['mkdir /tmp/taken', "mkdir: cannot create directory ‘/tmp/taken’: File exists\n"],
+    ['mkdir /tmp/missing/inner', "mkdir: cannot create directory ‘/tmp/missing/inner’: No such file or directory\n"],
+    ['mkdir /tmp/taken/inner', "mkdir: cannot create directory ‘/tmp/taken/inner’: Not a directory\n"],
+    ['mkdir /repo/new', "mkdir: cannot create directory ‘/repo/new’: Read-only file system\n"],
+    ['mkdir dir', "mkdir: cannot create directory ‘dir’: File exists\n"],
   ]) {
     it(command, async () => {
       const t = terminal()
@@ -106,13 +106,13 @@ describe('mkdir refuses what it cannot make', () => {
     const t = terminal()
     // A silent success here would let `mkdir -p "$dir" && …` run on a name it
     // never got.
-    check(t, "mkdir -p ''", '', "mkdir: cannot create directory '': No such file or directory\n", 1)
-    await check(t, "mkdir ''", '', "mkdir: cannot create directory '': No such file or directory\n", 1)
+    await check(t, "mkdir -p ''", '', "mkdir: cannot create directory ‘’: No such file or directory\n", 1)
+    await check(t, "mkdir ''", '', "mkdir: cannot create directory ‘’: No such file or directory\n", 1)
     const gated = await t.run("mkdir -p '' && echo continued")
     assert.equal(gated.stdout, '')
     assert.equal(gated.exitCode, 1)
     assert.deepEqual(gated.notes, ['mkdir: exited 1, so the command after && did not run.'])
-    await check(t, "mkdir -p /tmp/made ''", '', "mkdir: cannot create directory '': No such file or directory\n", 1)
+    await check(t, "mkdir -p /tmp/made ''", '', "mkdir: cannot create directory ‘’: No such file or directory\n", 1)
     await check(t, 'ls /tmp', 'made\n')
   })
 
@@ -124,12 +124,12 @@ describe('mkdir refuses what it cannot make', () => {
   })
 
   it('has no /tmp to make anything in without an overlay', async () => {
-    await check(terminal({ writable: false }), 'mkdir /tmp/new', '', "mkdir: cannot create directory '/tmp/new': No such file or directory\n", 1)
+    await check(terminal({ writable: false }), 'mkdir /tmp/new', '', "mkdir: cannot create directory ‘/tmp/new’: No such file or directory\n", 1)
   })
 
   it('points at a path that exists under another root', async () => {
     const result = await terminal({ cwd: '/' }).run('mkdir dir/leaf')
-    assert.equal(result.stderr, "mkdir: cannot create directory 'dir/leaf': No such file or directory\n")
+    assert.equal(result.stderr, "mkdir: cannot create directory ‘dir/leaf’: No such file or directory\n")
     assert.deepEqual(result.notes, ['mkdir: relative path "dir/leaf" was not found from cwd "/". A file exists at "/repo/dir/leaf".'])
   })
 

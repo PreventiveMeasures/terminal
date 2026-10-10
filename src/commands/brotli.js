@@ -1,7 +1,7 @@
 import { parseArgs } from '../args.js'
 import { consumeStdin, encodeUtf8, readBytesOf, stdinIsTerminal, stdoutIsTerminal } from '../util.js'
 import { lookupWithNote } from '../notes.js'
-import { unsupported } from '../unsupported.js'
+import { unsupported, unsupportedFrom, unsupportedNote } from '../unsupported.js'
 import { compress, supports } from '@preventive/archive/compression.js'
 import { decompressBytes } from '../compression.js'
 
@@ -127,7 +127,14 @@ async function through(bytes, name, target, opts, state) {
 function toFile(target, bytes, state) {
   const { ctx } = state
   let handle
-  try { handle = ctx.writable && ctx.fs.openWritable?.(ctx.cwd, target) } catch (e) { return fail(state, `failed to open output file [${target}]: ${e.message}`) }
+  try { handle = ctx.writable && ctx.fs.openWritable?.(ctx.cwd, target) } catch (e) {
+    // A refusal met on the way is the run's to report, not a file it failed.
+    if (unsupportedNote(e)) {
+      state.gap ??= unsupportedFrom(e, 'brotli', `brotli: ${e.message}`, 1)
+      return false
+    }
+    return fail(state, `failed to open output file [${target}]: ${e.message}`)
+  }
   if (!handle) {
     state.gap ??= unsupported('feature', 'brotli', 'read-only target', `brotli: ${target}: file system is read-only`, 1)
     return false

@@ -230,10 +230,10 @@ describe('what a file of bytes answers without being read as text', () => {
     await check(t, 'wc -w latin.bin', '3 latin.bin\n')
     // A byte that spells no character is a byte and not a character, which is
     // what wc counts of one as well: the PNG holds 19 bytes and 16 characters.
-    check(t, 'wc -mc img.png', '16 19 img.png\n')
+    await check(t, 'wc -mc img.png', '16 19 img.png\n')
     await check(t, 'wc -mc latin.bin', '15 16 latin.bin\n')
     // A sequence cut short at the end spells no character either.
-    check(terminal({ 'short.bin': Uint8Array.of(0x61, 0x62, 0xe2, 0x81) }), 'wc -mc short.bin', '2 4 short.bin\n')
+    await check(terminal({ 'short.bin': Uint8Array.of(0x61, 0x62, 0xe2, 0x81) }), 'wc -mc short.bin', '2 4 short.bin\n')
   })
 
   it('prints its bytes where the printing is text', async () => {
@@ -248,7 +248,7 @@ describe('what a file of bytes answers without being read as text', () => {
     const t = terminal(TREE)
     // A file's size is its bytes; what it takes up on disk is the blocks
     // holding them, which is what `du` reports without `--apparent-size`.
-    check(t, 'du -b img.png', '19\timg.png\n')
+    await check(t, 'du -b img.png', '19\timg.png\n')
     await check(t, 'du img.png', '4\timg.png\n')
     await check(t, 'du -h img.png', '4.0K\timg.png\n')
     await check(t, 'du --apparent-size img.png', '1\timg.png\n')
@@ -276,7 +276,7 @@ describe('what a file of bytes answers without being read as text', () => {
     await check(t(), 'ln -s /repo/img.png /tmp/l && base64 /tmp/l', 'iVBORw0KGgoAAAANSUhEUv/+Cg==\n')
     await check(t(), 'ln -s /repo/img.png /tmp/l && cp /tmp/l /tmp/copy && wc -c /tmp/copy', '19 /tmp/copy\n')
     // The link is as long as the path it holds, whatever it leads to.
-    check(t(), 'ln -s /repo/img.png /tmp/l && du -b /tmp/l', '13\t/tmp/l\n')
+    await check(t(), 'ln -s /repo/img.png /tmp/l && du -b /tmp/l', '13\t/tmp/l\n')
     await check(t(), 'ln -s /repo/img.png /tmp/l && cat /tmp/l | base64', 'iVBORw0KGgoAAAANSUhEUv/+Cg==\n')
     await gap(t(), 'ln -s /repo/img.png /tmp/l && cat /tmp/l', 'partial UTF-8 byte sequence', 'cat: byte output that is not valid UTF-8 cannot be represented by this string-based terminal\n')
   })
@@ -298,17 +298,17 @@ describe('what a file of bytes answers without being read as text', () => {
     await check(pair, 'diff -s a.bin b.bin', 'Files a.bin and b.bin are identical\n')
     await check(pair, 'diff -q a.bin c.bin', 'Files a.bin and c.bin differ\n', { exitCode: 1 })
     // The same characters spelled in other bytes are another file.
-    check(pair, 'diff -q a.bin text.txt', 'Files a.bin and text.txt differ\n', { exitCode: 1 })
+    await check(pair, 'diff -q a.bin text.txt', 'Files a.bin and text.txt differ\n', { exitCode: 1 })
     // Printing the difference is printing those bytes, and an option that
     // reads text more loosely than its bytes answers for neither.
-    gap(pair, 'diff a.bin c.bin', 'binary file', `diff: ${JSON.stringify('a.bin')} holds bytes that spell no text, and reading them as text is not supported\n`)
+    await gap(pair, 'diff a.bin c.bin', 'binary file', `diff: ${JSON.stringify('a.bin')} holds bytes that spell no text, and reading them as text is not supported\n`)
     await gap(pair, 'diff -q -i a.bin c.bin', 'binary file', `diff: ${JSON.stringify('a.bin')} holds bytes that spell no text, and reading them as text is not supported\n`)
     // `-N` stands the empty file in for a name that is not there, and a file
     // of bytes differs from it as it does from any other.
-    check(t, 'diff -N img.png missing.png', 'Binary files img.png and missing.png differ\n', { exitCode: 1 })
+    await check(t, 'diff -N img.png missing.png', 'Binary files img.png and missing.png differ\n', { exitCode: 1 })
     // `-a` asks for the bytes themselves as the diff, which is the printing
     // this terminal cannot do.
-    gap(t, 'diff -a img.png text.txt', 'binary file', `diff: ${JSON.stringify('img.png')} holds bytes that spell no text, and reading them as text is not supported\n`)
+    await gap(t, 'diff -a img.png text.txt', 'binary file', `diff: ${JSON.stringify('img.png')} holds bytes that spell no text, and reading them as text is not supported\n`)
   })
 
   it('copies into the overlay as the bytes it is', async () => {
@@ -388,7 +388,7 @@ describe('searching a tree that holds files of bytes', () => {
     await check(t, 'grep -l spelled text.txt img.png', 'text.txt\n')
     // A fold that stays within ASCII answers for the bytes too, and `-w`
     // and `-x` only narrow what being there would select.
-    check(t, 'grep -i SPELLED text.txt img.png', 'text.txt:spelled by a string\n')
+    await check(t, 'grep -i SPELLED text.txt img.png', 'text.txt:spelled by a string\n')
     await check(t, 'grep -w spelled text.txt img.png', 'text.txt:spelled by a string\n')
     await check(t, 'grep -x spelled text.txt img.png', '', { exitCode: 1 })
   })
@@ -478,10 +478,10 @@ describe('searching a tree that holds files of bytes', () => {
     await check(t, 'rg hello sub', 'sub/b.txt:hello again\n')
     // Opened, it is read, and a literal that is not in its bytes is one
     // ripgrep finds nothing of there either.
-    check(t, 'rg --hidden hello .', './a.txt:hello there\n./sub/b.txt:hello again\n')
+    await check(t, 'rg --hidden hello .', './a.txt:hello there\n./sub/b.txt:hello again\n')
     await check(t, 'rg hello .hidden.bin', '', { exitCode: 1 })
     // One that is in them is a line ripgrep prints as the bytes it is.
-    gap(t, 'rg --hidden caf .', 'unreadable bytes', `rg: ${JSON.stringify('.git/index')} holds bytes that are not text, and searching them is not supported\n`)
+    await gap(t, 'rg --hidden caf .', 'unreadable bytes', `rg: ${JSON.stringify('.git/index')} holds bytes that are not text, and searching them is not supported\n`)
     await gap(t, 'rg caf .hidden.bin', 'unreadable bytes', `rg: ${JSON.stringify('.hidden.bin')} holds bytes that are not text, and searching them is not supported\n`)
   })
 
@@ -499,7 +499,7 @@ describe('searching a tree that holds files of bytes', () => {
     await check(t, 'rg -c spelled .', './text.txt:1\n')
     // `--text` reads it as text, where a literal that is in its bytes is a
     // line ripgrep prints as those bytes, and one that is not changes nothing.
-    check(t, 'rg -a spelled .', './text.txt:spelled by a string\n')
+    await check(t, 'rg -a spelled .', './text.txt:spelled by a string\n')
     await gap(t, 'rg -a IHDR .', 'unreadable bytes', `rg: ${JSON.stringify('img.png')} holds bytes that are not text, and searching them is not supported\n`)
     await gap(t, 'rg spelled img.png', 'named binary file', `rg: ${JSON.stringify('img.png')} is binary, and reporting a binary match is not supported\n`)
   })
@@ -508,14 +508,14 @@ describe('searching a tree that holds files of bytes', () => {
     const t = terminal()
     // A NUL is what ripgrep calls binary, and an encoding it cannot read is
     // what this terminal cannot search: the two are answered apart.
-    gap(t, 'rg spelled img.png', 'named binary file', `rg: ${JSON.stringify('img.png')} is binary, and reporting a binary match is not supported\n`)
+    await gap(t, 'rg spelled img.png', 'named binary file', `rg: ${JSON.stringify('img.png')} is binary, and reporting a binary match is not supported\n`)
     await gap(t, 'rg latte latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
     // Only a literal read as written says a file holds no match: ripgrep
     // folds case and reads a regex by its own tables, so neither answers here.
-    gap(t, 'rg "l.tte" latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
+    await gap(t, 'rg "l.tte" latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
     await gap(t, 'rg -i SPELLED latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
     // `-v` selects the lines a pattern does not, which is every line there is.
-    gap(t, 'rg -v zzz latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
+    await gap(t, 'rg -v zzz latin.bin', 'unreadable bytes', `rg: ${JSON.stringify('latin.bin')} holds bytes that are not text, and searching them is not supported\n`)
     await check(t, 'rg zzz latin.bin', '', { exitCode: 1 })
   })
 
@@ -550,8 +550,17 @@ describe('a file of bytes and the writable overlay', () => {
     const t = overlay()
     await check(t, 'cp text.txt /tmp/one && wc -c /tmp/one', '20 /tmp/one\n')
     await check(t, 'cp img.png /tmp/one && wc -c /tmp/one', '19 /tmp/one\n')
-    await check(t, 'cp -n bytes.txt /tmp/one && wc -c /tmp/one', '19 /tmp/one\n')
+    await check(t, 'cp -n bytes.txt /tmp/one 2>/dev/null && wc -c /tmp/one', '19 /tmp/one\n')
     await check(t, 'cp img.png img.png', '', { stderr: "cp: 'img.png' and 'img.png' are the same file\n", exitCode: 1 })
+  })
+
+  it('is redirected onto stdin from the overlay as from the mount', async () => {
+    const t = overlay()
+    await check(t, 'cp img.png /tmp/copy')
+    await check(t, 'wc -c < /tmp/copy', '19\n')
+    await check(t, 'sha1sum < img.png && sha1sum < /tmp/copy', '91c599c0358a9b4744bcb5f2800ba7c868dbcba5  -\n'.repeat(2))
+    // One that changes under the command reading it is refused as before.
+    await gap(t, 'wc -c < /tmp/copy > /tmp/copy', 'modified redirected input', 'error: reading an inherited input file after it changes is not supported\n')
   })
 
   it('is text again in the overlay where its bytes spell text', async () => {

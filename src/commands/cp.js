@@ -1,11 +1,11 @@
 import { parseArgs } from '../args.js'
-import { compareNames, creationError, lookup, relativeTo, resolve, walkTree, writeTarget } from '../fs.js'
+import { compareNames, creationError, dirname, lookup, relativeTo, resolve, walkTree, writeTarget } from '../fs.js'
 import { err, reason } from '../util.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { UnsupportedError, unsupportedNote } from '../unsupported.js'
 import { quoteName } from './quote-name.js'
 import { lookupWithNote, missingPathNote } from '../notes.js'
-import { inOverlay } from '../writable.js'
+import { UMASK, inOverlay, writeRefusal } from '../writable.js'
 
 const SPECIAL_FILES = new Set(['/dev/null', '/dev/stdin', '/dev/stdout', '/dev/stderr'])
 
@@ -14,8 +14,12 @@ export function cp(_stdin, tokens, ctx) {
     short: ['f', 'n', 'v', 'T', 'r', 'R'], long: ['force', 'no-clobber', 'verbose', 'no-target-directory', 'recursive'],
     valueShort: ['t'], valueLong: ['target-directory'],
   })
+  // The build of coreutils 9.4 GNU/Linux distributions ship warns of every
+  // -n it reads, as it reads it, ahead of anything else it says.
+  const warnings = parsed.order.filter(({ name }) => name === 'n' || name === 'no-clobber')
+    .map(() => 'cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead\n').join('')
   const operands = copyOperands(parsed, ctx)
-  if (operands.error) return err('cp: ' + operands.error)
+  if (operands.error) return err(warnings + 'cp: ' + operands.error + (operands.usage ? "\nTry 'cp --help' for more information." : ''))
   const { sources, target, directory } = operands
   const { flags } = parsed
   const verbose = flags.has('v') || flags.has('verbose')
@@ -27,6 +31,7 @@ export function cp(_stdin, tokens, ctx) {
     noClobber, force: flags.has('f') || flags.has('force'), verbose, recursive,
     outputOverlap: verbose && outputOverlaps(copies, ctx, { recursive, noClobber }),
   }
+  if (warnings) report(state, warnings, false, true)
   for (const [source, destination] of copies) {
     // Each copy finishes before the next operand is opened. Ancestor scopes
     // (such as xargs reading its arguments) still guard their own input.
@@ -52,10 +57,10 @@ function copyOperands({ positional, flags, order }, ctx) {
   if (targets.length > 1) return { error: 'multiple target directories specified' }
   const explicit = targets[0]?.value
   const noDirectory = flags.has('T') || flags.has('no-target-directory')
-  if (positional.length === 0) return { error: 'missing file operand' }
-  if (explicit === undefined && positional.length === 1) return { error: 'missing destination file operand after ' + quoteName(positional[0], ctx) }
+  if (positional.length === 0) return { error: 'missing file operand', usage: true }
+  if (explicit === undefined && positional.length === 1) return { error: 'missing destination file operand after ' + quoteName(positional[0], ctx), usage: true }
   if (explicit !== undefined && noDirectory) return { error: 'cannot combine --target-directory (-t) and --no-target-directory (-T)' }
-  if (noDirectory && positional.length > 2) return { error: 'extra operand ' + quoteName(positional[2], ctx) }
+  if (noDirectory && positional.length > 2) return { error: 'extra operand ' + quoteName(positional[2], ctx), usage: true }
   const target = explicit ?? positional.at(-1)
   const found = lookup(ctx.cwd, target, ctx.fs)
   const directory = !noDirectory && ctx.fs.isDir(found.path)
@@ -163,7 +168,7 @@ function copyFile(source, destination, state, top = null) {
   if (dest.error && dest.error !== 'No such file or directory') return fail(`cannot stat ${shownTarget}: ${dest.error}`)
   if (state.noClobber && dest.path !== null) return
   if (sameFile(found.path, dest.path, ctx.fs)) return fail(`${shownSource} and ${shownTarget} are the same file`)
-  if (ctx.fs.isDir(dest.path)) return fail(`cannot overwrite directory ${shownTarget} with non-directory ${shownSource}`)
+  if (ctx.fs.isDir(dest.path)) return fail(`cannot overwrite directory ${shownTarget} with non-directory`)
   const absolute = writeTarget(ctx.fs, ctx.cwd, destination)
   // Two operands landing on one name is the mistake GNU refuses; two trees
   // merging onto one is what a recursive copy is for, and the second source
@@ -174,11 +179,14 @@ function copyFile(source, destination, state, top = null) {
   if (danglingTarget(ctx, destination, dest)) return fail(`not writing through dangling symlink ${shownTarget}`)
   if (invalid) {
     missingPathNote(ctx, 'cp', destination, invalid)
-    return fail(`cannot create regular file ${shownTarget}: ${invalid}`)
+    // GNU says a name spelled as a directory is not one, rather than that
+    // the open it could not make of it would have been of one.
+    return fail(`cannot create regular file ${shownTarget}: ${invalid === 'Is a directory' && destination.endsWith('/') ? 'Not a directory' : invalid}`)
   }
   try {
     if (!ctx.fs.copyWritable?.(ctx.cwd, found.path, destination)) {
-      return fail(`${state.force && dest.path !== null ? 'cannot remove' : 'cannot create regular file'} ${shownTarget}: Read-only file system`)
+      const refusal = writeRefusal(ctx, dest.path ?? dirname(absolute))
+      return fail(`${state.force && dest.path !== null ? 'cannot remove' : 'cannot create regular file'} ${shownTarget}: ${refusal}`)
     }
   } catch (e) {
     if (unsupportedNote(e)) throw e
@@ -232,7 +240,7 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
     // GNU makes the destination before the walk can find it reaching back
     // into the source, so a directory it cannot make answers ahead of the
     // loop: what is below is only reached where the making would succeed.
-    if (!ctx.writable || !inOverlay(target)) return fail(`cannot create directory ${shownTarget}: Read-only file system`)
+    if (!ctx.writable || !inOverlay(target)) return fail(`cannot create directory ${shownTarget}: ${writeRefusal(ctx, dirname(target))}`)
   }
   // A destination under the source is the loop GNU names. GNU makes the
   // directory, copies what it read before reaching it, and only then refuses;
@@ -261,6 +269,11 @@ function copyDirectory(source, absolute, destination, state, top, operand) {
     ctx.io.setReads([])
     copyFile(`${from}/${name}`, `${into}/${name}`, state, top)
   }
+  // A directory made by the copy takes the mode of the one it copies, less
+  // what the umask takes, as a file does (writable.js) — once what goes in
+  // it is in, as GNU sets it.
+  const mode = dest.path === null ? ctx.fs.metadataOf?.(absolute)?.mode : undefined
+  if (mode !== undefined) ctx.fs.keepMetadata(target, { mode: mode & 0o777 & ~UMASK })
 }
 
 function makeDirectory(source, destination, named, target, state) {
@@ -280,7 +293,7 @@ function makeDirectory(source, destination, named, target, state) {
   const writable = ctx.writable && inOverlay(target)
   if (writable) refuseBufferedOutput(state)
   try {
-    if (!writable || !ctx.fs.makeWritableDir?.(ctx.cwd, named)) return fail('Read-only file system')
+    if (!writable || !ctx.fs.makeWritableDir?.(ctx.cwd, named)) return fail(writeRefusal(ctx, dirname(target)))
   } catch (e) {
     if (unsupportedNote(e)) throw e
     missingPathNote(ctx, 'cp', e?.path, e?.fsError)

@@ -6,12 +6,13 @@
 //
 // The entries are this tree as `ls -l` describes it: every file `-rw-------`,
 // every directory `drwx------`, every link `lrwxrwxrwx`, all of them dated to
-// the moment the terminal was made. An archive also records who owns each
-// entry, as a number, and this terminal has no numbers for its user — `$UID`
-// is refused for the same reason — so the owner and group have to be given:
-// `--owner=NAME:UID --group=NAME:GID`, or the ids with `--numeric-owner`,
-// which records no names. Without them the archive is refused rather than
-// written with numbers made up.
+// the moment the terminal was made — and an entry that keeps a mode or a time
+// of its own, one extracted from an archive, with that. An archive also
+// records who owns each entry, as a number, and this terminal has no numbers
+// for its user — `$UID` is refused for the same reason — so the owner and
+// group have to be given: `--owner=NAME:UID --group=NAME:GID`, or the ids
+// with `--numeric-owner`, which records no names. Without them the archive is
+// refused rather than written with numbers made up.
 //
 // Names are stored as GNU stores them: the operand as it was typed, with
 // what would climb out of the archive taken off the front — a leading `/`,
@@ -163,9 +164,11 @@ function addPath(path, orig, safe, walk) {
   const first = walk.many && !dir ? walk.archived.get(path) : undefined
   if (first === safe.name) return state.refuse('feature', 'repeated name', `${quoteColon(orig, state.ctx)}: storing a name again, as a hard link to itself, is not supported`)
   if (walk.many && !dir && first === undefined) walk.archived.set(path, safe.name)
+  const own = fs.metadataOf?.(path) ?? null
+  const stat = { mode: own?.mode ?? MODES[type], mtime: own?.mtime ?? walk.mtime }
   const entry = first === undefined
-    ? { name: safe.name, type, mode: MODES[type], mtime: walk.mtime, ...walk.owners, linkname: link ? fs.readLink(path) : '', data: type === 'file' ? readBytesOf(fs, path) : undefined }
-    : { name: safe.name, type: 'hardlink', mode: MODES[type], mtime: walk.mtime, ...walk.owners, linkname: first }
+    ? { name: safe.name, type, ...stat, ...walk.owners, linkname: link ? fs.readLink(path) : '', data: type === 'file' ? readBytesOf(fs, path) : undefined }
+    : { name: safe.name, type: 'hardlink', ...stat, ...walk.owners, linkname: first }
   walk.entries.push(entry)
   if (walk.verbose) state.list(walk.line ? walk.line({ ...entry, name: orig, data: entry.data ?? new Uint8Array() }) : dir ? `${orig}/` : orig)
   // Where there are several operands, GNU counts the links of everything

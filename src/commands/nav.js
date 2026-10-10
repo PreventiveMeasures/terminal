@@ -2,14 +2,14 @@
 
 import { compareNames, lookup, resolve } from '../fs.js'
 import { longFormat } from './ls-long.js'
-import { tree } from './tree.js'
-import { find } from './find.js'
 import { homeOf } from '../shell/expand.js'
 import { parseArgs } from '../args.js'
-import { err, ok, usage } from '../util.js'
+import { err, ok } from '../util.js'
 import { unsupported } from '../unsupported.js'
 import { hiddenEntryNotes, lookupWithNote } from '../notes.js'
 import { FS_TOOLS } from './fs-tools.js'
+import { quoteName } from './quote-name.js'
+import { quoteLocale } from './mkdir.js'
 
 function pwd(_stdin, tokens, ctx) {
   parseArgs(tokens)
@@ -31,6 +31,10 @@ function cd(_stdin, tokens, ctx) {
   const { path: abs, error } = lookupWithNote(ctx, 'cd', target)
   if (error) return err(`cd: ${target}: ${error}`)
   if (!ctx.fs.isDir(abs)) return err(`cd: ${target}: Not a directory`)
+  // chdir(2) searches the directory it changes into, which a mode it keeps
+  // may deny (writable.js).
+  const denied = ctx.fs.searchGuard?.()?.(abs, 'changing into a directory') ?? null
+  if (denied !== null) throw denied
   // Bash keeps the name it was given in PWD, links and all, and collapses a
   // later `..` in it rather than in the path it leads to — the logical
   // directory `cd -L` means and `pwd` prints. Nothing here holds a working
@@ -46,9 +50,10 @@ function cd(_stdin, tokens, ctx) {
   return ok(printed)
 }
 
-// What `-F` marks each kind with: nothing here is executable, a socket or a
-// pipe, so `/` and `@` are the whole of it.
+// What `-F` marks each kind with: nothing here is a socket or a pipe, and a
+// file is executable only where it keeps a mode that says so (writable.js).
 const MARKS = { dir: '/', link: '@', file: '' }
+const executable = (ctx, abs) => ((ctx.fs.metadataOf?.(abs)?.mode ?? 0) & 0o111) !== 0
 
 // Non-TTY ls: one name per line, lexical order, classification only with
 // -F. A long listing is the model in ls-long.js, since a path-to-content
@@ -62,31 +67,45 @@ function ls(_stdin, tokens, ctx) {
   const hidden = hiddenEntryNotes()
   const all = flags.has('a') || flags.has('A')
   const kindOf = (abs) => ctx.fs.isDir(abs) ? 'dir' : ctx.fs.isLink?.(abs) ? 'link' : 'file'
-  const indicator = (kind) => flags.has('F') ? MARKS[kind] : ''
+  const indicator = (kind, abs) => flags.has('F') ? (kind === 'file' && executable(ctx, abs) ? '*' : MARKS[kind]) : ''
+  const linked = (abs) => indicator(kindOf(abs), abs)
   // A file operand and a directory entry are the same row: what it was called,
   // what to print for it, where it is, what it is, and — for a link, which a
   // long listing names beside what it points at — the target it holds. Once a
   // row names both, the mark goes on the target rather than on the link, and
   // on the target as it was written, trailing slash and all: GNU marks the
-  // name it printed, and only an operand's own spelling keeps it from doubling.
+  // name it printed, an operand's own trailing slash included, so `ls -dF d/`
+  // prints `d//`.
   const entry = (raw, abs, kind) => ({
     raw, abs, kind,
-    name: kind === 'link' && long ? raw : raw + (raw.endsWith('/') ? '' : indicator(kind)),
-    target: kind === 'link' ? ctx.fs.readLink(abs) + indicator(kindOf(lookup(ctx.cwd, abs, ctx.fs).path ?? '')) : null,
+    name: kind === 'link' && long ? raw : raw + indicator(kind, abs),
+    target: kind === 'link' ? ctx.fs.readLink(abs) + linked(lookup(ctx.cwd, abs, ctx.fs).path ?? '') : null,
   })
-  const render = (entries, listing) => long ? long.lines(entries, listing) : entries.map((e) => e.name)
+  const render = (entries, listing, others) => long ? long.lines(entries, listing, others) : entries.map((e) => e.name)
   // `ls link` lists what a link names when the link leads to a directory, and
   // `-l`, `-F` and `-d` describe the link itself instead, as GNU's own
   // dereferencing defaults have it. Either way the name printed is the operand.
   const followOperand = !(flags.has('l') || flags.has('F') || flags.has('d'))
   for (const target of targets) {
-    const { path: abs, error } = lookupWithNote(ctx, 'ls', target, { follow: false })
-    const followed = error || !followOperand || !ctx.fs.isLink?.(abs) ? abs : lookup(ctx.cwd, target, ctx.fs).path
-    if (error) errors.push(`ls: cannot access '${target}': ${error}`)
-    else if (flags.has('d') || ctx.fs.isFile(abs) || !ctx.fs.isDir(followed)) files.push(entry(target, abs, kindOf(abs)))
+    let found = lookupWithNote(ctx, 'ls', target, { follow: false })
+    let followed = found.path
+    // Following a link is stat's to do, and a link stat cannot follow is
+    // listed as lstat finds it only where it leads nowhere or round in a
+    // loop; any other failure — a target that is a file spelled with a
+    // trailing slash, say — is the operand's, as GNU's is.
+    if (!found.error && followOperand && ctx.fs.isLink?.(found.path)) {
+      const through = lookup(ctx.cwd, target, ctx.fs)
+      if (through.error === null) followed = through.path
+      else if (through.error !== 'No such file or directory' && through.error !== 'Too many levels of symbolic links') found = through
+    }
+    if (found.error) errors.push(`ls: cannot access ${quoteName(target, ctx)}: ${found.error}`)
+    else if (flags.has('d') || ctx.fs.isFile(found.path) || !ctx.fs.isDir(followed)) files.push(entry(target, found.path, kindOf(found.path)))
     else dirs.push({ path: target, abs: followed })
   }
-  const blocks = files.length ? [render(files, false).join('\n')] : []
+  // GNU measures every operand before it sets the directories aside to list
+  // after the files, so those are as wide as the widest of either.
+  const measured = dirs.map(({ path, abs }) => ({ name: path, abs, kind: 'dir' }))
+  const blocks = files.length ? [render(files, false, measured).join('\n')] : []
   for (const target of dirs) {
     const stack = [target]
     while (stack.length) {
@@ -112,11 +131,15 @@ function ls(_stdin, tokens, ctx) {
   return { stdout: blocks.length ? blocks.join('\n\n') + '\n' : '', stderr: errors.length ? errors.join('\n') + '\n' : '', exitCode: errors.length ? 2 : 0 }
 }
 
+// What coreutils says of a command line it cannot read, before the line
+// pointing at --help.
+const operandError = (command, message) => err(`${command}: ${message}\nTry '${command} --help' for more information.`)
+
 // Strip a matching suffix only when it leaves part of the basename intact.
-function basenameCmd(_stdin, tokens) {
+function basenameCmd(_stdin, tokens, ctx) {
   const { positional } = parseArgs(tokens)
-  if (positional.length === 0) return usage('basename PATH [SUFFIX]')
-  if (positional.length > 2) return err(`basename: extra operand: ${positional[2]}`)
+  if (positional.length === 0) return operandError('basename', 'missing operand')
+  if (positional.length > 2) return operandError('basename', `extra operand ${quoteLocale(positional[2], ctx)}`)
   const path = positional[0].replace(/\/+$/u, '')
   const name = path === '' ? (positional[0] === '' ? '' : '/') : path.slice(path.lastIndexOf('/') + 1)
   return ok(stripSuffix(name, positional[1]) + '\n')
@@ -129,13 +152,17 @@ function stripSuffix(name, suffix) {
 
 function dirnameCmd(_stdin, tokens) {
   const { positional } = parseArgs(tokens)
-  if (positional.length === 0) return usage('dirname PATH')
+  if (positional.length === 0) return operandError('dirname', 'missing operand')
   return ok(positional.map((p) => {
     const path = p.replace(/\/+$/u, '')
     const i = path.lastIndexOf('/')
     return i < 0 ? (p.startsWith('/') ? '/' : '.') : path.slice(0, i).replace(/\/+$/u, '') || '/'
   }).join('\n') + '\n')
 }
+
+// find and tree are registered with the other tools that read a tree, and
+// keep their place here among the commands that navigate one.
+const { find, tree } = FS_TOOLS
 
 export const NAV_COMMANDS = {
   pwd, cd, ls, find, tree, basename: basenameCmd, dirname: dirnameCmd, ...FS_TOOLS,

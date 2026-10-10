@@ -1,5 +1,5 @@
 import { parseArgs } from '../args.js'
-import { dirname, joinPath, lookup, resolve, walkPath } from '../fs.js'
+import { dirname, joinPath, lookup, resolve } from '../fs.js'
 import { missingPathNote } from '../notes.js'
 import { quoteShell } from './quote-name.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
@@ -28,13 +28,96 @@ export function canonicalize(ctx, path, mode, links) {
     if (reduced.error) return reduced
     walked = reduced.path + (path.endsWith('/') ? '/' : '')
   }
-  const found = walkPath(ctx.cwd, walked, ctx.fs, { lenient: mode === 'm' })
-  if (mode === 'm') return { path: found.rest.length ? resolve(found.path, found.rest.join('/')) : found.path }
-  if (found.error === 'No such file or directory' && found.rest.length === 0 && mode !== 'e') return { path: found.path }
-  if (found.error) return { error: found.error }
-  if (path.endsWith('/') && !ctx.fs.isDir(found.path)) return { error: 'Not a directory' }
-  return { path: found.path }
+  return physical(ctx, walked, mode)
 }
+
+// gnulib's canonicalize, which `realpath` is: the name is taken a component
+// at a time, and each one that is a link is replaced by what it holds, read
+// from the directory it is in — the kernel's resolution, but for how it tells
+// a loop from a long chain. The kernel calls 40 links a loop whatever they
+// are; gnulib counts 20 and from then on notes each link by the directory it
+// is in and the rest of the name still to be resolved there, and only a pair
+// it meets twice is a loop. So a chain of a hundred links that ends somewhere
+// is followed to its end, and a loop is found as one; under `-m` the link
+// that closes it is kept as the name it is, and the walk goes on past it.
+//
+// Each component asks readlink what it is: a link, something else (EINVAL),
+// or nothing it can answer for. Something else is fine; nothing is fine
+// under `-m`, and in the default mode only where it is the last component.
+// A component with a slash after it and nothing more, or a `.` or `..`, has
+// to be a directory, which is asked of access(2) instead, and its failure is
+// what is reported then.
+const NOT_A_LINK = 'Invalid argument'
+
+function physical(ctx, path, mode) {
+  let name = path
+  let dest = path.startsWith('/') ? '/' : ctx.cwd
+  let links = 0
+  const seen = new Set()
+  for (let start = 0; ;) {
+    while (name[start] === '/') start++
+    if (start >= name.length) break
+    const slash = name.indexOf('/', start)
+    const end = slash < 0 ? name.length : slash
+    const part = name.slice(start, end)
+    const after = name.slice(end)
+    if (part === '.' || part === '..') {
+      if (part === '..') dest = dirname(dest)
+      start = end
+      continue
+    }
+    const at = joinPath(dest, part)
+    const link = readLink(ctx, at)
+    if (link.target !== undefined) {
+      const checked = links++ < 20 ? {} : looped(ctx, seen, dest, name.slice(start))
+      if (checked.error) return checked
+      if (checked.loop && mode !== 'm') return { error: 'Too many levels of symbolic links' }
+      if (checked.loop) {
+        dest = at
+        start = end
+        continue
+      }
+      name = link.target + after
+      start = 0
+      if (link.target.startsWith('/')) dest = '/'
+      continue
+    }
+    let error = link.error
+    let fine = mode === 'm'
+    if (!fine && needsDirectory(after)) {
+      error = lookup('/', at + '/', ctx.fs).error
+      fine = error === null
+    } else if (!fine) fine = error === NOT_A_LINK
+    if (!fine && !(mode === 'E' && error === 'No such file or directory' && /^\/*$/u.test(after))) return { error }
+    dest = at
+    start = end
+  }
+  return { path: dest }
+}
+
+// gnulib's seen_triple: whether the walk has been in this directory with this
+// rest of the name to resolve before, which is the one sure sign of a loop.
+function looped(ctx, seen, dir, rest) {
+  const parent = lookup('/', dir, ctx.fs)
+  if (parent.error) return { error: parent.error }
+  const key = `${parent.path}\0${rest}`
+  if (seen.has(key)) return { loop: true }
+  seen.add(key)
+  return {}
+}
+
+// What readlink(2) says of a path: the target a link holds, EINVAL for
+// anything else that is there, or why the path cannot be answered for.
+function readLink(ctx, path) {
+  const found = lookup('/', path, ctx.fs, { follow: false })
+  if (found.error) return { error: found.error }
+  return ctx.fs.isLink?.(found.path) ? { target: ctx.fs.readLink(found.path) } : { error: NOT_A_LINK }
+}
+
+// gnulib's suffix_requires_dir_check: whether what follows a component —
+// slashes and nothing more, or slashes and a `.` or `..` — asks it to be a
+// directory before anything else has the chance to.
+const needsDirectory = (after) => /^(?:\/+\.(?=\/))*\/+(?:$|\.$|\.\.(?:\/|$))/u.test(after)
 
 // `-s` expands no link, in any existence mode: the name it prints is the one
 // it was given with `..` taken lexically, and `-e` asks whether that name —
@@ -118,7 +201,7 @@ export function realpath(_stdin, tokens, ctx) {
     long: ['canonicalize-existing', 'canonicalize-missing', 'logical', 'physical', 'strip', 'no-symlinks', 'quiet', 'zero'],
     valueLong: ['relative-to', 'relative-base'],
   })
-  if (!positional.length) return err('realpath: missing operand')
+  if (!positional.length) return err("realpath: missing operand\nTry 'realpath --help' for more information.")
   let links = 'physical', mode = 'E'
   for (const { name } of order) {
     if (Object.hasOwn(EXISTENCE_MODES, name)) mode = EXISTENCE_MODES[name]

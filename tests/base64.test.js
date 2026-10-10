@@ -71,7 +71,7 @@ describe('base64 wrapping options', () => {
   })
   for (const value of ['-1', '1.5', '2k', '2 ', 'no', '']) {
     it(`rejects wrap ${JSON.stringify(value)}`, async () => {
-      assert.deepEqual(await t().run(`base64 --wrap='${value}' short`), expected('', 1, `base64: invalid wrap size: ${value}\n`))
+      assert.deepEqual(await t().run(`base64 --wrap='${value}' short`), expected('', 1, `base64: invalid wrap size: ‘${value}’\n`))
     })
   }
 })
@@ -128,7 +128,7 @@ describe('base64 input and diagnostic errors', () => {
     })
   }
   it('does not silently concatenate multiple file operands', async () => {
-    assert.deepEqual(await createTerminal({ first: 'foo', second: 'bar' }).run('base64 first second'), expected('', 1, 'base64: extra operand: second\n'))
+    assert.deepEqual(await createTerminal({ first: 'foo', second: 'bar' }).run('base64 first second'), expected('', 1, "base64: extra operand ‘second’\nTry 'base64 --help' for more information.\n"))
   })
   it('honors -- for an option-shaped filename', async () => {
     assert.deepEqual(await createTerminal({ '-d': 'foo' }).run('base64 -- -d'), expected('Zm9v\n'))

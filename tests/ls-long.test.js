@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import { describe, it, mock } from 'node:test'
 import { createTerminal } from '@preventive/terminal'
+import { pack } from '@preventive/archive/tar.js'
 
 const HIDDEN_NOTE = 'ls: omitted 1 hidden entry: "/.hidden". Hidden entries are included with -a.'
 const FILES = { 'README.md': 'hello world\n', 'src/app.js': 'x\n', 'src/lib/util.js': 'y\n', '.hidden': 'h\n', big: '0'.repeat(1500), empty: '' }
@@ -68,9 +70,11 @@ describe('ls -l lists what the filesystem does not keep as this terminal’s def
     )))
   })
 
+  // GNU measures every operand before it sets the directories aside, so the
+  // file rows are as wide as a directory's would be.
   it('files come first, then each directory under its name, and a missing operand still fails', async () => {
     assert.deepEqual(await run(await made(), 'ls -l README.md src missing'), expected(lines(
-      '-rw------- 1 user user 12 Sep 18 05:52 README.md',
+      '-rw------- 1 user user   12 Sep 18 05:52 README.md',
       '',
       'src:',
       'total 8',
@@ -105,6 +109,158 @@ describe('ls -l lists what the filesystem does not keep as this terminal’s def
     }))
   })
 
+})
+
+// What an entry extracted from an archive keeps of its own — the mode it was
+// stored with, less what GNU tar takes off as anyone but root under umask
+// 077, and the time — is what its row says, until a write dates it to now.
+describe('ls -l lists an entry that keeps a mode and a time of its own with them', () => {
+  const STORED = Date.UTC(2024, 0, 2, 3, 4) / 1000
+  const owner = { uid: 1000, gid: 50, uname: 'dev', gname: 'staff' }
+  const ARCHIVE = pack([
+    { name: 'pkg/', type: 'directory', mode: 0o755, mtime: STORED, ...owner },
+    { name: 'pkg/run.sh', mode: 0o4755, mtime: STORED + 60, data: Buffer.from('echo\n'), ...owner },
+    { name: 'pkg/notes', mode: 0o666, mtime: STORED + 120, data: Buffer.from('n\n'), ...owner },
+    { name: 'pkg/link', type: 'symlink', mode: 0o777, mtime: STORED + 180, linkname: 'notes', ...owner },
+  ])
+  const extracted = async () => {
+    const t = await made({ 'pkg.tar': ARCHIVE }, { mount: '/repo', writable: '/tmp/' })
+    await run(t, 'cd /tmp && tar -xf /repo/pkg.tar')
+    return t
+  }
+
+  it('gives each extracted entry its mode and time', async () => {
+    const t = await extracted()
+    assert.deepEqual(await run(t, 'ls -la pkg'), expected(lines(
+      'total 16',
+      'drwx------ 2 user user 4096 Jan  2  2024 .',
+      'drwx------ 3 user user 4096 Sep 18 05:52 ..',
+      'lrwxrwxrwx 1 user user    5 Jan  2  2024 link -> notes',
+      '-rw------- 1 user user    2 Jan  2  2024 notes',
+      '-rwx------ 1 user user    5 Jan  2  2024 run.sh',
+    ), [], { cwd: '/tmp' }))
+    // -F marks what a mode makes executable, beside a link and after it.
+    assert.deepEqual(await run(t, 'ls -F pkg && ls -lF pkg/link'), expected('link@\nnotes\nrun.sh*\nlrwxrwxrwx 1 user user 5 Jan  2  2024 pkg/link -> notes\n', [], { cwd: '/tmp' }))
+  })
+
+  it('dates a file written to, and a directory a name is made in, to now', async () => {
+    const t = await extracted()
+    assert.deepEqual(await run(t, 'echo more >> pkg/notes && ls -l pkg/notes'), expected('-rw------- 1 user user 7 Sep 18 05:52 pkg/notes\n', [], { cwd: '/tmp' }))
+    assert.deepEqual(await run(t, 'touch pkg/new && ls -ld pkg'), expected('drwx------ 2 user user 4096 Sep 18 05:52 pkg\n', [], { cwd: '/tmp' }))
+    // A copy is a new file, made in the mode of what it copies.
+    assert.deepEqual(await run(t, 'cp pkg/run.sh copy && ls -l copy'), expected('-rwx------ 1 user user 5 Sep 18 05:52 copy\n', [], { cwd: '/tmp' }))
+  })
+
+  it('refuses what a kept mode keeps its owner from, and rm asks before it', async () => {
+    const t = await made({
+      'ro.tar': pack([
+        { name: 'ro/', type: 'directory', mode: 0o555, mtime: STORED, ...owner },
+        { name: 'ro/f', mode: 0o444, mtime: STORED, data: Buffer.from('f\n'), ...owner },
+        { name: 'w', mode: 0o444, mtime: STORED, data: Buffer.from(''), ...owner },
+        { name: 'hidden', mode: 0o200, mtime: STORED, data: Buffer.from('h\n'), ...owner },
+      ]),
+    }, { mount: '/repo', writable: '/tmp/' })
+    await run(t, 'cd /tmp && tar -xf /repo/ro.tar')
+    // GNU is told "Permission denied", each command in its own words.
+    const refused = async (line, path, doing) => {
+      const r = await run(t, line)
+      assert.deepEqual(r.unsupported.map((u) => u.detail), ['permission denied'], line)
+      assert.match(r.stderr, new RegExp(`${path}: ${doing} where its mode denies it is not supported \\(GNU says Permission denied\\)\n$`, 'u'), line)
+      assert.notEqual(r.exitCode, 0, line)
+    }
+    await refused('echo x >> w', '/tmp/w', 'writing a file')
+    await refused('touch ro/new', '/tmp/ro', 'changing the names in a directory')
+    await refused('rm -f ro/f', '/tmp/ro', 'changing the names in a directory')
+    await refused('cat hidden', '/tmp/hidden', 'reading a file')
+    // rm asks first where stdin is the terminal, whose end answers no; it
+    // asks nothing of a stdin that is not one, nor under -f.
+    assert.deepEqual(await run(t, 'rm w ro; echo $?'), expected('1\n', [], { cwd: '/tmp', stderr: "rm: remove write-protected regular empty file 'w'? rm: cannot remove 'ro': Is a directory\n" }))
+    assert.deepEqual(await run(t, 'rm -r ro; echo $?'), expected('0\n', [], { cwd: '/tmp', stderr: "rm: descend into write-protected directory 'ro'? " }))
+    assert.deepEqual(await run(t, 'rm w < /dev/null && ls w'), expected('', [], { cwd: '/tmp', stderr: "ls: cannot access 'w': No such file or directory\n", exitCode: 2 }))
+  })
+
+  // A directory without its search bit lets no name in it be looked up, on
+  // the way to anything under it or to itself as a working directory, and one
+  // without its read bit cannot be listed: GNU is told "Permission denied" of
+  // `cat private/file`, `ls xonly` and `cd ronly` alike.
+  it('refuses what a directory’s kept mode keeps from a lookup or a listing', async () => {
+    const t = await made({
+      'closed.tar': pack([
+        { name: 'private/', type: 'directory', mode: 0o000, mtime: STORED, ...owner },
+        { name: 'private/file', mode: 0o644, mtime: STORED, data: Buffer.from('secret\n'), ...owner },
+        { name: 'private/sub/', type: 'directory', mode: 0o755, mtime: STORED, ...owner },
+        { name: 'ronly/', type: 'directory', mode: 0o444, mtime: STORED, ...owner },
+        { name: 'ronly/file', mode: 0o644, mtime: STORED, data: Buffer.from('r\n'), ...owner },
+        { name: 'ronly/sub/', type: 'directory', mode: 0o755, mtime: STORED, ...owner },
+        { name: 'names/', type: 'directory', mode: 0o444, mtime: STORED, ...owner },
+        { name: 'names/f', mode: 0o644, mtime: STORED, data: Buffer.from('f\n'), ...owner },
+        { name: 'xonly/', type: 'directory', mode: 0o111, mtime: STORED, ...owner },
+        { name: 'xonly/file', mode: 0o644, mtime: STORED, data: Buffer.from('x\n'), ...owner },
+      ]),
+    }, { mount: '/repo', writable: '/tmp/' })
+    await run(t, 'cd /tmp && tar -xf /repo/closed.tar')
+    const refused = async (line, path, doing) => {
+      const r = await run(t, line)
+      assert.deepEqual(r.unsupported.map((u) => u.detail), ['permission denied'], line)
+      assert.match(r.stderr, new RegExp(`${path}: ${doing} where its mode denies it is not supported \\(GNU says Permission denied\\)\n$`, 'u'), line)
+      assert.notEqual(r.exitCode, 0, line)
+    }
+    const listing = 'listing a directory', searching = 'looking up a name in a directory'
+    await refused('cat private/file', '/tmp/private', searching)
+    await refused('cat private/sub/../file', '/tmp/private', searching)
+    await refused('test -e private/file', '/tmp/private', searching)
+    await refused('cat ronly/file', '/tmp/ronly', searching)
+    await refused('ls private', '/tmp/private', listing)
+    await refused('ls xonly', '/tmp/xonly', listing)
+    await refused('echo private/*', '/tmp/private', listing)
+    await refused('find private', '/tmp/private', listing)
+    await refused('grep -r secret private', '/tmp/private', listing)
+    await refused('cd ronly', '/tmp/ronly', 'changing into a directory')
+    // A directory that can be read but not searched lists its names, and no
+    // more: GNU's `ls -l` and `tree` stat each one, and its `find` each
+    // directory, where its plain `ls` and `find` over files need not.
+    await refused('ls -l names', '/tmp/names', searching)
+    await refused('tree names', '/tmp/names', searching)
+    await refused('find ronly', '/tmp/ronly', searching)
+    assert.deepEqual(await run(t, 'ls ronly names && find names'), expected('names:\nf\n\nronly:\nfile\nsub\nnames\nnames/f\n', [], { cwd: '/tmp' }))
+    // What none of those modes denies is answered: each directory itself, as
+    // stat(2) reads it, and what is under one that can be searched.
+    assert.deepEqual(await run(t, 'ls -ld private ronly names xonly && test -d private && cat xonly/file'), expected(lines(
+      'dr-------- 2 user user 4096 Jan  2  2024 names',
+      'd--------- 3 user user 4096 Jan  2  2024 private',
+      'dr-------- 3 user user 4096 Jan  2  2024 ronly',
+      'd--x------ 2 user user 4096 Jan  2  2024 xonly',
+      'x',
+    ), [], { cwd: '/tmp' }))
+    assert.deepEqual(await run(t, 'find . -maxdepth 1'), expected('.\n./names\n./private\n./ronly\n./xonly\n', ['find: depth limit omitted contents of 2 directories: "./names", "./ronly".'], { cwd: '/tmp' }))
+    assert.deepEqual(await run(t, 'cd xonly && cat file'), expected('x\n', [], { cwd: '/tmp/xonly' }))
+  })
+
+  // GNU sed -i writes a new file and renames it over the name, replacing a
+  // link with a regular file, and gives it the mode fstat(2) read from the
+  // file it opened: for a link, the one the link leads to.
+  it('gives the file sed -i writes over a link the mode of what the link leads to', async () => {
+    const t = await made({
+      'bin.tar': pack([
+        { name: 'bin/', type: 'directory', mode: 0o755, mtime: STORED, ...owner },
+        { name: 'bin/run', mode: 0o755, mtime: STORED, data: Buffer.from('a\n'), ...owner },
+        { name: 'bin/ro', mode: 0o444, mtime: STORED, data: Buffer.from('a\n'), ...owner },
+      ]),
+    }, { mount: '/repo', writable: '/tmp/' })
+    await run(t, 'cd /tmp && tar -xf /repo/bin.tar && ln -s bin/run l && ln -s bin/ro m && ln -s run bin/n')
+    assert.deepEqual(await run(t, 'sed -i s/a/b/ l m && sed -i.bak s/a/b/ bin/n && ls -l l m bin && cat l m bin/n bin/run bin/ro'), expected(lines(
+      '-rwx------ 1 user user    2 Sep 18 05:52 l',
+      '-r-------- 1 user user    2 Sep 18 05:52 m',
+      '',
+      'bin:',
+      'total 12',
+      '-rwx------ 1 user user 2 Sep 18 05:52 n',
+      'lrwxrwxrwx 1 user user 3 Sep 18 05:52 n.bak -> run',
+      '-r-------- 1 user user 2 Jan  2  2024 ro',
+      '-rwx------ 1 user user 2 Jan  2  2024 run',
+      'b', 'b', 'b', 'a', 'a',
+    ), [], { cwd: '/tmp' }))
+  })
 })
 
 describe('ls -l ownership and time', () => {

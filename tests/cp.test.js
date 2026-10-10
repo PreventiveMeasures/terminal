@@ -10,6 +10,9 @@ const SOURCES = { a: 'alpha\n', b: 'beta\0😀', empty: '', 'dir/leaf': 'leaf', 
 const terminal = (options = {}) => createTerminal(SOURCES, { mount: '/repo', cwd: '/repo', writable: '/tmp/', ...options })
 const expected = (stdout = '', stderr = '', exitCode = 0) => ({ stdout, stderr, exitCode, cwd: '/repo', notes: [], unsupported: [] })
 const quote = (text) => "'" + text.replaceAll("'", "'\\''") + "'"
+// What the coreutils 9.4 GNU/Linux distributions ship says of every -n it
+// reads, whatever the copy then does.
+const NO_CLOBBER = 'cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead\n'
 
 async function check(t, command, stdout = '', stderr = '', exitCode = 0) {
   assert.deepEqual(await t.run(command), expected(stdout, stderr, exitCode), command)
@@ -73,16 +76,20 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
   for (const flag of ['-n', '--no-clobber', '-fn', '-nf', '--force --no-clobber']) {
     it(`${flag} skips an existing destination successfully`, async () => {
       const t = terminal()
-      await check(t, `printf old >/tmp/out; cp ${flag} -v a /tmp/out`)
+      await check(t, `printf old >/tmp/out; cp ${flag} -v a /tmp/out`, '', NO_CLOBBER)
       await check(t, 'cat /tmp/out', 'old')
-      await check(t, `cp ${flag} b /tmp/out`)
-      await check(t, `cp ${flag} a a`)
+      await check(t, `cp ${flag} b /tmp/out`, '', NO_CLOBBER)
+      await check(t, `cp ${flag} a a`, '', NO_CLOBBER)
     })
   }
 
+  it('warns once for each -n, before anything else it says', async () => {
+    await check(terminal(), 'cp -n -n', '', NO_CLOBBER + NO_CLOBBER + "cp: missing file operand\nTry 'cp --help' for more information.\n", 1)
+  })
+
   it('creates a missing destination with no-clobber', async () => {
     const t = terminal()
-    await check(t, 'cp -nv a /tmp/out', "'a' -> '/tmp/out'\n")
+    await check(t, 'cp -nv a /tmp/out', "'a' -> '/tmp/out'\n", NO_CLOBBER)
     await check(t, 'cat /tmp/out', 'alpha\n')
   })
 
@@ -98,7 +105,7 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
 
   it('no-clobber silently skips a colliding later source', async () => {
     const t = terminal()
-    await check(t, 'cp -nv one/shared two/shared /tmp', "'one/shared' -> '/tmp/shared'\n")
+    await check(t, 'cp -nv one/shared two/shared /tmp', "'one/shared' -> '/tmp/shared'\n", NO_CLOBBER)
     await check(t, 'cat /tmp/shared', 'first')
   })
 
@@ -138,11 +145,11 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
     // The name normalizes onto the descriptor's file, but `missing` is not
     // there, so nothing is opened and the failure is the whole answer. GNU
     // prints the line before it tries, and the line lands in `out`.
-    check(t, 'cp -v a /tmp/missing/../out >/tmp/out', '', "cp: cannot create regular file '/tmp/missing/../out': No such file or directory\n", 1)
+    await check(t, 'cp -v a /tmp/missing/../out >/tmp/out', '', "cp: cannot create regular file '/tmp/missing/../out': No such file or directory\n", 1)
     await check(t, 'cat /tmp/out', "'a' -> '/tmp/missing/../out'\n")
     // The same file under both names refuses before the line, so GNU leaves
     // the redirect's truncation standing.
-    check(t, 'cp -v /tmp/out /tmp/out >/tmp/out', '', "cp: '/tmp/out' and '/tmp/out' are the same file\n", 1)
+    await check(t, 'cp -v /tmp/out /tmp/out >/tmp/out', '', "cp: '/tmp/out' and '/tmp/out' are the same file\n", 1)
     await check(t, 'cat /tmp/out', '')
   })
 
@@ -152,7 +159,7 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
     // The second operand lands on the name the first has just made, so it is
     // refused before `/tmp/two/x` is opened and the descriptor on it meets
     // nothing; GNU copies the first and leaves its line there.
-    check(t, 'cp -v /tmp/one/x /tmp/two/x /tmp/d >/tmp/two/x', '', "cp: will not overwrite just-created '/tmp/d/x' with '/tmp/two/x'\n", 1)
+    await check(t, 'cp -v /tmp/one/x /tmp/two/x /tmp/d >/tmp/two/x', '', "cp: will not overwrite just-created '/tmp/d/x' with '/tmp/two/x'\n", 1)
     await check(t, 'cat /tmp/two/x', "'/tmp/one/x' -> '/tmp/d/x'\n")
     await check(t, 'cat /tmp/d/x', 'ONE')
     // The operand that is copied still refuses when the descriptor is its own
@@ -167,10 +174,10 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
     // `/repo` is read-only, so the filesystem refuses before the source is
     // read. GNU announces first, so the line lands in the source it names and
     // the failure follows it.
-    check(t, 'cp -v /tmp/a /repo/new >/tmp/a', '', "cp: cannot create regular file '/repo/new': Read-only file system\n", 1)
+    await check(t, 'cp -v /tmp/a /repo/new >/tmp/a', '', "cp: cannot create regular file '/repo/new': Read-only file system\n", 1)
     await check(t, 'cat /tmp/a', "'/tmp/a' -> '/repo/new'\n")
     // A destination it can write still refuses, since the source is read then.
-    check(t, 'printf A >/tmp/a')
+    await check(t, 'printf A >/tmp/a')
     const refused = await t.run('cp -v /tmp/a /tmp/b >/tmp/a')
     assert.deepEqual(refused.unsupported.map(({ detail }) => detail), ['copy output buffering'])
     await check(t, 'test -e /tmp/b', '', '', 1)
@@ -191,8 +198,9 @@ describe('cp no-clobber, verbosity, and multi-source conflicts', () => {
 
 describe('cp reports ordinary path, operand, and read-only failures', () => {
   const cases = [
-    ['cp', 'missing file operand'], ['cp a', "missing destination file operand after 'a'"],
-    ['cp -T a b /tmp/out', "extra operand '/tmp/out'"],
+    ['cp', "missing file operand\nTry 'cp --help' for more information."],
+    ['cp a', "missing destination file operand after 'a'\nTry 'cp --help' for more information."],
+    ['cp -T a b /tmp/out', "extra operand '/tmp/out'\nTry 'cp --help' for more information."],
     ['cp -t /tmp -T a b', 'cannot combine --target-directory (-t) and --no-target-directory (-T)'],
     ['cp -t /tmp -t /repo a', 'multiple target directories specified'],
     ['cp -t /missing a', "target directory '/missing': No such file or directory"],
@@ -203,12 +211,12 @@ describe('cp reports ordinary path, operand, and read-only failures', () => {
     ['cp a/../b /tmp/out', "cannot stat 'a/../b': Not a directory"],
     ['cp a/ /tmp/out', "cannot stat 'a/': Not a directory"],
     ['cp dir /tmp/out', "-r not specified; omitting directory 'dir'"],
-    ['cp -T a /tmp', "cannot overwrite directory '/tmp' with non-directory 'a'"],
+    ['cp -T a /tmp', "cannot overwrite directory '/tmp' with non-directory"],
     ['cp a /repo/new', "cannot create regular file '/repo/new': Read-only file system"],
     ['cp a /tmp/../repo/new', "cannot create regular file '/tmp/../repo/new': Read-only file system"],
     ['cp -f a /repo/b', "cannot remove '/repo/b': Read-only file system"],
     ['cp a /tmp/no/leaf', "cannot create regular file '/tmp/no/leaf': No such file or directory"],
-    ['cp a /tmp/no/', "cannot create regular file '/tmp/no/': No such file or directory"],
+    ['cp a /tmp/no/', "cannot create regular file '/tmp/no/': Not a directory"],
     ["cp a ''", "cannot create regular file '': No such file or directory"],
     ['cp a ./a', "'a' and './a' are the same file"],
   ]
@@ -230,7 +238,7 @@ describe('cp reports ordinary path, operand, and read-only failures', () => {
   it('leaves disabled and mounted source files read-only with ordinary errors', async () => {
     const t = terminal({ writable: false })
     await check(t, 'cp a /repo/new', '', "cp: cannot create regular file '/repo/new': Read-only file system\n", 1)
-    await check(t, 'cp -n a b')
+    await check(t, 'cp -n a b', '', NO_CLOBBER)
     assert.deepEqual(SOURCES, { a: 'alpha\n', b: 'beta\0😀', empty: '', 'dir/leaf': 'leaf', 'one/shared': 'first', 'two/shared': 'second', '-f': 'literal' })
   })
 })

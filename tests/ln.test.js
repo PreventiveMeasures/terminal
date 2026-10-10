@@ -34,7 +34,7 @@ describe('ln -s makes a symbolic link in the writable overlay', () => {
     await check(t, 'ln -s ../nowhere sub/gone; test -L sub/gone && echo link; test -e sub/gone || echo dangling', 'link\ndangling\n')
     await fails(t, 'cat sub/gone', 'cat: sub/gone: No such file or directory\n')
     // A link to a link is followed in turn, as the kernel follows it.
-    check(t, 'ln -s /repo/srclink twice; cat twice', 'plain\n')
+    await check(t, 'ln -s /repo/srclink twice; cat twice', 'plain\n')
   })
 
   it('makes the link in the current directory when given the target alone', async () => {
@@ -65,12 +65,12 @@ describe('ln -s makes a symbolic link in the writable overlay', () => {
     await check(t, 'mkdir d; ln -s d dl')
     // Without -n a link to `d` is the directory it leads to, so the new link
     // lands inside `d`; with it the name is the link, and a name taken.
-    check(t, 'ln -s /repo/file dl; find /tmp/d -type l', '/tmp/d/file\n')
+    await check(t, 'ln -s /repo/file dl; find /tmp/d -type l', '/tmp/d/file\n')
     await fails(t, 'ln -sn /repo/file dl', "ln: failed to create symbolic link 'dl': File exists\n")
     await fails(t, 'ln -sT /repo/file d', "ln: failed to create symbolic link 'd': File exists\n")
     await check(t, 'ln -sfn /repo/file dl; cat dl', 'plain\n')
-    await fails(t, 'ln -sT x y z', "ln: extra operand 'z'\n")
-    await fails(t, 'ln -sT x', "ln: missing destination file operand after 'x'\n")
+    await fails(t, 'ln -sT x y z', "ln: extra operand 'z'\nTry 'ln --help' for more information.\n")
+    await fails(t, 'ln -sT x', "ln: missing destination file operand after 'x'\nTry 'ln --help' for more information.\n")
     await fails(t, 'ln -s -t d -T x', 'ln: cannot combine --target-directory and --no-target-directory\n')
   })
 
@@ -93,7 +93,7 @@ describe('ln -s makes a symbolic link in the writable overlay', () => {
     await check(t, 'ln -sr d d/self; realpath d/self', '/tmp/d\n')
     assert.match((await t.run('ls -l d/self')).stdout, / d\/self -> \.\n$/u)
     // The target is taken as far as it leads, through the links on the way.
-    check(t, 'ln -s /repo/dir dl; ln -srv dl/leaf d/l', "'d/l' -> '../../repo/dir/leaf'\n")
+    await check(t, 'ln -s /repo/dir dl; ln -srv dl/leaf d/l', "'d/l' -> '../../repo/dir/leaf'\n")
     await fails(t, 'ln -r /repo/file x', 'ln: cannot do --relative without --symbolic\n')
   })
 
@@ -118,8 +118,8 @@ describe('ln -s makes a symbolic link in the writable overlay', () => {
     await fails(t, 'ln -sT x d/', "ln: failed to create symbolic link 'd/': File exists\n")
     await fails(t, 'ln -sT x /', "ln: failed to create symbolic link '/': File exists\n")
     await fails(t, 'ln -s x gone/', "ln: failed to create symbolic link 'gone/': File exists\n")
-    await fails(t, 'ln -s', 'ln: missing file operand\n')
-    await fails(t, 'ln', 'ln: missing file operand\n')
+    await fails(t, 'ln -s', "ln: missing file operand\nTry 'ln --help' for more information.\n")
+    await fails(t, 'ln', "ln: missing file operand\nTry 'ln --help' for more information.\n")
     await check(t, 'ls /tmp', 'd\ngone\n')
   })
 
@@ -152,7 +152,7 @@ describe('a link ln made is a name the rest of the overlay answers for', () => {
     const t = terminal()
     await check(t, 'ln -s /tmp/out link; echo x > link; cat /tmp/out', 'x\n')
     await check(t, 'mkdir d; ln -s d dl; mkdir -p dl/sub; touch dl/f; cp /repo/file dl/c; find /tmp/d', '/tmp/d\n/tmp/d/c\n/tmp/d/f\n/tmp/d/sub\n')
-    await fails(t, 'mkdir dl', "mkdir: cannot create directory 'dl': File exists\n")
+    await fails(t, 'mkdir dl', "mkdir: cannot create directory ‘dl’: File exists\n")
     await fails(t, 'echo x > dl', 'error: dl: Is a directory\n')
   })
 
@@ -162,7 +162,7 @@ describe('a link ln made is a name the rest of the overlay answers for', () => {
     await check(t, 'ln -s /repo/file again; sed -i s/plain/changed/ again; cat again; test -L again || echo file', 'changed\nfile\n')
     // A backup name a link already holds is replaced by the file, as a rename
     // over it replaces it, and what the link pointed at is left alone.
-    check(t, "printf 'x\\n' > f; ln -s /repo/file f.bak; sed -i.bak s/x/y/ f; cat f f.bak /repo/file; test -L f.bak || echo file", 'y\nx\nplain\nfile\n')
+    await check(t, "printf 'x\\n' > f; ln -s /repo/file f.bak; sed -i.bak s/x/y/ f; cat f f.bak /repo/file; test -L f.bak || echo file", 'y\nx\nplain\nfile\n')
     await check(t, 'find /tmp -type l | sort', '/tmp/link.bak\n')
   })
 

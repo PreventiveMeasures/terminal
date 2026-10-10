@@ -19,7 +19,10 @@ const CASES = [
   ["find src -ipath '*/APP.JS'", 'src/app.js\n'],
   ['grep -I alpha binary', '', 1],
   [String.raw`grep -Pn '(?<=id=)\d+' records`, '2:id=42\n3:id=7\n'],
-  ['tree -L1 --noreport src', 'src\n├── app.js\n├── dir\n├── main.ts\n└── other.txt\n'],
+  // tree 2.1.1 takes the argument after `-L` as the level, wherever in a run
+  // of letters it was, so this spelling's level is `--noreport`, which is none.
+  ['tree -L1 --noreport src', '', 1, 'tree: Invalid level, must be greater than 0.\n'],
+  ['tree -L 1 --noreport src', 'src\n├── app.js\n├── dir\n├── main.ts\n└── other.txt\n'],
   ['grep -rn alpha src --exclude-dir=dir', 'src/app.js:1:alpha\nsrc/main.ts:1:alpha\nsrc/main.ts:3:alpha beta\n'],
   ["grep -rn alpha src --include '*.js'", 'src/app.js:1:alpha\n'],
   ["sort -t: -k2,2n table", 'c:1\nb:2\na:3\n'],
@@ -40,11 +43,11 @@ const CASES = [
 ]
 
 describe('options from historical agent command logs', () => {
-  for (const [command, stdout, exitCode = 0] of CASES) {
+  for (const [command, stdout, exitCode = 0, stderr = ''] of CASES) {
     it(command, async () => {
       const result = await createTerminal(FILES).run(command)
       assert.equal(result.stdout, stdout)
-      assert.equal(result.stderr, '')
+      assert.equal(result.stderr, stderr)
       assert.equal(result.exitCode, exitCode)
       assert.deepEqual(result.unsupported, [])
     })

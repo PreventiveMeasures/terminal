@@ -17,8 +17,9 @@
 
 import { ArchiveError, unzip as readZip } from '@preventive/archive/zip.js'
 import { lookupWithNote } from '../../notes.js'
-import { encodeUtf8, readBytesOf } from '../../util.js'
+import { decodeUtf8Maybe, encodeUtf8, readBytesOf } from '../../util.js'
 import { markUnsupported } from '../../unsupported.js'
+import { UMASK } from '../../writable.js'
 import { formatDate } from '../extra.js'
 import { refusalOf, rewritten, storedName } from '../stored-names.js'
 import { extractMembers } from './extract.js'
@@ -33,7 +34,10 @@ const NO_DIRECTORY = [
 
 export async function unzip(_stdin, tokens, ctx) {
   const opts = parseUnzip(tokens)
-  if (opts.usage) return { stdout: '', stderr: opts.usage.text, exitCode: opts.usage.status }
+  if (opts.usage) {
+    const stdout = opts.usage.fd === 1 ? opts.usage.text : ''
+    return { stdout, stderr: stdout ? '' : opts.usage.text, exitCode: opts.usage.status }
+  }
   // -t says everything on stdout, errors and all; -p keeps stdout for the
   // members, and is as quiet as -q.
   const run = unzipRun(ctx, opts)
@@ -66,6 +70,7 @@ export async function unzip(_stdin, tokens, ctx) {
     const [detail, message] = refusalOf(stored)
     return run.refuse('feature', detail, `${stored}: ${message}`)
   }
+  run.comment = commentOf(bytes)
   if (entries.length === 0) {
     run.heading(found.name, false)
     run.say(2, `warning [${found.name}]:  zipfile is empty\n`)
@@ -76,7 +81,9 @@ export async function unzip(_stdin, tokens, ctx) {
   run.heading(found.name, false)
   if (opts.mode === 'test') test(chosen, found.name, run)
   else if (opts.mode === 'pipe') for (const entry of chosen.entries) run.bytes(entry.type === 'symlink' ? encodeUtf8(entry.linkname) : entry.data)
-  else if (!extractMembers(chosen.entries, opts, run)) return run.end(run.gap ? 1 : run.status)
+  else if (twoReadings(chosen.entries.filter((entry) => entry.type !== 'symlink'), ctx)) {
+    return run.refuse('feature', 'archive times', 'whether an entry\'s time is exact or a DOS time is not known here, and outside UTC the two date what is extracted differently (TZ=UTC answers it)')
+  } else if (!extractMembers(withModes(chosen.entries, bytes), opts, run)) return run.end(run.gap ? 1 : run.status)
   cautions(chosen, run)
   if (opts.mode === 'test') summary(chosen, found.name, run)
   return run.end(chosen.missed ? 11 : run.status)
@@ -91,14 +98,70 @@ function findArchive(name, ctx) {
   return null
 }
 
-// Whether the end record's signature is anywhere UnZip looks for it: the
+// Where the end record's signature is, of the places UnZip looks for it: the
 // last 22 bytes and the longest comment before them. Where it is not, UnZip
 // says so in words of its own; where it is, what went wrong is past saying.
-function hasEndRecord(bytes) {
+function endRecord(bytes) {
   for (let at = bytes.length - 4; at >= Math.max(0, bytes.length - 22 - 0xffff); at--) {
-    if (bytes[at] === 0x50 && bytes[at + 1] === 0x4b && bytes[at + 2] === 0x05 && bytes[at + 3] === 0x06) return true
+    if (bytes[at] === 0x50 && bytes[at + 1] === 0x4b && bytes[at + 2] === 0x05 && bytes[at + 3] === 0x06) return at
   }
-  return false
+  return -1
+}
+const hasEndRecord = (bytes) => endRecord(bytes) >= 0
+
+// The mode UnZip gives what it extracts, which is its mapattr's: a Unix-like
+// maker's stored mode as it stands, which is the one the reader hands out,
+// and any other maker's DOS attributes expanded — read-only into no write
+// permission, a directory into execute — with the umask taken off, where the
+// reader hands out the mode it gives every such entry. A Unix mode stored
+// beside them that agrees with them, as PKZip for Unix stores one, is kept;
+// an Amiga's own bits are spread over all three. The central directory says
+// who made each entry, and the reader has read it whole already.
+const UNIX_LIKE = new Set([2, 3, 5, 12, 13, 16, 17, 18, 30])
+const AMIGA = 1, FAT = 0
+function unzipMode(host, attributes, name) {
+  let mode = attributes >>> 16
+  if (host === AMIGA) mode = (attributes >>> 17 & 7) * 0o111
+  else if (UNIX_LIKE.has(host) && mode !== 0) return mode
+  else {
+    if (host !== FAT && !UNIX_LIKE.has(host)) mode = 0
+    const dos = attributes & 0xff | (name.endsWith('/') ? 0x10 : 0)
+    const bits = ((dos & 1) === 0 ? 2 : 0) | (dos & 0x10) >> 4
+    if ((mode & 0o700) === (0o400 | bits << 6)) return mode
+    mode = 0o444 | bits * 0o111
+  }
+  return mode & ~UMASK
+}
+
+function withModes(entries, bytes) {
+  const at = endRecord(bytes)
+  const u16 = (i) => bytes[i] + bytes[i + 1] * 0x100
+  const modes = new Map()
+  for (let i = u16(at + 16) + u16(at + 18) * 0x10000, n = u16(at + 10); n > 0 && i + 46 <= bytes.length; n--) {
+    const length = u16(i + 28)
+    const name = decodeUtf8Maybe(bytes.subarray(i + 46, i + 46 + length))
+    if (name !== undefined) modes.set(name, unzipMode(bytes[i + 5], u16(i + 38) + u16(i + 40) * 0x10000, name))
+    i += 46 + length + u16(i + 30) + u16(i + 32)
+  }
+  return entries.map((entry) => ({ ...entry, mode: modes.get(entry.storedName) ?? entry.mode }))
+}
+
+// The archive's comment as UnZip shows it under the archive's name: as far
+// as a NUL, which ends it as a C string, without a carriage return, an
+// escape shown as `^[` rather than sent to the terminal, and ended with a
+// newline where it does not end with one.
+function commentOf(bytes) {
+  const at = endRecord(bytes)
+  const stored = bytes.subarray(at + 22, at + 22 + bytes[at + 20] + bytes[at + 21] * 0x100)
+  const end = stored.indexOf(0)
+  const shown = []
+  for (const byte of end < 0 ? stored : stored.subarray(0, end)) {
+    if (byte === 0x0d) continue
+    if (byte === 0x1b) shown.push(0x5e, 0x5b)
+    else shown.push(byte)
+  }
+  if (shown.length > 0 && shown.at(-1) !== 0x0a) shown.push(0x0a)
+  return Uint8Array.from(shown)
 }
 
 const bytesOf = (text) => encodeUtf8(text)
@@ -146,6 +209,11 @@ function summary(chosen, name, run) {
   else run.say(1, `No errors detected in ${name} for the ${chosen.entries.length} file${chosen.entries.length === 1 ? '' : 's'} tested.\n`)
 }
 
+// UnZip dates what it extracts by an exact time where the archive has one
+// and by a DOS time read as local time otherwise, and the reader says only
+// what the time is: outside UTC, the two would date an entry differently.
+const twoReadings = (entries, ctx) => !ctx.vars.has('TZ') && entries.some((entry) => new Date(entry.mtime * 1000).getTimezoneOffset() !== 0)
+
 // -l: nothing is said of a pattern that matched nothing, and the status
 // says only whether anything was listed at all.
 function list(chosen, name, run) {
@@ -178,11 +246,15 @@ function unzipRun(ctx, opts) {
     quiet: opts.mode === 'pipe' ? Math.max(opts.quiet, 1) : opts.quiet,
     say(fd, text) { run.events.push({ fd: everythingOut ? 1 : fd, text }) },
     bytes(bytes) { run.events.push({ fd: 1, bytes }) },
-    // "Archive:" before anything else, where UnZip is not quiet; where it
-    // is, an error names the archive on a line of its own instead.
+    // "Archive:" before anything else, where UnZip is not quiet, and the
+    // archive's comment under it; where it is quiet, an error names the
+    // archive on a line of its own instead.
+    comment: null,
     heading(name, failing) {
-      if (run.quiet === 0) run.say(1, `Archive:  ${name}\n`)
-      else if (failing) run.say(2, `[${name}]\n`)
+      if (run.quiet === 0) {
+        run.say(1, `Archive:  ${name}\n`)
+        if (run.comment?.length) run.events.push({ fd: 1, bytes: run.comment })
+      } else if (failing) run.say(2, `[${name}]\n`)
     },
     refuse(kind, detail, message) {
       run.say(2, `unzip: ${message}\n`)

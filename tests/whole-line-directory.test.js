@@ -116,7 +116,8 @@ describe('ls -d lists operands themselves', () => {
     ['ls -d */', 'a/\nb/\n'],
     ['ls -d a/*', 'a/nested\na/x\n'],
     ['ls -d .hidden', '.hidden\n'],
-    ['ls -dF . a a/ z', './\na/\na/\nz\n'],
+    // GNU marks the name as it was spelled, a slash of its own and all.
+    ['ls -dF . a a/ z', './\na/\na//\nz\n'],
     ['ls -dR a', 'a\n'],
     ['ls -d1 a b', 'a\nb\n'],
     ['cd a && ls -d . ../b', '.\n../b\n'],

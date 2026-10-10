@@ -140,16 +140,36 @@ patches a regular file and nothing else, so a link operand is `not a regular
 file -- refusing to patch` whatever it leads to, while a link on the way to
 the file is followed as any other component is.
 
+A name is held to the lengths Linux holds one to: a component longer than 255
+bytes is `File name too long` where a directory is asked about it, and so is a
+whole name of 4096 bytes or more, before anything in it is looked up. A walk is
+held to neither, since `find`, `rm -r` and `du` hand the kernel one
+directory's names at a time, and `mkdir -p` makes a long path one component at
+a time, as GNU's does. So a `find -exec` that makes the directories its own
+walk goes into stops where GNU's stops, at the first name too long to hand
+over; one that would go on past four thousand of them — a command making two
+at every level — reports an unsupported diagnostic instead.
+
 `mkdir` makes them one at a time and `mkdir -p` makes a whole path, passing
 over what is already there and naming the component it stops at. A name a link
 holds is a name already taken, which making a directory never follows; `-p`
 follows it, and passes over only a link that leads to a directory. `rm -r`
-takes a tree away again, emptying a directory before removing it. The overlay's
-`/tmp` is where it is mounted rather than something inside it, so `rm -r /tmp`
-is refused as the busy device Linux calls a mount point, and nothing in it is
-removed on the way to finding that out.
+takes a tree away again, emptying a directory before removing it, and naming
+each entry it cannot remove rather than the directories above it, which it
+does not try to remove once one of their entries is left. Where stdin is the
+terminal and `-f` was not given, it first asks, as GNU does, whether a name
+may be written at all, so a directory the read-only mount answers for is
+named itself and not gone into. The sources are a read-only mount, so what
+is written there fails as `Read-only file system`; `/`, and any directory on
+the way down to the mount, is the root filesystem's, which the session's
+user cannot write, so a name made in or taken out of it fails as
+`Permission denied` — `rm -r /tmp` empties the overlay and then cannot
+remove `/tmp` itself, as GNU's cannot, and `rm -r /` is GNU's preserve-root
+refusal.
 
-`touch` creates the empty files it names, and `-c` leaves an absent name alone.
+`touch` creates the empty files it names, and `-c` leaves an absent name alone;
+`touch -` touches what standard output is, which a terminal or a pipe takes
+without a word.
 Times are the half it cannot answer: every entry carries the one time the
 terminal was made, so a name already there reports an unsupported diagnostic
 rather than a success that changed nothing, and `-a`, `-m`, `-d`, `-t` and `-r`
@@ -170,7 +190,24 @@ do backups and the interactive prompt.
 `ls -l` fills in what the filesystem does not keep with one deliberate model
 rather than a guess per entry: every entry is the session user's alone
 (`-rw-------` and `drwx------`) and is dated to the moment the terminal was
-created, a time its forks carry with them. Link counts, directory sizes and
+created, a time its forks carry with them. An entry extracted from an archive
+keeps the mode and the time it was stored with, as GNU tar and UnZip keep them
+under the session's umask, 077 — the one that makes everything else here
+`-rw-------` and `drwx------` — and is listed with them — marked `*` by `-F`
+where they make it executable — until a write dates it to now, as making or
+removing a name in a directory dates the directory; `cp` makes a file in the
+mode of one it copies, `gzip` carries both over to what it writes, `sed -i`
+gives the file it writes the mode of the one it read — through a link, the
+one the link leads to — and `tar -c` and `zip` store them. What such a mode
+keeps its owner from — reading a file, writing one, making or removing a
+name in a directory, listing a directory, and looking up any name in one
+without its search bit, on the way to whatever is under it or to change into
+it — GNU is told "Permission denied" of, in words each command has its own
+way of saying, so that is refused with an unsupported diagnostic, while the
+directory itself is still listed by `ls -ld` and found by `test -d` as GNU
+finds it; `rm` asks before it takes away a write-protected entry, as GNU asks
+where stdin is the terminal, and the terminal's empty stdin answers no. Link
+counts, directory sizes and
 the `total` line are what ext4 would report for the same tree, and `-h`
 rounds sizes as `du -h` does. A symbolic link — one a source entry declares,
 or one `ln -s` made — is the row the model has nothing to guess at:
@@ -178,9 +215,9 @@ the `lrwxrwxrwx` every link on Linux carries, the length of the path it holds
 as its size, and that path named after it.
 
 `du -b` measures UTF-8 content bytes recursively, including hidden files;
-`du -bs src` reports a directory total. `--apparent-size` (also accepted as the
-BSD `-A`) supports block and human-readable units, and `--inodes` counts
-entries. Plain `du`, `du -sh` and the rest report what ext4 would allocate for
+`du -bs src` reports a directory total. `--apparent-size` supports block and
+human-readable units, and `--inodes` counts entries; BSD's `-A` is not GNU's,
+and is not taken here either. Plain `du`, `du -sh` and the rest report what ext4 would allocate for
 the same tree — the model `ls -l` reads its `total` from: 4 KiB blocks, a
 directory taking one, an empty file none, and a link whose target is under 60
 bytes none — so a total reads as it would from a disk holding the tree, block
@@ -277,9 +314,19 @@ takes a terminal, a link, and a name already taken or already named as
 compressed, and decompressing to stdout hands on unchanged what is not gzip
 data, as `zcat -f` of a plain file. Without it a link is refused, as GNU
 refuses one, and a name already taken is asked about where stdin is the
-terminal, which answers with its end. What another compressor made —
-compress, pack, a zip — GNU gzip also reads, and it is refused here, as is a
-compression level.
+terminal, which answers with its end. A name that is not there is tried, when
+decompressing, with `.gz`, `.z`, `-z` and `.Z` on the end, and a suffix is
+read in any case, `F.GZ` as much as `f.gz`. A member is read in GNU's order: a
+header asking for what gzip does not do — another method, encryption, flags
+it does not know, a header check that fails — is said and the next file read;
+the data is written as it is inflated, and then a check or a count that fails
+it, or an end that comes too soon, is said and the run stops there, as gzip
+exits there, taking away a file it was writing. A member records the name and
+the moment of the file it came from, and one of stdin the moment of the file
+stdin is, or none for a pipe; what is deflated inside it is the runtime's
+stream rather than GNU's own deflate, so it can come out a few bytes apart
+from GNU's. What another compressor made — compress, pack, a zip — GNU gzip
+also reads, and it is refused here, as is a compression level.
 
 `tar` lists (`-t`), extracts (`-x`) and creates (`-c`) archives as GNU tar
 1.35 does, with its listings, messages and statuses: the old-style `tar czf`
@@ -327,8 +374,12 @@ comes to the entry: macOS's `LIBARCHIVE.xattr.` records are warned of, while
 would complain of, and the records of multi-volume and incremental archives,
 are refused. Extraction writes into the writable `/tmp/` overlay alone, which
 holds no hard link and no device, so an entry that would make one is refused
-too. The overlay keeps no times either, so an entry dated before 1970 or after
-the run began, which GNU warns of once it has written it, is refused as well.
+too. What an entry says of its mode and time is kept as GNU keeps it for
+anyone but root: the mode less its set-id and sticky bits and the umask, 077,
+and the time — a directory's once nothing more is written into it — while a
+directory made on the way to an entry is `drwx------` and dated to when it
+was made. An entry dated before 1970 or after the run began, which GNU warns
+of in words of its own once it has written it, is refused.
 
 `zip` makes a new archive as Info-ZIP Zip 3.0 does — `-r`, `-j`, `-D`, `-0`,
 `-y` and `-q`, its `adding:` lines, warnings, refusal of one name for two
@@ -339,22 +390,34 @@ stores a whole archive or deflates what deflate makes smaller, so a file by
 one of those names that deflate would make smaller, beside another file it
 makes smaller, is refused. That deflate is the runtime's rather than
 Info-ZIP's, so the share a file reports saved is this archive's, and can be a
-few points away from what Info-ZIP's would be: 56% for the numbers 1 to 400,
-a line each, where Info-ZIP saves 53%. Adding to an archive already there, a
-file operand `-`, which Info-ZIP reads from stdin, a compression level and the
-rest are refused. `unzip` answers as Debian's UnZip 6.00 does: `-l`, dated
-year first, `-t`, `-p`, and extraction with `-q`, `-o`, `-n` — which wins over
+few points away from what Info-ZIP's would be: 56% for the numbers 1 to 400, a
+line each, where Info-ZIP saves 53%. Its records are the package's too: they
+say the archive was made by Zip 2.0 rather than 3.0, mark no file as text, and
+carry a file's modification time alone, where Info-ZIP adds its access time
+and its owner's ids, which this terminal does not have — so an archive is a
+few bytes apart from Info-ZIP's even where nothing in it is deflated. Adding
+to an archive already there, a file operand `-`, which Info-ZIP reads from
+stdin, a compression level and the rest are refused. `unzip` answers as
+Debian's UnZip 6.00 does: its usage where it is given no archive, the
+archive's comment under its name where it is not quiet, `-l`, dated year
+first, `-t`, `-p`, and extraction with `-q`, `-o`, `-n` — which wins over
 `-o`, with UnZip's caution, where both are given — `-j`, `-d` and `-x`, the
-overwrite question included — UnZip asks it on stdin, and a stdin with
-nothing on it answers with its end, which UnZip takes as "None". A link is
-made last, its name held until then by a placeholder of its target, as UnZip
-holds it, so a later entry of that name, which `-j` can make, meets it as it
-would there. A name stored with a `.` segment, which Info-ZIP never writes
-and other tools do, is refused as tar's is, since UnZip lists it as stored. The
-package does not say how an entry was stored, nor whether its time is an exact
-one or a DOS time, so an extraction that is not quiet — which names each file
-`extracting` or `inflating` by how it was stored — `-c`, and `-v` or the
-second `-l` that UnZip reads as one, are refused, and `-l` answers where the
+overwrite question included — UnZip asks it on stdin, and a stdin with nothing
+on it answers with its end, which UnZip takes as "None". A link is made last,
+its name held until then by a placeholder of its target, as UnZip holds it, so
+a later entry of that name, which `-j` can make, meets it as it would there. A
+file keeps the mode it was stored with, less its set-id and sticky bits but
+with no umask taken from it, and its time — or, where a maker other than
+Unix recorded DOS attributes alone, the mode UnZip expands them into, less the
+umask; a directory UnZip made for an entry
+of its own takes the entry's once everything is written, and one made on the
+way, or for `-d`, is `drwx------`, dated to when it was made, as a link is. A
+name stored with a `.` segment, which Info-ZIP never writes and other tools
+do, is refused as tar's is, since UnZip lists it as stored. The package does
+not say how an entry was stored, nor whether its time is an exact one or a DOS
+time, so an extraction that is not quiet — which names each file `extracting`
+or `inflating` by how it was stored — `-c`, and `-v` or the second `-l` that
+UnZip reads as one, are refused, and `-l` and an extraction answer where the
 two readings of every time agree, which they always do under `TZ=UTC`.
 
 `curl` is the one command that reaches outside, and the one no terminal has
@@ -407,7 +470,11 @@ NUL terminators (`-z`). It resolves paths within the virtual filesystem, each
 of the three ways GNU offers: `-P`, the default, expands every link it walks
 through, `..` taken from what the link leads to; `-L` takes `..` from the name
 as written, cancelling the component before it; and `-s` expands no link at
-all, asking the filesystem only whether what the name leads to is there.
+all, asking the filesystem only whether what the name leads to is there. A
+chain of links is followed to its end however long it is, as gnulib's
+canonicalization follows one, and only a link met again on the same rest of
+the name is a loop — where everything that opens a name stops at the
+kernel's forty.
 
 Behaviour is checked against the real tools: bash 5.2, GNU grep 3.11, GNU sed
 4.9, gawk 5.2, ripgrep 14.1, GNU diff 3.10 and GNU patch 2.7.6 in the C

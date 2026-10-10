@@ -118,6 +118,15 @@ describe('brotli compresses with the stream the runtime has', () => {
     assert.deepEqual(await t.run('brotli -f /tmp/p && ls /tmp'), result('p\np.br\n'))
   })
 
+  it('reports a refusal met opening the output as the gap it is', async () => {
+    // The first operand reads `a.br`, and the second writes over it: a file
+    // this run is reading while it writes it is refused, and the refusal is
+    // carried where a redirect cannot hide it rather than said as a failure.
+    const t = terminal()
+    await gap(t, 'cd /tmp && echo x > a && echo y > a.br && brotli -fk a.br a', 'streaming self-output',
+      'brotli: writing to an actively read input file is not supported\n')
+  })
+
   it('carries bytes that spell no text through the round trip', async () => {
     const t = terminal()
     assert.deepEqual(await t.run('cp img.br /tmp/i.br && brotli --rm -d /tmp/i.br && brotli --rm /tmp/i && brotli --rm -d /tmp/i.br && base64 /tmp/i'), result('iVBOR/8K\n'))

@@ -71,7 +71,7 @@ describe('touch reports the times it cannot set', () => {
     await check(t, 'printf kept >/tmp/held')
     await gap(t, 'touch /tmp/held', TIMES('/tmp/held'))
     // The gap is a refusal, not a rewrite: what the file holds is untouched.
-    check(t, 'cat /tmp/held', 'kept')
+    await check(t, 'cat /tmp/held', 'kept')
   })
 
   it('names a directory that is already there', async () => {
@@ -116,7 +116,9 @@ describe('touch answers for a filesystem it cannot write', () => {
   it('refuses a source tree that is read-only', async () => {
     const t = terminal()
     await check(t, 'touch /repo/new', '', "touch: cannot touch '/repo/new': Read-only file system\n", 1)
-    await check(t, 'touch file', '', "touch: setting times of 'file': Read-only file system\n", 1)
+    // GNU opens a file to touch it, and what the open failed with is what
+    // it says; a directory is not opened, so setting its times is.
+    await check(t, 'touch file', '', "touch: cannot touch 'file': Read-only file system\n", 1)
     await check(t, 'touch dir', '', "touch: setting times of 'dir': Read-only file system\n", 1)
     await check(t, 'test -e /repo/new', '', '', 1)
   })
@@ -124,13 +126,13 @@ describe('touch answers for a filesystem it cannot write', () => {
   it('has no /tmp to write when no overlay was asked for', async () => {
     const t = terminal({ writable: false })
     await check(t, 'touch /tmp/new', '', "touch: cannot touch '/tmp/new': No such file or directory\n", 1)
-    await check(t, 'touch file', '', "touch: setting times of 'file': Read-only file system\n", 1)
+    await check(t, 'touch file', '', "touch: cannot touch 'file': Read-only file system\n", 1)
   })
 })
 
 describe('touch reports a name it cannot reach the way GNU reports it', () => {
   for (const [command, stderr, exitCode] of [
-    ['touch', 'touch: missing file operand\n', 1],
+    ['touch', "touch: missing file operand\nTry 'touch --help' for more information.\n", 1],
     ['touch /tmp/missing/new', "touch: cannot touch '/tmp/missing/new': No such file or directory\n", 1],
     ['touch /tmp/file/new', "touch: cannot touch '/tmp/file/new': Not a directory\n", 1],
     ['touch /tmp/gone/', "touch: setting times of '/tmp/gone/': No such file or directory\n", 1],
@@ -170,7 +172,7 @@ describe('touch reports a name it cannot reach the way GNU reports it', () => {
 
   it('quotes a name that needs it', async () => {
     const t = createTerminal({ 'a b': 'x' }, { mount: '/repo', cwd: '/repo', writable: '/tmp/' })
-    await check(t, 'touch "a b"', '', "touch: setting times of 'a b': Read-only file system\n", 1)
+    await check(t, 'touch "a b"', '', "touch: cannot touch 'a b': Read-only file system\n", 1)
   })
 })
 

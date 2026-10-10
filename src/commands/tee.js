@@ -9,7 +9,7 @@
 // was written all the same, the files it could write having been written.
 
 import { parseArgs } from '../args.js'
-import { consumeStdin, encodeUtf8 } from '../util.js'
+import { consumeStdin, encodeUtf8, reason } from '../util.js'
 import { markUnsupported, unsupported, unsupportedNote } from '../unsupported.js'
 
 export function tee(stdin, tokens, ctx) {
@@ -41,8 +41,13 @@ function write(name, bytes, append, state, ctx) {
   try {
     handle = ctx.writable && ctx.fs.openWritable?.(ctx.cwd, name, append)
   } catch (e) {
-    // The message names the file it is about, as GNU's does.
-    state.stderr += `tee: ${e.message}\n`
+    // The message names the file it is about, as GNU's does. A refusal keeps
+    // its note: the file was not written for a reason that is this
+    // terminal's, not GNU's, and saying only that it failed would hide it.
+    const message = `tee: ${reason(e)}`
+    const note = unsupportedNote(e)
+    if (note) state.gap ??= unsupported(note.kind, 'tee', note.detail, message, 1)
+    state.stderr += message + '\n'
     state.status = 1
     return
   }

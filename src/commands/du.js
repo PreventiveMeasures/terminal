@@ -16,6 +16,12 @@ export function du(_stdin, tokens, ctx) {
   const state = { ctx, options, seen: new Set(), result: emptyOutput(), total: 0n, failed: false }
   if (options.stderr) appendOutput(state.result, ctx.flushOutput(emptyOutput(options.stderr)))
   for (const operand of options.operands) {
+    // GNU names an empty operand for what it is before fts can fail on it.
+    if (operand === '') {
+      appendOutput(state.result, ctx.flushOutput(err('du: invalid zero-length file name')))
+      state.failed = true
+      continue
+    }
     const name = operand.length > 2 ? operand.replace(/\/+$/u, '/') : operand
     // du measures the names it is given, as `-P` has it by default; `-D` (or
     // `-H`) and `-L` each ask about what an operand points at instead.
