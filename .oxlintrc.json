@@ -5,6 +5,9 @@
     "pedantic": "error",
     "perf": "error"
   },
+  "jsPlugins": [
+    "./lint/control-bytes.js"
+  ],
   "plugins": [
     "import",
     "node",
@@ -64,6 +67,7 @@
     "no-script-url": "error",
     "default-case": "error",
     "no-undef": "error",
+    "local/no-control-bytes": "error",
     "unicorn/consistent-function-scoping": "off",
     "unicorn/explicit-length-check": "off",
     "unicorn/no-array-callback-reference": "off",
