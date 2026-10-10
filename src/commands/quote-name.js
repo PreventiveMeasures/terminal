@@ -47,7 +47,7 @@ export function quoteShell(name, ctx) {
 // nothing awkward in it is printed bare; one with a space, a quote, a
 // backslash or a control character is double-quoted with C escapes, and in
 // a byte locale every byte past ASCII is an octal escape too.
-const HEADER_ESCAPES = new Map([['', 'a'], ['\b', 'b'], ['\f', 'f'], ['\n', 'n'], ['\r', 'r'], ['\t', 't'], ['\v', 'v'], ['"', '"'], ['\\', '\\']])
+const HEADER_ESCAPES = new Map([['\u0007', 'a'], ['\b', 'b'], ['\f', 'f'], ['\n', 'n'], ['\r', 'r'], ['\t', 't'], ['\v', 'v'], ['"', '"'], ['\\', '\\']])
 
 export function quoteHeaderName(name, ctx) {
   const bytes = byteLocale(ctx)

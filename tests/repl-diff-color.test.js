@@ -20,21 +20,21 @@ const CONTEXT = '*** a.txt\n--- b.txt\n***************\n*** 1,3 ****\n  one\n! t
 describe('the REPL paints a diff it can recognise', () => {
   it('turns each style name into the escapes for it', () => {
     const lines = painted(UNIFIED).split('\n')
-    assert.match(lines[0], /^\[1m--- a\.txt\[22m$/u)
-    assert.match(lines[2], /^\[36m@@ /u)
+    assert.equal(lines[0], '\u001B[1m--- a.txt\u001B[22m')
+    assert.ok(lines[2].startsWith('\u001B[36m@@ '))
     assert.equal(lines[3], ' one', 'a line with no style is handed back as it was')
-    assert.match(lines[4], /^\[31m-two\[39m$/u)
-    assert.match(lines[5], /^\[32m\+2\[39m$/u)
+    assert.equal(lines[4], '\u001B[31m-two\u001B[39m')
+    assert.equal(lines[5], '\u001B[32m+2\u001B[39m')
   })
   it('paints the other two styles as well', () => {
-    assert.match(painted(NORMAL).split('\n')[2], /^\[90m---\[39m$/u)
-    assert.match(painted(CONTEXT).split('\n')[5], /^\[33m! two\[39m$/u)
+    assert.equal(painted(NORMAL).split('\n')[2], '\u001B[90m---\u001B[39m')
+    assert.equal(painted(CONTEXT).split('\n')[5], '\u001B[33m! two\u001B[39m')
   })
   it('paints only the diff lines when other output surrounds them', () => {
     const out = painted(`listing\n${UNIFIED}done\n`)
     assert.ok(out.startsWith('listing\n'), 'text before the diff is untouched')
     assert.ok(out.endsWith('done\n'), 'text after the diff is untouched')
-    assert.match(out, /\[32m\+2\[39m/u)
+    assert.ok(out.includes('\u001B[32m+2\u001B[39m'))
   })
 })
 

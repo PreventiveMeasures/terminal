@@ -231,7 +231,7 @@ function parseName(s, strip) {
   return { name: stripLeading(raw, strip), rest }
 }
 
-const ESCAPES = { a: '', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', '"': '"' }
+const ESCAPES = { a: '\u0007', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', '"': '"' }
 
 function parseCString(s) {
   let value = ''
