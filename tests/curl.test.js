@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { ReadableStream } from 'node:stream/web'
 import { describe, it } from 'node:test'
+import { TextEncoder } from 'node:util'
 import { createTerminal } from '@preventive/terminal'
 
 // curl is the one command here that reaches outside the tree, and the one no
@@ -20,7 +22,8 @@ const offline = (sources = SOURCES, opts = {}) => createTerminal(sources, { moun
 const result = (stdout = '', { stderr = '', exitCode = 0, notes = [], unsupported = [] } = {}) =>
   ({ stdout, stderr, exitCode, cwd: '/repo', notes, unsupported })
 
-const HEADER_NOTE = 'curl: response header names are lowercased and sorted, and the status line reads HTTP/1.1 whatever the connection spoke.'
+const TRY = "curl: try 'curl --help' or 'curl --manual' for more information\n"
+const feed = (r) => r.unsupported.map(({ kind, detail }) => ({ kind, detail }))
 
 // Every request the line made, in order, with what it carried: a test asks
 // what went out as readily as what came back, since half of what curl does is
@@ -112,8 +115,8 @@ describe('curl makes the request the command line describes', () => {
     assert.equal(calls[0].redirect, 'manual')
     // Bytes that spell no text are what a pipe and a file take, and what this
     // terminal's own output says it cannot carry.
-    assert.deepEqual(await term.run(`curl ${HOST}/img | base64`), result('iVBOR/8K\n'))
-    assert.deepEqual(await term.run(`curl ${HOST}/img > /tmp/copy.png; sha256sum /tmp/copy.png`),
+    assert.deepEqual(await term.run(`curl -s ${HOST}/img | base64`), result('iVBOR/8K\n'))
+    assert.deepEqual(await term.run(`curl -s ${HOST}/img > /tmp/copy.png; sha256sum /tmp/copy.png`),
       result('679ae6a4120cc43d94e6462f34fa9fef218ba7de581f7e509e5bc5f924338b34  /tmp/copy.png\n'))
     const carried = await term.run(`curl ${HOST}/img`)
     assert.equal(carried.exitCode, 1)
@@ -126,19 +129,28 @@ describe('curl makes the request the command line describes', () => {
     assert.equal(calls[0].url, 'http://api.test/plain')
   })
 
-  it('prints the header block under -i, and says how it was rendered', async (t) => {
-    serving(t, { '/x': text('hello\n', 200, { 'x-answer': '42' }) })
-    const r = await online().run(`curl -i ${HOST}/x`)
-    assert.equal(r.stdout, 'HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\nx-answer: 42\r\n\r\nhello\n')
-    assert.deepEqual(r.notes, [HEADER_NOTE])
-    assert.equal(r.exitCode, 0)
+  it('refuses -i and -I, whose header block the runtime does not hand back as it came', async (t) => {
+    const calls = serving(t, { '/x': text('hello\n', 200, { 'x-answer': '42' }) })
+    for (const option of ['-i', '-I']) {
+      // oxlint-disable-next-line no-await-in-loop -- one option after the last.
+      const r = await online().run(`curl ${option} ${HOST}/x`)
+      assert.deepEqual([r.stdout, r.exitCode, feed(r)], ['', 2, [{ kind: 'option', detail: option }]], option)
+    }
+    assert.equal(calls.length, 0)
+    // A body and -I ask for two methods, which curl says before anything else.
+    const both = await online().run(`curl -I -d a ${HOST}/x`)
+    assert.deepEqual([both.stderr, both.exitCode, both.unsupported], ['Warning: You can only select one HTTP request method! You asked for both POST \nWarning: (-d, --data) and HEAD (-I, --head).\n', 2, []])
   })
 
-  it('asks for the headers alone under -I', async (t) => {
-    const calls = serving(t, { '/x': text('never read\n') })
-    const r = await online().run(`curl -I ${HOST}/x`)
-    assert.equal(calls[0].method, 'HEAD')
-    assert.equal(r.stdout, 'HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\n')
+  it('sends curl\'s own headers, and the coding curl\'s request asks for', async (t) => {
+    const calls = serving(t, { '/x': text('ok\n') })
+    await online().run(`curl ${HOST}/x`)
+    assert.deepEqual([calls[0].headers['user-agent'], calls[0].headers.accept, calls[0].headers['accept-encoding']], ['curl/8.5.0', '*/*', 'identity'])
+    await online().run(`curl --compressed ${HOST}/x`)
+    assert.equal(calls[1].headers['accept-encoding'], 'deflate, gzip, br, zstd')
+    // A request with no User-Agent is one the runtime will not make.
+    const bare = await online().run(`curl -A '' ${HOST}/x`)
+    assert.deepEqual([bare.exitCode, feed(bare)], [2, [{ kind: 'option', detail: '-A' }]])
   })
 
   it('takes several URLs one after another', async (t) => {
@@ -147,21 +159,20 @@ describe('curl makes the request the command line describes', () => {
     assert.deepEqual(calls.map((call) => call.url), [`${HOST}/one`, `${HOST}/two`])
   })
 
-  it('prints its usage over a line that named no URL, and the list it points at', async () => {
+  it('prints curl\'s usage over a line that named no URL, and curl\'s list for --help', async () => {
     const term = online()
     const bare = await term.run('curl')
-    assert.equal(bare.exitCode, 2)
-    assert.match(bare.stderr, /^curl: try 'curl --help'/u)
-    // The list it points at is a list of what this curl carries, not of what
-    // curl has: it will not offer what it would then refuse.
+    assert.deepEqual([bare.stderr, bare.exitCode], [TRY, 2])
+    const silent = await term.run('curl -s')
+    assert.deepEqual([silent.stderr, silent.exitCode], [`curl: (2) no URL specified\n${TRY}`, 2])
     const help = await term.run('curl --help')
     assert.equal(help.exitCode, 0)
-    assert.match(help.stdout, /^Usage: curl \[options\.\.\.\] <url>\n/u)
-    assert.match(help.stdout, /^ -L, --location {11}follow a redirect, up to --max-redirs <num>$/mu)
-    assert.doesNotMatch(help.stdout, /--insecure|--proxy|--cookie/u)
-    assert.deepEqual(help.unsupported, [])
-    // It answers before whatever else the line asked for, as curl does.
-    assert.deepEqual(await term.run('curl -h https://api.test/x'), await term.run('curl --help'))
+    assert.match(help.stdout, /^Usage: curl \[options\.\.\.\] <url>\n -d, --data <data> {10}HTTP POST data\n/u)
+    assert.match(help.stdout, /For all options use the manual or "--help all"\.\n$/u)
+    assert.deepEqual(await term.run('curl -sh'), help)
+    // Anything after it is a category curl would list, which is not kept here.
+    const category = await term.run('curl -h https://api.test/x')
+    assert.deepEqual([category.exitCode, feed(category)], [2, [{ kind: 'option', detail: '--help' }]])
   })
 })
 
@@ -193,13 +204,16 @@ describe('curl sends what it was told to send', () => {
   })
 
   it('says so, rather than sending nothing, when the data file is not there', async (t) => {
-    serving(t, { '/post': text('taken\n') })
+    const calls = serving(t, { '/post': text('taken\n') })
     const r = await online().run(`curl -d @nope.json ${HOST}/post`)
     assert.equal(r.exitCode, 26)
-    assert.equal(r.stderr, 'curl: (26) Failed to open/read local data from file/application\n')
+    assert.equal(r.stderr, `curl: Failed to open nope.json\ncurl: option -d: error encountered when reading a file\n${TRY}`)
+    // -s silences the first of the two, where it comes before the option.
+    assert.equal((await online().run(`curl -s --data @nope.json ${HOST}/post`)).stderr, `curl: option --data: error encountered when reading a file\n${TRY}`)
+    assert.equal(calls.length, 0)
   })
 
-  it('carries --json as JSON, and refuses a body that is both', async (t) => {
+  it('carries --json as JSON, and joins it to data the way curl does', async (t) => {
     const calls = serving(t, { '/post': text('{}\n') })
     const term = online()
     await term.run(`curl --json '{"a":1}' ${HOST}/post`)
@@ -210,10 +224,9 @@ describe('curl sends what it was told to send', () => {
     // keeps the line endings a document has.
     await term.run(`curl --json @body.json ${HOST}/post`)
     assert.equal(calls[1].body, '{"a":1}\n')
-    const mixed = await term.run(`curl --json '{}' -d a=1 ${HOST}/post`)
-    assert.equal(mixed.exitCode, 2)
-    assert.equal(mixed.stderr, 'curl: --json cannot be mixed with --data\n')
-    assert.equal(calls.length, 2)
+    // A `--json` piece joins on to what came before, anything else after a `&`.
+    await term.run(`curl -d a --json b --json c -d d ${HOST}/post`)
+    assert.deepEqual([calls[2].body, calls[2].headers['content-type']], ['abc&d', 'application/json'])
   })
 
   it('sets the headers it was given, and the two it is a shorthand for', async (t) => {
@@ -232,15 +245,27 @@ describe('curl sends what it was told to send', () => {
   })
 
   it('refuses the header spellings it cannot answer for', async (t) => {
-    serving(t, { '/x': text('ok\n') })
+    const calls = serving(t, { '/x': text('ok\n') })
     const term = online()
     // `Name:` takes away a header the runtime sends, which is the runtime's own.
     const taken = await term.run(`curl -H 'Accept:' ${HOST}/x`)
     assert.equal(taken.exitCode, 2)
-    assert.deepEqual(taken.unsupported.map(({ kind, detail }) => ({ kind, detail })), [{ kind: 'option', detail: '-H' }])
-    const malformed = await term.run(`curl -H nonsense ${HOST}/x`)
-    assert.equal(malformed.exitCode, 2)
-    assert.equal(malformed.stderr, 'curl: -H: not a header: nonsense\n')
+    assert.deepEqual(feed(taken), [{ kind: 'option', detail: '-H' }])
+    // A body's length goes with it, whichever Content-Type the line gave it.
+    for (const types of ['', "-H 'Content-Type: text/plain' "]) {
+      // oxlint-disable-next-line no-await-in-loop -- one spelling after the last.
+      const r = await term.run(`curl -d x ${types}-H 'Content-Length:' ${HOST}/x`)
+      assert.deepEqual([r.exitCode, feed(r)], [2, [{ kind: 'option', detail: '-H' }]], types)
+    }
+    // The runtime sends its own Host, and will not send some headers at all.
+    for (const header of ['Host: example.test', 'Expect: 100-continue', 'Transfer-Encoding: chunked', 'X-Twice: 1']) {
+      // oxlint-disable-next-line no-await-in-loop -- one header after the last.
+      const r = await term.run(`curl -H '${header}' -H 'X-Twice: 2' ${HOST}/x`)
+      assert.deepEqual([r.exitCode, feed(r)], [2, [{ kind: 'option', detail: '-H' }]], header)
+    }
+    // What is no header to curl is not one here either: it sends nothing for it.
+    assert.deepEqual(await term.run(`curl -H nonsense -H ': empty' -H 'X-Gone:' ${HOST}/x`), result('ok\n'))
+    assert.deepEqual(Object.keys(calls[0].headers).sort(), ['accept', 'accept-encoding', 'user-agent'])
     // A password curl would have prompted a terminal for, and there is none here.
     const prompted = await term.run(`curl -u ada ${HOST}/x`)
     assert.equal(prompted.exitCode, 2)
@@ -260,10 +285,10 @@ describe('curl follows a redirect where -L asked for it', () => {
     assert.deepEqual(calls.slice(1).map((call) => call.url), [`${HOST}/go`, `${HOST}/there`])
   })
 
-  it('prints every response in the chain under -i', async (t) => {
-    serving(t, CHAIN)
-    const r = await online().run(`curl -iL ${HOST}/go`)
-    assert.equal(r.stdout, 'HTTP/1.1 302\r\ncontent-type: text/plain;charset=UTF-8\r\nlocation: /there\r\n\r\nHTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\narrived\n')
+  it('keeps a method -X named on every hop, without the body a GET would drop', async (t) => {
+    const calls = serving(t, { '/post': moved('/landed'), '/landed': text('landed\n') })
+    await online().run(`curl -L -X POST -d a=1 ${HOST}/post`)
+    assert.deepEqual(calls.map(({ method, body }) => ({ method, body })), [{ method: 'POST', body: 'a=1' }, { method: 'POST', body: null }])
   })
 
   it('turns the older three into a GET and keeps the method on a 307', async (t) => {
@@ -336,23 +361,34 @@ describe('curl writes where it was told to write', () => {
   it('pairs -o and -O with the URLs in the order both were written', async (t) => {
     serving(t, { '/one': text('1\n'), '/two': text('2\n'), '/three': text('3\n') })
     const term = online()
-    assert.deepEqual(await term.run(`cd /tmp && curl -o one.txt -O ${HOST}/one ${HOST}/two; cat /tmp/one.txt /tmp/two`),
+    assert.deepEqual(await term.run(`cd /tmp && curl -s -o one.txt -O ${HOST}/one ${HOST}/two; cat /tmp/one.txt /tmp/two`),
       { ...result('1\n2\n'), cwd: '/tmp' })
     // A URL past the last output target writes to stdout, as it does in curl,
     // and `-o -` is stdout named.
-    assert.deepEqual(await term.run(`curl -o /tmp/kept.txt ${HOST}/one ${HOST}/three`), { ...result('3\n'), cwd: '/tmp' })
+    assert.deepEqual(await term.run(`curl -s -o /tmp/kept.txt ${HOST}/one ${HOST}/three`), { ...result('3\n'), cwd: '/tmp' })
     assert.deepEqual(await term.run(`curl -o - ${HOST}/one`), { ...result('1\n'), cwd: '/tmp' })
+    assert.deepEqual(await term.run(`curl -s -o /dev/null ${HOST}/one`), { ...result(), cwd: '/tmp' })
   })
 
-  it('writes the headers into the file too, where -i asked for them', async (t) => {
-    serving(t, { '/x': text('hello\n') })
-    const r = await online().run(`curl -i -o /tmp/full.txt ${HOST}/x; cat /tmp/full.txt`)
-    assert.equal(r.stdout, 'HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\nhello\n')
+  it('refuses the progress meter curl draws where its output is not the terminal', async (t) => {
+    const calls = serving(t, { '/x': text('hello\n') })
+    const term = online()
+    for (const line of [`curl -o /tmp/x ${HOST}/x`, `curl ${HOST}/x | cat`, `curl ${HOST}/x > /tmp/y`]) {
+      // oxlint-disable-next-line no-await-in-loop -- one line after the last.
+      const r = await term.run(line)
+      assert.deepEqual(feed(r), [{ kind: 'feature', detail: 'progress meter' }], line)
+    }
+    assert.equal(calls.length, 0)
+    // Silent, without the meter, or with nowhere for it to be seen, there is none.
+    for (const line of [`curl -s ${HOST}/x | cat`, `curl --no-progress-meter -o /tmp/x ${HOST}/x`, `curl ${HOST}/x 2>/dev/null | cat`]) {
+      // oxlint-disable-next-line no-await-in-loop -- one line after the last.
+      assert.deepEqual((await term.run(line)).unsupported, [], line)
+    }
   })
 
   it('says a file system that cannot be written is one, rather than writing nowhere', async (t) => {
     serving(t, { '/x': text('hello\n') })
-    const r = await online(SOURCES, { writable: false }).run(`curl -o out.txt ${HOST}/x`)
+    const r = await online(SOURCES, { writable: false }).run(`curl -s -o out.txt ${HOST}/x`)
     assert.equal(r.exitCode, 23)
     assert.equal(r.stderr, 'curl: (23) out.txt: file system is read-only\n')
     assert.deepEqual(r.unsupported.map(({ kind, detail }) => ({ kind, detail })), [{ kind: 'feature', detail: 'read-only target' }])
@@ -362,38 +398,62 @@ describe('curl writes where it was told to write', () => {
     serving(t, { '/': text('root\n') })
     const r = await online().run(`cd /tmp && curl -O ${HOST}/`)
     assert.equal(r.exitCode, 23)
-    assert.equal(r.stderr, 'curl: (23) Remote filename has no length\n')
+    assert.equal(r.stderr, 'curl: Remote file name has no length\ncurl: (23) Failed writing received data to disk/application\n')
   })
 })
 
 describe('curl reports a transfer that failed the way curl reports it', () => {
-  it('gives each failure curl\'s own number', async (t) => {
+  it('gives each failure curl\'s own number, and curl\'s words where they are known', async (t) => {
     const term = online()
-    const cases = [
-      ['/resolve', refused('ENOTFOUND', 'getaddrinfo ENOTFOUND api.test'), 6, 'curl: (6) Could not resolve host: api.test\n'],
-      ['/connect', refused('ECONNREFUSED', 'connect ECONNREFUSED 127.0.0.1:443'), 7, 'curl: (7) Failed to connect to api.test port 443: connect ECONNREFUSED 127.0.0.1:443\n'],
-      ['/reset', refused('ECONNRESET', 'socket hang up'), 56, 'curl: (56) Recv failure: socket hang up\n'],
-      ['/cert', refused('CERT_HAS_EXPIRED', 'certificate has expired'), 60, 'curl: (60) SSL certificate problem: certificate has expired\n'],
-    ]
-    for (const [path, route, code, stderr] of cases) {
+    serving(t, { '/resolve': refused('ENOTFOUND', 'getaddrinfo ENOTFOUND api.test') })
+    assert.deepEqual(await term.run(`curl ${HOST}/resolve`), result('', { stderr: 'curl: (6) Could not resolve host: api.test\n', exitCode: 6 }))
+    // curl says how long it waited, which only its own connection knows: a
+    // quiet line gets curl's answer, and one that would print it a gap.
+    for (const [path, route, code] of [
+      ['/connect', refused('ECONNREFUSED', 'connect ECONNREFUSED 127.0.0.1:443'), 7],
+      ['/reset', refused('ECONNRESET', 'socket hang up'), 56],
+      ['/cert', refused('CERT_HAS_EXPIRED', 'certificate has expired'), 60],
+    ]) {
       serving(t, { [path]: route })
       // oxlint-disable-next-line no-await-in-loop -- one failure after the last.
-      const r = await term.run(`curl ${HOST}${path}`)
-      assert.equal(r.exitCode, code, path)
-      assert.equal(r.stderr, stderr, path)
-      assert.deepEqual(r.unsupported, [], path)
+      assert.deepEqual(await term.run(`curl -s ${HOST}${path}`), result('', { exitCode: code }), path)
+      // oxlint-disable-next-line no-await-in-loop -- one failure after the last.
+      const told = await term.run(`curl ${HOST}${path}`)
+      assert.deepEqual([told.exitCode, feed(told)], [code, [{ kind: 'feature', detail: 'transfer error message' }]], path)
     }
+  })
+
+  it('writes what came of a body that stopped short, then says by how much', async (t) => {
+    const cut = () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode('only ten\n\n')) },
+      pull(controller) { controller.error(Object.assign(new TypeError('terminated'), { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) })) },
+    }), { headers: { 'content-length': '100' } })
+    serving(t, { '/cut': cut })
+    assert.deepEqual(await online().run(`curl ${HOST}/cut`), result('only ten\n\n', { stderr: 'curl: (18) transfer closed with 90 bytes remaining to read\n', exitCode: 18 }))
+  })
+
+  it('refuses an answer the runtime decoded where curl would write it encoded', async (t) => {
+    serving(t, { '/gz': text('decoded\n', 200, { 'content-encoding': 'gzip' }) })
+    const plain = await online().run(`curl ${HOST}/gz`)
+    assert.deepEqual([plain.stdout, plain.exitCode, feed(plain)], ['', 2, [{ kind: 'feature', detail: 'content encoding' }]])
+    // Under --compressed curl decodes it too.
+    assert.deepEqual(await online().run(`curl --compressed ${HOST}/gz`), result('decoded\n'))
+  })
+
+  it('writes an encoded answer that says it is empty, which no decoding changes', async (t) => {
+    serving(t, { '/none': () => new Response(null, { status: 200, headers: { 'content-encoding': 'gzip', 'content-length': '0' } }) })
+    assert.deepEqual(await online().run(`curl ${HOST}/none`), result(''))
   })
 
   it('puts a deadline on the request where --max-time asked for one', async (t) => {
     const calls = serving(t, { '/slow': () => { throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }) } })
-    const r = await online().run(`curl -m 2 ${HOST}/slow`)
-    assert.equal(r.exitCode, 28)
-    assert.equal(r.stderr, 'curl: (28) Operation timed out after 2000 milliseconds\n')
+    const r = await online().run(`curl -s -m 2 ${HOST}/slow`)
+    assert.deepEqual([r.stderr, r.exitCode], ['', 28])
     assert.equal(calls[0].signal instanceof AbortSignal, true)
     const misspelt = await online().run(`curl -m soon ${HOST}/slow`)
     assert.equal(misspelt.exitCode, 2)
-    assert.equal(misspelt.stderr, 'curl: option --max-time: expected a proper numerical parameter\n')
+    assert.equal(misspelt.stderr, `curl: option -m: expected a proper numerical parameter\n${TRY}`)
+    assert.equal((await online().run(`curl --max-time -1 ${HOST}/slow`)).stderr, `curl: option --max-time: expected a positive numerical parameter\n${TRY}`)
   })
 
   it('makes -f a failing status, and leaves the body alone without it', async (t) => {
@@ -417,20 +477,23 @@ describe('curl reports a transfer that failed the way curl reports it', () => {
     assert.equal(shown.exitCode, 7)
   })
 
-  it('exits on the last transfer that failed', async (t) => {
+  it('exits with what came of the last transfer', async (t) => {
     serving(t, { '/one': text('1\n'), '/gone': text('no\n', 404) })
-    const r = await online().run(`curl -f ${HOST}/gone ${HOST}/one`)
-    assert.equal(r.stdout, '1\n')
-    assert.equal(r.exitCode, 22)
+    const r = await online().run(`curl -sf ${HOST}/gone ${HOST}/one`)
+    assert.deepEqual([r.stdout, r.exitCode], ['1\n', 0])
+    assert.equal((await online().run(`curl -sf ${HOST}/one ${HOST}/gone`)).exitCode, 22)
   })
 
   it('refuses a URL it cannot read and a protocol it does not speak', async (t) => {
-    serving(t, {})
+    serving(t, { '/x': text('ok\n') })
     const term = online()
-    const malformed = await term.run('curl "ht tp://not a url"')
+    const malformed = await term.run('curl "http://api.test/a b"')
     assert.equal(malformed.exitCode, 3)
-    assert.equal(malformed.stderr, 'curl: (3) URL using bad/illegal format or missing URL\n')
-    for (const url of ['file:///etc/passwd', 'data:text/plain,hi', 'ftp://api.test/x']) {
+    assert.equal(malformed.stderr, 'curl: (3) URL rejected: Malformed input to a URL function\n')
+    // One to three slashes after the scheme are curl's; four are not.
+    assert.deepEqual(await term.run('curl http:/api.test/x; curl http:////api.test/x'),
+      result('ok\n', { stderr: 'curl: (3) URL rejected: Unsupported number of slashes following scheme\n', exitCode: 3 }))
+    for (const url of ['file:///etc/passwd', 'ftp://api.test/x', 'ftp.api.test/x']) {
       // oxlint-disable-next-line no-await-in-loop -- one URL after the last.
       const r = await term.run(`curl ${url}`)
       assert.equal(r.exitCode, 1, url)
@@ -484,10 +547,54 @@ describe('curl refuses what it cannot do rather than dropping it', () => {
     assert.deepEqual(r.unsupported.map((u) => u.detail), ['protocol'])
   })
 
-  it('accepts the two that ask for what it does anyway', async (t) => {
+  it('accepts the two that ask for what it can do', async (t) => {
     const calls = serving(t, { '/x': text('ok\n') })
-    // The runtime decompresses what it is sent, and there is no meter to hide.
     assert.deepEqual(await online().run(`curl --compressed --no-progress-meter ${HOST}/x`), result('ok\n'))
     assert.equal(calls.length, 1)
+  })
+
+  it('reads brackets around an IPv6 host as the address, after one to three slashes', async (t) => {
+    const calls = serving(t, { '/x': text('ok\n') })
+    const term = online()
+    for (const url of ['http:/[::1]:8080/x', 'http://[::1]:8080/x', 'http:///[::1]:8080/x']) {
+      // oxlint-disable-next-line no-await-in-loop -- one URL after the last.
+      assert.deepEqual(await term.run(`curl '${url}'`), result('ok\n'), url)
+    }
+    assert.deepEqual(calls.map((call) => String(call.url)), ['http://[::1]:8080/x', 'http://[::1]:8080/x', 'http://[::1]:8080/x'])
+  })
+
+  it('refuses a URL the runtime would send other than as curl sends it', async (t) => {
+    const calls = serving(t, { '/x': text('ok\n') })
+    const term = online()
+    for (const [url, detail] of [
+      [`'${HOST}/x[1-3]'`, 'URL globbing'], [`'${HOST}/{x,y}'`, 'URL globbing'],
+      [`'${HOST}/a/%2e%2e/x'`, 'URL rewriting'], [`'${HOST}/x?q="a"'`, 'URL rewriting'], [`'${HOST}/é'`, 'URL rewriting'],
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one URL after the last.
+      const r = await term.run(`curl ${url}`)
+      assert.deepEqual([r.exitCode, feed(r)], [2, [{ kind: 'feature', detail }]], url)
+    }
+    assert.equal(calls.length, 0)
+    // What both read alike goes: dot segments, a fragment, and with -g brackets.
+    for (const url of [`'${HOST}/a/../x'`, `'${HOST}/x#top'`, `-g '${HOST}/x?[1]'`]) {
+      // oxlint-disable-next-line no-await-in-loop -- one URL after the last.
+      assert.deepEqual(await term.run(`curl ${url}`), result('ok\n'), url)
+    }
+  })
+
+  it('sends the credentials a URL carries as curl does, as basic authentication', async (t) => {
+    const calls = serving(t, { '/x': text('ok\n') })
+    assert.deepEqual(await online().run('curl http://ada:se%20cret@api.test/x'), result('ok\n'))
+    assert.deepEqual([calls[0].url, calls[0].headers.authorization], ['http://api.test/x', 'Basic YWRhOnNlIGNyZXQ='])
+  })
+
+  it('refuses a method the runtime would send otherwise', async (t) => {
+    const calls = serving(t, { '/x': text('ok\n') })
+    for (const line of ['-X post', '-X GET -d a', '-X HEAD', "-X 'BAD METHOD'", '-X TRACE']) {
+      // oxlint-disable-next-line no-await-in-loop -- one line after the last.
+      const r = await online().run(`curl ${line} ${HOST}/x`)
+      assert.deepEqual([r.exitCode, feed(r)], [2, [{ kind: 'option', detail: '-X' }]], line)
+    }
+    assert.equal(calls.length, 0)
   })
 })

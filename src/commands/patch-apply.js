@@ -8,8 +8,8 @@ import { okToReverse } from './patch-names.js'
 // or two of context at each end. The first hunk that fits nowhere is tried
 // the other way round, which is how an already-applied patch is noticed.
 
-export function createFileState(input) {
-  return { input, frozen: 0, inOffset: 0, outOffset: 0, out: [] }
+export function createFileState(input, say) {
+  return { input, frozen: 0, inOffset: 0, outOffset: 0, out: [], say }
 }
 
 const ifetch = (state, n) => n < 1 || n > state.input.length ? '' : state.input[n - 1]
@@ -71,9 +71,13 @@ export function locateHunk(state, hunk, fuzz, loose) {
 }
 
 // Lines up to `n` (1-based) that have not been output yet. A hunk placed
-// past the end asks for lines that are not there, and gets none.
+// past the end asks for lines that are not there, and gets none; one placed
+// before lines already written out is one patch says it cannot apply.
 function copyTill(state, n) {
-  if (state.frozen > n) return false
+  if (state.frozen > n) {
+    state.say('misordered hunks! output would be garbled\n')
+    return false
+  }
   while (state.frozen < n) {
     if (state.frozen < state.input.length) state.out.push(state.input[state.frozen])
     state.frozen++
@@ -82,30 +86,56 @@ function copyTill(state, n) {
 }
 
 // patch.c apply_hunk: deletions skip input lines, insertions add new ones,
-// context lines are copied through; both sides' context has to agree.
+// context lines are copied through; both sides' context has to agree. A
+// context hunk goes by its own marks, where a run of `!` lines is replaced
+// by the other side's run, and the two sides have to meet mark for mark.
+// GNU counts the lines it names from where the hunk began, through the array
+// it read the hunk into: the old side from 1, the new side after the `---`
+// line and the blank line that may stand before it.
 export function applyHunk(state, hunk, whereArg) {
   const where = whereArg - 1
   const fresh = hunk.newLines, old = hunk.oldLines
+  const oldMark = (i) => hunk.marks?.old[i] ?? old[i]?.tag
+  const newMark = (i) => hunk.marks?.new[i] ?? fresh[i]?.tag
   let ni = 0, oi = 0
-  const mangled = () => { throw new PatchFatal(`Out-of-sync patch, lines ${hunk.line + 1 + oi + 1},${hunk.line + 1 + old.length + ni + 1} -- mangled text or line numbers, maybe?`) }
+  const mangled = () => {
+    const newBase = old.length + 2 + (hunk.blank ? 1 : 0)
+    throw new PatchFatal(`Out-of-sync patch, lines ${hunk.beg + oi + 1},${hunk.beg + newBase + ni} -- mangled text or line numbers, maybe?`)
+  }
   while (oi < old.length) {
-    if (old[oi].tag === '-') {
+    if (oldMark(oi) === '-') {
       if (!copyTill(state, where + oi)) return false
       state.frozen++
       oi++
     } else if (ni >= fresh.length) break
-    else if (fresh[ni].tag === '+') {
+    else if (newMark(ni) === '+') {
       if (!copyTill(state, where + oi)) return false
       state.out.push(fresh[ni++].text)
-    } else if (fresh[ni].tag === old[oi].tag) { oi++; ni++ }
-    else mangled()
+    } else if (newMark(ni) !== oldMark(oi)) mangled()
+    else if (newMark(ni) === '!') {
+      if (!copyTill(state, where + oi)) return false
+      do { state.frozen++; oi++ } while (oldMark(oi) === '!')
+      do state.out.push(fresh[ni++].text); while (newMark(ni) === '!')
+    } else { oi++; ni++ }
   }
-  for (; ni < fresh.length && fresh[ni].tag === '+'; ni++) {
+  for (; ni < fresh.length && newMark(ni) === '+'; ni++) {
     if (!copyTill(state, where + oi)) return false
     state.out.push(fresh[ni].text)
   }
   state.outOffset += fresh.length - old.length
   return true
+}
+
+// patch.c check_line_endings: whether the hunk's first line and the file's
+// line where it failed disagree about ending in CR LF. A hunk with no old
+// lines starts with the `---` line patch makes up for it, which never does.
+function differentEndings(state, hunk, where) {
+  const crlf = (text) => text.length >= 2 && text.endsWith('\r\n')
+  if (hunk.oldLines.length > 0 && hunk.oldLines[0].text === '') return false
+  if (state.input.length === 0) return false
+  const line = ifetch(state, Math.min(where, state.input.length))
+  if (line === '') return false
+  return (hunk.oldLines.length > 0 && crlf(hunk.oldLines[0].text)) !== crlf(line)
 }
 
 export const finishOutput = (state) => state.frozen >= state.input.length || copyTill(state, state.input.length)
@@ -127,7 +157,7 @@ export function applyHunks(run, header, hunks, state, reject) {
     if (run.skipRest || creating || !where || !applyHunk(state, hunk, where)) {
       if (!run.skipRejectFile) reject.add(hunk, tally.failed === 0, state.outOffset, run.reverse)
       tally.failed++
-      if (!run.skipRest && !opts.silent) run.say(`Hunk #${tally.count} FAILED at ${newWhere}.\n`)
+      if (!run.skipRest && !opts.silent) run.say(`Hunk #${tally.count} FAILED at ${newWhere}${differentEndings(state, hunk, newWhere) ? ' (different line endings)' : ''}.\n`)
     } else if (!opts.silent && (fuzz || state.inOffset)) {
       const offset = state.inOffset ? ` (offset ${state.inOffset} line${state.inOffset === 1 ? '' : 's'})` : ''
       run.say(`Hunk #${tally.count} succeeded at ${newWhere}${fuzz ? ` with fuzz ${fuzz}` : ''}${offset}.\n`)

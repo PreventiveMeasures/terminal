@@ -10,8 +10,9 @@ const line = (prefix, text) => prefix + text
 
 // `reverse` is read when a hunk is added, not when the file starts: the
 // first hunk can turn the patch around, and GNU labels the header by the
-// direction in force when the reject is written.
-export function createReject(header, format) {
+// direction in force when the reject is written. So is the style of a
+// context patch, which reading its hunks can show to be the new one.
+export function createReject(header, format, scanner) {
   let text = ''
   const headerLine = (tag, side) => `${tag} ${header.names[side] ?? '/dev/null'}${header.timestrs[side] ?? ''}\n`
   const index = header.names.index === null ? '' : `Index: ${header.names.index}\n`
@@ -24,7 +25,7 @@ export function createReject(header, format) {
         text += unifiedReject(hunk, outOffset)
       } else {
         if (first) text += index + headerLine('***', sides[0]) + headerLine('---', sides[1])
-        text += contextReject(hunk, outOffset, format)
+        text += contextReject(hunk, outOffset, header.type, header.type === 'unified' || (header.type === 'context' && scanner.newStyle))
       }
     },
   }
@@ -47,15 +48,16 @@ function unifiedReject(hunk, outOffset) {
 }
 
 // `*** 3,5 ****` and `--- 3,6 ----` for a new-style context reject; a
-// normal diff's rejects get the old style, `*** 3,5` and `--- 3,6 -----`.
+// normal diff's rejects get the old style, `*** 3,5` and `--- 3,6 -----`,
+// and so do an old-style context diff's: the style is the patch's, whatever
+// --reject-format asked for. Only a unified hunk's changes are marked `!`.
 function contextRange(first, count) {
   const last = first + count - 1
   return last < first ? '0' : last === first ? `${first}` : `${first},${last}`
 }
 
-function contextReject(hunk, outOffset, format) {
-  const newStyle = format !== 'normal'
-  const marks = hunk.marks ?? (format === 'normal' ? rawMarks(hunk) : normalizedMarks(hunk))
+function contextReject(hunk, outOffset, type, newStyle) {
+  const marks = hunk.marks ?? (type === 'unified' ? normalizedMarks(hunk) : rawMarks(hunk))
   let out = `***************${hunk.fn ?? ''}\n`
   out += `*** ${contextRange(hunk.oldStart + outOffset, hunk.oldLines.length)}${newStyle ? ' ****' : ''}\n`
   hunk.oldLines.forEach((l, i) => { out += line(marks.old[i] + ' ', l.text) })

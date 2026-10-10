@@ -253,11 +253,20 @@ is printed is read back and held to the change set. Neither a change set that
 would not reconstruct the second file nor a rendering that does not say what
 it was given is ever printed — both are refused as trouble instead, so no
 diff this terminal emits loses a line. Which of several shortest change sets
-it picks can differ from GNU's; given the same change set, the bytes are
-GNU's. The virtual filesystem keeps no modification
-times, so headers carry the name alone, as they do under `--label`; a file
-`-N` stands in for gets the epoch, which is what tells `patch` it did not
-exist. A name a directory holds and cannot read — a link leading nowhere, or
+it picks can differ from GNU's, which sets aside lines that cannot match
+before it searches and settles where every run of changes sits, in every
+output style, within the stretch the files' identical ends leave; nothing
+here can tell when the two differ. Given the same change set, the bytes are
+GNU's. A header dates each file the way GNU's does, by its modification
+time — which this terminal keeps as the moment it was made, the time `ls -l`
+shows — to the nanosecond in GNU's ISO form, or ctime's for a context diff
+where `LC_TIME` is `C`, in the host's zone unless `TZ` is set. Standard input
+is dated now, and a file `-N` stands in for gets the epoch, which is what
+tells `patch` it did not exist. `/dev/null` is read as the empty file it is,
+but its time is the host's own: a header that would print it is refused,
+and `--label` names that side without one. A NUL makes a file binary only in
+the first 4096 bytes, the block GNU's first read takes; past them it is text
+like any other byte. A name a directory holds and cannot read — a link leading nowhere, or
 one that loops — is answered for as that read rather than as a type of its
 own, whatever is across from it, and what stopped the read is what is said.
 `-y`, `-e`, `-B`, `-I` and the rest report an unsupported diagnostic.
@@ -269,7 +278,15 @@ with fuzz, exactly as GNU patch does, with the same messages, reject files,
 `-d`, `-r`, `-b`, `-z`, `--dry-run` and `--reject-format`. It writes only
 inside a writable `/tmp/` overlay; a target anywhere else is refused with an
 unsupported diagnostic, while `--dry-run` and `-o -` work everywhere. Ed
-scripts and git binary patches are refused the same way.
+scripts and git binary patches are refused the same way. A patch is read
+the way GNU's pch.c reads one: a line starting with `#` is a comment it
+passes over, a last line without its newline is said to end the patch in the
+middle of a line and is not read, a hunk header is read as leniently as GNU
+reads it and a damaged one stops the patch in GNU's words, and the line
+numbers it gives are the ones GNU counts. An output file is made before the
+patch is read and keeps what was written before a patch that stops partway,
+a file is backed up once, before patch first writes it, and a file a patch
+deletes goes once the whole input has been read.
 
 `gzip`, `gunzip`, `zcat` and `gzcat` compress and decompress through the
 runtime's stream as GNU gzip 1.12 does, with `-c`, `-d`, `-k` and `-f`, which
@@ -368,38 +385,77 @@ terminal does not speak, `file:` included. A request carries what the command
 line gave it and nothing off the host: no environment, no `.netrc`, no cookie
 jar, no client certificate, no proxy.
 
-What it carries of curl: `-s`, `-S`, `-i`, `-I`, `-L` with `--max-redirs`,
-`-f`, `-X`, `-H`, `-A`, `-u`, `-d` with `--data-raw`, `--data-binary`,
-`--data-ascii` and `--json` — `@file` reading the virtual tree and `@-` the
-pipe — `-o`, `-O`, `-m`, `--compressed`, which the runtime does anyway, and
-`-h`, which lists what this curl carries rather than what curl has.
+What it carries of curl: `-s`, `-S`, `--no-progress-meter`, `-L` with
+`--max-redirs`, `-f`, `-X`, `-H`, `-A`, `-u`, `-d` with `--data-raw`,
+`--data-binary`, `--data-ascii` and `--json` — `@file` reading the virtual tree
+and `@-` the pipe, `-d` dropping the carriage returns and newlines of a file
+and stopping at its first NUL as curl does — `-o`, `-O`, `-m`, `--compressed`,
+`-g`, and `-h`, which prints curl 8.5.0's own short list. A URL is read as curl
+reads it: one to three slashes after the scheme, a scheme guessed from how a
+bare host starts, credentials in it sent as basic authentication, and curl's
+code 3 and words for a blank in it or a fourth slash. The `[...]` and `{...}`
+ranges curl expands are refused unless `-g` reads them as written, and so is a
+URL the runtime would send other than as curl sends it — a non-ASCII or quoted
+character it would encode, a `%2e%2e` it would take as a step up.
 A hop `-L` takes carries what the request carried, less what it should not:
 a redirect to another origin — another host, another scheme, another port —
-goes without the `Authorization`, `Cookie` and `Proxy-Authorization` the first
-request had, since a credential is addressed to the origin it was given for
-and the next origin was named by the answer rather than by whoever wrote the
-line. curl drops them for the same reason without `--location-trusted`, which
-is refused here. Several URLs run one after another, `-o` and `-O` pair with
-them in the order both were written, and the status is the last transfer that failed, in curl's
-own numbers: 3 for a URL, 6 for a name that did not resolve, 7 for a
-connection that did not open, 22 for `-f` over a failing status, 23 for an
-output it could not write, 28 for `--max-time`, 47 for the end of a redirect
-chain, 56 for an answer that stopped early, and 60 for a certificate. What
-comes back is bytes, as it is for every other command here that writes what no
-string need spell, so `curl url > /tmp/f.png` and `curl url | sha256sum` read
-the answer itself and `-o` writes it into the overlay — which, being the only
-writable place here, is where an output file must be. A transfer is one
-request and its answer: there is no connection to reuse, no cookie jar, no
-resume, and no progress meter, since there is no terminal to draw one on. The
-options that would ask for those — `-k`, `-v`, `-x`, `-b`, `-c`, `-w`, `-T`,
-`-F`, `-G`, `-r`, `-E`, `--retry`, `--connect-timeout` and the rest — report
-an unsupported diagnostic naming what would have to exist for them to work,
-rather than being accepted and quietly dropped. Two things read differently
-from the real tool, and the run says the first of them on the note channel:
-`-i` prints a header block rendered from what `fetch` hands back — names
-lowercased and sorted, under a status line that reads `HTTP/1.1` whichever
-version the connection spoke — and a header the runtime reserves for itself is
-the runtime's to set, so `-H` can add to a request but not take away from it.
+goes without the `Authorization` and `Cookie` the first request had, since a
+credential is addressed to the origin it was given for and the next origin was
+named by the answer rather than by whoever wrote the line. curl drops them for
+the same reason without `--location-trusted`, which is refused here. A hop
+keeps or changes the method by curl's rules: a POST becomes a GET on a 301,
+302 or 303 and keeps its body on a 307 or 308, and a method `-X` named is the
+method of every hop, without the body a hop to a GET would have left behind. Several URLs run one after another, `-o` and `-O` pair
+with them in the order both were written, and the status is the last
+transfer's, in curl's own numbers: 3 for a URL, 6 for a name that did not
+resolve, 7 for a connection that did not open, 18 for a body shorter than it
+said it was, 22 for `-f` over a failing status, 23 for an output it could not
+write, 26 for a data file it could not read, 28 for `--max-time`, 47 for the
+end of a redirect chain, 56 for an answer that stopped early, and 60 for a
+certificate. A body that stops short is written as far as it came before the
+status says so. curl's words for a failure are written where they are known
+word for word; where curl's carry what the runtime does not report — the
+milliseconds a connection took, the bytes a timeout had received — the failure
+is refused unless `-s` leaves it unsaid. What comes back is bytes, as it is for
+every other command here that writes what no string need spell, so
+`curl url > /tmp/f.png` and `curl url | sha256sum` read the answer itself and
+`-o` writes it into the overlay — which, being the only writable place here,
+is where an output file must be — or, as `/dev/null`, nowhere. A transfer is
+one request and its answer: there is no connection to reuse, no cookie jar and
+no resume. The options that would ask for those — `-k`, `-v`, `-x`, `-b`,
+`-c`, `-w`, `-T`, `-F`, `-G`, `-r`, `-E`, `--retry`, `--connect-timeout` and
+the rest — report an unsupported diagnostic naming what would have to exist
+for them to work, rather than being accepted and quietly dropped, and so does
+an option this curl does not know. So do `-i` and `-I`, since the header block
+the runtime hands back is not the one the server sent — not its names' case or
+order, not a name sent twice, not the HTTP version — and the progress meter
+curl draws on stderr when what it writes is not the terminal: `-o`, `-O`, or a
+stdout redirected or piped asks for it unless `-s` or `--no-progress-meter`
+leaves it out or stderr goes nowhere. An answer the server sent encoded is
+refused, since the runtime hands back only the decoded bytes and curl writes
+what came; under `--compressed`, which asks for the codings curl would decode
+itself, it is written decoded, as curl writes it.
+
+The request is curl's where the runtime lets it be: `User-Agent: curl/8.5.0`,
+`Accept: */*` (`application/json` under `--json`), and the `Content-Type` and
+`Content-Length` of a body. What the runtime will not send as curl sends it is
+refused rather than changed: a `Host`, `Expect`, `Transfer-Encoding`,
+`Keep-Alive`, `Upgrade` or `Content-Length` header, a `Connection` other than
+`close` or `keep-alive` or a `Sec-Fetch-Mode` other than `cors`, a header
+named twice, `-H "Name:"` taking away a
+header the runtime always sends, `-A ""`, `-u` without a password, which curl
+would ask for, a body over a megabyte without `-H "Expect:"`, and an `-X` the
+runtime would send otherwise — a lowercase method it would capitalise, a
+method it will not send at all, a HEAD whose announced body curl would wait
+for, a GET or HEAD with a body. A header with no colon or no name is dropped,
+as curl drops it, and `Name;` is the empty header it is in curl. What remains
+the runtime's and is not reported line by line: it sends header names in
+lowercase and in an order of its own, and adds `connection: keep-alive`,
+`accept-language: *`, `sec-fetch-mode: cors` and an `accept-encoding` — set
+here to `identity`, curl's meaning when it sends none, or to curl's own list
+under `--compressed` — none of which curl sends, and a POST or PUT without a
+body carries `content-length: 0`. A server that answers by those headers, or
+by their case or order, sees a request curl would not have made.
 
 `realpath` supports GNU canonicalization modes (`-e`, `-m`, and the default),
 relative output (`--relative-to`, `--relative-base`), quiet errors (`-q`) and

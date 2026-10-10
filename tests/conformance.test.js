@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { hrtime } from 'node:process'
-import { describe, it } from 'node:test'
+import { describe, it, mock } from 'node:test'
 import { URL } from 'node:url'
 import { createTerminal } from '@preventive/terminal'
 import { TREES } from './fixtures/conformance/trees.js'
@@ -28,6 +28,10 @@ import { TREES } from './fixtures/conformance/trees.js'
 //   @tree glob                     use that fixture tree (see trees.js)
 //   @mode overlay                  run in the writable /tmp overlay
 //   @mode readonly                 run on a read-only mount (the default)
+//   @clock 2026-09-18T05:52:00.250Z  make the terminal at that instant, read
+//                                  the clock as stopped there, under TZ=UTC —
+//                                  the time every file is dated to, which is
+//                                  what a diff header prints
 //
 // The three failure shapes are deliberately distinct, because which one a
 // command produces is itself the behaviour under test. `!` is a gap this
@@ -53,6 +57,7 @@ export function parse(text, file) {
   const cases = []
   let tree = 'trees'
   let mode = 'readonly'
+  let clock = null
   text.split('\n').forEach((raw, index) => {
     const line = raw.trim()
     const at = `${file}:${index + 1}`
@@ -65,6 +70,9 @@ export function parse(text, file) {
       } else if (directive === 'mode') {
         assert.ok(value === 'overlay' || value === 'readonly', `${at}: unknown mode ${value}`)
         mode = value
+      } else if (directive === 'clock') {
+        clock = Date.parse(value)
+        assert.ok(Number.isFinite(clock), `${at}: unreadable clock ${value}`)
       } else assert.fail(`${at}: unknown directive ${directive}`)
       return
     }
@@ -83,7 +91,7 @@ export function parse(text, file) {
       command = line.slice(0, split).trim()
       expect = line.slice(split + 4).trim()
     }
-    cases.push({ at, tree, mode, command, ...expectation(expect, at) })
+    cases.push({ at, tree, mode, clock, command, ...expectation(expect, at) })
   })
   return cases
 }
@@ -136,9 +144,13 @@ function closingQuote(expect, at) {
 // The overlay mounts sources away from /tmp and copies them in, which is how
 // a workflow gets somewhere to write without the source tree becoming
 // writable. Read-only mounts stay at / so paths in a case read naturally.
-async function terminalFor({ at, tree, mode }) {
+async function terminalFor({ at, tree, mode, clock }) {
   const files = TREES[tree]
-  if (mode === 'readonly') return createTerminal(files)
+  if (mode === 'readonly') {
+    const terminal = createTerminal(files)
+    if (clock !== null) await terminal.run('export TZ=UTC')
+    return terminal
+  }
   const terminal = createTerminal(files, { mount: '/work', cwd: '/work', writable: '/tmp/' })
   for (const name of Object.keys(files)) {
     // There is no mkdir and no recursive cp, and a redirect will not create
@@ -149,6 +161,7 @@ async function terminalFor({ at, tree, mode }) {
     assert.equal(copy.exitCode, 0, `${at}: copying ${name} into the overlay: ${copy.stderr}`)
   }
   assert.equal((await terminal.run('cd /tmp')).exitCode, 0)
+  if (clock !== null) await terminal.run('export TZ=UTC')
   return terminal
 }
 
@@ -157,6 +170,12 @@ async function terminalFor({ at, tree, mode }) {
 const quote = (name) => `'${name.replaceAll("'", String.raw`'\''`)}'`
 
 async function check(entry) {
+  if (entry.clock === null) return checkNow(entry)
+  mock.timers.enable({ apis: ['Date'], now: entry.clock })
+  try { return await checkNow(entry) } finally { mock.timers.reset() }
+}
+
+async function checkNow(entry) {
   const terminal = await terminalFor(entry)
   const started = hrtime.bigint()
   const result = await terminal.run(entry.command)

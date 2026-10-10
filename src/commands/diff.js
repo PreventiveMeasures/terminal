@@ -1,7 +1,7 @@
 import { DiffError, FormatError, diff as diffText } from '@preventive/diff'
 import { basename, lookup, sameBytes, textOfFile } from '../fs.js'
-import { consumeStdin, err, readTextOrBytes } from '../util.js'
-import { unsupported } from '../unsupported.js'
+import { consumeStdin, encodeUtf8, err, readTextOrBytes } from '../util.js'
+import { markUnsupported, unsupported, unsupportedNote } from '../unsupported.js'
 import { lookupWithNote } from '../notes.js'
 import { appendOutput, emptyOutput } from '../shell/output.js'
 import { renderDiff } from './diff-output.js'
@@ -60,6 +60,7 @@ function samePath(state, a, b) {
 
 function operandKind(state, name) {
   if (name === '-') return 'stdin'
+  if (name === DEV_NULL) return 'file'
   const found = lookup(state.ctx.cwd, name, state.ctx.fs)
   if (found.error) return 'missing'
   return state.ctx.fs.isDir(found.path) ? 'dir' : 'file'
@@ -124,18 +125,27 @@ export function compareFiles(state, nameA, nameB, inDirectory, listed = null) {
     return report(state, `Files ${label(0)} and ${label(1)} differ\n`, 1)
   }
   let text
-  try { text = renderDiff(state, contents, [nameA, nameB], missing, inDirectory) } catch (e) {
+  const times = sides.map((side) => side.content === null ? 0 : side.mtime)
+  try { text = renderDiff(state, contents, [nameA, nameB], times, inDirectory) } catch (e) {
+    const note = unsupportedNote(e)
+    if (note) return refuse(state, note.detail, `diff: ${e.message}`)
     if (!(e instanceof DiffError) && !(e instanceof FormatError)) throw e
-    const message = `diff: ${nameA} ${nameB}: ${e.message}`
-    const detail = e instanceof DiffError ? 'change set verification' : 'diff rendering verification'
-    appendOutput(state.out, unsupported('feature', 'diff', detail, message, 2))
-    state.status = 2
-    return
+    return refuse(state, e instanceof DiffError ? 'change set verification' : 'diff rendering verification', `diff: ${nameA} ${nameB}: ${e.message}`)
   }
   // Nothing to print is the answer that they match; asking twice would mean
   // searching twice, since that search is the only thing that can say so.
   if (text === '') return sameReport(state, nameA, nameB)
   report(state, text, 1)
+}
+
+// Trouble this diff cannot get past, said on stderr and on the feed. The
+// feed takes it off the result the command hands back, which in a directory
+// walk is the whole walk's: the first refusal is the one carried, as it is
+// everywhere else here.
+function refuse(state, detail, message) {
+  appendOutput(state.out, unsupported('feature', 'diff', detail, message, 2))
+  if (!unsupportedNote(state.out)) markUnsupported(state.out, 'feature', 'diff', detail, message)
+  state.status = 2
 }
 
 function sameReport(state, nameA, nameB) {
@@ -146,10 +156,16 @@ function sameReport(state, nameA, nameB) {
 // shows the stripped lines too, as GNU's does.
 const stripTrailingCr = (text) => text.replace(/\r\n/gu, '\n')
 
-// GNU looks for a NUL in the first block it reads; a file this size is read
-// whole, so the whole file is what is looked at — its bytes where its text
-// is not there to look through.
-const isBinary = (side) => side.content === undefined ? side.bytes.includes(0) : side.content?.includes('\0') === true
+// GNU looks for a NUL in the first block it reads, which is st_blksize bytes
+// of a file and of a pipe alike — 4096 on the ext4 this tree models — and a
+// NUL past it is text like any other byte. Its bytes are looked through
+// where its text is not there to look through.
+const SNIFF = 4096
+function isBinary(side) {
+  if (side.content === undefined) return side.bytes.subarray(0, SNIFF).includes(0)
+  const at = side.content?.indexOf('\0') ?? -1
+  return at !== -1 && at < SNIFF && encodeUtf8(side.content.slice(0, at)).length < SNIFF
+}
 
 // Two files of text are the same text; where either is bytes that spell
 // none, the bytes are what says whether they differ. A side that is not
@@ -163,17 +179,23 @@ const EMPTY = new Uint8Array()
 // Content null means the file is not there, and undefined that its bytes
 // spell no text — which diff answers for, since a file holding a NUL is one
 // it compares without reading either as text. Identity tells `diff a ./a`
-// apart from two files that merely read the same.
+// apart from two files that merely read the same, and `mtime` is the time a
+// header dates the file by, null where the model keeps none.
 function readOperand(state, name) {
   const { ctx } = state
   if (name === '-') {
     consumeStdin(ctx)
-    return { content: state.stdin, identity: ctx.stdinHandle?.identity ?? Symbol('stdin') }
+    return { content: state.stdin, identity: ctx.stdinHandle?.identity ?? Symbol('stdin'), mtime: Date.now() }
   }
+  // The device every system has, read as the empty file it is. Its time is
+  // the host's, which nothing here models.
+  if (name === DEV_NULL) return { content: '', identity: DEV_NULL, mtime: null }
   const found = lookupWithNote(ctx, 'diff', name)
   // What stopped the read travels with it: a link that loops is not the
   // missing file a name that is simply absent is.
   if (found.error || ctx.fs.isDir(found.path)) return { content: null, bytes: null, identity: undefined, error: found.error }
   const { text, bytes } = readTextOrBytes(ctx.fs, found.path)
-  return { content: text, bytes, identity: ctx.fs.fileIdentity?.(found.path) ?? found.path }
+  return { content: text, bytes, identity: ctx.fs.fileIdentity?.(found.path) ?? found.path, mtime: ctx.createdAt }
 }
+
+const DEV_NULL = '/dev/null'

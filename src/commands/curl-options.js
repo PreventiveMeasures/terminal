@@ -1,8 +1,8 @@
-import { toBase64 } from '@exodus/bytes/base64.js'
 import { parseArgs } from '../args.js'
 import { consumeStdin, encodeUtf8, joinBytes, readBytesOf } from '../util.js'
 import { lookupWithNote } from '../notes.js'
-import { unsupported } from '../unsupported.js'
+import { unsupported, unsupportedNote } from '../unsupported.js'
+import { requestHeaders } from './curl-headers.js'
 
 // Reading a curl command line: the options this one carries, the ones it
 // refuses by name, and everything the request is then made of. The two
@@ -15,10 +15,10 @@ import { unsupported } from '../unsupported.js'
 // which is how a thing curl can do but this cannot is told apart from a thing
 // curl has never had.
 const SCHEMA = {
-  short: ['h', 's', 'S', 'i', 'I', 'L', 'f', 'O', 'k', 'v', 'G', 'n'],
+  short: ['h', 's', 'S', 'i', 'I', 'L', 'f', 'O', 'k', 'v', 'G', 'n', 'g'],
   long: [
     'help', 'silent', 'show-error', 'no-progress-meter', 'include', 'head', 'location', 'location-trusted', 'fail', 'remote-name',
-    'compressed', 'insecure', 'verbose', 'get', 'netrc',
+    'compressed', 'insecure', 'verbose', 'get', 'netrc', 'globoff',
   ],
   valueShort: ['X', 'A', 'm', 'u', 'e', 'b', 'c', 'w', 'x', 'T', 'r', 'C', 'E', 'D', 'F'],
   valueLong: [
@@ -39,8 +39,8 @@ const SCHEMA = {
 const REFUSED = new Map([
   ['k', 'certificates are the runtime\'s to check, and nothing here can tell it not to'],
   ['insecure', 'certificates are the runtime\'s to check, and nothing here can tell it not to'],
-  ['v', 'the trace is of a connection this code never sees; `-i` prints the response headers'],
-  ['verbose', 'the trace is of a connection this code never sees; `-i` prints the response headers'],
+  ['v', 'the trace is of a connection this code never sees'],
+  ['verbose', 'the trace is of a connection this code never sees'],
   ['location-trusted', 'a credential is for the origin it was given for; `-L` follows the hop without it'],
   ['G', 'moving the data into the query string is not implemented; put it in the URL'],
   ['get', 'moving the data into the query string is not implemented; put it in the URL'],
@@ -70,8 +70,8 @@ const REFUSED = new Map([
   ['capath', 'the trust store is the runtime\'s own'],
   ['e', 'a referer is `-H "Referer: …"`'],
   ['referer', 'a referer is `-H "Referer: …"`'],
-  ['D', 'writing the headers to a file of their own is not implemented; `-i` writes them in front of the body'],
-  ['dump-header', 'writing the headers to a file of their own is not implemented; `-i` writes them in front of the body'],
+  ['D', 'writing the headers to a file of their own is not implemented'],
+  ['dump-header', 'writing the headers to a file of their own is not implemented'],
   ['connect-timeout', 'only the whole transfer can be timed here, which is `--max-time`'],
   ['retry', 'retrying is not implemented: a transfer here is one request and its answer'],
   ['limit-rate', 'the runtime reads the response at its own pace'],
@@ -86,27 +86,51 @@ const DATA = new Map([
   ['d', 'text'], ['data', 'text'], ['data-ascii', 'text'],
   ['data-raw', 'raw'], ['data-binary', 'binary'], ['json', 'json'],
 ])
-const HEADER_OPTIONS = new Set(['H', 'header'])
 const OUTPUT_OPTIONS = new Set(['o', 'output'])
 const REMOTE_OPTIONS = new Set(['O', 'remote-name'])
-const FORM_TYPE = 'application/x-www-form-urlencoded'
-const JSON_TYPE = 'application/json'
 // curl's own ceiling on a chain of redirects; `--max-redirs` moves it, and
 // `-1` is curl's spelling for no ceiling at all.
 const MAX_REDIRS = 50
 const LINE_ENDINGS = new Set([0x0a, 0x0d])
 
+// What curl says under a complaint about its command line, which is printed
+// whatever -s says.
+export const TRY = "curl: try 'curl --help' or 'curl --manual' for more information\n"
+
 // What a whole command line comes to: the refusal it met, or the request it
 // describes, the URLs it names, and where each of their answers goes.
 export function readCommandLine(tokens, stdin, state) {
-  const { flags, values, positional, order } = parseArgs(tokens, SCHEMA)
+  // curl takes no `--name=value`: it is a name it does not know.
+  const glued = tokens.slice(0, tokens.includes('--') ? tokens.indexOf('--') : tokens.length).find((t) => /^--[^=]+=/u.test(t))
+  if (glued !== undefined) return { refusal: unknownOption(glued) }
+  let parsed
+  try { parsed = parseArgs(tokens, SCHEMA) } catch (e) {
+    const note = unsupportedNote(e)
+    if (note) return { refusal: unknownOption(note.detail) }
+    const missing = /^(\S+) requires an argument$/u.exec(e.message)
+    return { usage: `curl: option ${missing ? missing[1] : ''}: requires parameter\n${TRY}` }
+  }
+  const { flags, values, positional, order } = parsed
   // Asked for what it can do, it answers before anything else it was handed,
-  // as curl does — and answers with what it carries rather than with curl's
-  // own list, since it will not offer what it would then refuse.
-  if (flags.has('h') || flags.has('help')) return { help: true }
+  // as curl does — with its own words, which name a category only when one
+  // follows the option.
+  const help = order.findIndex(({ name }) => name === 'h' || name === 'help')
+  if (help !== -1) return helpFor(tokens, order.slice(0, help))
   const refusal = refusedOption(flags, values)
-  if (refusal) return { refusal }
-  return { opts: readOptions(flags, values, order, stdin, state), urls: positional, targets: outputTargets(order) }
+  return { refusal, opts: refusal ? null : readOptions(flags, values, order, stdin, state), urls: positional, targets: outputTargets(order) }
+}
+
+const unknownOption = (label) => unsupported('option', 'curl', label, `curl: option ${label}: is unknown\n${TRY.trimEnd()}`, 2)
+
+// `--help` with nothing after it is curl's short list, word for word; with
+// anything after it, curl takes that for a category to list, which is not
+// kept here. An option before it that curl would have read and failed on
+// first is not looked at either.
+function helpFor(tokens, before) {
+  const last = tokens.at(-1)
+  const alone = last === '--help' || /^-[sSiILfOkvGng]*h/u.test(last)
+  if (alone && !before.some(({ name }) => ['m', 'max-time', 'max-redirs'].includes(name) || DATA.has(name))) return { help: true }
+  return { refusal: unsupported('option', 'curl', '--help', 'curl: --help: listing a category of options is not supported', 2) }
 }
 
 function refusedOption(flags, values) {
@@ -118,6 +142,13 @@ function refusedOption(flags, values) {
   return null
 }
 
+// The spelling a value option was given under last, which is the one curl
+// names when it cannot read the value.
+function spelling(order, names) {
+  const last = order.findLast(({ name }) => names.includes(name))
+  return last === undefined ? null : (last.name.length === 1 ? '-' : '--') + last.name
+}
+
 // Everything the request is made of, read once. What a redirect may change —
 // the method, the body, and what the body had the request say about it — it
 // changes on the way rather than here.
@@ -125,88 +156,98 @@ function readOptions(flags, values, order, stdin, state) {
   state.quiet = (flags.has('s') || flags.has('silent')) && !flags.has('S') && !flags.has('show-error')
   const body = requestBody(order, stdin, state)
   if (body === null) return null
-  const headers = requestHeaders(values, order, body, state)
-  if (headers === null) return null
-  const redirects = count(values.get('max-redirs'), '--max-redirs', state)
-  const seconds = count(values.get('m') ?? values.get('max-time'), '--max-time', state)
+  const seconds = number(values.get('m') ?? values.get('max-time'), spelling(order, ['m', 'max-time']), seconds2ms, state)
+  const redirects = number(values.get('max-redirs'), '--max-redirs', redirectCount, state)
   if (redirects === null || seconds === null) return null
-  // A deadline is the runtime's to keep, and a runtime without a signal to
-  // hand it one cannot keep this one: that is a gap rather than a request
-  // made without the limit it was given.
-  if (seconds !== undefined && typeof AbortSignal?.timeout !== 'function') {
-    return gap(state, 'feature', '--max-time', 2, 'this runtime cannot put a deadline on a request')
-  }
   const head = flags.has('I') || flags.has('head')
+  const compressed = flags.has('compressed')
+  const headers = requestHeaders({ values, order, body, compressed, state })
+  if (headers === null) return null
   return {
-    headers,
+    headers: headers.list,
+    implied: headers.implied,
     body: body.bytes,
     head,
     include: flags.has('i') || flags.has('include'),
+    compressed,
+    globoff: flags.has('g') || flags.has('globoff'),
     location: flags.has('L') || flags.has('location'),
     failEarly: flags.has('f') || flags.has('fail'),
-    method: values.get('X') ?? values.get('request') ?? (head ? 'HEAD' : body.bytes === null ? 'GET' : 'POST'),
+    progress: !(flags.has('s') || flags.has('silent') || flags.has('no-progress-meter')),
+    custom: values.get('X') ?? values.get('request') ?? null,
+    request: head ? 'HEAD' : body.bytes === null ? 'GET' : 'POST',
     redirects: redirects === undefined ? MAX_REDIRS : redirects < 0 ? Infinity : redirects,
-    timeout: seconds === undefined ? null : Math.round(seconds * 1000),
+    // A deadline of no time at all is no deadline, as it is to curl.
+    timeout: seconds === undefined || seconds === 0 ? null : seconds,
   }
 }
 
-// A number curl would take, refused in the words curl refuses one with.
+// A number curl would take, read the way curl reads it — strtod for a time,
+// strtol for a count — and refused in the words curl refuses one with.
 // Nothing where the option was not given, which is not the same answer as a
 // value that was given and was not a number.
-function count(written, label, state) {
+function number(written, label, read, state) {
   if (written === undefined) return
-  const value = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/u.test(written.trim()) ? Number(written.trim()) : Number.NaN
-  if (!Number.isFinite(value)) {
-    state.stderr += `curl: option ${label}: expected a proper numerical parameter\n`
-    state.status = 2
-    return null
-  }
-  return value
+  const answer = read(written)
+  if (typeof answer === 'number') return answer
+  state.stderr += `curl: option ${label}: ${answer}\n${TRY}`
+  state.status = 2
+  return null
+}
+
+const BLANKS = /^[ \t\n\v\f\r]*/u
+const DECIMAL = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/u
+const HEX = /^[+-]?0[xX][0-9a-fA-F]+$/u
+const TOO_LARGE = 'too large number'
+const LONG_MAX = 2n ** 63n - 1n
+const BAD = 'expected a proper numerical parameter'
+
+function seconds2ms(written) {
+  const text = written.replace(BLANKS, '')
+  const value = DECIMAL.test(text) ? Number(text) : HEX.test(text) ? Number.parseInt(text, 16) : Number.NaN
+  if (Number.isNaN(value)) return BAD
+  if (value > 2 ** 63 / 1000) return TOO_LARGE
+  if (value < 0) return 'expected a positive numerical parameter'
+  return Math.trunc(value * 1000)
+}
+
+function redirectCount(written) {
+  const text = written.replace(BLANKS, '')
+  if (!/^[+-]?\d+$/u.test(text)) return BAD
+  const value = Number(text)
+  if (BigInt(text.replace(/^\+/u, '')) > LONG_MAX || BigInt(text.replace(/^\+/u, '')) < -LONG_MAX - 1n) return TOO_LARGE
+  return value < -1 ? BAD : value
 }
 
 // The body, from the data options in the order they were written and joined
-// as curl joins them: `&` between the pieces of a form, nothing between the
-// pieces of a `--json`. A file that cannot be read stops the command where
-// curl stops it.
+// as curl joins them: `&` before each piece but a `--json` one, which joins
+// on to what came before. A file that cannot be read stops the command line
+// where curl stops it, in its words.
 function requestBody(order, stdin, state) {
-  const parts = []
-  const kinds = new Set()
+  let joined = null
+  let json = false
   for (const { name, value } of order) {
     const how = DATA.get(name)
     if (how === undefined) continue
-    const piece = dataPiece(how, value, stdin, state)
+    const piece = dataPiece(how, value, stdin, state, (name.length === 1 ? '-' : '--') + name)
     if (piece === null) return null
-    kinds.add(how === 'json' ? 'json' : 'form')
-    parts.push(piece)
+    if (how === 'json') json = true
+    joined = joined === null ? piece : joinBytes([joined, encodeUtf8(how === 'json' ? '' : '&'), piece])
   }
-  if (parts.length === 0) return { bytes: null, json: false }
-  // curl takes one or the other: a body that is a form and a body that is
-  // JSON disagree about what joins their pieces and what the request should
-  // say it is carrying, and picking one of the two would answer the other.
-  if (kinds.size > 1) {
-    state.stderr += 'curl: --json cannot be mixed with --data\n'
-    state.status = 2
-    return null
-  }
-  const json = kinds.has('json')
-  const joined = []
-  for (const [at, part] of parts.entries()) {
-    if (at > 0 && !json) joined.push(encodeUtf8('&'))
-    joined.push(part)
-  }
-  return { bytes: joinBytes([...joined, new Uint8Array()]), json }
+  return { bytes: joined, json }
 }
 
-function dataPiece(how, value, stdin, state) {
+function dataPiece(how, value, stdin, state, label) {
   if (how === 'raw' || !value.startsWith('@')) return encodeUtf8(value)
   const name = value.slice(1)
-  const bytes = name === '-' ? pipedBytes(stdin, state.ctx) : fileBytes(name, state)
+  const bytes = name === '-' ? pipedBytes(stdin, state.ctx) : fileBytes(name, state, label)
   if (bytes === null) return null
-  // The text forms drop the line endings a file carries, which is what makes
-  // `-d @body.txt` the one field it looks like rather than one with a newline
-  // stuck on the end. `--data-binary` keeps them, and so does `--json`, which
-  // is that same option under two headers — a document is what it holds.
-  return how === 'text' ? bytes.filter((byte) => !LINE_ENDINGS.has(byte)) : bytes
+  if (how !== 'text') return bytes
+  // The text forms read a file as a string: its line endings go, and so does
+  // everything from a NUL on, which is where the string ends.
+  const text = bytes.filter((byte) => !LINE_ENDINGS.has(byte))
+  const nul = text.indexOf(0)
+  return nul === -1 ? text : text.subarray(0, nul)
 }
 
 // Taking the pipe is taking it: the next command in the group finds it at its
@@ -218,68 +259,19 @@ function pipedBytes(stdin, ctx) {
   return piped ?? encodeUtf8(text)
 }
 
-function fileBytes(name, state) {
+// A file that cannot be read is curl's code 26, said twice: once as it opens
+// it — which -s, if it came first, silences — and once as the option it was
+// reading, which nothing silences.
+function fileBytes(name, state, label) {
   const { ctx } = state
   const found = lookupWithNote(ctx, 'curl', name)
   if (found.error || ctx.fs.isDir(found.path)) {
-    fail(state, 26, 'Failed to open/read local data from file/application')
+    if (!state.quiet) state.stderr += `curl: Failed to open ${name}\n`
+    state.stderr += `curl: option ${label}: error encountered when reading a file\n${TRY}`
+    state.status = 26
     return null
   }
   return readBytesOf(ctx.fs, found.path)
-}
-
-// What the request carries: what was asked for, what a body needs said about
-// it, and nothing off the host — no environment, no stored credential, and no
-// header added behind the caller's back beyond the content type a body
-// implies, which `-H` overrides as it does in curl.
-function requestHeaders(values, order, body, state) {
-  const headers = new Headers()
-  if (body.bytes !== null) headers.set('content-type', body.json ? JSON_TYPE : FORM_TYPE)
-  if (body.json) headers.set('accept', JSON_TYPE)
-  const agent = values.get('A') ?? values.get('user-agent')
-  if (agent !== undefined) headers.set('user-agent', agent)
-  const credentials = values.get('u') ?? values.get('user')
-  if (credentials !== undefined) {
-    // curl asks a terminal for the password a `-u user` leaves out, and there
-    // is no terminal here to ask — the same reason `read` is not a builtin.
-    if (!credentials.includes(':')) return gap(state, 'feature', '-u', 2, 'there is no interactive input here to read a password from')
-    headers.set('authorization', `Basic ${toBase64(encodeUtf8(credentials))}`)
-  }
-  for (const { name, value } of order) {
-    if (!HEADER_OPTIONS.has(name)) continue
-    if (!setWritten(headers, value, state)) return null
-  }
-  return headers
-}
-
-// curl's three spellings of a custom header: `Name: value` sends it, `Name;`
-// sends it empty, and `Name:` takes away one curl would have sent. The third
-// is the one that cannot be done here — what a request carries beyond what is
-// set is the runtime's own — so it is refused rather than taken for a header
-// that was set and then was not.
-function setWritten(headers, written, state) {
-  const cut = written.indexOf(':')
-  if (cut === -1) {
-    if (!written.endsWith(';')) return badHeader(state, written)
-    return setHeader(headers, written.slice(0, -1), '', state)
-  }
-  const value = written.slice(cut + 1).trim()
-  if (value === '') {
-    gap(state, 'option', '-H', 2, `-H "${written}": taking away a header the runtime sends is not supported`)
-    return false
-  }
-  return setHeader(headers, written.slice(0, cut), value, state)
-}
-
-function setHeader(headers, name, value, state) {
-  try { headers.set(name.trim(), value) } catch { return badHeader(state, name.trim()) }
-  return true
-}
-
-function badHeader(state, written) {
-  state.stderr += `curl: -H: not a header: ${written}\n`
-  state.status = 2
-  return false
 }
 
 // Where each URL's answer goes: `-o` names a file, `-o -` and no option at
@@ -310,6 +302,7 @@ export function fail(state, code, message) {
 // already written.
 export function gap(state, kind, detail, code, text) {
   state.gap ??= { kind, detail, message: `curl: (${code}) ${text}` }
-  fail(state, code, text)
+  state.stderr += `curl: (${code}) ${text}\n`
+  state.status = code
   return null
 }

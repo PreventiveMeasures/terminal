@@ -2,7 +2,7 @@ import { lookup, resolve, writeTarget } from '../fs.js'
 import { consumeStdin, lineRecords } from '../util.js'
 import { UnsupportedError, markUnsupported, unsupportedNote } from '../unsupported.js'
 import { lookupWithNote } from '../notes.js'
-import { PatchFatal, createScanner, nextHunk, scanHeaders } from './patch-parse.js'
+import { PatchFatal, blankHeader, createScanner, nextHunk, restartAt, scanHeaders } from './patch-parse.js'
 import { chooseInput } from './patch-names.js'
 import { applyHunks, createFileState, finishOutput, joinOutput } from './patch-apply.js'
 import { createReject } from './patch-reject.js'
@@ -19,7 +19,7 @@ export function patch(stdin, tokens, ctx) {
   if (parsed.error) return parsed.error
   if (parsed.refused) return parsed.refused
   const { opts, operands } = parsed
-  const run = { ctx, opts, dir: ctx.cwd, events: [], stdout: '', stderr: '', skipRest: false, skipRejectFile: false, reverse: opts.reverse, reverseFlag: opts.reverse, someFailed: false, rejectsMade: new Set(), output: '' }
+  const run = { ctx, opts, dir: ctx.cwd, events: [], stdout: '', stderr: '', skipRest: false, skipRejectFile: false, reverse: opts.reverse, reverseFlag: opts.reverse, someFailed: false, rejectsMade: new Set(), created: new Set(), deferred: new Map(), output: '' }
   // With the result on stdout, what patch says goes to stderr, as GNU's does.
   const fd = opts.output === '-' ? 2 : 1
   run.quote = (name) => quoteShell(name, ctx)
@@ -30,9 +30,24 @@ export function patch(stdin, tokens, ctx) {
       if (found.error || !ctx.fs.isDir(found.path)) throw new PatchFatal(`Can't change to directory ${quoteShell(opts.directory, ctx)} : ${found.error ?? 'Not a directory'}`)
       run.dir = found.path
     }
+    // An output file is created, empty, before anything is read — a patch
+    // whose input is that same file reads it empty, as GNU's does — and is
+    // written as files are patched, so a patch that stops partway leaves
+    // what was written before it stopped.
+    const outfile = opts.output !== null && opts.output !== '-' ? opts.output : null
+    if (outfile !== null) writeText(run, outfile, '', false)
     const text = patchText(run, stdin, opts.input ?? operands[1] ?? null)
-    applyAll(run, createScanner(text), operands[0] ?? null)
-    if (opts.output !== null && opts.output !== '-') writeText(run, opts.output, run.output, false)
+    const written = () => run.output + (run.state && !run.state.done ? joinOutput(run.state.out) : '')
+    try {
+      applyAll(run, createScanner(text, run.say, opts.loose), operands[0] ?? null)
+    } catch (e) {
+      if (outfile !== null && e instanceof PatchFatal) writeText(run, outfile, written(), false)
+      throw e
+    }
+    if (outfile !== null) writeText(run, outfile, written(), false)
+    // Files the patch deletes go once it is all read, as GNU's do, and only
+    // those nothing wrote again in the meantime.
+    for (const { name, backup } of run.deferred.values()) removeFile(run, name, backup)
   } catch (e) {
     if (!(e instanceof PatchFatal)) {
       // A refusal keeps what was already said; anything else is dispatch's.
@@ -61,20 +76,24 @@ function patchText(run, stdin, source) {
 // write the result, move on to the next.
 function applyAll(run, scanner, operand) {
   const { opts } = run
+  run.operand = operand
   for (;;) {
     if (scanner.base !== 0 && scanner.base >= scanner.lines.length) return
     const header = scanHeaders(scanner, { needHeader: operand === null, strip: opts.strip, format: opts.format })
     if (header === null) {
       if (scanner.base === 0 && !scanner.empty) throw new PatchFatal('Only garbage was found in the patch input.')
+      // Given a file and an output, a patch with nothing in it still copies
+      // the one to the other (patch.c apply_empty_patch).
+      if (scanner.base === 0 && operand !== null && opts.output !== null) applyOne(run, scanner, { ...blankHeader(), type: 'normal', start: 0, sline: 0, empty: true }, operand)
       return
     }
     run.skipRest = false
     run.skipRejectFile = false
     run.reverse = run.reverseFlag
-    let inname = chooseInput(run, header, operand, (name) => stat(run, name))
+    let inname = chooseInput(run, header, operand, (name) => stat(run, name, operand === null))
     if (inname === null) inname = askForFile(run, scanner, header)
     if (run.skipRest) run.someFailed = true
-    scanner.pos = header.start
+    restartAt(scanner, header.start, header.sline)
     applyOne(run, scanner, header, inname)
     scanner.base = scanner.pos
   }
@@ -83,7 +102,7 @@ function applyAll(run, scanner, operand) {
 function askForFile(run, scanner, header) {
   const { opts } = run
   if (!opts.silent) {
-    run.say(`can't find file to patch at input line ${header.hunkLine + 1}\n`)
+    run.say(`can't find file to patch at input line ${header.sline}\n`)
     if (header.type !== 'normal') run.say(opts.strip === -1 ? 'Perhaps you should have used the -p or --strip option?\n' : 'Perhaps you used the wrong -p or --strip option?\n')
   }
   if (scanner.base < header.start) {
@@ -108,7 +127,7 @@ function applyOne(run, scanner, header, inname) {
   if (!run.skipRest) outname = opts.output ?? (renaming ? header.names[run.reverse ? 'old' : 'new'] : inname)
   let input = { exists: false, isDir: false, content: '' }
   if (!run.skipRest) {
-    input = stat(run, inname)
+    input = stat(run, inname, run.operand === null)
     if (input.isDir || input.link) {
       run.say(`File ${quoteShell(inname, run.ctx)} is not a regular file -- refusing to patch\n`)
       run.skipRest = true
@@ -119,7 +138,7 @@ function applyOne(run, scanner, header, inname) {
     assertWritable(run, outname)
     if (renaming && inname !== outname) assertWritable(run, inname)
   }
-  const state = createFileState(lineRecords(input.exists ? input.content : ''))
+  const state = run.state = createFileState(lineRecords(input.exists ? input.content : ''), run.say)
   if (!run.skipRest && !opts.silent) {
     const renamed = inname !== outname
     const skipRename = !renamed && (header.rename[0] || header.rename[1])
@@ -128,14 +147,15 @@ function applyOne(run, scanner, header, inname) {
     const note = renamed || skipRename ? ` (${skipRename ? 'already ' : ''}${how} from ${from})` : ''
     run.say(`${opts.dryRun ? 'checking' : 'patching'} file ${quoteShell(outname, run.ctx)}${note}\n`)
   }
-  const reject = createReject(header, opts.rejectFormat ?? header.type)
+  const reject = createReject(header, opts.rejectFormat ?? header.type, scanner)
   const hunks = () => header.empty ? null : nextHunk(scanner, header.type)
   const result = applyHunks(run, header, hunks, state, reject)
   if (!run.skipRest && !finishOutput(state)) {
-    run.say('misordered hunks! output would be garbled\nSkipping patch.\n')
+    run.say('Skipping patch.\n')
     run.skipRest = true
   }
   const content = joinOutput(state.out)
+  state.done = true
   if (opts.output !== null && !run.skipRest) {
     if (opts.output === '-') { run.stdout += content; run.events.push({ fd: 1, text: content }) }
     else run.output += content
@@ -150,9 +170,12 @@ function store(run, header, file) {
   const { opts } = run
   const { inname, outname, input, content, result, empty, renaming } = file
   const backup = opts.backup || (opts.backupIfMismatch && (result.mismatch || result.failed > 0))
+  // A file this run has already written is backed up no more: its backup
+  // holds what was there before patch began (util.c create_backup).
+  const fresh = !run.created.has(resolve(run.dir, outname))
   const saysDeleted = header.says[run.reverse ? 0 : 1] === 2
   if (empty && (opts.removeEmpty || saysDeleted)) {
-    if (!opts.dryRun) removeFile(run, outname, backup)
+    if (!opts.dryRun) run.deferred.set(resolve(run.dir, outname), { name: outname, backup: backup && fresh })
     return
   }
   if (!empty && saysDeleted) {
@@ -161,11 +184,15 @@ function store(run, header, file) {
   }
   if (opts.dryRun) return
   if (result.failed < result.count || renaming) {
-    writeText(run, outname, content, backup)
+    writeText(run, outname, content, backup && fresh)
+    run.created.add(resolve(run.dir, outname))
+    run.deferred.delete(resolve(run.dir, outname))
     if (renaming && inname !== outname && (header.rename[0] || header.rename[1])) removeFile(run, inname, false)
   } else if (backup) {
-    if (!input.exists) throw new PatchFatal(`Can't reopen file ${quoteShell(outname, run.ctx)} : No such file or directory`)
+    // The backup is made before the file it copies is opened, so a file
+    // that is not there leaves an empty one behind it.
     writeText(run, backupName(run, outname), input.content, false)
+    if (!input.exists) throw new PatchFatal(`Can't reopen file ${quoteShell(outname, run.ctx)} : No such file or directory`)
   }
 }
 
@@ -187,8 +214,11 @@ function reportRejects(run, outname, result, text) {
 const backupName = (run, name) => name + run.opts.suffix
 
 // GNU patches a regular file and nothing else, and reads the name itself to
-// decide: a link is none, whatever it leads to.
-function stat(run, name) {
+// decide: a link is none, whatever it leads to. A file an earlier patch in
+// the same input deletes is still there until the end, but a name a header
+// gives reads as one that is not.
+function stat(run, name, pending = false) {
+  if (pending && run.deferred.has(resolve(run.dir, name))) return { exists: false, isDir: false, link: false, size: 0, content: '' }
   const itself = lookup(run.dir, name, run.ctx.fs, { follow: false })
   const link = !itself.error && run.ctx.fs.isLink?.(itself.path) === true
   const found = lookup(run.dir, name, run.ctx.fs)
@@ -219,6 +249,8 @@ function writeText(run, name, content, backup) {
     if (backup) ctx.fs.openWritable(run.dir, backupName(run, name))
     ctx.fs.openWritable(run.dir, name).write(content)
   } catch (e) {
+    // A write the filesystem refuses as unsupported stays that refusal.
+    if (unsupportedNote(e)) throw e
     throw new PatchFatal(`Can't create file ${quoteShell(name, run.ctx)} : ${e?.fsError ?? e.message}`)
   }
 }
