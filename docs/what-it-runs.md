@@ -245,8 +245,9 @@ timestamps or other absent metadata report an unsupported diagnostic.
 
 `diff` compares files and, with `-r`, directories, in normal, unified (`-u`,
 `-U N`) and context (`-c`, `-C N`) format, with `-q`, `-s`, `-N`, `-x`, `-a`,
-`-i`, `-w`, `-b`, `-Z`, `--strip-trailing-cr`, `-p`, `-L` and `-d`. The diff
-itself comes from [`@preventive/diff`](https://www.npmjs.com/package/@preventive/diff),
+`-i`, `-w`, `-b`, `-Z`, `--strip-trailing-cr`, `-p`, `-L`, `-d` and
+`--horizon-lines`. The diff itself comes from
+[`@preventive/diff`](https://www.npmjs.com/package/@preventive/diff),
 which runs the linear-space Myers algorithm GNU diff uses and checks its own
 work twice over: the change set is replayed against the first file, and what
 is printed is read back and held to the change set. Neither a change set that

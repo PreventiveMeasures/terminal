@@ -170,10 +170,34 @@ diff -C1 horizon1 horizon2 => "*** horizon1\n--- horizon2\n***************\n*** 
 diff -u horizon1 horizon2 => "--- horizon1\n+++ horizon2\n@@ -1,10 +1,8 @@\n a\n b\n-b\n c\n b\n b\n b\n-b\n b\n c\n" 1
 diff -c horizon1 horizon2 => "*** horizon1\n--- horizon2\n***************\n*** 1,10 ****\n  a\n  b\n- b\n  c\n  b\n  b\n  b\n- b\n  b\n  c\n--- 1,8 ----\n" 1
 diff -U5 horizon1 horizon2 => "--- horizon1\n+++ horizon2\n@@ -1,10 +1,8 @@\n a\n b\n-b\n c\n b\n b\n b\n b\n-b\n c\n" 1
+# --horizon-lines lets that run reach as many lines into the shared ends,
+# or as many as the context printed if that is more; given twice, the
+# larger counts. Its count reads as -U's does.
+diff --horizon-lines=1 horizon1 horizon2 => "3d2\n< b\n6d4\n< b\n" 1
+diff --horizon-lines=2 horizon1 horizon2 => "3d2\n< b\n7d5\n< b\n" 1
+diff --horizon-lines 4 horizon1 horizon2 => "3d2\n< b\n9d7\n< b\n" 1
+diff --horizon-lines=5 --horizon-lines=1 horizon1 horizon2 => "3d2\n< b\n9d7\n< b\n" 1
+diff --horizon-lines= horizon1 horizon2 => "3d2\n< b\n5d3\n< b\n" 1
+diff --horizon-lines=' +2' horizon1 horizon2 => "3d2\n< b\n7d5\n< b\n" 1
+diff --horizon-lines=-0 horizon1 horizon2 => "3d2\n< b\n5d3\n< b\n" 1
+diff --horizon-lines=010 horizon1 horizon2 => "3d2\n< b\n9d7\n< b\n" 1
+diff --horizon-lines=99999999999999999999999 horizon1 horizon2 => "3d2\n< b\n9d7\n< b\n" 1
+diff --horizon-lines=1 -U1 horizon1 horizon2 => "--- horizon1\n+++ horizon2\n@@ -2,6 +2,4 @@\n b\n-b\n c\n b\n-b\n b\n" 1
+diff --horizon-lines=5 -U1 horizon1 horizon2 => "--- horizon1\n+++ horizon2\n@@ -2,3 +2,2 @@\n b\n-b\n c\n@@ -8,3 +7,2 @@\n b\n-b\n c\n" 1
+diff -C1 --horizon-lines=5 horizon1 horizon2 => "*** horizon1\n--- horizon2\n***************\n*** 2,4 ****\n  b\n- b\n  c\n--- 2,3 ----\n***************\n*** 8,10 ****\n  b\n- b\n  c\n--- 7,8 ----\n" 1
+diff --horizon-lines=0 -u horizon1 horizon2 => "--- horizon1\n+++ horizon2\n@@ -1,10 +1,8 @@\n a\n b\n-b\n c\n b\n b\n b\n-b\n b\n c\n" 1
+diff --horizon-lines=4 -u horizon1 horizon2 => "--- horizon1\n+++ horizon2\n@@ -1,10 +1,8 @@\n a\n b\n-b\n c\n b\n b\n b\n b\n-b\n c\n" 1
+diff --horizon-lines=1 ten ten2 => "3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n" 1
+diff --horizon-lines=x horizon1 horizon2 => % 2
+diff --horizon-lines=-1 horizon1 horizon2 => % 2
+diff --horizon-lines=1x horizon1 horizon2 => % 2
+diff --horizon-lines='2 ' horizon1 horizon2 => % 2
+diff horizon1 horizon2 --horizon-lines => % 2
 diff => % 2
 diff ten => % 2
 diff ten ten2 extra => % 2
 diff -U x ten ten2 => % 2
+diff -U -0 ten ten2 => "--- ten\n+++ ten2\n@@ -3 +3 @@\n-c\n+X\n@@ -9 +9 @@\n-i\n+Y\n" 1
 diff -U -1 ten ten2 => % 2
 diff -U '' ten ten2 => "--- ten\n+++ ten2\n@@ -3 +3 @@\n-c\n+X\n@@ -9 +9 @@\n-i\n+Y\n" 1
 diff -u -c ten ten2 => % 2
@@ -230,6 +254,8 @@ diff -rs f1 f1; echo $? => "0\n"
 diff -r d1 d1; echo $? => "0\n"
 diff -ru -L left -L right f1 f2 => "diff -ru -L left -L right left right\n--- left\n+++ right\n@@ -1 +1 @@\n-a\n+b\n" 1
 diff -rq -L left -L right f1 f2 => "Files left and right differ\n" 1
+diff -r --horizon-lines 2 f1 f2 => "diff -r --horizon-lines 2 f1/a f2/a\n1c1\n< a\n---\n> b\n" 1
+diff -ru --horizon-lines=2 f1 f2 => "diff -ru '--horizon-lines=2' f1/a f2/a\n--- f1/a\n+++ f2/a\n@@ -1 +1 @@\n-a\n+b\n" 1
 diff -r -p d1 d2 | head -4 => "diff -r -p d1/.hidden d2/.hidden\n*** d1/.hidden\n--- d2/.hidden\n***************\n"
 diff -r -a d1 d2 | head -6 => "diff -r -a d1/.hidden d2/.hidden\n1c1\n< .h1\n---\n> .h2\ndiff -r -a d1/Zed d2/Zed\n"
 diff -r d1 d2 2>/dev/null | wc -l => "38\n"

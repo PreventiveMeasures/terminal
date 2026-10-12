@@ -1,5 +1,5 @@
 import { parseArgs } from '../args.js'
-import { err, parseNonNegativeInt } from '../util.js'
+import { err } from '../util.js'
 import { unsupported, unsupportedNote } from '../unsupported.js'
 import { quoteShell } from './quote-name.js'
 
@@ -32,7 +32,7 @@ const REFUSED = new Map([
   ['F', 'a custom function regex'], ['show-function-line', 'a custom function regex'], ['X', 'reading exclusions from a file'], ['exclude-from', 'reading exclusions from a file'],
   ['S', 'a starting file'], ['starting-file', 'a starting file'], ['from-file', 'comparing one file to many'], ['to-file', 'comparing one file to many'],
   ['P', 'one-sided new files'], ['unidirectional-new-file', 'one-sided new files'], ['v', 'a version banner'], ['version', 'a version banner'],
-  ['help', 'a help text'], ['H', 'large-file heuristics'], ['speed-large-files', 'large-file heuristics'], ['horizon-lines', 'the horizon setting'],
+  ['help', 'a help text'], ['H', 'large-file heuristics'], ['speed-large-files', 'large-file heuristics'],
   ['ignore-file-name-case', 'case-insensitive names'], ['no-ignore-file-name-case', 'case-insensitive names'], ['no-dereference', 'symbolic links'],
   ['color', 'colored output'], ['palette', 'colored output'], ['line-format', 'custom line formats'], ['old-line-format', 'custom line formats'],
   ['new-line-format', 'custom line formats'], ['unchanged-line-format', 'custom line formats'], ['old-group-format', 'custom group formats'],
@@ -66,7 +66,7 @@ export function parseDiffOptions(tokens) {
     if (note) return { refused: unsupported(note.kind, 'diff', note.detail, `diff: ${e.message}`, 2) }
     return { error: usage(e.message) }
   }
-  const opts = { style: null, context: -1, labels: [], excludes: [], whitespace: 'none', switches: switchString(tokens) }
+  const opts = { style: null, context: -1, horizon: 0, labels: [], excludes: [], whitespace: 'none', switches: switchString(tokens) }
   for (const { name, value } of parsed.order) {
     const refused = REFUSED.get(name)
     const label = (name.length === 1 ? '-' : '--') + name
@@ -97,13 +97,21 @@ function applyOption(opts, name, value) {
       return conflict
     }
     case 'U': case 'C': {
-      const count = parseContext(value)
+      const count = parseLines(value)
       if (count === null) return usage(`invalid context length '${value}'`)
       const conflict = style(name === 'U' ? 'unified' : 'context')
       if (opts.context < count) opts.context = count
       return conflict
     }
     case 'normal': return style('normal')
+    // How far a run may move into the lines the two files share at either
+    // end. GNU keeps the largest asked for, as it does the context.
+    case 'horizon-lines': {
+      const count = parseLines(value)
+      if (count === null) return usage(`invalid horizon length '${value}'`)
+      opts.horizon = Math.max(opts.horizon, count)
+      return null
+    }
     case 'q': case 'brief': opts.brief = true; return null
     case 's': case 'report-identical-files': opts.identical = true; return null
     case 'r': case 'recursive': opts.recursive = true; return null
@@ -126,11 +134,13 @@ function applyOption(opts, name, value) {
 }
 
 // strtoimax: blanks and a sign are fine, anything else in the text is not,
-// and an empty string reads as zero.
-function parseContext(value) {
+// and an empty string reads as zero. Only a count below zero is refused, so
+// `-0` is zero; a count past what fits is as many lines as there are.
+function parseLines(value) {
   if (value === '') return 0
-  const parsed = parseNonNegativeInt(value, 'diff')
-  return parsed.error ? null : parsed.value
+  const match = /^[ \t\n\v\f\r]*([-+]?)(\d+)$/u.exec(value)
+  if (!match || (match[1] === '-' && /[1-9]/u.test(match[2]))) return null
+  return Math.min(Number(match[2]), Number.MAX_SAFE_INTEGER)
 }
 
 // The option words as typed, for the `diff -r ...` line above each file pair
