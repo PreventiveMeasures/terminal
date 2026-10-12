@@ -253,8 +253,9 @@ is printed is read back and held to the change set. Neither a change set that
 would not reconstruct the second file nor a rendering that does not say what
 it was given is ever printed — both are refused as trouble instead, so no
 diff this terminal emits loses a line. Which of several shortest change sets
-it picks can differ from GNU's; given the same change set, the bytes are
-GNU's. The virtual filesystem keeps no modification
+it picks can differ from GNU's, but a run of changes free to sit in more than
+one place is settled as GNU settles it, in every output style; given the same
+change set, the bytes are GNU's. The virtual filesystem keeps no modification
 times, so headers carry the name alone, as they do under `--label`; a file
 `-N` stands in for gets the epoch, which is what tells `patch` it did not
 exist. A name a directory holds and cannot read — a link leading nowhere, or
