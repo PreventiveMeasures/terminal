@@ -15,8 +15,8 @@ importers:
         specifier: ^1.0.0-beta.4
         version: 1.0.0-beta.4
       '@preventive/diff':
-        specifier: ^1.0.1
-        version: 1.0.1
+        specifier: ^1.0.2
+        version: 1.0.2
       '@preventive/vfs':
         specifier: ^1.0.0-beta.4
         version: 1.0.0-beta.4
@@ -162,8 +162,8 @@ packages:
     resolution: {integrity: sha512-lJN3Wdt1pdsYXjAKJatYFn97N1l+0Kge6ixHIvHR1bdk5Zy/zDxigPbc3Rv1F13zObgV6X1TK7IvvHEaqFCvIA==}
     engines: {node: '>=24.14.0'}
 
-  '@preventive/diff@1.0.1':
-    resolution: {integrity: sha512-e4c673eQKCuEPHP8IZdirOXdOYONAkIjb9FdLLKGZ4xkDZNLF19w9V9ETzQAR5Z3iOu/N5tgZBGuBCLZzNTz2A==}
+  '@preventive/diff@1.0.2':
+    resolution: {integrity: sha512-nZuUrASfcH9YdfTRsrZgI1i5vPYu6x609jLC6ilvtl9qeT1TCdw+emnNAGNKlXh2c4WPd9GyuLkuBjzo5yAr6w==}
     engines: {node: '>=24.14.0'}
 
   '@preventive/vfs@1.0.0-beta.4':
@@ -247,7 +247,7 @@ snapshots:
     transitivePeerDependencies:
       - '@noble/hashes'
 
-  '@preventive/diff@1.0.1': {}
+  '@preventive/diff@1.0.2': {}
 
   '@preventive/vfs@1.0.0-beta.4': {}
 

@@ -33,10 +33,12 @@ export function renderDiff(state, contents, names, missing, inDirectory) {
 function diffBody(opts, contents) {
   // -p names each hunk after the function it starts inside. That heuristic
   // is diff's, not the library's: the formatters take a callback and ask.
+  // --horizon-lines goes as given: the library weighs it against the context
+  // printed, as GNU does, and leaves it alone in the normal format.
   const lines = opts.showFunction ? lineRecords(contents[0]) : null
   return diffText(contents[0], contents[1], {
     format: opts.style ?? 'normal', context: opts.context, label: lines ? (index) => functionLine(lines, index) : null,
-    minimal: opts.minimal, ignoreCase: opts.ignoreCase, whitespace: opts.whitespace,
+    minimal: opts.minimal, ignoreCase: opts.ignoreCase, whitespace: opts.whitespace, horizon: opts.horizon,
   })
 }
 
