@@ -141,6 +141,20 @@ TILKG5T9tB5DkK4/PNx7Nv9Rm5Xgj+2G41fk3zxZMtUcrb7nrE7+yT8Wv3+Zyth/Pv+xLtRvP7rWualb
 qgsTGIu7ACgAAA==`),
 }
 
+// A global header with no entry after it, which GNU lists as nothing: its
+// own, as `tar --format=posix --pax-option=globexthdr.name=pax_global_header
+// --pax-option=comment=x -cf lone-global.tar -T /dev/null` writes it, and
+// Python's tarfile's with the access time `globatime.tar` is refused for,
+// which with no entry to apply it to GNU never reads.
+const LONE_GLOBAL_TARS = {
+  'lone-global.tar': tarOf(`
+H4sIAAAAAAACA+3OOw6DMBRE0VezCpbgh42pWAtywCIFPxEiefmxKKlRpCj3FHPb2ULqxml9hKl7xjDEXe5nMu/c2exaY7QWratG
+faXqvJi8tpFylC94v46w5yvyn9SW/TrPcTnaVAgAAAAAAAAAAAAAAAAA4Fd8ACQBfg4AKAAA`),
+  'lone-globatime.tar': tarOf(`
+H4sIAAAAAAACA+3NMQrCQBQE0K09RU6Q7CLBSrC09Ao/ZJEUNjGCx1exsLJUEN9rZphm2q7tdoe47muMdU4fkZ/eZc6lf/XHXnLZ
+5NQc0xdczkvM9/v0n8q6iWU61e0Q4yoBAAAAAAAAAADwK25E5CYQACgAAA==`),
+}
+
 const SOURCES = {
   'pkg.tar': PKG_TAR,
   'pkg.tgz': PKG_TGZ,
@@ -149,6 +163,7 @@ const SOURCES = {
   ...LONG_TARS,
   ...STORED_TARS,
   ...PAX_TARS,
+  ...LONE_GLOBAL_TARS,
   'notes.txt': 'plain text\n',
   'empty.zip': Uint8Array.of(0x50, 0x4b, 0x05, 0x06, ...new Uint8Array(18)),
   'pkg/README.md': '# pkg\n',
@@ -352,6 +367,15 @@ describe('tar lists what an archive holds', () => {
     await gap(t, 'tar -tf label.tar', 'extended header', 'tar: GNU.volume.label: records of multi-volume and incremental archives are not supported\n')
     await gap(t, 'tar -tf badatime.tar', 'extended header', 'tar: atime=5x: extended header times GNU would reject are not supported\n')
     await gap(t, 'tar -tf globatime.tar', 'extended header', 'tar: atime=bad: extended header times GNU would reject are not supported\n')
+  })
+
+  it('lists a global header with no entry after it as nothing, as GNU does', async () => {
+    const t = await terminal()
+    for (const name of Object.keys(LONE_GLOBAL_TARS)) {
+      assert.deepEqual(await t.run(`tar -tvf ${name}`), result(), name)
+      assert.deepEqual(await t.run(`tar -xvf ${name} -C /tmp`), result(), name)
+    }
+    assert.deepEqual(await t.run('ls -A /tmp'), result())
   })
 
   it('refuses an archive whose names it cannot give back as stored', async () => {

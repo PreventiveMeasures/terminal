@@ -148,9 +148,11 @@ async function gunzipped(data, state) {
 }
 
 // The whole archive through the package's reader: its entries, or why it
-// will not read them.
+// will not read them. A global header with no entry after it is one GNU
+// writes itself -- `--pax-option` with no file to archive -- and lists as
+// nothing, whatever its records hold, so it is taken as nothing here too.
 function unpacked(data) {
-  try { return { entries: unpack(data) } } catch (error) {
+  try { return { entries: unpack(data, { trailingGlobal: true }) } } catch (error) {
     if (!(error instanceof ArchiveError)) throw error
     return { error }
   }
