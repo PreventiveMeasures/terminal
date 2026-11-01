@@ -253,11 +253,14 @@ work twice over: the change set is replayed against the first file, and what
 is printed is read back and held to the change set. Neither a change set that
 would not reconstruct the second file nor a rendering that does not say what
 it was given is ever printed — both are refused as trouble instead, so no
-diff this terminal emits loses a line. Which of several shortest change sets
-it picks can differ from GNU's, but a run of changes free to sit in more than
-one place is settled as GNU settles it, in every output style; given the same
-change set, the bytes are GNU's. The virtual filesystem keeps no modification
-times, so headers carry the name alone, as they do under `--label`; a file
+diff this terminal emits loses a line. Where several shortest change sets
+would do, it picks GNU's by GNU's rules: the lines GNU sets aside before
+searching are set aside, and a run of changes free to sit in more than one
+place is settled as GNU settles it, in every output style. Only between large
+files far apart, where the search gives up sooner than GNU's does, can the
+change set differ; given the same change set, the bytes are GNU's. The
+virtual filesystem keeps no modification times, so headers carry the name
+alone, as they do under `--label`; a file
 `-N` stands in for gets the epoch, which is what tells `patch` it did not
 exist. A name a directory holds and cannot read — a link leading nowhere, or
 one that loops — is answered for as that read rather than as a type of its

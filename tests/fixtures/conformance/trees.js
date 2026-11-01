@@ -95,6 +95,8 @@ export const TREES = {
     big2: '1\n2\n3\n4\nNEW1\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\ntwenty\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n',
     slide1: 'x\na\nb\nb\nb\nc\ny\n', slide2: 'X\na\nb\nc\nY\n',
     horizon1: 'a\nb\nb\nc\nb\nb\nb\nb\nb\nc\n', horizon2: 'a\nb\nc\nb\nb\nb\nb\nc\n',
+    aside1: 'f\nd\nd\ne\nd\na\nb\n', aside2: 'f\nd\nf\nd\na\na\nd\n',
+    cw1: 'y\nx\n', cw2: 'y\nx \nx\n', ci1: 'y\nx\n', ci2: 'y\nX\nx\n',
   },
 
   // Two directory trees for diff -r: a file only on one side, a directory

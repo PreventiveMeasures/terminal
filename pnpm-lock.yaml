@@ -12,14 +12,14 @@ importers:
         specifier: ^1.16.0
         version: 1.16.0
       '@preventive/archive':
-        specifier: ^1.0.0-beta.4
-        version: 1.0.0-beta.4
+        specifier: ^1.2.2
+        version: 1.2.2
       '@preventive/diff':
-        specifier: ^1.0.2
-        version: 1.0.2
+        specifier: ^1.1.0
+        version: 1.1.0
       '@preventive/vfs':
-        specifier: ^1.0.0-beta.4
-        version: 1.0.0-beta.4
+        specifier: ^1.1.0
+        version: 1.1.0
     devDependencies:
       oxlint:
         specifier: ^1.63.0
@@ -158,16 +158,16 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@preventive/archive@1.0.0-beta.4':
-    resolution: {integrity: sha512-lJN3Wdt1pdsYXjAKJatYFn97N1l+0Kge6ixHIvHR1bdk5Zy/zDxigPbc3Rv1F13zObgV6X1TK7IvvHEaqFCvIA==}
+  '@preventive/archive@1.2.2':
+    resolution: {integrity: sha512-RnGcgKh4+lrrgXrW7fAKC1P38GBwJ1rDbbZr4vMzYBHZgYyNFyPE6e/pHOlQxa9bGnNXYiHllsMJVr+cQlsAZQ==}
     engines: {node: '>=24.14.0'}
 
-  '@preventive/diff@1.0.2':
-    resolution: {integrity: sha512-nZuUrASfcH9YdfTRsrZgI1i5vPYu6x609jLC6ilvtl9qeT1TCdw+emnNAGNKlXh2c4WPd9GyuLkuBjzo5yAr6w==}
+  '@preventive/diff@1.1.0':
+    resolution: {integrity: sha512-BOV7wpd+v2HJllvK90KW+asSVuIwo4B74nhpxa5qOjbR6piMzq5Gl5icv1JHzUWffbXPcwJFFYnTeLepuKhsJA==}
     engines: {node: '>=24.14.0'}
 
-  '@preventive/vfs@1.0.0-beta.4':
-    resolution: {integrity: sha512-yqx/I33WLZO7+efWJHsE2w8iazwAcIKTUiGYfWfidW09uxRSNUS4tJ9+7e7BhJgC6UsTck1bLbUhKN6a1Rwdqg==}
+  '@preventive/vfs@1.1.0':
+    resolution: {integrity: sha512-tJSrYMkw5bRYicIm446SL2S+OA0VM+pIlCgPTbNHeft3qMJt1VnFKcbtPRDR+MlsTngeyRmippDUPmoFqxU6YA==}
     engines: {node: '>=24.14.0'}
 
   oxlint@1.64.0:
@@ -241,15 +241,15 @@ snapshots:
   '@oxlint/binding-win32-x64-msvc@1.64.0':
     optional: true
 
-  '@preventive/archive@1.0.0-beta.4':
+  '@preventive/archive@1.2.2':
     dependencies:
       '@exodus/bytes': 1.16.0
     transitivePeerDependencies:
       - '@noble/hashes'
 
-  '@preventive/diff@1.0.2': {}
+  '@preventive/diff@1.1.0': {}
 
-  '@preventive/vfs@1.0.0-beta.4': {}
+  '@preventive/vfs@1.1.0': {}
 
   oxlint@1.64.0:
     optionalDependencies:

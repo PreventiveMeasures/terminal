@@ -5,9 +5,11 @@
 # the name alone, as it does under --label: what GNU printed after the tab
 # was dropped when these were recorded, except the epoch stamp -N gives a
 # file that does not exist, which patch reads as meaning exactly that.
-# Which of several shortest change sets diff picks is its own; every case
-# here has one shortest change set, but for which of a run of equal lines it
-# names, and that is settled as GNU settles it -- so the bytes are GNU's.
+# Where several shortest change sets would do, which one diff prints is
+# decided by its own rules -- the lines it sets aside before searching, and
+# where it puts a run of equal lines a change could take any of -- and this
+# one follows GNU's, so the bytes are GNU's. Only a search between large
+# files far apart, which gives up sooner here than in GNU, picks otherwise.
 @tree pair
 @mode readonly
 diff ten ten2 => "3c3\n< c\n---\n> X\n9c9\n< i\n---\n> Y\n" 1
@@ -193,6 +195,18 @@ diff --horizon-lines=-1 horizon1 horizon2 => % 2
 diff --horizon-lines=1x horizon1 horizon2 => % 2
 diff --horizon-lines='2 ' horizon1 horizon2 => % 2
 diff horizon1 horizon2 --horizon-lines => % 2
+# Lines matching nothing in the other file are set aside before the search,
+# as GNU sets them aside, and that decides which shortest change set it
+# reaches: aside1's in the normal style is neither -u's, which sees more of
+# the shared ends, nor -d's, which searches every line. A context-format hunk
+# that removes nothing prints the second file's side alone, so under -w and
+# -i its kept lines are the second file's.
+diff -c -w cw1 cw2 => "*** cw1\n--- cw2\n***************\n*** 1,2 ****\n--- 1,3 ----\n  y\n  x \n+ x\n" 1
+diff -c -w cw2 cw1 => "*** cw2\n--- cw1\n***************\n*** 1,3 ****\n  y\n  x \n- x\n--- 1,2 ----\n" 1
+diff -c -i ci1 ci2 => "*** ci1\n--- ci2\n***************\n*** 1,2 ****\n--- 1,3 ----\n  y\n  X\n+ x\n" 1
+diff aside1 aside2 => "2a3\n> f\n4,5d4\n< e\n< d\n7c6,7\n< b\n---\n> a\n> d\n" 1
+diff -u aside1 aside2 => "--- aside1\n+++ aside2\n@@ -1,7 +1,7 @@\n f\n d\n-d\n-e\n+f\n d\n a\n-b\n+a\n+d\n" 1
+diff -d aside1 aside2 => "3,4c3\n< d\n< e\n---\n> f\n7c6,7\n< b\n---\n> a\n> d\n" 1
 diff => % 2
 diff ten => % 2
 diff ten ten2 extra => % 2

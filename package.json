@@ -205,9 +205,9 @@
   },
   "dependencies": {
     "@exodus/bytes": "^1.16.0",
-    "@preventive/archive": "^1.0.0-beta.4",
-    "@preventive/diff": "^1.0.2",
-    "@preventive/vfs": "^1.0.0-beta.4"
+    "@preventive/archive": "^1.2.2",
+    "@preventive/diff": "^1.1.0",
+    "@preventive/vfs": "^1.1.0"
   },
   "devDependencies": {
     "oxlint": "^1.63.0"
