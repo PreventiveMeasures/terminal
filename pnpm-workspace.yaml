@@ -1,1 +1,6 @@
+minimumReleaseAge: 20160
+
+minimumReleaseAgeExclude:
+  - "@preventive/*"
+
 modulesCacheMaxAge: 0
