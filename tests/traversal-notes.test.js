@@ -49,6 +49,9 @@ describe('tree depth omission notes', () => {
     ['tree -L1 a', ['/a/one']],
     ['tree -L1 .hidden', ['/.hidden/inner']],
     ['tree -FL1 --noreport', ['/a', '/c'], ['/.hidden']],
+    ['tree -L1 a c', ['/a/one']],
+    ['tree -L1 c .hidden a', ['/.hidden/inner', '/a/one']],
+    ['tree -L2 b a', [], ['/b/.hidden']],
   ]) {
     it(command + ' reports only eligible omitted contents', () => check(command, paths, FILES, hidden))
   }
@@ -108,7 +111,7 @@ describe('tree depth omission notes', () => {
     await check('tree -L1', ['/dir'], { 'dir/name\nwith\nnewlines': '' })
   })
 
-  for (const command of ['tree -L0', 'tree -Lnope', 'tree -L1 --unknown', 'tree -L1 a c', 'tree -L1 missing']) {
+  for (const command of ['tree -L0', 'tree -Lnope', 'tree -L1 --unknown', 'tree -L1 missing', 'tree -L1 missing gone']) {
     it(command + ' emits no note when listing never starts', async () => {
       const result = await createTerminal(FILES).run(command)
       assert.notEqual(result.exitCode, 0)

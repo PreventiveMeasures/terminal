@@ -1,4 +1,4 @@
-// tree 2.x's listing. Counts include the root directory.
+// tree 2.x's listing. Counts include each root directory that lists anything.
 //
 // The branches are drawn with what the locale's character set has in it: the
 // box drawing of a UTF-8 one, and the ASCII tree falls back to where a byte
@@ -20,11 +20,32 @@ export const branchesFor = (ctx) => (byteLocale(ctx) ? BRANCHES.ascii : BRANCHES
 
 export function tree(_stdin, tokens, ctx) {
   const { flags, values, positional } = parseArgs(tokens, { short: ['a', 'd', 'F'], long: ['noreport'], valueShort: ['L'] })
-  if (positional.length > 1) return unsupported('feature', 'tree', 'multiple roots', 'tree: multiple roots are not supported')
   const limit = values.has('L') ? parseNonNegativeInt(values.get('L'), 'tree: -L', values.get('L'), { max: INT32_MAX }) : { value: Number.POSITIVE_INFINITY }
   if (limit.error) return limit.error
   if (!limit.value) return err('tree: -L must be greater than zero')
-  const start = positional[0] ?? '.'
+  // Each operand is a tree of its own, listed in turn under the name it was
+  // given, with no line between one and the next; a single report beneath them
+  // all totals every one, and one that is not there at all sets the status.
+  const listing = { out: [], count: { dirs: 0, files: 0 }, omitted: new Set(), hidden: hiddenEntryNotes(), branches: branchesFor(ctx), missing: false }
+  try {
+    for (const start of positional.length ? positional : ['.']) {
+      const gap = listRoot(ctx, start, flags, limit.value, listing)
+      if (gap) return gap
+    }
+  } finally {
+    omissionNote(ctx.notes, { command: 'tree', action: 'depth limit omitted contents of', noun: ['directory', 'directories'], paths: listing.omitted })
+    listing.hidden.emit(ctx.notes, 'tree', 'Hidden entries are included with -a.')
+  }
+  const { out, count } = listing
+  if (!flags.has('noreport')) {
+    const dirs = `${count.dirs} ${count.dirs === 1 ? 'directory' : 'directories'}`
+    const files = `${count.files} ${count.files === 1 ? 'file' : 'files'}`
+    out.push('', flags.has('d') ? dirs : `${dirs}, ${files}`)
+  }
+  return { stdout: out.join('\n') + '\n', stderr: '', exitCode: listing.missing ? 2 : 0 }
+}
+
+function listRoot(ctx, start, flags, limit, listing) {
   const { path: root, error } = lookupWithNote(ctx, 'tree', start)
   const isDir = !error && ctx.fs.isDir(root)
   // What the operand prints comes from the name itself and what it opens from
@@ -32,25 +53,11 @@ export function tree(_stdin, tokens, ctx) {
   // counted among the files, and only a name that is not there at all fails.
   const named = lookup(ctx.cwd, start, ctx.fs, { follow: false })
   const missing = Boolean(error) && Boolean(named.error)
-  const count = { dirs: isDir && itemsFor(ctx.fs, root, flags).length ? 1 : 0, files: !missing && !isDir ? 1 : 0 }
-  const out = [start + rootMark(ctx, flags, named, isDir) + (isDir ? '' : '  [error opening dir]')]
-  if (isDir) {
-    const omitted = new Set()
-    const hidden = hiddenEntryNotes()
-    try {
-      const gap = walk(ctx.fs, root, out, flags, limit.value, count, omitted, hidden, branchesFor(ctx))
-      if (gap) return gap
-    } finally {
-      omissionNote(ctx.notes, { command: 'tree', action: 'depth limit omitted contents of', noun: ['directory', 'directories'], paths: omitted })
-      hidden.emit(ctx.notes, 'tree', 'Hidden entries are included with -a.')
-    }
-  }
-  if (!flags.has('noreport')) {
-    const dirs = `${count.dirs} ${count.dirs === 1 ? 'directory' : 'directories'}`
-    const files = `${count.files} ${count.files === 1 ? 'file' : 'files'}`
-    out.push('', flags.has('d') ? dirs : `${dirs}, ${files}`)
-  }
-  return { stdout: out.join('\n') + '\n', stderr: '', exitCode: missing ? 2 : 0 }
+  if (missing) listing.missing = true
+  else if (!isDir) listing.count.files++
+  else if (itemsFor(ctx.fs, root, flags).length) listing.count.dirs++
+  listing.out.push(start + rootMark(ctx, flags, named, isDir) + (isDir ? '' : '  [error opening dir]'))
+  return isDir ? walk(ctx.fs, root, flags, limit, listing) : undefined
 }
 
 // `-F` marks the operand as it was typed, whatever it ends in -- `tree -F d/`
@@ -63,7 +70,7 @@ function rootMark(ctx, flags, named, isDir) {
   return isDir && !flags.has('d') ? '/' : ''
 }
 
-function walk(fs, root, out, flags, limit, count, omitted, hidden, branches) {
+function walk(fs, root, flags, limit, { out, count, omitted, hidden, branches }) {
   const stack = [{ dir: root, prefix: '', items: itemsFor(fs, root, flags, hidden), i: 0, depth: 0 }]
   while (stack.length) {
     const frame = stack.at(-1)
